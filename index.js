@@ -12,11 +12,8 @@ const DATA_DIR = '/data';
 const MEM_FILE = DATA_DIR + '/memory.json';
 
 async function loadMemory() {
-  try {
-    return JSON.parse(await fs.readFile(MEM_FILE, 'utf8'));
-  } catch {
-    return { todos: [], notes: [] };
-  }
+  try { return JSON.parse(await fs.readFile(MEM_FILE, 'utf8')); }
+  catch { return { todos: [], notes: [] }; }
 }
 async function saveMemory(mem) {
   await fs.mkdir(DATA_DIR, { recursive: true }).catch(() => {});
@@ -86,13 +83,34 @@ async function askIva(userText) {
   return text;
 }
 
+async function transcribeVoice(fileId) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const fileRes = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`);
+  const filePath = (await fileRes.json()).result.file_path;
+  const audioRes = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`);
+  const audioBuf = Buffer.from(await audioRes.arrayBuffer());
+  const form = new FormData();
+  form.append('file', new Blob([audioBuf]), 'voice.ogg');
+  form.append('model', 'whisper-large-v3-turbo');
+  const r = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+    body: form,
+  });
+  return (await r.json()).text;
+}
+
 app.post('/telegram', async (req, res) => {
   const msg = req.body?.message;
   const chatId = msg?.chat?.id;
-  const userText = msg?.text;
   res.sendStatus(200);
-  if (!chatId || !userText) return;
+  if (!chatId) return;
   try {
+    let userText = msg?.text;
+    if (!userText && msg?.voice) {
+      userText = await transcribeVoice(msg.voice.file_id);
+    }
+    if (!userText) return;
     const reply = await askIva(userText);
     await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: 'POST',
