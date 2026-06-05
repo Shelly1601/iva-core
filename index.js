@@ -53,7 +53,25 @@ app.post('/telegram', async (req, res) => {
   }
 });
 
+async function setupTelegramWebhook() {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const domain = process.env.RAILWAY_PUBLIC_DOMAIN;
+  if (!token || !domain) {
+    console.log('Telegram: Token oder Domain fehlt noch - Webhook nicht gesetzt.');
+    return;
+  }
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${token}/setWebhook?url=https://${domain}/telegram`);
+    console.log('Telegram-Webhook gesetzt:', await r.text());
+  } catch (e) {
+    console.error('Webhook-Fehler:', e);
+  }
+}
+
 app.get('/', (_req, res) => res.send('IVA laeuft.'));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('IVA-Core auf Port ' + PORT));
+app.listen(PORT, () => {
+  console.log('IVA-Core auf Port ' + PORT);
+  setupTelegramWebhook();
+});
