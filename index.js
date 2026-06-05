@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import fs from 'fs/promises';
 import { generateText, tool } from 'ai';
 import { anthropic } from '@ai-sdk/anthropic';
 import { z } from 'zod';
@@ -7,27 +8,77 @@ import { z } from 'zod';
 const app = express();
 app.use(express.json());
 
-const SYSTEM_PROMPT = `Du bist IVA, der persoenliche Assistent von Nadine.
+const DATA_DIR = '/data';
+const MEM_FILE = DATA_DIR + '/memory.json';
+
+async function loadMemory() {
+  try {
+    return JSON.parse(await fs.readFile(MEM_FILE, 'utf8'));
+  } catch {
+    return { todos: [], notes: [] };
+  }
+}
+async function saveMemory(mem) {
+  await fs.mkdir(DATA_DIR, { recursive: true }).catch(() => {});
+  await fs.writeFile(MEM_FILE, JSON.stringify(mem, null, 2));
+}
+
+async function buildSystemPrompt() {
+  const mem = await loadMemory();
+  const notes = mem.notes.length ? mem.notes.map(n => '- ' + n).join('\n') : '(noch nichts gemerkt)';
+  const open = mem.todos.filter(t => !t.done);
+  const todoText = open.length ? open.map(t => '- ' + t.text).join('\n') : '(keine offenen)';
+  return `Du bist IVA, der persoenliche Assistent von Nadine.
 Charakter: Sparringspartner, kein Jasager. Loesungsorientiert, direkt, ehrlich.
-Keine Moralkeule - wenn etwas in einer kleinen Grauzone liegt, nenne Weg UND Haken in einem Satz und liefere dann die Loesung.
-Fasse dich kurz. Hoechstens eine Rueckfrage, und nur wenn wirklich noetig.
-Du hast Werkzeuge (z.B. Todos anlegen). Nutze sie, statt nur darueber zu reden.`;
+Keine Moralkeule - bei Grauzonen Weg UND Haken in einem Satz, dann die Loesung.
+Fasse dich kurz. Hoechstens eine Rueckfrage, nur wenn noetig.
+Nutze deine Werkzeuge, statt nur darueber zu reden.
+
+Das hast du dir gemerkt:
+${notes}
+
+Offene Todos:
+${todoText}`;
+}
 
 const tools = {
   createTodo: tool({
-    description: 'Legt ein neues Todo fuer Nadine an.',
-    parameters: z.object({ text: z.string().describe('Der Todo-Text') }),
+    description: 'Legt ein neues Todo an.',
+    parameters: z.object({ text: z.string() }),
     execute: async ({ text }) => {
-      console.log('NEUES TODO:', text);
+      const mem = await loadMemory();
+      mem.todos.push({ text, done: false, ts: Date.now() });
+      await saveMemory(mem);
       return { ok: true, text };
+    },
+  }),
+  completeTodo: tool({
+    description: 'Markiert ein Todo per Textsuche als erledigt.',
+    parameters: z.object({ text: z.string() }),
+    execute: async ({ text }) => {
+      const mem = await loadMemory();
+      const t = mem.todos.find(t => !t.done && t.text.toLowerCase().includes(text.toLowerCase()));
+      if (t) { t.done = true; await saveMemory(mem); return { ok: true, done: t.text }; }
+      return { ok: false, msg: 'nicht gefunden' };
+    },
+  }),
+  remember: tool({
+    description: 'Merkt sich dauerhaft eine Information (bereichsuebergreifend).',
+    parameters: z.object({ fact: z.string() }),
+    execute: async ({ fact }) => {
+      const mem = await loadMemory();
+      mem.notes.push(fact);
+      await saveMemory(mem);
+      return { ok: true, fact };
     },
   }),
 };
 
 async function askIva(userText) {
+  const system = await buildSystemPrompt();
   const { text } = await generateText({
     model: anthropic('claude-sonnet-4-6'),
-    system: SYSTEM_PROMPT,
+    system,
     prompt: userText,
     tools,
     maxSteps: 5,
@@ -48,30 +99,20 @@ app.post('/telegram', async (req, res) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text: reply }),
     });
-  } catch (e) {
-    console.error('Fehler bei askIva/Telegram:', e);
-  }
+  } catch (e) { console.error('Fehler:', e); }
 });
 
 async function setupTelegramWebhook() {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const domain = process.env.RAILWAY_PUBLIC_DOMAIN;
-  if (!token || !domain) {
-    console.log('Telegram: Token oder Domain fehlt noch - Webhook nicht gesetzt.');
-    return;
-  }
+  if (!token || !domain) { console.log('Telegram: Token/Domain fehlt.'); return; }
   try {
     const r = await fetch(`https://api.telegram.org/bot${token}/setWebhook?url=https://${domain}/telegram`);
-    console.log('Telegram-Webhook gesetzt:', await r.text());
-  } catch (e) {
-    console.error('Webhook-Fehler:', e);
-  }
+    console.log('Telegram-Webhook:', await r.text());
+  } catch (e) { console.error('Webhook-Fehler:', e); }
 }
 
 app.get('/', (_req, res) => res.send('IVA laeuft.'));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log('IVA-Core auf Port ' + PORT);
-  setupTelegramWebhook();
-});
+app.listen(PORT, () => { console.log('IVA-Core auf Port ' + PORT); setupTelegramWebhook(); });
