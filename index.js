@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import fs from 'fs/promises';
+import ical from 'node-ical';
 import { generateText, tool } from 'ai';
 import { anthropic } from '@ai-sdk/anthropic';
 import { z } from 'zod';
@@ -18,6 +19,42 @@ async function loadMemory() {
 async function saveMemory(mem) {
   await fs.mkdir(DATA_DIR, { recursive: true }).catch(() => {});
   await fs.writeFile(MEM_FILE, JSON.stringify(mem, null, 2));
+}
+
+const CALENDARS = [
+  { label: 'Privat', url: process.env.PRIVAT_GOOGLE_ICS_URL },
+  { label: 'Familie', url: process.env.FAMILIE_GOOGLE_ICS_URL },
+  { label: 'Projekte', url: process.env.PROJEKTE_GOOGLE_ICS_URL },
+  { label: 'Outlook', url: process.env.OUTLOOK_ICS_URL },
+];
+
+function fmtDate(d) {
+  return d.toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
+}
+
+async function getEvents(days) {
+  const now = new Date();
+  const until = new Date(now.getTime() + days * 86400000);
+  const out = [];
+  for (const cal of CALENDARS) {
+    if (!cal.url) continue;
+    try {
+      const data = await ical.async.fromURL(cal.url);
+      for (const e of Object.values(data)) {
+        if (e.type !== 'VEVENT') continue;
+        if (e.rrule) {
+          for (const d of e.rrule.between(now, until)) {
+            out.push({ start: d, label: cal.label, summary: e.summary || '(ohne Titel)' });
+          }
+        } else if (e.start) {
+          const s = new Date(e.start);
+          if (s >= now && s <= until) out.push({ start: s, label: cal.label, summary: e.summary || '(ohne Titel)' });
+        }
+      }
+    } catch (err) { console.error('ICS-Fehler bei ' + cal.label + ':', err.message); }
+  }
+  out.sort((a, b) => a.start - b.start);
+  return out.map(e => `${e.label} · ${fmtDate(e.start)} – ${e.summary}`);
 }
 
 async function buildSystemPrompt() {
@@ -69,6 +106,14 @@ const tools = {
       return { ok: true, fact };
     },
   }),
+  getCalendar: tool({
+    description: 'Liest Termine aus Nadines Kalendern (Privat, Familie, Projekte, Outlook) fuer die naechsten Tage.',
+    parameters: z.object({ days: z.number().optional().describe('Zeitraum in Tagen, z.B. 1 = heute, 7 = diese Woche') }),
+    execute: async ({ days }) => {
+      const events = await getEvents(days || 7);
+      return { count: events.length, events };
+    },
+  }),
 };
 
 async function askIva(userText) {
@@ -107,9 +152,7 @@ app.post('/telegram', async (req, res) => {
   if (!chatId) return;
   try {
     let userText = msg?.text;
-    if (!userText && msg?.voice) {
-      userText = await transcribeVoice(msg.voice.file_id);
-    }
+    if (!userText && msg?.voice) userText = await transcribeVoice(msg.voice.file_id);
     if (!userText) return;
     const reply = await askIva(userText);
     await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
