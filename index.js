@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import fs from 'fs/promises';
 import ical from 'node-ical';
+import cron from 'node-cron';
 import { generateText, tool } from 'ai';
 import { anthropic } from '@ai-sdk/anthropic';
 import { z } from 'zod';
@@ -31,8 +32,14 @@ const CALENDARS = [
 function fmtDate(d) {
   return d.toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
 }
+function berlinDay(d) {
+  return d.toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' });
+}
+function fmtEvents(arr) {
+  return arr.map(e => `${e.label} · ${fmtDate(e.start)} – ${e.summary}`);
+}
 
-async function getEvents(days) {
+async function getEventsRaw(days) {
   const now = new Date();
   const until = new Date(now.getTime() + days * 86400000);
   const out = [];
@@ -43,9 +50,7 @@ async function getEvents(days) {
       for (const e of Object.values(data)) {
         if (e.type !== 'VEVENT') continue;
         if (e.rrule) {
-          for (const d of e.rrule.between(now, until)) {
-            out.push({ start: d, label: cal.label, summary: e.summary || '(ohne Titel)' });
-          }
+          for (const d of e.rrule.between(now, until)) out.push({ start: d, label: cal.label, summary: e.summary || '(ohne Titel)' });
         } else if (e.start) {
           const s = new Date(e.start);
           if (s >= now && s <= until) out.push({ start: s, label: cal.label, summary: e.summary || '(ohne Titel)' });
@@ -54,13 +59,13 @@ async function getEvents(days) {
     } catch (err) { console.error('ICS-Fehler bei ' + cal.label + ':', err.message); }
   }
   out.sort((a, b) => a.start - b.start);
-  return out.map(e => `${e.label} · ${fmtDate(e.start)} – ${e.summary}`);
+  return out;
 }
 
 async function buildSystemPrompt() {
   const mem = await loadMemory();
-  const notes = mem.notes.length ? mem.notes.map(n => '- ' + n).join('\n') : '(noch nichts gemerkt)';
-  const open = mem.todos.filter(t => !t.done);
+  const notes = mem.notes?.length ? mem.notes.map(n => '- ' + n).join('\n') : '(noch nichts gemerkt)';
+  const open = (mem.todos || []).filter(t => !t.done);
   const todoText = open.length ? open.map(t => '- ' + t.text).join('\n') : '(keine offenen)';
   return `Du bist IVA, der persoenliche Assistent von Nadine.
 Charakter: Sparringspartner, kein Jasager. Loesungsorientiert, direkt, ehrlich.
@@ -81,6 +86,7 @@ const tools = {
     parameters: z.object({ text: z.string() }),
     execute: async ({ text }) => {
       const mem = await loadMemory();
+      mem.todos = mem.todos || [];
       mem.todos.push({ text, done: false, ts: Date.now() });
       await saveMemory(mem);
       return { ok: true, text };
@@ -91,7 +97,7 @@ const tools = {
     parameters: z.object({ text: z.string() }),
     execute: async ({ text }) => {
       const mem = await loadMemory();
-      const t = mem.todos.find(t => !t.done && t.text.toLowerCase().includes(text.toLowerCase()));
+      const t = (mem.todos || []).find(t => !t.done && t.text.toLowerCase().includes(text.toLowerCase()));
       if (t) { t.done = true; await saveMemory(mem); return { ok: true, done: t.text }; }
       return { ok: false, msg: 'nicht gefunden' };
     },
@@ -101,6 +107,7 @@ const tools = {
     parameters: z.object({ fact: z.string() }),
     execute: async ({ fact }) => {
       const mem = await loadMemory();
+      mem.notes = mem.notes || [];
       mem.notes.push(fact);
       await saveMemory(mem);
       return { ok: true, fact };
@@ -110,7 +117,7 @@ const tools = {
     description: 'Liest Termine aus Nadines Kalendern (Privat, Familie, Projekte, Outlook) fuer die naechsten Tage.',
     parameters: z.object({ days: z.number().optional().describe('Zeitraum in Tagen, z.B. 1 = heute, 7 = diese Woche') }),
     execute: async ({ days }) => {
-      const events = await getEvents(days || 7);
+      const events = fmtEvents(await getEventsRaw(days || 7));
       return { count: events.length, events };
     },
   }),
@@ -126,6 +133,14 @@ async function askIva(userText) {
     maxSteps: 5,
   });
   return text;
+}
+
+async function sendTelegram(chatId, text) {
+  await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text }),
+  });
 }
 
 async function transcribeVoice(fileId) {
@@ -145,21 +160,40 @@ async function transcribeVoice(fileId) {
   return (await r.json()).text;
 }
 
+async function sendBriefing() {
+  const mem = await loadMemory();
+  if (!mem.chatId) { console.log('Briefing: noch keine chatId bekannt.'); return; }
+  const today = berlinDay(new Date());
+  const todays = (await getEventsRaw(2)).filter(e => berlinDay(e.start) === today);
+  const eventsText = todays.length ? fmtEvents(todays).join('\n') : 'keine Termine';
+  const open = (mem.todos || []).filter(t => !t.done).map(t => t.text);
+  const todosText = open.length ? open.map(t => '- ' + t).join('\n') : 'keine offenen';
+  const data = `Termine heute:\n${eventsText}\n\nOffene Todos:\n${todosText}`;
+  const { text } = await generateText({
+    model: anthropic('claude-sonnet-4-6'),
+    system: 'Du bist IVA. Schreibe ein kurzes, motivierendes Morning-Briefing auf Deutsch. Max 6 Zeilen, klare Prioritaeten, ein knackiger Schlusssatz. Kein Fuelltext.',
+    prompt: 'Meine Daten fuer heute:\n\n' + data,
+  });
+  await sendTelegram(mem.chatId, text);
+}
+
 app.post('/telegram', async (req, res) => {
   const msg = req.body?.message;
   const chatId = msg?.chat?.id;
   res.sendStatus(200);
   if (!chatId) return;
   try {
+    const mem = await loadMemory();
+    if (mem.chatId !== chatId) { mem.chatId = chatId; await saveMemory(mem); }
+
     let userText = msg?.text;
     if (!userText && msg?.voice) userText = await transcribeVoice(msg.voice.file_id);
     if (!userText) return;
+
+    if (userText.trim().toLowerCase() === '/briefing') { await sendBriefing(); return; }
+
     const reply = await askIva(userText);
-    await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: reply }),
-    });
+    await sendTelegram(chatId, reply);
   } catch (e) { console.error('Fehler:', e); }
 });
 
@@ -172,6 +206,8 @@ async function setupTelegramWebhook() {
     console.log('Telegram-Webhook:', await r.text());
   } catch (e) { console.error('Webhook-Fehler:', e); }
 }
+
+cron.schedule('0 7 * * *', sendBriefing, { timezone: 'Europe/Berlin' });
 
 app.get('/', (_req, res) => res.send('IVA laeuft.'));
 
