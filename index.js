@@ -13,7 +13,7 @@ app.use(express.json());
 
 const DATA_DIR = '/data';
 const MEM_FILE = DATA_DIR + '/memory.json';
-const HEATHERO_LEADS_URL = 'https://thbvjafssbealqsswhdv.supabase.co/functions/v1/api-gateway/v1/leads';
+const API_BASE = 'https://thbvjafssbealqsswhdv.supabase.co/functions/v1/api-gateway/v1';
 
 async function loadMemory() {
   try { return JSON.parse(await fs.readFile(MEM_FILE, 'utf8')); }
@@ -85,8 +85,10 @@ async function fetchInbox(acc, limit) {
   return out.reverse();
 }
 
-async function fetchHeatheroLeads() {
-  const r = await fetch(HEATHERO_LEADS_URL, { headers: { 'X-API-Key': process.env.HEATHERO_API_KEY } });
+async function apiGet(path, projectId) {
+  const headers = { 'X-API-Key': process.env.MEINCRM_API_KEY || process.env.HEATHERO_API_KEY };
+  if (projectId) headers['X-Project-Id'] = projectId;
+  const r = await fetch(API_BASE + path, { headers });
   const text = await r.text();
   if (!r.ok) return { ok: false, status: r.status, body: text.slice(0, 600) };
   try { return { ok: true, data: JSON.parse(text) }; } catch { return { ok: true, raw: text.slice(0, 2000) }; }
@@ -102,7 +104,7 @@ Charakter: Sparringspartner, kein Jasager. Loesungsorientiert, direkt, ehrlich.
 Keine Moralkeule - bei Grauzonen Weg UND Haken in einem Satz, dann die Loesung.
 Fasse dich kurz. Hoechstens eine Rueckfrage, nur wenn noetig.
 Nutze deine Werkzeuge, statt nur darueber zu reden.
-Telegram-Format: **Fett** NUR fuer Ueberschriften/Schluesselbegriffe. KEINE Tabellen und keine ###-Header - nutze kurze Zeilen mit Bindestrich.
+Telegram-Format: **Fett** NUR fuer Ueberschriften/Schluesselbegriffe. KEINE Tabellen, keine ###-Header - kurze Zeilen mit Bindestrich.
 
 Das hast du dir gemerkt:
 ${notes}
@@ -122,8 +124,10 @@ const tools = {
     execute: async ({ days }) => { const ev = fmtEvents(await getEventsRaw(days || 7)); return { count: ev.length, events: ev }; } }),
   getMails: tool({ description: 'Liest die neuesten E-Mails aus allen Postfaechern.', parameters: z.object({ proKonto: z.number().optional() }),
     execute: async ({ proKonto }) => { let all = []; for (const acc of loadMailAccounts()) { try { all = all.concat(await fetchInbox(acc, proKonto || 8)); } catch (e) { all.push({ konto: acc.label, fehler: e.message }); } } return { count: all.length, mails: all }; } }),
-  getLeads: tool({ description: 'Ruft die Leads aus dem heat-hero CRM ab.', parameters: z.object({}),
-    execute: async () => await fetchHeatheroLeads() }),
+  getLeads: tool({ description: 'Ruft Leads ab. Optional projectId fuer ein bestimmtes CRM.', parameters: z.object({ projectId: z.string().optional() }),
+    execute: async ({ projectId }) => await apiGet('/leads', projectId) }),
+  getProjects: tool({ description: 'Listet alle CRM-Projekte (per Master-Token) mit IDs und Namen auf.', parameters: z.object({}),
+    execute: async () => await apiGet('/projects') }),
 };
 
 async function askIva(userText) {
@@ -162,10 +166,10 @@ async function sendBriefing() {
   const open = (mem.todos || []).filter(t => !t.done).map(t => t.text);
   const todosText = open.length ? open.map(t => '- ' + t).join('\n') : 'keine offenen';
   let leadsText = 'keine Daten';
-  try { const r = await fetchHeatheroLeads(); if (r.ok && r.data) leadsText = JSON.stringify(r.data).slice(0, 8000); else if (!r.ok) leadsText = 'Abruf-Fehler ' + r.status; } catch {}
+  try { const r = await apiGet('/leads'); if (r.ok && r.data) leadsText = JSON.stringify(r.data).slice(0, 9000); else if (!r.ok) leadsText = 'Abruf-Fehler ' + r.status; } catch {}
   const { text } = await generateText({ model: anthropic('claude-sonnet-4-6'),
-    system: 'Du bist IVA. Schreibe ein kurzes Morning-Briefing auf Deutsch fuer Telegram. **Fett** nur fuer die paar Ueberschriften, KEINE Tabellen, keine ###-Header, kurze Zeilen mit Bindestrich. Struktur: kurze Begruessung, dann **Termine heute**, **Offene Todos**, und **Leads - Handlungsbedarf** mit NUR den Leads, die liegengeblieben oder nicht erreicht sind (Name + kurzer Grund). Max ~14 Zeilen, ein motivierender Schlusssatz.',
-    prompt: `Termine heute:\n${eventsText}\n\nOffene Todos:\n${todosText}\n\nLeads (rohe Daten aus heat-hero):\n${leadsText}` });
+    system: 'Du bist IVA. Morning-Briefing auf Deutsch fuer Telegram. **Fett** nur fuer Ueberschriften, KEINE Tabellen, kurze Zeilen mit Bindestrich. Aufbau: kurze Begruessung, dann **Termine heute**, **Offene Todos**, dann **HeatHero - Leads** unterteilt in diese Kategorien (zeige nur Kategorien mit Eintraegen): "Neue unbearbeitete Leads", "Follow-Ups heute", "Wiedervorlagen heute", "Ohne Update nach Termin", "Status: Montage terminieren". Pro Lead: Name + kurzer Grund. Stuetze dich auf die Felder der Rohdaten (Status, Termin-Datum, letztes Update, Follow-up-/Wiedervorlage-Datum). Ein motivierender Schlusssatz.',
+    prompt: `Heute ist ${today}.\nTermine heute:\n${eventsText}\n\nOffene Todos:\n${todosText}\n\nLeads (rohe Daten):\n${leadsText}` });
   await sendTelegram(mem.chatId, text);
 }
 
@@ -198,12 +202,8 @@ async function setBotCommands() {
     { command: 'mails', description: 'Neue Mails zusammenfassen' },
     { command: 'todos', description: 'Offene Todos anzeigen' },
   ];
-  try {
-    await fetch(`https://api.telegram.org/bot${token}/setMyCommands`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ commands }),
-    });
-  } catch (e) { console.error('setMyCommands-Fehler:', e); }
+  try { await fetch(`https://api.telegram.org/bot${token}/setMyCommands`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ commands }) }); }
+  catch (e) { console.error('setMyCommands-Fehler:', e); }
 }
 
 cron.schedule('0 7 * * *', sendBriefing, { timezone: 'Europe/Berlin' });
