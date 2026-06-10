@@ -188,7 +188,25 @@ async function setupTelegramWebhook() {
   try { const r = await fetch(`https://api.telegram.org/bot${token}/setWebhook?url=https://${domain}/telegram`); console.log('Webhook:', await r.text()); }
   catch (e) { console.error('Webhook-Fehler:', e); }
 }
+async function setBotCommands() {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  const commands = [
+    { command: 'briefing', description: 'Tagesueberblick jetzt senden' },
+    { command: 'leads', description: 'Offene Leads / Handlungsbedarf' },
+    { command: 'termine', description: 'Termine der Woche' },
+    { command: 'mails', description: 'Neue Mails zusammenfassen' },
+    { command: 'todos', description: 'Offene Todos anzeigen' },
+  ];
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/setMyCommands`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commands }),
+    });
+  } catch (e) { console.error('setMyCommands-Fehler:', e); }
+}
+
 cron.schedule('0 7 * * *', sendBriefing, { timezone: 'Europe/Berlin' });
 app.get('/', (_req, res) => res.send('IVA laeuft.'));
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => { console.log('IVA-Core auf Port ' + PORT); setupTelegramWebhook(); });
+app.listen(PORT, () => { console.log('IVA-Core auf Port ' + PORT); setupTelegramWebhook(); setBotCommands(); });
