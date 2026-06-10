@@ -102,6 +102,7 @@ Charakter: Sparringspartner, kein Jasager. Loesungsorientiert, direkt, ehrlich.
 Keine Moralkeule - bei Grauzonen Weg UND Haken in einem Satz, dann die Loesung.
 Fasse dich kurz. Hoechstens eine Rueckfrage, nur wenn noetig.
 Nutze deine Werkzeuge, statt nur darueber zu reden.
+Telegram-Format: **Fett** NUR fuer Ueberschriften/Schluesselbegriffe. KEINE Tabellen und keine ###-Header - nutze kurze Zeilen mit Bindestrich.
 
 Das hast du dir gemerkt:
 ${notes}
@@ -115,7 +116,7 @@ const tools = {
     execute: async ({ text }) => { const m = await loadMemory(); m.todos = m.todos || []; m.todos.push({ text, done: false, ts: Date.now() }); await saveMemory(m); return { ok: true, text }; } }),
   completeTodo: tool({ description: 'Markiert ein Todo per Textsuche als erledigt.', parameters: z.object({ text: z.string() }),
     execute: async ({ text }) => { const m = await loadMemory(); const t = (m.todos || []).find(t => !t.done && t.text.toLowerCase().includes(text.toLowerCase())); if (t) { t.done = true; await saveMemory(m); return { ok: true, done: t.text }; } return { ok: false }; } }),
-  remember: tool({ description: 'Merkt sich dauerhaft eine Info (bereichsuebergreifend).', parameters: z.object({ fact: z.string() }),
+  remember: tool({ description: 'Merkt sich dauerhaft eine Info.', parameters: z.object({ fact: z.string() }),
     execute: async ({ fact }) => { const m = await loadMemory(); m.notes = m.notes || []; m.notes.push(fact); await saveMemory(m); return { ok: true, fact }; } }),
   getCalendar: tool({ description: 'Liest Termine aus den Kalendern.', parameters: z.object({ days: z.number().optional() }),
     execute: async ({ days }) => { const ev = fmtEvents(await getEventsRaw(days || 7)); return { count: ev.length, events: ev }; } }),
@@ -131,11 +132,17 @@ async function askIva(userText) {
   return text;
 }
 
+function toTelegramHTML(s) {
+  s = String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+}
 async function sendTelegram(chatId, text) {
   await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: chatId, text }),
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text: toTelegramHTML(text), parse_mode: 'HTML' }),
   });
 }
+
 async function transcribeVoice(fileId) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const filePath = (await (await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`)).json()).result.file_path;
@@ -146,6 +153,7 @@ async function transcribeVoice(fileId) {
   const r = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` }, body: form });
   return (await r.json()).text;
 }
+
 async function sendBriefing() {
   const mem = await loadMemory(); if (!mem.chatId) return;
   const today = berlinDay(new Date());
@@ -153,9 +161,11 @@ async function sendBriefing() {
   const eventsText = todays.length ? fmtEvents(todays).join('\n') : 'keine Termine';
   const open = (mem.todos || []).filter(t => !t.done).map(t => t.text);
   const todosText = open.length ? open.map(t => '- ' + t).join('\n') : 'keine offenen';
+  let leadsText = 'keine Daten';
+  try { const r = await fetchHeatheroLeads(); if (r.ok && r.data) leadsText = JSON.stringify(r.data).slice(0, 8000); else if (!r.ok) leadsText = 'Abruf-Fehler ' + r.status; } catch {}
   const { text } = await generateText({ model: anthropic('claude-sonnet-4-6'),
-    system: 'Du bist IVA. Kurzes, motivierendes Morning-Briefing auf Deutsch. Max 6 Zeilen, klare Prioritaeten, knackiger Schluss. Kein Fuelltext.',
-    prompt: `Termine heute:\n${eventsText}\n\nOffene Todos:\n${todosText}` });
+    system: 'Du bist IVA. Schreibe ein kurzes Morning-Briefing auf Deutsch fuer Telegram. **Fett** nur fuer die paar Ueberschriften, KEINE Tabellen, keine ###-Header, kurze Zeilen mit Bindestrich. Struktur: kurze Begruessung, dann **Termine heute**, **Offene Todos**, und **Leads - Handlungsbedarf** mit NUR den Leads, die liegengeblieben oder nicht erreicht sind (Name + kurzer Grund). Max ~14 Zeilen, ein motivierender Schlusssatz.',
+    prompt: `Termine heute:\n${eventsText}\n\nOffene Todos:\n${todosText}\n\nLeads (rohe Daten aus heat-hero):\n${leadsText}` });
   await sendTelegram(mem.chatId, text);
 }
 
