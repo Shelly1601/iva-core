@@ -13,16 +13,16 @@ app.use(express.json());
 
 const DATA_DIR = '/data';
 const MEM_FILE = DATA_DIR + '/memory.json';
-const HEATHERO_BASE = 'https://thbvjafssbealqsswhdv.supabase.co/functions/v1/api-gateway/v1';
-const MEINCRM_BASE = 'https://qqyoqshjwpkmerilhjus.supabase.co/functions/v1/external-leads-api';
+const HEATHERO_LEADS_URL = 'https://thbvjafssbealqsswhdv.supabase.co/functions/v1/api-gateway/v1/leads';
+const MEINCRM_REST_URL = 'https://qqyoqshjwpkmerilhjus.supabase.co/rest/v1/leads';
 
 const CRM_SOURCES = [
-  { label: 'HeatHero', group: 'Arbeit', base: HEATHERO_BASE, key: process.env.HEATHERO_API_KEY, projectId: null },
-  { label: 'HeatHero (Mein CRM)', group: 'Mein CRM', base: MEINCRM_BASE, key: process.env.MEINCRM_API_KEY, projectId: process.env.HEATHERO_PROJECT_ID },
-  { label: 'Goals & Concepts', group: 'Mein CRM', base: MEINCRM_BASE, key: process.env.MEINCRM_API_KEY, projectId: process.env.GOALS_CONCEPTS_PROJECT_ID },
-  { label: 'Koop Steuerberater', group: 'Mein CRM', base: MEINCRM_BASE, key: process.env.MEINCRM_API_KEY, projectId: process.env.KOOP_STEUERBERATER_PROJECT_ID },
-  { label: 'Sol', group: 'Mein CRM', base: MEINCRM_BASE, key: process.env.MEINCRM_API_KEY, projectId: process.env.SOL_PROJECT_ID },
-  { label: 'Versuro', group: 'Mein CRM', base: MEINCRM_BASE, key: process.env.MEINCRM_API_KEY, projectId: process.env.VERSURO_PROJECT_ID },
+  { label: 'HeatHero', group: 'Arbeit', mode: 'gateway', projectId: null },
+  { label: 'HeatHero (Mein CRM)', group: 'Mein CRM', mode: 'rest', projectId: process.env.HEATHERO_PROJECT_ID },
+  { label: 'Goals & Concepts', group: 'Mein CRM', mode: 'rest', projectId: process.env.GOALS_CONCEPTS_PROJECT_ID },
+  { label: 'Koop Steuerberater', group: 'Mein CRM', mode: 'rest', projectId: process.env.KOOP_STEUERBERATER_PROJECT_ID },
+  { label: 'Sol', group: 'Mein CRM', mode: 'rest', projectId: process.env.SOL_PROJECT_ID },
+  { label: 'Versuro', group: 'Mein CRM', mode: 'rest', projectId: process.env.VERSURO_PROJECT_ID },
 ];
 
 async function fetchWithTimeout(url, opts = {}, ms = 8000) {
@@ -31,6 +31,7 @@ async function fetchWithTimeout(url, opts = {}, ms = 8000) {
   try { return await fetch(url, { ...opts, signal: ctrl.signal }); }
   finally { clearTimeout(id); }
 }
+function safeJson(t) { try { return JSON.parse(t); } catch { return t.slice(0, 1500); } }
 
 async function loadMemory() {
   try { return JSON.parse(await fs.readFile(MEM_FILE, 'utf8')); } catch { return { todos: [], notes: [] }; }
@@ -102,24 +103,27 @@ async function fetchInbox(acc, limit) {
 }
 
 async function fetchLeads(src) {
-  if (!src.key) return { projekt: src.label, gruppe: src.group, fehler: 'kein API-Key gesetzt' };
-  if (src.projectId === undefined) return { projekt: src.label, gruppe: src.group, fehler: 'Project-ID-Variable fehlt' };
-  const headers = { 'X-API-Key': src.key };
-  if (src.projectId) headers['X-Project-Id'] = src.projectId;
-  let last = '404';
-  for (const url of [src.base + '/leads', src.base]) {
-    try {
-      const r = await fetchWithTimeout(url, { headers }, 8000);
+  try {
+    if (src.mode === 'gateway') {
+      const key = process.env.HEATHERO_API_KEY;
+      if (!key) return { projekt: src.label, gruppe: src.group, fehler: 'kein HEATHERO_API_KEY' };
+      const r = await fetchWithTimeout(HEATHERO_LEADS_URL, { headers: { 'X-API-Key': key } }, 8000);
       const t = await r.text();
-      if (r.ok) {
-        try { return { projekt: src.label, gruppe: src.group, leads: JSON.parse(t) }; }
-        catch { return { projekt: src.label, gruppe: src.group, raw: t.slice(0, 1500) }; }
-      }
-      last = r.status + ': ' + t.slice(0, 150);
-      if (r.status !== 404) break;
-    } catch (e) { last = e.name === 'AbortError' ? 'Timeout' : e.message; }
+      if (!r.ok) return { projekt: src.label, gruppe: src.group, fehler: r.status + ': ' + t.slice(0, 150) };
+      return { projekt: src.label, gruppe: src.group, leads: safeJson(t) };
+    } else {
+      const key = process.env.MEINCRM_SERVICE_KEY;
+      if (!key) return { projekt: src.label, gruppe: src.group, fehler: 'kein MEINCRM_SERVICE_KEY gesetzt' };
+      if (!src.projectId) return { projekt: src.label, gruppe: src.group, fehler: 'keine Project-ID' };
+      const url = `${MEINCRM_REST_URL}?project_id=eq.${encodeURIComponent(src.projectId)}&select=*&order=created_at.desc&limit=1000`;
+      const r = await fetchWithTimeout(url, { headers: { apikey: key, Authorization: 'Bearer ' + key } }, 8000);
+      const t = await r.text();
+      if (!r.ok) return { projekt: src.label, gruppe: src.group, fehler: r.status + ': ' + t.slice(0, 150) };
+      return { projekt: src.label, gruppe: src.group, leads: safeJson(t) };
+    }
+  } catch (e) {
+    return { projekt: src.label, gruppe: src.group, fehler: e.name === 'AbortError' ? 'Timeout' : e.message };
   }
-  return { projekt: src.label, gruppe: src.group, fehler: last };
 }
 async function fetchAllLeads() {
   return await Promise.all(CRM_SOURCES.map(fetchLeads));
@@ -221,7 +225,7 @@ app.post('/telegram', async (req, res) => {
 async function setupTelegramWebhook() {
   const token = process.env.TELEGRAM_BOT_TOKEN, domain = process.env.RAILWAY_PUBLIC_DOMAIN;
   if (!token || !domain) return;
-  try { const r = await fetchWithTimeout(`https://api.telegram.org/bot${token}/setWebhook?url=https://${domain}/telegram`, {}, 8000); console.log('Webhook:', await r.text()); }
+  try { const r = await fetch(`https://api.telegram.org/bot${token}/setWebhook?url=https://${domain}/telegram`); console.log('Webhook:', await r.text()); }
   catch (e) { console.error('Webhook-Fehler:', e); }
 }
 async function setBotCommands() {
