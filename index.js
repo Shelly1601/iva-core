@@ -25,6 +25,13 @@ const CRM_SOURCES = [
   { label: 'Versuro', group: 'Mein CRM', base: MEINCRM_BASE, key: process.env.MEINCRM_API_KEY, projectId: process.env.VERSURO_PROJECT_ID },
 ];
 
+async function fetchWithTimeout(url, opts = {}, ms = 8000) {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), ms);
+  try { return await fetch(url, { ...opts, signal: ctrl.signal }); }
+  finally { clearTimeout(id); }
+}
+
 async function loadMemory() {
   try { return JSON.parse(await fs.readFile(MEM_FILE, 'utf8')); } catch { return { todos: [], notes: [] }; }
 }
@@ -43,9 +50,9 @@ function fmtDate(d) { return d.toLocaleString('de-DE', { weekday: 'short', day: 
 function berlinDay(d) { return d.toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' }); }
 function fmtEvents(arr) { return arr.map(e => `${e.label} · ${fmtDate(e.start)} – ${e.summary}`); }
 async function getEventsRaw(days) {
-  const now = new Date(); const until = new Date(now.getTime() + days * 86400000); const out = [];
-  for (const cal of CALENDARS) {
-    if (!cal.url) continue;
+  const now = new Date(); const until = new Date(now.getTime() + days * 86400000);
+  const lists = await Promise.all(CALENDARS.filter(c => c.url).map(async cal => {
+    const out = [];
     try {
       const data = await ical.async.fromURL(cal.url);
       for (const e of Object.values(data)) {
@@ -54,8 +61,9 @@ async function getEventsRaw(days) {
         else if (e.start) { const s = new Date(e.start); if (s >= now && s <= until) out.push({ start: s, label: cal.label, summary: e.summary || '(ohne Titel)' }); }
       }
     } catch (err) { console.error('ICS-Fehler:', err.message); }
-  }
-  out.sort((a, b) => a.start - b.start); return out;
+    return out;
+  }));
+  return lists.flat().sort((a, b) => a.start - b.start);
 }
 
 function hostFor(user, override) {
@@ -101,7 +109,7 @@ async function fetchLeads(src) {
   let last = '404';
   for (const url of [src.base + '/leads', src.base]) {
     try {
-      const r = await fetch(url, { headers });
+      const r = await fetchWithTimeout(url, { headers }, 8000);
       const t = await r.text();
       if (r.ok) {
         try { return { projekt: src.label, gruppe: src.group, leads: JSON.parse(t) }; }
@@ -109,14 +117,12 @@ async function fetchLeads(src) {
       }
       last = r.status + ': ' + t.slice(0, 150);
       if (r.status !== 404) break;
-    } catch (e) { last = e.message; }
+    } catch (e) { last = e.name === 'AbortError' ? 'Timeout' : e.message; }
   }
   return { projekt: src.label, gruppe: src.group, fehler: last };
 }
 async function fetchAllLeads() {
-  const out = [];
-  for (const s of CRM_SOURCES) out.push(await fetchLeads(s));
-  return out;
+  return await Promise.all(CRM_SOURCES.map(fetchLeads));
 }
 
 async function buildSystemPrompt() {
@@ -187,13 +193,13 @@ async function transcribeVoice(fileId) {
 async function sendBriefing() {
   const mem = await loadMemory(); if (!mem.chatId) return;
   const today = berlinDay(new Date());
-  const todays = (await getEventsRaw(2)).filter(e => berlinDay(e.start) === today);
+  const [evRaw, leadsAll] = await Promise.all([getEventsRaw(2), fetchAllLeads()]);
+  const todays = evRaw.filter(e => berlinDay(e.start) === today);
   const eventsText = todays.length ? fmtEvents(todays).join('\n') : 'keine Termine';
   const open = (mem.todos || []).filter(t => !t.done).map(t => t.text);
   const todosText = open.length ? open.map(t => '- ' + t).join('\n') : 'keine offenen';
-  let blocks = [];
-  try { for (const x of await fetchAllLeads()) { const body = x.fehler ? ('Fehler: ' + x.fehler) : JSON.stringify(x.leads).slice(0, 3500); blocks.push(`[${x.gruppe} / ${x.projekt}]\n${body}`); } } catch {}
-  const { text } = await generateText({ model: anthropic('claude-sonnet-4-6'),
+  const blocks = leadsAll.map(x => `[${x.gruppe} / ${x.projekt}]\n${x.fehler ? ('Fehler: ' + x.fehler) : JSON.stringify(x.leads).slice(0, 3500)}`);
+  const { text } = await generateText({ model: anthropic('claude-haiku-4-5-20251001'),
     system: 'Du bist IVA. Morning-Briefing auf Deutsch fuer Telegram. **Fett** nur fuer Ueberschriften, KEINE Tabellen, kurze Zeilen mit Bindestrich. Aufbau: kurze Begruessung, **Termine heute**, **Offene Todos**, dann **Arbeit – HeatHero**, danach **Mein CRM (privat)** mit den Unterprojekten. Je Projekt die Kategorien (nur nicht-leere zeigen): Neue unbearbeitete Leads, Follow-Ups heute, Wiedervorlagen heute, Ohne Update nach Termin, Status "Montage terminieren". Pro Lead: Name + kurzer Grund. Leere Projekte weglassen. Motivierender Schlusssatz.',
     prompt: `Heute ist ${today}.\nTermine heute:\n${eventsText}\n\nOffene Todos:\n${todosText}\n\nLeads je Projekt (rohe Daten):\n${blocks.join('\n\n')}` });
   await sendTelegram(mem.chatId, text);
@@ -215,7 +221,7 @@ app.post('/telegram', async (req, res) => {
 async function setupTelegramWebhook() {
   const token = process.env.TELEGRAM_BOT_TOKEN, domain = process.env.RAILWAY_PUBLIC_DOMAIN;
   if (!token || !domain) return;
-  try { const r = await fetch(`https://api.telegram.org/bot${token}/setWebhook?url=https://${domain}/telegram`); console.log('Webhook:', await r.text()); }
+  try { const r = await fetchWithTimeout(`https://api.telegram.org/bot${token}/setWebhook?url=https://${domain}/telegram`, {}, 8000); console.log('Webhook:', await r.text()); }
   catch (e) { console.error('Webhook-Fehler:', e); }
 }
 async function setBotCommands() {
