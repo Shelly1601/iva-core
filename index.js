@@ -14,7 +14,7 @@ app.use(express.json());
 const DATA_DIR = '/data';
 const MEM_FILE = DATA_DIR + '/memory.json';
 const HEATHERO_BASE = 'https://thbvjafssbealqsswhdv.supabase.co/functions/v1/api-gateway/v1';
-const MEINCRM_BASE = 'https://qqyoqshjwpkmerilhjus.supabase.co/functions/v1/api-gateway/v1';
+const MEINCRM_BASE = 'https://qqyoqshjwpkmerilhjus.supabase.co/functions/v1/external-leads-api';
 
 const CRM_SOURCES = [
   { label: 'HeatHero', group: 'Arbeit', base: HEATHERO_BASE, key: process.env.HEATHERO_API_KEY, projectId: null },
