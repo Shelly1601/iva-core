@@ -67,6 +67,32 @@ async function getEventsRaw(days) {
   return lists.flat().sort((a, b) => a.start - b.start);
 }
 
+async function calendlyGet(path) {
+  const r = await fetchWithTimeout('https://api.calendly.com' + path, { headers: { Authorization: 'Bearer ' + process.env.CALENDLY_TOKEN, 'Content-Type': 'application/json' } }, 8000);
+  if (!r.ok) throw new Error(r.status + ': ' + (await r.text()).slice(0, 150));
+  return r.json();
+}
+async function getCalendlyEvents(days) {
+  if (!process.env.CALENDLY_TOKEN) return { fehler: 'kein CALENDLY_TOKEN' };
+  try {
+    const me = await calendlyGet('/users/me');
+    const userUri = me.resource.uri;
+    const now = new Date().toISOString();
+    const max = new Date(Date.now() + (days || 14) * 86400000).toISOString();
+    const data = await calendlyGet(`/scheduled_events?user=${encodeURIComponent(userUri)}&status=active&min_start_time=${now}&max_start_time=${max}&sort=start_time:asc&count=20`);
+    const events = await Promise.all((data.collection || []).map(async ev => {
+      let bucher = '';
+      try {
+        const uuid = ev.uri.split('/').pop();
+        const inv = await calendlyGet(`/scheduled_events/${uuid}/invitees`);
+        bucher = (inv.collection || []).map(i => i.name).filter(Boolean).join(', ');
+      } catch {}
+      return { wann: fmtDate(new Date(ev.start_time)), termin: ev.name, bucher, ort: ev.location?.location || ev.location?.type || '' };
+    }));
+    return { count: events.length, events };
+  } catch (e) { return { fehler: e.message }; }
+}
+
 function hostFor(user, override) {
   if (override) return override;
   const d = (user.split('@')[1] || '').toLowerCase();
@@ -157,6 +183,8 @@ const tools = {
     execute: async ({ fact }) => { const m = await loadMemory(); m.notes = m.notes || []; m.notes.push(fact); await saveMemory(m); return { ok: true, fact }; } }),
   getCalendar: tool({ description: 'Liest Termine aus den Kalendern.', parameters: z.object({ days: z.number().optional() }),
     execute: async ({ days }) => { const ev = fmtEvents(await getEventsRaw(days || 7)); return { count: ev.length, events: ev }; } }),
+  getCalendly: tool({ description: 'Liest kommende Calendly-Buchungen (wer hat wann was gebucht).', parameters: z.object({ days: z.number().optional() }),
+    execute: async ({ days }) => await getCalendlyEvents(days || 14) }),
   getMails: tool({ description: 'Liest die neuesten E-Mails.', parameters: z.object({ proKonto: z.number().optional() }),
     execute: async ({ proKonto }) => { let all = []; for (const acc of loadMailAccounts()) { try { all = all.concat(await fetchInbox(acc, proKonto || 8)); } catch (e) { all.push({ konto: acc.label, fehler: e.message }); } } return { count: all.length, mails: all }; } }),
   getLeads: tool({ description: 'Ruft Leads ab. Ohne projekt: alle. Mit projekt (z.B. HeatHero, Versuro): nur dieses.', parameters: z.object({ projekt: z.string().optional() }),
@@ -234,6 +262,7 @@ async function setBotCommands() {
     { command: 'briefing', description: 'Tagesueberblick jetzt senden' },
     { command: 'leads', description: 'Offene Leads / Handlungsbedarf' },
     { command: 'termine', description: 'Termine der Woche' },
+    { command: 'calendly', description: 'Kommende Calendly-Buchungen' },
     { command: 'mails', description: 'Neue Mails zusammenfassen' },
     { command: 'todos', description: 'Offene Todos anzeigen' },
   ];
