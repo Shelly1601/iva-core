@@ -37,6 +37,7 @@ const CALENDARS = [
   { label: 'Privat', url: process.env.PRIVAT_GOOGLE_ICS_URL },
   { label: 'Familie', url: process.env.FAMILIE_GOOGLE_ICS_URL },
   { label: 'Projekte', url: process.env.PROJEKTE_GOOGLE_ICS_URL },
+  { label: 'Outlook', url: process.env.OUTLOOK_ICS_URL },
 ];
 function fmtDate(d) { return d.toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' }); }
 function berlinDay(d) { return d.toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' }); }
@@ -97,13 +98,20 @@ async function fetchLeads(src) {
   if (src.projectId === undefined) return { projekt: src.label, gruppe: src.group, fehler: 'Project-ID-Variable fehlt' };
   const headers = { 'X-API-Key': src.key };
   if (src.projectId) headers['X-Project-Id'] = src.projectId;
-  try {
-    const r = await fetch(src.base + '/leads', { headers });
-    const t = await r.text();
-    if (!r.ok) return { projekt: src.label, gruppe: src.group, fehler: r.status + ': ' + t.slice(0, 200) };
-    let data; try { data = JSON.parse(t); } catch { return { projekt: src.label, gruppe: src.group, raw: t.slice(0, 1500) }; }
-    return { projekt: src.label, gruppe: src.group, leads: data };
-  } catch (e) { return { projekt: src.label, gruppe: src.group, fehler: e.message }; }
+  let last = '404';
+  for (const url of [src.base + '/leads', src.base]) {
+    try {
+      const r = await fetch(url, { headers });
+      const t = await r.text();
+      if (r.ok) {
+        try { return { projekt: src.label, gruppe: src.group, leads: JSON.parse(t) }; }
+        catch { return { projekt: src.label, gruppe: src.group, raw: t.slice(0, 1500) }; }
+      }
+      last = r.status + ': ' + t.slice(0, 150);
+      if (r.status !== 404) break;
+    } catch (e) { last = e.message; }
+  }
+  return { projekt: src.label, gruppe: src.group, fehler: last };
 }
 async function fetchAllLeads() {
   const out = [];
