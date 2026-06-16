@@ -13,11 +13,20 @@ app.use(express.json());
 
 const DATA_DIR = '/data';
 const MEM_FILE = DATA_DIR + '/memory.json';
-const API_BASE = 'https://thbvjafssbealqsswhdv.supabase.co/functions/v1/api-gateway/v1';
+const HEATHERO_BASE = 'https://thbvjafssbealqsswhdv.supabase.co/functions/v1/api-gateway/v1';
+const MEINCRM_BASE = 'https://qqyoqshjwpkmerilhjus.supabase.co/functions/v1/api-gateway/v1';
+
+const CRM_SOURCES = [
+  { label: 'HeatHero', group: 'Arbeit', base: HEATHERO_BASE, key: process.env.HEATHERO_API_KEY, projectId: null },
+  { label: 'HeatHero (Mein CRM)', group: 'Mein CRM', base: MEINCRM_BASE, key: process.env.MEINCRM_API_KEY, projectId: process.env.HEATHERO_PROJECT_ID },
+  { label: 'Goals & Concepts', group: 'Mein CRM', base: MEINCRM_BASE, key: process.env.MEINCRM_API_KEY, projectId: process.env.GOALS_CONCEPTS_PROJECT_ID },
+  { label: 'Koop Steuerberater', group: 'Mein CRM', base: MEINCRM_BASE, key: process.env.MEINCRM_API_KEY, projectId: process.env.KOOP_STEUERBERATER_PROJECT_ID },
+  { label: 'Sol', group: 'Mein CRM', base: MEINCRM_BASE, key: process.env.MEINCRM_API_KEY, projectId: process.env.SOL_PROJECT_ID },
+  { label: 'Versuro', group: 'Mein CRM', base: MEINCRM_BASE, key: process.env.MEINCRM_API_KEY, projectId: process.env.VERSURO_PROJECT_ID },
+];
 
 async function loadMemory() {
-  try { return JSON.parse(await fs.readFile(MEM_FILE, 'utf8')); }
-  catch { return { todos: [], notes: [] }; }
+  try { return JSON.parse(await fs.readFile(MEM_FILE, 'utf8')); } catch { return { todos: [], notes: [] }; }
 }
 async function saveMemory(mem) {
   await fs.mkdir(DATA_DIR, { recursive: true }).catch(() => {});
@@ -28,7 +37,6 @@ const CALENDARS = [
   { label: 'Privat', url: process.env.PRIVAT_GOOGLE_ICS_URL },
   { label: 'Familie', url: process.env.FAMILIE_GOOGLE_ICS_URL },
   { label: 'Projekte', url: process.env.PROJEKTE_GOOGLE_ICS_URL },
-  { label: 'Outlook', url: process.env.OUTLOOK_ICS_URL },
 ];
 function fmtDate(d) { return d.toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' }); }
 function berlinDay(d) { return d.toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' }); }
@@ -44,7 +52,7 @@ async function getEventsRaw(days) {
         if (e.rrule) { for (const d of e.rrule.between(now, until)) out.push({ start: d, label: cal.label, summary: e.summary || '(ohne Titel)' }); }
         else if (e.start) { const s = new Date(e.start); if (s >= now && s <= until) out.push({ start: s, label: cal.label, summary: e.summary || '(ohne Titel)' }); }
       }
-    } catch (err) { console.error('ICS-Fehler bei ' + cal.label + ':', err.message); }
+    } catch (err) { console.error('ICS-Fehler:', err.message); }
   }
   out.sort((a, b) => a.start - b.start); return out;
 }
@@ -56,7 +64,6 @@ function hostFor(user, override) {
   if (['outlook', 'hotmail', 'live', 'msn'].some(x => d.includes(x))) return 'outlook.office365.com';
   if (d.includes('gmx')) return 'imap.gmx.net';
   if (d.includes('web.de')) return 'imap.web.de';
-  if (d.includes('yahoo')) return 'imap.mail.yahoo.com';
   return null;
 }
 function loadMailAccounts() {
@@ -85,13 +92,23 @@ async function fetchInbox(acc, limit) {
   return out.reverse();
 }
 
-async function apiGet(path, projectId) {
-  const headers = { 'X-API-Key': process.env.MEINCRM_API_KEY || process.env.HEATHERO_API_KEY };
-  if (projectId) headers['X-Project-Id'] = projectId;
-  const r = await fetch(API_BASE + path, { headers });
-  const text = await r.text();
-  if (!r.ok) return { ok: false, status: r.status, body: text.slice(0, 600) };
-  try { return { ok: true, data: JSON.parse(text) }; } catch { return { ok: true, raw: text.slice(0, 2000) }; }
+async function fetchLeads(src) {
+  if (!src.key) return { projekt: src.label, gruppe: src.group, fehler: 'kein API-Key gesetzt' };
+  if (src.projectId === undefined) return { projekt: src.label, gruppe: src.group, fehler: 'Project-ID-Variable fehlt' };
+  const headers = { 'X-API-Key': src.key };
+  if (src.projectId) headers['X-Project-Id'] = src.projectId;
+  try {
+    const r = await fetch(src.base + '/leads', { headers });
+    const t = await r.text();
+    if (!r.ok) return { projekt: src.label, gruppe: src.group, fehler: r.status + ': ' + t.slice(0, 200) };
+    let data; try { data = JSON.parse(t); } catch { return { projekt: src.label, gruppe: src.group, raw: t.slice(0, 1500) }; }
+    return { projekt: src.label, gruppe: src.group, leads: data };
+  } catch (e) { return { projekt: src.label, gruppe: src.group, fehler: e.message }; }
+}
+async function fetchAllLeads() {
+  const out = [];
+  for (const s of CRM_SOURCES) out.push(await fetchLeads(s));
+  return out;
 }
 
 async function buildSystemPrompt() {
@@ -104,7 +121,7 @@ Charakter: Sparringspartner, kein Jasager. Loesungsorientiert, direkt, ehrlich.
 Keine Moralkeule - bei Grauzonen Weg UND Haken in einem Satz, dann die Loesung.
 Fasse dich kurz. Hoechstens eine Rueckfrage, nur wenn noetig.
 Nutze deine Werkzeuge, statt nur darueber zu reden.
-Telegram-Format: **Fett** NUR fuer Ueberschriften/Schluesselbegriffe. KEINE Tabellen, keine ###-Header - kurze Zeilen mit Bindestrich.
+Telegram-Format: **Fett** NUR fuer Ueberschriften. KEINE Tabellen, keine ###-Header - kurze Zeilen mit Bindestrich.
 
 Das hast du dir gemerkt:
 ${notes}
@@ -122,17 +139,19 @@ const tools = {
     execute: async ({ fact }) => { const m = await loadMemory(); m.notes = m.notes || []; m.notes.push(fact); await saveMemory(m); return { ok: true, fact }; } }),
   getCalendar: tool({ description: 'Liest Termine aus den Kalendern.', parameters: z.object({ days: z.number().optional() }),
     execute: async ({ days }) => { const ev = fmtEvents(await getEventsRaw(days || 7)); return { count: ev.length, events: ev }; } }),
-  getMails: tool({ description: 'Liest die neuesten E-Mails aus allen Postfaechern.', parameters: z.object({ proKonto: z.number().optional() }),
+  getMails: tool({ description: 'Liest die neuesten E-Mails.', parameters: z.object({ proKonto: z.number().optional() }),
     execute: async ({ proKonto }) => { let all = []; for (const acc of loadMailAccounts()) { try { all = all.concat(await fetchInbox(acc, proKonto || 8)); } catch (e) { all.push({ konto: acc.label, fehler: e.message }); } } return { count: all.length, mails: all }; } }),
-  getLeads: tool({ description: 'Ruft Leads ab. Optional projectId fuer ein bestimmtes CRM.', parameters: z.object({ projectId: z.string().optional() }),
-    execute: async ({ projectId }) => await apiGet('/leads', projectId) }),
-  getProjects: tool({ description: 'Listet alle CRM-Projekte (per Master-Token) mit IDs und Namen auf.', parameters: z.object({}),
-    execute: async () => await apiGet('/projects') }),
+  getLeads: tool({ description: 'Ruft Leads ab. Ohne projekt: alle. Mit projekt (z.B. HeatHero, Versuro): nur dieses.', parameters: z.object({ projekt: z.string().optional() }),
+    execute: async ({ projekt }) => {
+      let list = await fetchAllLeads();
+      if (projekt) list = list.filter(x => x.projekt.toLowerCase().includes(projekt.toLowerCase()));
+      return list.map(x => ({ projekt: x.projekt, gruppe: x.gruppe, fehler: x.fehler, leads: x.leads ? JSON.stringify(x.leads).slice(0, 5000) : null }));
+    } }),
 };
 
 async function askIva(userText) {
   const system = await buildSystemPrompt();
-  const { text } = await generateText({ model: anthropic('claude-sonnet-4-6'), system, prompt: userText, tools, maxSteps: 5 });
+  const { text } = await generateText({ model: anthropic('claude-sonnet-4-6'), system, prompt: userText, tools, maxSteps: 6 });
   return text;
 }
 
@@ -146,7 +165,6 @@ async function sendTelegram(chatId, text) {
     body: JSON.stringify({ chat_id: chatId, text: toTelegramHTML(text), parse_mode: 'HTML' }),
   });
 }
-
 async function transcribeVoice(fileId) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const filePath = (await (await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`)).json()).result.file_path;
@@ -165,11 +183,11 @@ async function sendBriefing() {
   const eventsText = todays.length ? fmtEvents(todays).join('\n') : 'keine Termine';
   const open = (mem.todos || []).filter(t => !t.done).map(t => t.text);
   const todosText = open.length ? open.map(t => '- ' + t).join('\n') : 'keine offenen';
-  let leadsText = 'keine Daten';
-  try { const r = await apiGet('/leads'); if (r.ok && r.data) leadsText = JSON.stringify(r.data).slice(0, 9000); else if (!r.ok) leadsText = 'Abruf-Fehler ' + r.status; } catch {}
+  let blocks = [];
+  try { for (const x of await fetchAllLeads()) { const body = x.fehler ? ('Fehler: ' + x.fehler) : JSON.stringify(x.leads).slice(0, 3500); blocks.push(`[${x.gruppe} / ${x.projekt}]\n${body}`); } } catch {}
   const { text } = await generateText({ model: anthropic('claude-sonnet-4-6'),
-    system: 'Du bist IVA. Morning-Briefing auf Deutsch fuer Telegram. **Fett** nur fuer Ueberschriften, KEINE Tabellen, kurze Zeilen mit Bindestrich. Aufbau: kurze Begruessung, dann **Termine heute**, **Offene Todos**, dann **HeatHero - Leads** unterteilt in diese Kategorien (zeige nur Kategorien mit Eintraegen): "Neue unbearbeitete Leads", "Follow-Ups heute", "Wiedervorlagen heute", "Ohne Update nach Termin", "Status: Montage terminieren". Pro Lead: Name + kurzer Grund. Stuetze dich auf die Felder der Rohdaten (Status, Termin-Datum, letztes Update, Follow-up-/Wiedervorlage-Datum). Ein motivierender Schlusssatz.',
-    prompt: `Heute ist ${today}.\nTermine heute:\n${eventsText}\n\nOffene Todos:\n${todosText}\n\nLeads (rohe Daten):\n${leadsText}` });
+    system: 'Du bist IVA. Morning-Briefing auf Deutsch fuer Telegram. **Fett** nur fuer Ueberschriften, KEINE Tabellen, kurze Zeilen mit Bindestrich. Aufbau: kurze Begruessung, **Termine heute**, **Offene Todos**, dann **Arbeit – HeatHero**, danach **Mein CRM (privat)** mit den Unterprojekten. Je Projekt die Kategorien (nur nicht-leere zeigen): Neue unbearbeitete Leads, Follow-Ups heute, Wiedervorlagen heute, Ohne Update nach Termin, Status "Montage terminieren". Pro Lead: Name + kurzer Grund. Leere Projekte weglassen. Motivierender Schlusssatz.',
+    prompt: `Heute ist ${today}.\nTermine heute:\n${eventsText}\n\nOffene Todos:\n${todosText}\n\nLeads je Projekt (rohe Daten):\n${blocks.join('\n\n')}` });
   await sendTelegram(mem.chatId, text);
 }
 
@@ -193,8 +211,7 @@ async function setupTelegramWebhook() {
   catch (e) { console.error('Webhook-Fehler:', e); }
 }
 async function setBotCommands() {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return;
+  const token = process.env.TELEGRAM_BOT_TOKEN; if (!token) return;
   const commands = [
     { command: 'briefing', description: 'Tagesueberblick jetzt senden' },
     { command: 'leads', description: 'Offene Leads / Handlungsbedarf' },
