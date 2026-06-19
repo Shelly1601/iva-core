@@ -193,4 +193,117 @@ ${todoText}`;
 
 const tools = {
   createTodo: tool({ description: 'Legt ein neues Todo an.', parameters: z.object({ text: z.string() }),
-    execute: async ({ text }) => { const m = await loadMemory(); m.todos = m.todos || [];
+    execute: async ({ text }) => { const m = await loadMemory(); m.todos = m.todos || []; m.todos.push({ text, done: false, ts: Date.now() }); await saveMemory(m); return { ok: true, text }; } }),
+  completeTodo: tool({ description: 'Markiert ein Todo per Textsuche als erledigt.', parameters: z.object({ text: z.string() }),
+    execute: async ({ text }) => { const m = await loadMemory(); const t = (m.todos || []).find(t => !t.done && t.text.toLowerCase().includes(text.toLowerCase())); if (t) { t.done = true; await saveMemory(m); return { ok: true, done: t.text }; } return { ok: false }; } }),
+  remember: tool({ description: 'Merkt sich dauerhaft eine Info.', parameters: z.object({ fact: z.string() }),
+    execute: async ({ fact }) => { const m = await loadMemory(); m.notes = m.notes || []; m.notes.push(fact); await saveMemory(m); return { ok: true, fact }; } }),
+  getCalendar: tool({ description: 'Liest Termine aus den Kalendern.', parameters: z.object({ days: z.number().optional() }),
+    execute: async ({ days }) => { const ev = fmtEvents(await getEventsRaw(days || 7)); return { count: ev.length, events: ev }; } }),
+  getCalendly: tool({ description: 'Liest kommende Calendly-Buchungen.', parameters: z.object({ days: z.number().optional() }),
+    execute: async ({ days }) => await getCalendlyEvents(days || 14) }),
+  getMails: tool({ description: 'Liest die neuesten E-Mails. Feld "bereich" = Firma (aus Empfaenger).', parameters: z.object({ proKonto: z.number().optional() }),
+    execute: async ({ proKonto }) => { let all = []; for (const acc of loadMailAccounts()) { try { all = all.concat(await fetchInbox(acc, proKonto || 12)); } catch (e) { all.push({ konto: acc.label, fehler: e.message }); } } return { count: all.length, mails: all }; } }),
+  getLeads: tool({ description: 'Ruft Leads ab. Ohne projekt: alle. Mit projekt: nur dieses.', parameters: z.object({ projekt: z.string().optional() }),
+    execute: async ({ projekt }) => {
+      let list = await fetchAllLeads();
+      if (projekt) list = list.filter(x => x.projekt.toLowerCase().includes(projekt.toLowerCase()));
+      return list.map(x => ({ projekt: x.projekt, gruppe: x.gruppe, fehler: x.fehler, leads: x.leads ? JSON.stringify(x.leads).slice(0, 5000) : null }));
+    } }),
+};
+
+async function askIva(userText) {
+  const system = await buildSystemPrompt();
+  const { text } = await generateText({ model: anthropic('claude-sonnet-4-6'), system, prompt: userText, tools, maxSteps: 6 });
+  return text;
+}
+
+function toTelegramHTML(s) {
+  s = String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+}
+async function sendTelegram(chatId, text) {
+  await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text: toTelegramHTML(text), parse_mode: 'HTML' }),
+  });
+}
+async function transcribeVoice(fileId) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const filePath = (await (await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`)).json()).result.file_path;
+  const audioBuf = Buffer.from(await (await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`)).arrayBuffer());
+  const form = new FormData();
+  form.append('file', new Blob([audioBuf]), 'voice.ogg');
+  form.append('model', 'whisper-large-v3-turbo');
+  const r = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` }, body: form });
+  return (await r.json()).text;
+}
+
+async function sendBriefing() {
+  const mem = await loadMemory(); if (!mem.chatId) return;
+  const today = berlinDay(new Date());
+  const [evRaw, leadsAll] = await Promise.all([getEventsRaw(2), fetchAllLeads()]);
+  const todays = evRaw.filter(e => berlinDay(e.start) === today);
+  const eventsText = todays.length ? fmtEvents(todays).join('\n') : 'keine Termine';
+  const open = (mem.todos || []).filter(t => !t.done).map(t => t.text);
+  const todosText = open.length ? open.map(t => '- ' + t).join('\n') : 'keine offenen';
+  const blocks = leadsAll.map(x => `[${x.gruppe} / ${x.projekt}]\n${x.fehler ? ('Fehler: ' + x.fehler) : JSON.stringify(x.leads).slice(0, 3500)}`);
+  const { text } = await generateText({ model: anthropic('claude-haiku-4-5-20251001'),
+    system: 'Du bist IVA. Morning-Briefing auf Deutsch fuer Telegram. **Fett** nur fuer Ueberschriften, KEINE Tabellen, kurze Zeilen mit Bindestrich. Aufbau: kurze Begruessung, **Termine heute**, **Offene Todos**, dann **Arbeit – HeatHero**, danach **Mein CRM (privat)** mit den Unterprojekten. Je Projekt die Kategorien (nur nicht-leere zeigen): Neue unbearbeitete Leads, Follow-Ups heute, Wiedervorlagen heute, Ohne Update nach Termin, Status "Montage terminieren". Pro Lead: Name + kurzer Grund. Leere Projekte weglassen. Motivierender Schlusssatz.',
+    prompt: `Heute ist ${today}.\nTermine heute:\n${eventsText}\n\nOffene Todos:\n${todosText}\n\nLeads je Projekt (rohe Daten):\n${blocks.join('\n\n')}` });
+  await sendTelegram(mem.chatId, text);
+}
+
+app.post('/telegram', async (req, res) => {
+  const msg = req.body?.message; const chatId = msg?.chat?.id;
+  res.sendStatus(200); if (!chatId) return;
+  try {
+    const mem = await loadMemory(); if (mem.chatId !== chatId) { mem.chatId = chatId; await saveMemory(mem); }
+    let userText = msg?.text;
+    if (!userText && msg?.voice) userText = await transcribeVoice(msg.voice.file_id);
+    if (!userText) return;
+    if (userText.trim().toLowerCase() === '/briefing') { await sendBriefing(); return; }
+    await sendTelegram(chatId, await askIva(userText));
+  } catch (e) { console.error('Fehler:', e); }
+});
+
+const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
+app.use('/api', (req, res, next) => {
+  res.set(CORS);
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  if ((req.headers.authorization || '') !== 'Bearer ' + (process.env.API_TOKEN || '')) return res.status(401).json({ error: 'unauthorized' });
+  next();
+});
+app.get('/api/leads', async (_req, res) => res.json(await fetchAllLeads()));
+app.get('/api/mails', async (_req, res) => { let all = []; for (const acc of loadMailAccounts()) { try { all = all.concat(await fetchInbox(acc, 15)); } catch (e) {} } res.json(all); });
+app.get('/api/calendar', async (_req, res) => res.json(fmtEvents(await getEventsRaw(7))));
+app.get('/api/calendly', async (_req, res) => res.json(await getCalendlyEvents(14)));
+app.get('/api/todos', async (_req, res) => { const m = await loadMemory(); res.json((m.todos || []).filter(t => !t.done)); });
+app.post('/api/todos', async (req, res) => { const m = await loadMemory(); m.todos = m.todos || []; m.todos.push({ text: req.body?.text || '', done: false, ts: Date.now() }); await saveMemory(m); res.json({ ok: true }); });
+app.post('/api/todos/toggle', async (req, res) => { const m = await loadMemory(); const t = (m.todos || []).find(t => t.ts === req.body?.ts); if (t) { t.done = !t.done; await saveMemory(m); } res.json({ ok: true }); });
+app.post('/api/chat', async (req, res) => { try { res.json({ reply: await askIva(req.body?.message || '') }); } catch (e) { res.json({ reply: 'Fehler: ' + e.message }); } });
+
+async function setupTelegramWebhook() {
+  const token = process.env.TELEGRAM_BOT_TOKEN, domain = process.env.RAILWAY_PUBLIC_DOMAIN;
+  if (!token || !domain) return;
+  try { const r = await fetch(`https://api.telegram.org/bot${token}/setWebhook?url=https://${domain}/telegram`); console.log('Webhook:', await r.text()); }
+  catch (e) { console.error('Webhook-Fehler:', e); }
+}
+async function setBotCommands() {
+  const token = process.env.TELEGRAM_BOT_TOKEN; if (!token) return;
+  const commands = [
+    { command: 'briefing', description: 'Tagesueberblick jetzt senden' },
+    { command: 'leads', description: 'Offene Leads / Handlungsbedarf' },
+    { command: 'termine', description: 'Termine der Woche' },
+    { command: 'calendly', description: 'Kommende Calendly-Buchungen' },
+    { command: 'mails', description: 'Neue Mails zusammenfassen' },
+    { command: 'todos', description: 'Offene Todos anzeigen' },
+  ];
+  try { await fetch(`https://api.telegram.org/bot${token}/setMyCommands`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ commands }) }); }
+  catch (e) { console.error('setMyCommands-Fehler:', e); }
+}
+
+cron.schedule('0 7 * * *', sendBriefing, { timezone: 'Europe/Berlin' });
+app.get('/', (_req, res) => res.send('IVA laeuft.'));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => { console.log('IVA-Core auf Port ' + PORT); setupTelegramWebhook(); setBotCommands(); });
