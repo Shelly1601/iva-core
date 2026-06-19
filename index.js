@@ -120,8 +120,12 @@ async function fetchInbox(acc, limit) {
     const total = client.mailbox.exists;
     if (total > 0) {
       const start = Math.max(1, total - limit + 1);
-      for await (const m of client.fetch(`${start}:*`, { envelope: true, flags: true })) {
-        out.push({ konto: acc.label, von: m.envelope?.from?.[0]?.address || '', betreff: m.envelope?.subject || '(kein Betreff)', ungelesen: !m.flags?.has('\\Seen') });
+      for await (const m of client.fetch(`${start}:*`, { envelope: true, flags: true, headers: ['delivered-to', 'x-original-to', 'x-forwarded-to', 'to'] })) {
+        const toEnv = (m.envelope?.to || []).map(x => x.address);
+        let hdr = ''; try { hdr = m.headers ? m.headers.toString() : ''; } catch {}
+        const hdrAddrs = hdr.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g) || [];
+        const an = [...new Set([...toEnv, ...hdrAddrs])].join(', ');
+        out.push({ konto: acc.label, an, von: m.envelope?.from?.[0]?.address || '', betreff: m.envelope?.subject || '(kein Betreff)', ungelesen: !m.flags?.has('\\Seen') });
       }
     }
   } finally { lock.release(); await client.logout(); }
@@ -166,6 +170,7 @@ Keine Moralkeule - bei Grauzonen Weg UND Haken in einem Satz, dann die Loesung.
 Fasse dich kurz. Hoechstens eine Rueckfrage, nur wenn noetig.
 Nutze deine Werkzeuge, statt nur darueber zu reden.
 Telegram-Format: **Fett** NUR fuer Ueberschriften. KEINE Tabellen, keine ###-Header - kurze Zeilen mit Bindestrich.
+E-Mails: das Feld "an" (Empfaenger) zeigt, zu welcher Firma/welchem Bereich eine Mail gehoert (z.B. @goalsandconcepts.de = Goals & Concepts, @heat-hero.com = HeatHero). Die Sammel-Adresse selbst dabei ignorieren.
 
 Das hast du dir gemerkt:
 ${notes}
@@ -185,8 +190,8 @@ const tools = {
     execute: async ({ days }) => { const ev = fmtEvents(await getEventsRaw(days || 7)); return { count: ev.length, events: ev }; } }),
   getCalendly: tool({ description: 'Liest kommende Calendly-Buchungen (wer hat wann was gebucht).', parameters: z.object({ days: z.number().optional() }),
     execute: async ({ days }) => await getCalendlyEvents(days || 14) }),
-  getMails: tool({ description: 'Liest die neuesten E-Mails.', parameters: z.object({ proKonto: z.number().optional() }),
-    execute: async ({ proKonto }) => { let all = []; for (const acc of loadMailAccounts()) { try { all = all.concat(await fetchInbox(acc, proKonto || 8)); } catch (e) { all.push({ konto: acc.label, fehler: e.message }); } } return { count: all.length, mails: all }; } }),
+  getMails: tool({ description: 'Liest die neuesten E-Mails. Feld "an" = Empfaenger-Adresse; darueber lassen sich Mails einer Firma/einem Bereich zuordnen (Domain der Empfaenger-Adresse).', parameters: z.object({ proKonto: z.number().optional() }),
+    execute: async ({ proKonto }) => { let all = []; for (const acc of loadMailAccounts()) { try { all = all.concat(await fetchInbox(acc, proKonto || 12)); } catch (e) { all.push({ konto: acc.label, fehler: e.message }); } } return { count: all.length, mails: all }; } }),
   getLeads: tool({ description: 'Ruft Leads ab. Ohne projekt: alle. Mit projekt (z.B. HeatHero, Versuro): nur dieses.', parameters: z.object({ projekt: z.string().optional() }),
     execute: async ({ projekt }) => {
       let list = await fetchAllLeads();
