@@ -9,6 +9,7 @@ import { anthropic } from '@ai-sdk/anthropic';
 import { z } from 'zod';
 import * as campaigns from './marketing/campaigns.js';
 import { analyzeReferences } from './marketing/analyze.js';
+import { generateImage } from './marketing/images.js';
 
 const app = express();
 app.use(express.json());
@@ -226,6 +227,8 @@ const tools = {
       if (res.ok) await campaigns.updateCampaign(id, { analysis: { profile: res.profile, accounts: res.accounts, at: new Date().toISOString() } });
       return res;
     } }),
+  generateImage: tool({ description: 'Generiert ein Bild aus einem Prompt (fal.ai). model: schnell (guenstig, default) | flux | flux-pro | nanobanana (premium, stark bei Text im Bild). Gibt Bild-URLs zurueck.', parameters: z.object({ prompt: z.string(), model: z.string().optional(), numImages: z.number().optional() }),
+    execute: async ({ prompt, model, numImages }) => await generateImage(prompt, { model, numImages: numImages || 1 }) }),
 };
 
 async function askIva(userText) {
@@ -315,6 +318,10 @@ app.post('/api/campaigns/:id/analyze', async (req, res) => {
 });
 app.post('/api/analyze', async (req, res) => {
   try { res.json(await analyzeReferences(req.body?.handles || [], { brand: req.body?.brand || '' })); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/generate-image', async (req, res) => {
+  try { res.json(await generateImage(req.body?.prompt || '', { model: req.body?.model, imageSize: req.body?.imageSize, numImages: req.body?.numImages || 1 })); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
