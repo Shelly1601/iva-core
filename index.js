@@ -7,6 +7,8 @@ import { ImapFlow } from 'imapflow';
 import { generateText, tool } from 'ai';
 import { anthropic } from '@ai-sdk/anthropic';
 import { z } from 'zod';
+import * as campaigns from './marketing/campaigns.js';
+import { analyzeReferences } from './marketing/analyze.js';
 
 const app = express();
 app.use(express.json());
@@ -210,6 +212,20 @@ const tools = {
       if (projekt) list = list.filter(x => x.projekt.toLowerCase().includes(projekt.toLowerCase()));
       return list.map(x => ({ projekt: x.projekt, gruppe: x.gruppe, fehler: x.fehler, leads: x.leads ? JSON.stringify(x.leads).slice(0, 5000) : null }));
     } }),
+  listCampaigns: tool({ description: 'Listet alle Marketing-Kampagnen.', parameters: z.object({}),
+    execute: async () => ({ campaigns: await campaigns.listCampaigns() }) }),
+  createCampaign: tool({ description: 'Legt eine Marketing-Kampagne an. type: content|lead-gen|ads. autonomy: observe|suggest|auto.', parameters: z.object({ name: z.string(), brand: z.string().optional(), type: z.enum(['content', 'lead-gen', 'ads']).optional(), references: z.array(z.string()).optional(), tone: z.string().optional(), targetChannel: z.string().optional(), autonomy: z.enum(['observe', 'suggest', 'auto']).optional() }),
+    execute: async (input) => await campaigns.createCampaign(input) }),
+  analyzeReferences: tool({ description: 'Analysiert Referenz-Konten (Instagram-Handles) und liefert ein Muster-Profil + Content-Ideen. Dauert ~30-60s (scrapt live via Apify).', parameters: z.object({ handles: z.array(z.string()), brand: z.string().optional() }),
+    execute: async ({ handles, brand }) => await analyzeReferences(handles, { brand }) }),
+  analyzeCampaign: tool({ description: 'Analysiert die Referenz-Konten einer bestehenden Kampagne (per id) und speichert das Muster-Profil in der Kampagne.', parameters: z.object({ id: z.string() }),
+    execute: async ({ id }) => {
+      const c = await campaigns.getCampaign(id);
+      if (!c) return { ok: false, error: 'Kampagne nicht gefunden' };
+      const res = await analyzeReferences(c.references, { brand: c.brand });
+      if (res.ok) await campaigns.updateCampaign(id, { analysis: { profile: res.profile, accounts: res.accounts, at: new Date().toISOString() } });
+      return res;
+    } }),
 };
 
 async function askIva(userText) {
@@ -249,7 +265,7 @@ async function sendBriefing() {
   const todosText = open.length ? open.map(t => '- ' + t).join('\n') : 'keine offenen';
   const blocks = leadsAll.map(x => `[${x.gruppe} / ${x.projekt}]\n${x.fehler ? ('Fehler: ' + x.fehler) : JSON.stringify(x.leads).slice(0, 3500)}`);
   const { text } = await generateText({ model: anthropic('claude-haiku-4-5-20251001'),
-    system: 'Du bist IVA. Morning-Briefing auf Deutsch fuer Telegram. **Fett** nur fuer Ueberschriften, KEINE Tabellen, kurze Zeilen mit Bindestrich. Aufbau: kurze Begruessung, **Termine heute**, **Offene Todos**, dann **Arbeit – HeatHero**, danach **Mein CRM (privat)** mit den Unterprojekten. Je Projekt die Kategorien (nur nicht-leere zeigen): Neue unbearbeitete Leads, Follow-Ups heute, Wiedervorlagen heute, Ohne Update nach Termin, Status "Montage terminieren". Pro Lead: Name + kurzer Grund. Leere Projekte weglassen. Motivierender Schlusssatz.',
+    system: 'Du bist IVA. Morning-Briefing auf Deutsch fuer Telegram. **Fett** nur fuer Ueberschriften, KEINE Tabellen, kurze Zeilen mit Bindestrich. Aufbau: kurze Begruessung, **Termine heute**, **Offene Todos**, dann **Arbeit - HeatHero**, danach **Mein CRM (privat)** mit den Unterprojekten. Je Projekt die Kategorien (nur nicht-leere zeigen): Neue unbearbeitete Leads, Follow-Ups heute, Wiedervorlagen heute, Ohne Update nach Termin, Status "Montage terminieren". Pro Lead: Name + kurzer Grund. Leere Projekte weglassen. Motivierender Schlusssatz.',
     prompt: `Heute ist ${today}.\nTermine heute:\n${eventsText}\n\nOffene Todos:\n${todosText}\n\nLeads je Projekt (rohe Daten):\n${blocks.join('\n\n')}` });
   await sendTelegram(mem.chatId, text);
 }
@@ -282,6 +298,25 @@ app.get('/api/todos', async (_req, res) => { const m = await loadMemory(); res.j
 app.post('/api/todos', async (req, res) => { const m = await loadMemory(); m.todos = m.todos || []; m.todos.push({ text: req.body?.text || '', done: false, ts: Date.now() }); await saveMemory(m); res.json({ ok: true }); });
 app.post('/api/todos/toggle', async (req, res) => { const m = await loadMemory(); const t = (m.todos || []).find(t => t.ts === req.body?.ts); if (t) { t.done = !t.done; await saveMemory(m); } res.json({ ok: true }); });
 app.post('/api/chat', async (req, res) => { try { res.json({ reply: await askIva(req.body?.message || '') }); } catch (e) { res.json({ reply: 'Fehler: ' + e.message }); } });
+
+// --- Marketing-Maschine: Kampagnen + Analyse-Engine ---
+app.get('/api/campaigns', async (_req, res) => res.json(await campaigns.listCampaigns()));
+app.post('/api/campaigns', async (req, res) => res.json(await campaigns.createCampaign(req.body || {})));
+app.patch('/api/campaigns/:id', async (req, res) => { const c = await campaigns.updateCampaign(req.params.id, req.body || {}); res.status(c ? 200 : 404).json(c || { error: 'not found' }); });
+app.delete('/api/campaigns/:id', async (req, res) => res.json({ ok: await campaigns.deleteCampaign(req.params.id) }));
+app.post('/api/campaigns/:id/analyze', async (req, res) => {
+  try {
+    const c = await campaigns.getCampaign(req.params.id);
+    if (!c) return res.status(404).json({ error: 'not found' });
+    const result = await analyzeReferences(c.references, { brand: c.brand });
+    if (result.ok) await campaigns.updateCampaign(c.id, { analysis: { profile: result.profile, accounts: result.accounts, at: new Date().toISOString() } });
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/analyze', async (req, res) => {
+  try { res.json(await analyzeReferences(req.body?.handles || [], { brand: req.body?.brand || '' })); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 async function setupTelegramWebhook() {
   const token = process.env.TELEGRAM_BOT_TOKEN, domain = process.env.RAILWAY_PUBLIC_DOMAIN;
