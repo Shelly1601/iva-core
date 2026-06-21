@@ -24,7 +24,7 @@ Erzeuge ${count} fertige, deutlich unterschiedliche Post-Ideen. Pro Idee GENAU d
 - Hook: <starke erste Zeile, die sofort fesselt>
 - Caption: <fertiger, sofort verwendbarer Post-Text>
 - Hashtags: <5-10 passende Hashtags>
-- Bild-Prompt: <praeziser englischer Prompt fuer die Bildgenerierung, der zum Post passt>`;
+- Bild-Prompt: <detaillierter ENGLISCHER Prompt fuer ein hochwertiges, scroll-stoppendes Social-Media-Bild: konkretes Motiv/Szene, Stil (modern editorial, clean, cinematic lighting, realistisch, hohe Detailtiefe), Bildausschnitt, Stimmung, Farbwelt. Beschreibe EIN echtes Foto/Bild, keine Collage. KEIN Text und keine Buchstaben im Bild (Schrift kommt spaeter separat drueber). Mindestens 2-3 Saetze, sehr konkret.>`;
 
   const userPrompt = briefing
     ? `Meine zusaetzliche Vorgabe fuer diese Ideen: ${briefing}`
