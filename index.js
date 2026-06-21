@@ -57,6 +57,17 @@ async function saveMemory(mem) {
   await fs.writeFile(MEM_FILE, JSON.stringify(mem, null, 2));
 }
 
+// --- Gespraechs-Gedaechtnis (pro Session/Chat), eigene Datei, stoert die Todos/Notizen nicht ---
+const CONV_FILE = DATA_DIR + '/conversations.json';
+const MAX_TURNS = 16; // letzte 16 Nachrichten (8 Paare) als Kontext je Session
+async function loadConversations() {
+  try { return JSON.parse(await fs.readFile(CONV_FILE, 'utf8')); } catch { return {}; }
+}
+async function saveConversations(c) {
+  await fs.mkdir(DATA_DIR, { recursive: true }).catch(() => {});
+  await fs.writeFile(CONV_FILE, JSON.stringify(c, null, 2));
+}
+
 const CALENDARS = [
   { label: 'Privat', url: process.env.PRIVAT_GOOGLE_ICS_URL },
   { label: 'Familie', url: process.env.FAMILIE_GOOGLE_ICS_URL },
@@ -238,9 +249,14 @@ const tools = {
     } }),
 };
 
-async function askIva(userText) {
+async function askIva(userText, sessionId = 'default') {
   const system = await buildSystemPrompt();
-  const { text } = await generateText({ model: anthropic('claude-sonnet-4-6'), system, prompt: userText, tools, maxSteps: 6 });
+  const conv = await loadConversations();
+  const history = Array.isArray(conv[sessionId]) ? conv[sessionId] : [];
+  const messages = [...history, { role: 'user', content: userText }];
+  const { text } = await generateText({ model: anthropic('claude-sonnet-4-6'), system, messages, tools, maxSteps: 6 });
+  conv[sessionId] = [...messages, { role: 'assistant', content: text || '(ok)' }].slice(-MAX_TURNS);
+  await saveConversations(conv);
   return text;
 }
 
@@ -289,7 +305,8 @@ app.post('/telegram', async (req, res) => {
     if (!userText && msg?.voice) userText = await transcribeVoice(msg.voice.file_id);
     if (!userText) return;
     if (userText.trim().toLowerCase() === '/briefing') { await sendBriefing(); return; }
-    await sendTelegram(chatId, await askIva(userText));
+    if (userText.trim().toLowerCase() === '/reset') { const c = await loadConversations(); delete c[String(chatId)]; await saveConversations(c); await sendTelegram(chatId, 'Okay, ich hab unseren Gespraechsfaden zurueckgesetzt. Frischer Start.'); return; }
+    await sendTelegram(chatId, await askIva(userText, String(chatId)));
   } catch (e) { console.error('Fehler:', e); }
 });
 
@@ -307,7 +324,7 @@ app.get('/api/calendly', async (_req, res) => res.json(await getCalendlyEvents(1
 app.get('/api/todos', async (_req, res) => { const m = await loadMemory(); res.json((m.todos || []).filter(t => !t.done)); });
 app.post('/api/todos', async (req, res) => { const m = await loadMemory(); m.todos = m.todos || []; m.todos.push({ text: req.body?.text || '', done: false, ts: Date.now() }); await saveMemory(m); res.json({ ok: true }); });
 app.post('/api/todos/toggle', async (req, res) => { const m = await loadMemory(); const t = (m.todos || []).find(t => t.ts === req.body?.ts); if (t) { t.done = !t.done; await saveMemory(m); } res.json({ ok: true }); });
-app.post('/api/chat', async (req, res) => { try { res.json({ reply: await askIva(req.body?.message || '') }); } catch (e) { res.json({ reply: 'Fehler: ' + e.message }); } });
+app.post('/api/chat', async (req, res) => { try { res.json({ reply: await askIva(req.body?.message || '', req.body?.sessionId || 'web') }); } catch (e) { res.json({ reply: 'Fehler: ' + e.message }); } });
 
 // --- Marketing-Maschine: Kampagnen + Analyse-Engine ---
 app.get('/api/campaigns', async (_req, res) => res.json(await campaigns.listCampaigns()));
