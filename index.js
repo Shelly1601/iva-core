@@ -10,6 +10,7 @@ import { z } from 'zod';
 import * as campaigns from './marketing/campaigns.js';
 import { analyzeReferences } from './marketing/analyze.js';
 import { generateImage } from './marketing/images.js';
+import { generateContent } from './marketing/content.js';
 
 const app = express();
 app.use(express.json());
@@ -229,6 +230,12 @@ const tools = {
     } }),
   generateImage: tool({ description: 'Generiert ein Bild aus einem Prompt (fal.ai). model: schnell (guenstig, default) | flux | flux-pro | nanobanana (premium, stark bei Text im Bild). Gibt Bild-URLs zurueck.', parameters: z.object({ prompt: z.string(), model: z.string().optional(), numImages: z.number().optional() }),
     execute: async ({ prompt, model, numImages }) => await generateImage(prompt, { model, numImages: numImages || 1 }) }),
+  generateContent: tool({ description: 'Erzeugt fertige Post-Ideen (Hook, Caption, Hashtags, Bild-Prompt) fuer eine Kampagne - im gelernten Stil + nach optionaler Vorgabe (briefing).', parameters: z.object({ campaignId: z.string(), briefing: z.string().optional(), count: z.number().optional() }),
+    execute: async ({ campaignId, briefing, count }) => {
+      const c = await campaigns.getCampaign(campaignId);
+      if (!c) return { ok: false, error: 'Kampagne nicht gefunden' };
+      return await generateContent(c, { briefing, count: count || 3 });
+    } }),
 };
 
 async function askIva(userText) {
@@ -323,6 +330,13 @@ app.post('/api/analyze', async (req, res) => {
 app.post('/api/generate-image', async (req, res) => {
   try { res.json(await generateImage(req.body?.prompt || '', { model: req.body?.model, imageSize: req.body?.imageSize, numImages: req.body?.numImages || 1 })); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/campaigns/:id/generate', async (req, res) => {
+  try {
+    const c = await campaigns.getCampaign(req.params.id);
+    if (!c) return res.status(404).json({ error: 'not found' });
+    res.json(await generateContent(c, { briefing: req.body?.briefing || '', count: req.body?.count || 3 }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 async function setupTelegramWebhook() {
