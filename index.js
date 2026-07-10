@@ -242,11 +242,12 @@ const tools = {
     } }),
   generateImage: tool({ description: 'Generiert ein Bild aus einem Prompt (fal.ai). model: schnell (guenstig, default) | flux | flux-pro | nanobanana (premium, stark bei Text im Bild). Gibt Bild-URLs zurueck.', parameters: z.object({ prompt: z.string(), model: z.string().optional(), numImages: z.number().optional() }),
     execute: async ({ prompt, model, numImages }) => await generateImage(prompt, { model: model || 'nanobanana', numImages: numImages || 1 }) }),
-  generateContent: tool({ description: 'Erzeugt fertige Post-Ideen (Hook, Caption, Hashtags, Bild-Prompt) fuer eine Kampagne - im gelernten Stil + nach optionaler Vorgabe (briefing).', parameters: z.object({ campaignId: z.string(), briefing: z.string().optional(), count: z.number().optional() }),
-    execute: async ({ campaignId, briefing, count }) => {
+  generateContent: tool({ description: 'Erzeugt fertigen Content fuer eine Kampagne im gelernten Stil + Brand-Profil. format: reel (Reel-Skript, default) | image (Bild-Post) | email. Optionale Vorgabe (briefing).', parameters: z.object({ campaignId: z.string(), briefing: z.string().optional(), count: z.number().optional(), format: z.enum(['reel', 'image', 'email']).optional() }),
+    execute: async ({ campaignId, briefing, count, format }) => {
       const c = await campaigns.getCampaign(campaignId);
       if (!c) return { ok: false, error: 'Kampagne nicht gefunden' };
-      return await generateContent(c, { briefing, count: count || 3 });
+      const brand = c.brandId ? await brands.getBrand(c.brandId) : null;
+      return await generateContent(c, brand, { briefing, count: count || 3, format: format || 'reel' });
     } }),
   listBrands: tool({ description: 'Listet alle Marken-Profile (eigene + Referenz-Brands).', parameters: z.object({}),
     execute: async () => ({ brands: await brands.listBrands() }) }),
@@ -359,7 +360,8 @@ app.post('/api/campaigns/:id/generate', async (req, res) => {
   try {
     const c = await campaigns.getCampaign(req.params.id);
     if (!c) return res.status(404).json({ error: 'not found' });
-    res.json(await generateContent(c, { briefing: req.body?.briefing || '', count: req.body?.count || 3 }));
+    const brand = c.brandId ? await brands.getBrand(c.brandId) : null;
+    res.json(await generateContent(c, brand, { briefing: req.body?.briefing || '', count: req.body?.count || 3, format: req.body?.format || 'reel' }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/brands', async (_req, res) => res.json(await brands.listBrands()));
