@@ -13,7 +13,7 @@ import fs from 'fs/promises';
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const FILE = DATA_DIR + '/marketing.json';
 
-export const TYPES = ['content', 'lead-gen', 'ads'];
+export const TYPES = ['content', 'lead-gen', 'ads', 'email'];
 export const AUTONOMY = ['observe', 'suggest', 'auto']; // beobachten -> vorschlagen -> vollautonom
 
 async function load() {
@@ -27,17 +27,19 @@ async function save(data) {
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
 export async function listCampaigns() {
-  return (await load()).campaigns;
+  return (await load()).campaigns || [];
 }
 export async function getCampaign(id) {
-  return (await load()).campaigns.find(c => c.id === id) || null;
+  return ((await load()).campaigns || []).find(c => c.id === id) || null;
 }
 export async function createCampaign(input = {}) {
   const data = await load();
+  data.campaigns = data.campaigns || [];
   const c = {
     id: uid(),
     name: input.name || 'Neue Kampagne',
-    brand: input.brand || '',                                   // z.B. HeatHero, Sol Living
+    brandId: input.brandId || '',                               // Verknuepfung zur Brand (brands.js)
+    brand: input.brand || '',                                   // Klartext-Name (Fallback/Anzeige)
     type: TYPES.includes(input.type) ? input.type : 'content',
     references: Array.isArray(input.references) ? input.references : [],
     tone: input.tone || '',
@@ -54,9 +56,9 @@ export async function createCampaign(input = {}) {
 }
 export async function updateCampaign(id, patch = {}) {
   const data = await load();
-  const c = data.campaigns.find(x => x.id === id);
+  const c = (data.campaigns || []).find(x => x.id === id);
   if (!c) return null;
-  for (const k of ['name', 'brand', 'type', 'references', 'tone', 'targetChannel', 'autonomy', 'analysis', 'active']) {
+  for (const k of ['name', 'brandId', 'brand', 'type', 'references', 'tone', 'targetChannel', 'autonomy', 'analysis', 'active']) {
     if (k in patch) c[k] = patch[k];
   }
   c.updatedAt = new Date().toISOString();
@@ -65,6 +67,7 @@ export async function updateCampaign(id, patch = {}) {
 }
 export async function deleteCampaign(id) {
   const data = await load();
+  data.campaigns = data.campaigns || [];
   const before = data.campaigns.length;
   data.campaigns = data.campaigns.filter(c => c.id !== id);
   await save(data);
