@@ -11,6 +11,7 @@ import * as campaigns from './marketing/campaigns.js';
 import { analyzeReferences } from './marketing/analyze.js';
 import { generateImage } from './marketing/images.js';
 import { generateContent } from './marketing/content.js';
+import * as brands from './marketing/brands.js';
 
 const app = express();
 app.use(express.json());
@@ -240,13 +241,19 @@ const tools = {
       return res;
     } }),
   generateImage: tool({ description: 'Generiert ein Bild aus einem Prompt (fal.ai). model: schnell (guenstig, default) | flux | flux-pro | nanobanana (premium, stark bei Text im Bild). Gibt Bild-URLs zurueck.', parameters: z.object({ prompt: z.string(), model: z.string().optional(), numImages: z.number().optional() }),
-    execute: async ({ prompt, model, numImages }) => await generateImage(prompt, { model, numImages: numImages || 1 }) }),
+    execute: async ({ prompt, model, numImages }) => await generateImage(prompt, { model: model || 'nanobanana', numImages: numImages || 1 }) }),
   generateContent: tool({ description: 'Erzeugt fertige Post-Ideen (Hook, Caption, Hashtags, Bild-Prompt) fuer eine Kampagne - im gelernten Stil + nach optionaler Vorgabe (briefing).', parameters: z.object({ campaignId: z.string(), briefing: z.string().optional(), count: z.number().optional() }),
     execute: async ({ campaignId, briefing, count }) => {
       const c = await campaigns.getCampaign(campaignId);
       if (!c) return { ok: false, error: 'Kampagne nicht gefunden' };
       return await generateContent(c, { briefing, count: count || 3 });
     } }),
+  listBrands: tool({ description: 'Listet alle Marken-Profile (eigene + Referenz-Brands).', parameters: z.object({}),
+    execute: async () => ({ brands: await brands.listBrands() }) }),
+  createBrand: tool({ description: 'Legt ein Marken-Profil an. type: own (eigene Marke) | reference (Vorbild-Marke). Felder: name, website, instagram, linkedin, colors[], tone, audience.', parameters: z.object({ name: z.string(), type: z.enum(['own', 'reference']).optional(), website: z.string().optional(), instagram: z.string().optional(), linkedin: z.string().optional(), colors: z.array(z.string()).optional(), tone: z.string().optional(), audience: z.string().optional() }),
+    execute: async (input) => await brands.createBrand(input) }),
+  updateBrand: tool({ description: 'Aktualisiert ein Marken-Profil per id (beliebige Felder: name, website, instagram, linkedin, colors, tone, audience).', parameters: z.object({ id: z.string(), name: z.string().optional(), website: z.string().optional(), instagram: z.string().optional(), linkedin: z.string().optional(), colors: z.array(z.string()).optional(), tone: z.string().optional(), audience: z.string().optional() }),
+    execute: async ({ id, ...patch }) => await brands.updateBrand(id, patch) }),
 };
 
 async function askIva(userText, sessionId = 'default') {
@@ -355,6 +362,10 @@ app.post('/api/campaigns/:id/generate', async (req, res) => {
     res.json(await generateContent(c, { briefing: req.body?.briefing || '', count: req.body?.count || 3 }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+app.get('/api/brands', async (_req, res) => res.json(await brands.listBrands()));
+app.post('/api/brands', async (req, res) => res.json(await brands.createBrand(req.body || {})));
+app.patch('/api/brands/:id', async (req, res) => { const b = await brands.updateBrand(req.params.id, req.body || {}); res.status(b ? 200 : 404).json(b || { error: 'not found' }); });
+app.delete('/api/brands/:id', async (req, res) => res.json({ ok: await brands.deleteBrand(req.params.id) }));
 
 async function setupTelegramWebhook() {
   const token = process.env.TELEGRAM_BOT_TOKEN, domain = process.env.RAILWAY_PUBLIC_DOMAIN;
