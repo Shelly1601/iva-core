@@ -13,6 +13,7 @@ import { generateImage } from './marketing/images.js';
 import { generateContent } from './marketing/content.js';
 import * as brands from './marketing/brands.js';
 import { refineTone, analyzeWebsite } from './marketing/assist.js';
+import { marketAnalysis } from './marketing/market.js';
 
 const app = express();
 app.use(express.json());
@@ -374,6 +375,8 @@ app.delete('/api/brands/:id', async (req, res) => res.json({ ok: await brands.de
 // --- KI-Assistenz (Gemini, kostenlos) ---
 app.post('/api/assist/tone', async (req, res) => { try { res.json(await refineTone(req.body?.text || '')); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/assist/website', async (req, res) => { try { res.json(await analyzeWebsite(req.body?.url || '')); } catch (e) { res.status(500).json({ error: e.message }); } });
+// --- Marken-Marktanalyse (Gemini) ---
+app.post('/api/brands/:id/market', async (req, res) => { try { const b = await brands.getBrand(req.params.id); if (!b) return res.status(404).json({ error: 'not found' }); res.json(await marketAnalysis(b, { customerValue: req.body?.customerValue || null })); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 async function setupTelegramWebhook() {
   const token = process.env.TELEGRAM_BOT_TOKEN, domain = process.env.RAILWAY_PUBLIC_DOMAIN;
