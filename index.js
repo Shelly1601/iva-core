@@ -318,7 +318,7 @@ app.post('/telegram', async (req, res) => {
   } catch (e) { console.error('Fehler:', e); }
 });
 
-const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
+const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type', 'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS' };
 app.use('/api', (req, res, next) => {
   res.set(CORS);
   if (req.method === 'OPTIONS') return res.sendStatus(204);
