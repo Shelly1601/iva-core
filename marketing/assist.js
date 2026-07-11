@@ -8,7 +8,7 @@ import { generateText } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 
 const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY });
-const MODEL = 'gemini-2.5-flash'; // kostenloser Tier, schnell
+const MODEL = 'gemini-2.0-flash'; // kostenloser Tier, stabil
 
 export async function refineTone(rawText) {
   if (!process.env.GEMINI_API_KEY) return { ok: false, error: 'GEMINI_API_KEY fehlt' };
