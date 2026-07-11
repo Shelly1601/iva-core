@@ -12,6 +12,7 @@ import { analyzeReferences } from './marketing/analyze.js';
 import { generateImage } from './marketing/images.js';
 import { generateContent } from './marketing/content.js';
 import * as brands from './marketing/brands.js';
+import { refineTone, analyzeWebsite } from './marketing/assist.js';
 
 const app = express();
 app.use(express.json());
@@ -370,6 +371,9 @@ app.get('/api/brands/:id', async (req, res) => { const b = await brands.getBrand
 app.post('/api/brands', async (req, res) => res.json(await brands.createBrand(req.body || {})));
 app.patch('/api/brands/:id', async (req, res) => { const b = await brands.updateBrand(req.params.id, req.body || {}); res.status(b ? 200 : 404).json(b || { error: 'not found' }); });
 app.delete('/api/brands/:id', async (req, res) => res.json({ ok: await brands.deleteBrand(req.params.id) }));
+// --- KI-Assistenz (Gemini, kostenlos) ---
+app.post('/api/assist/tone', async (req, res) => { try { res.json(await refineTone(req.body?.text || '')); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/assist/website', async (req, res) => { try { res.json(await analyzeWebsite(req.body?.url || '')); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 async function setupTelegramWebhook() {
   const token = process.env.TELEGRAM_BOT_TOKEN, domain = process.env.RAILWAY_PUBLIC_DOMAIN;
