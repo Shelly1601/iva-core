@@ -12,6 +12,9 @@ import { analyzeReferences } from './marketing/analyze.js';
 import { generateImage } from './marketing/images.js';
 import { generateContent } from './marketing/content.js';
 import * as brands from './marketing/brands.js';
+import { refineTone, analyzeWebsite } from './marketing/assist.js';
+import { marketAnalysis } from './marketing/market.js';
+import { speak } from './voice.js';
 
 const app = express();
 app.use(express.json());
@@ -192,13 +195,22 @@ async function buildSystemPrompt() {
   const notes = mem.notes?.length ? mem.notes.map(n => '- ' + n).join('\n') : '(noch nichts gemerkt)';
   const open = (mem.todos || []).filter(t => !t.done);
   const todoText = open.length ? open.map(t => '- ' + t.text).join('\n') : '(keine offenen)';
+  const jetzt = new Date().toLocaleString('de-DE', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
   return `Du bist IVA, der persoenliche Assistent von Nadine.
 Charakter: Sparringspartner, kein Jasager. Loesungsorientiert, direkt, ehrlich.
 Keine Moralkeule - bei Grauzonen Weg UND Haken in einem Satz, dann die Loesung.
 Fasse dich kurz. Hoechstens eine Rueckfrage, nur wenn noetig.
 Nutze deine Werkzeuge, statt nur darueber zu reden.
 Telegram-Format: **Fett** NUR fuer Ueberschriften. KEINE Tabellen, keine ###-Header - kurze Zeilen mit Bindestrich.
-E-Mails haben ein Feld "bereich" (HeatHero, Goals & Concepts, Sol Living, Privat) - nutze es zum Gruppieren/Filtern nach Firma.
+
+Jetzt gerade: ${jetzt} (Europe/Berlin). Nutze das fuer "heute", "morgen", "diese Woche" - rate nie das Datum.
+
+Ueber Nadine und ihr Business:
+- Sie betreut mehrere Marken - ordne Mails und Leads immer dem richtigen Bereich zu.
+- HeatHero (heat-hero.com): Arbeit, eigenes CRM ueber api-gateway.
+- Goals & Concepts (goalsandconcepts.de), Sol Living (sol-living.de), Versuro, Koop Steuerberater: privates CRM (Supabase).
+- Privat: sell.nadine@outlook.de.
+- E-Mails haben ein Feld "bereich" (HeatHero, Goals & Concepts, Sol Living, Privat) - nutze es zum Gruppieren/Filtern nach Firma.
 
 Das hast du dir gemerkt:
 ${notes}
@@ -262,7 +274,7 @@ async function askIva(userText, sessionId = 'default') {
   const conv = await loadConversations();
   const history = Array.isArray(conv[sessionId]) ? conv[sessionId] : [];
   const messages = [...history, { role: 'user', content: userText }];
-  const { text } = await generateText({ model: anthropic('claude-sonnet-4-6'), system, messages, tools, maxSteps: 6 });
+  const { text } = await generateText({ model: anthropic('claude-sonnet-5'), system, messages, tools, maxSteps: 6 });
   conv[sessionId] = [...messages, { role: 'assistant', content: text || '(ok)' }].slice(-MAX_TURNS);
   await saveConversations(conv);
   return text;
@@ -277,6 +289,17 @@ async function sendTelegram(chatId, text) {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: chatId, text: toTelegramHTML(text), parse_mode: 'HTML' }),
   });
+}
+async function sendTelegramVoice(chatId, text) {
+  try {
+    const audio = await speak(text);
+    if (!audio) return;
+    const form = new FormData();
+    form.append('chat_id', String(chatId));
+    form.append('audio', new Blob([audio.buffer], { type: audio.mime }), 'eva.' + audio.ext);
+    form.append('title', 'Eva');
+    await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendAudio`, { method: 'POST', body: form });
+  } catch (e) { console.error('TTS-Sendefehler:', e.message); }
 }
 async function transcribeVoice(fileId) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -310,15 +333,19 @@ app.post('/telegram', async (req, res) => {
   try {
     const mem = await loadMemory(); if (mem.chatId !== chatId) { mem.chatId = chatId; await saveMemory(mem); }
     let userText = msg?.text;
-    if (!userText && msg?.voice) userText = await transcribeVoice(msg.voice.file_id);
+    const wasVoice = !userText && !!msg?.voice;
+    if (wasVoice) userText = await transcribeVoice(msg.voice.file_id);
     if (!userText) return;
     if (userText.trim().toLowerCase() === '/briefing') { await sendBriefing(); return; }
     if (userText.trim().toLowerCase() === '/reset') { const c = await loadConversations(); delete c[String(chatId)]; await saveConversations(c); await sendTelegram(chatId, 'Okay, ich hab unseren Gespraechsfaden zurueckgesetzt. Frischer Start.'); return; }
-    await sendTelegram(chatId, await askIva(userText, String(chatId)));
+    if (userText.trim().toLowerCase() === '/stimme') { const m = await loadMemory(); m.voiceOn = !m.voiceOn; await saveMemory(m); await sendTelegram(chatId, m.voiceOn ? 'Stimme an - ich antworte ab jetzt auch gesprochen.' : 'Stimme aus - nur noch Text.'); return; }
+    const antwort = await askIva(userText, String(chatId));
+    await sendTelegram(chatId, antwort);
+    if (wasVoice || (await loadMemory()).voiceOn) await sendTelegramVoice(chatId, antwort);
   } catch (e) { console.error('Fehler:', e); }
 });
 
-const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
+const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type', 'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS' };
 app.use('/api', (req, res, next) => {
   res.set(CORS);
   if (req.method === 'OPTIONS') return res.sendStatus(204);
@@ -336,6 +363,7 @@ app.post('/api/chat', async (req, res) => { try { res.json({ reply: await askIva
 
 // --- Marketing-Maschine: Kampagnen + Analyse-Engine ---
 app.get('/api/campaigns', async (_req, res) => res.json(await campaigns.listCampaigns()));
+app.get('/api/campaigns/:id', async (req, res) => { const c = await campaigns.getCampaign(req.params.id); res.status(c ? 200 : 404).json(c || { error: 'not found' }); });
 app.post('/api/campaigns', async (req, res) => res.json(await campaigns.createCampaign(req.body || {})));
 app.patch('/api/campaigns/:id', async (req, res) => { const c = await campaigns.updateCampaign(req.params.id, req.body || {}); res.status(c ? 200 : 404).json(c || { error: 'not found' }); });
 app.delete('/api/campaigns/:id', async (req, res) => res.json({ ok: await campaigns.deleteCampaign(req.params.id) }));
@@ -365,9 +393,15 @@ app.post('/api/campaigns/:id/generate', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/brands', async (_req, res) => res.json(await brands.listBrands()));
+app.get('/api/brands/:id', async (req, res) => { const b = await brands.getBrand(req.params.id); res.status(b ? 200 : 404).json(b || { error: 'not found' }); });
 app.post('/api/brands', async (req, res) => res.json(await brands.createBrand(req.body || {})));
 app.patch('/api/brands/:id', async (req, res) => { const b = await brands.updateBrand(req.params.id, req.body || {}); res.status(b ? 200 : 404).json(b || { error: 'not found' }); });
 app.delete('/api/brands/:id', async (req, res) => res.json({ ok: await brands.deleteBrand(req.params.id) }));
+// --- KI-Assistenz (Gemini, kostenlos) ---
+app.post('/api/assist/tone', async (req, res) => { try { res.json(await refineTone(req.body?.text || '')); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/assist/website', async (req, res) => { try { res.json(await analyzeWebsite(req.body?.url || '')); } catch (e) { res.status(500).json({ error: e.message }); } });
+// --- Marken-Marktanalyse (Gemini) ---
+app.post('/api/brands/:id/market', async (req, res) => { try { const b = await brands.getBrand(req.params.id); if (!b) return res.status(404).json({ error: 'not found' }); res.json(await marketAnalysis(b, { customerValue: req.body?.customerValue || null })); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 async function setupTelegramWebhook() {
   const token = process.env.TELEGRAM_BOT_TOKEN, domain = process.env.RAILWAY_PUBLIC_DOMAIN;
@@ -384,6 +418,7 @@ async function setBotCommands() {
     { command: 'calendly', description: 'Kommende Calendly-Buchungen' },
     { command: 'mails', description: 'Neue Mails zusammenfassen' },
     { command: 'todos', description: 'Offene Todos anzeigen' },
+    { command: 'stimme', description: 'Sprachausgabe an/aus' },
   ];
   try { await fetch(`https://api.telegram.org/bot${token}/setMyCommands`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ commands }) }); }
   catch (e) { console.error('setMyCommands-Fehler:', e); }
