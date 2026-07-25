@@ -276,7 +276,7 @@ async function askIva(userText, sessionId = 'default') {
   const conv = await loadConversations();
   const history = Array.isArray(conv[sessionId]) ? conv[sessionId] : [];
   const messages = [...history, { role: 'user', content: userText }];
-  const { text } = await generateText({ model: anthropic('claude-sonnet-5'), system, messages, tools, maxSteps: 6 });
+  const { text } = await generateText({ model: anthropic('claude-sonnet-4-6'), system, messages, tools, maxSteps: 6 });
   conv[sessionId] = [...messages, { role: 'assistant', content: text || '(ok)' }].slice(-MAX_TURNS);
   await saveConversations(conv);
   return text;
