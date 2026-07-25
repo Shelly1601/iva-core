@@ -158,6 +158,7 @@
   // ---- Chat ----
   function bubble(cls,text){const d=document.createElement('div');d.className='bubble '+cls;d.textContent=text;$('msgs').appendChild(d);$('msgs').scrollTop=$('msgs').scrollHeight;return d;}
   async function sendChat(){const inp=$('chatIn');const t=inp.value.trim();if(!t)return;
+    unlockAudio();
     bubble('user',t);inp.value='';const b=bubble('iva','…');
     try{const res=await api('/api/chat',{method:'POST',body:JSON.stringify({message:t,sessionId:'cockpit'})});
       b.textContent=res.reply||'(keine Antwort)';speak(b.textContent);}
@@ -166,17 +167,21 @@
   $('chatIn').addEventListener('keydown',e=>{if(e.key==='Enter')sendChat();});
 
   // ---- Evas Stimme (ElevenLabs ueber den Server) ----
-  let ttsOn=true, curAudio=null;
+  let ttsOn=true;
+  const evaAudio=new Audio(); let audioReady=false;
+  // Entsperrt die Tonausgabe bei der ersten Nutzer-Geste (umgeht die Browser-Autoplay-Sperre)
+  function unlockAudio(){ if(audioReady)return; audioReady=true;
+    try{ evaAudio.src='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
+      evaAudio.play().catch(()=>{}); }catch(e){} }
   async function speak(text){ if(!ttsOn||!text) return;
     try{ const c=cfg();
       const r=await fetch(c.url+'/api/speak',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+c.tok},body:JSON.stringify({text:String(text).slice(0,900)})});
       if(!r.ok) return; const buf=await r.arrayBuffer(); if(!buf.byteLength) return;
-      if(curAudio){try{curAudio.pause();}catch(e){}}
-      curAudio=new Audio(URL.createObjectURL(new Blob([buf],{type:'audio/mpeg'})));
-      curAudio.play().catch(()=>{});
+      evaAudio.src=URL.createObjectURL(new Blob([buf],{type:'audio/mpeg'}));
+      evaAudio.play().catch(()=>{});
     }catch(e){}
   }
-  $('ttsBtn').addEventListener('click',()=>{ttsOn=!ttsOn;$('ttsBtn').classList.toggle('off',!ttsOn);if(!ttsOn&&curAudio){try{curAudio.pause();}catch(e){}}});
+  $('ttsBtn').addEventListener('click',()=>{ttsOn=!ttsOn;$('ttsBtn').classList.toggle('off',!ttsOn);if(!ttsOn){try{evaAudio.pause();}catch(e){}}});
 
   // ---- Mikro (Spracheingabe, Chrome) ----
   let rec=null;
