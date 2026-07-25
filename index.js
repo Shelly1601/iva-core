@@ -15,6 +15,8 @@ import * as brands from './marketing/brands.js';
 import { refineTone, analyzeWebsite } from './marketing/assist.js';
 import { marketAnalysis } from './marketing/market.js';
 import { speak } from './voice.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const app = express();
 app.use(express.json());
@@ -360,6 +362,11 @@ app.get('/api/todos', async (_req, res) => { const m = await loadMemory(); res.j
 app.post('/api/todos', async (req, res) => { const m = await loadMemory(); m.todos = m.todos || []; m.todos.push({ text: req.body?.text || '', done: false, ts: Date.now() }); await saveMemory(m); res.json({ ok: true }); });
 app.post('/api/todos/toggle', async (req, res) => { const m = await loadMemory(); const t = (m.todos || []).find(t => t.ts === req.body?.ts); if (t) { t.done = !t.done; await saveMemory(m); } res.json({ ok: true }); });
 app.post('/api/chat', async (req, res) => { try { res.json({ reply: await askIva(req.body?.message || '', req.body?.sessionId || 'web') }); } catch (e) { res.json({ reply: 'Fehler: ' + e.message }); } });
+app.post('/api/speak', async (req, res) => {
+  try { const audio = await speak(req.body?.text || ''); if (!audio) return res.status(204).end();
+    res.set('Content-Type', audio.mime); res.send(audio.buffer);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // --- Marketing-Maschine: Kampagnen + Analyse-Engine ---
 app.get('/api/campaigns', async (_req, res) => res.json(await campaigns.listCampaigns()));
@@ -425,6 +432,9 @@ async function setBotCommands() {
 }
 
 cron.schedule('0 7 * * *', sendBriefing, { timezone: 'Europe/Berlin' });
+const __dirnameIva = path.dirname(fileURLToPath(import.meta.url));
+app.use(express.static(path.join(__dirnameIva, 'public')));
+app.get('/cockpit', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'cockpit.html')));
 app.get('/', (_req, res) => res.send('IVA laeuft.'));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => { console.log('IVA-Core auf Port ' + PORT); setupTelegramWebhook(); setBotCommands(); });
