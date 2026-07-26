@@ -3,15 +3,31 @@
 
 // Text fuer die Sprachausgabe saeubern: Markdown, Emojis, Listen-Bindestriche raus.
 function clean(text) {
-  return String(text || '')
-    .replace(/\*\*(.+?)\*\*/g, '$1')      // **fett** -> fett
-    .replace(/^[\s]*[-•]\s+/gm, '')        // Listen-Bindestriche am Zeilenanfang
-    .replace(/[#*_`>]/g, '')               // restliche Markdown-Zeichen
-    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/gu, '') // Emojis/Symbole
-    .replace(/\n{2,}/g, '. ')              // Absaetze -> Sprechpause
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 2500);                       // Laenge kappen (Kosten + Audiolaenge)
+  const MON = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+  const TAG = { Mo:'Montag', Di:'Dienstag', Mi:'Mittwoch', Do:'Donnerstag', Fr:'Freitag', Sa:'Samstag', So:'Sonntag' };
+  const ABK = { 'z.B.':'zum Beispiel', 'z. B.':'zum Beispiel', 'u.a.':'unter anderem', 'd.h.':'das heißt', 'usw.':'und so weiter', 'ca.':'circa', 'inkl.':'inklusive', 'evtl.':'eventuell', 'bzw.':'beziehungsweise', 'Nr.':'Nummer', 'Tel.':'Telefon' };
+  let s = String(text || '');
+  // Markdown, Emojis, Struktur raus
+  s = s.replace(/\*\*(.+?)\*\*/g, '$1')
+       .replace(/^[\s]*[-•*]\s+/gm, '')
+       .replace(/[#*_`>|]/g, '')
+       .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}]/gu, '');
+  // Abkuerzungen ausschreiben
+  for (const [k, v] of Object.entries(ABK)) s = s.split(k).join(v);
+  // Wochentags-Kuerzel: "So." -> "Sonntag" (nur wenn ein Datum folgt)
+  s = s.replace(/\b(Mo|Di|Mi|Do|Fr|Sa|So)\.(?=,?\s*\d)/g, (m, d) => TAG[d]);
+  // Datum "26.07." / "26.07.2026" -> "26. Juli (2026)"
+  s = s.replace(/\b(\d{1,2})\.(\d{1,2})\.(\d{4})?/g, (m, d, mo, y) => {
+    const i = parseInt(mo, 10) - 1;
+    return (i >= 0 && i < 12) ? `${parseInt(d, 10)}. ${MON[i]}${y ? ' ' + y : ''}` : m;
+  });
+  // Uhrzeit "19:00" -> "19 Uhr", "14:30" -> "14 Uhr 30"
+  s = s.replace(/\b(\d{1,2}):(\d{2})\b/g, (m, h, mm) => mm === '00' ? `${parseInt(h, 10)} Uhr` : `${parseInt(h, 10)} Uhr ${parseInt(mm, 10)}`);
+  // Aufzaehlungs-Bindestrich -> Sprechpause
+  s = s.replace(/\s[-–]\s/g, ', ');
+  // Absaetze -> Pause, Whitespace normalisieren, Laenge kappen
+  s = s.replace(/\n{2,}/g, '. ').replace(/\s+/g, ' ').trim();
+  return s.slice(0, 2500);
 }
 
 // ElevenLabs: Standard-Stimme "Rachel" als Fallback. Eigene deutsche Stimme:

@@ -159,10 +159,10 @@
 
   // ---- Chat ----
   function bubble(cls,text){const d=document.createElement('div');d.className='bubble '+cls;d.textContent=text;$('msgs').appendChild(d);$('msgs').scrollTop=$('msgs').scrollHeight;return d;}
-  async function sendChat(){const inp=$('chatIn');const t=inp.value.trim();if(!t)return;
+  async function sendChat(viaVoice){const inp=$('chatIn');const t=inp.value.trim();if(!t)return;
     unlockAudio();
     bubble('user',t);inp.value='';const b=bubble('iva','…');
-    try{const res=await api('/api/chat',{method:'POST',body:JSON.stringify({message:t,sessionId:'cockpit'})});
+    try{const res=await api('/api/chat',{method:'POST',body:JSON.stringify({message:t,sessionId:'cockpit',voice:viaVoice===true})});
       b.textContent=res.reply||'(keine Antwort)';speak(b.textContent);}
     catch(e){b.textContent='Fehler: '+e.message+'. Prüf ⚙︎.';setStatus('err','Fehler');}}
   $('chatSend').addEventListener('click',sendChat);
@@ -193,7 +193,7 @@
     if(rec) return rec;
     rec=new SR(); rec.lang='de-DE'; rec.interimResults=false;
     rec.onresult=e=>{ const txt=(e.results[e.results.length-1][0].transcript||'').trim();
-      if(wakeOn) handleWake(txt); else { $('chatIn').value=txt; sendChat(); } };
+      if(wakeOn) handleWake(txt); else { $('chatIn').value=txt; sendChat(true); } };
     rec.onend=()=>{ $('micBtn').classList.remove('rec'); if(wakeOn){ try{rec.start();}catch(e){} } };
     rec.onerror=()=>{ $('micBtn').classList.remove('rec'); };
     return rec;
@@ -202,9 +202,9 @@
     if(low.includes('eva') && /(wake|wach|weck|w[eä]k)/.test(low)){
       const rest=txt.replace(/.*?(wake ?up|wake|wach ?auf|wach|weck\w*)/i,'').trim();
       unlockAudio();
-      if(rest.length>2){ $('chatIn').value=rest; sendChat(); }
+      if(rest.length>2){ $('chatIn').value=rest; sendChat(true); }
       else { awake=true; setStatus('on','Eva hört zu …'); }
-    } else if(awake){ awake=false; setStatus('on','verbunden'); $('chatIn').value=txt; sendChat(); }
+    } else if(awake){ awake=false; setStatus('on','verbunden'); $('chatIn').value=txt; sendChat(true); }
   }
   function toggleMic(){ if(wakeOn) return; const r=ensureRec(); if(!r)return;
     $('micBtn').classList.add('rec'); try{r.start();}catch(e){$('micBtn').classList.remove('rec');} }

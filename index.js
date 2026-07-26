@@ -271,8 +271,9 @@ const tools = {
     execute: async ({ id, ...patch }) => await brands.updateBrand(id, patch) }),
 };
 
-async function askIva(userText, sessionId = 'default') {
-  const system = await buildSystemPrompt();
+async function askIva(userText, sessionId = 'default', voice = false) {
+  let system = await buildSystemPrompt();
+  if (voice) system += '\n\nWICHTIG – diese Anfrage kam per SPRACHE: Antworte kurz und in fluessig gesprochenen Saetzen, wie du es einem Menschen ins Gesicht sagen wuerdest. KEINE Aufzaehlungen, keine Bindestrich-Listen, keine **Fett**-Ueberschriften, keine Abkuerzungen (Datum und Uhrzeit ausschreiben). Hoechstens 2-3 Saetze.';
   const conv = await loadConversations();
   const history = Array.isArray(conv[sessionId]) ? conv[sessionId] : [];
   const messages = [...history, { role: 'user', content: userText }];
@@ -361,7 +362,7 @@ app.get('/api/calendly', async (_req, res) => res.json(await getCalendlyEvents(1
 app.get('/api/todos', async (_req, res) => { const m = await loadMemory(); res.json((m.todos || []).filter(t => !t.done)); });
 app.post('/api/todos', async (req, res) => { const m = await loadMemory(); m.todos = m.todos || []; m.todos.push({ text: req.body?.text || '', done: false, ts: Date.now() }); await saveMemory(m); res.json({ ok: true }); });
 app.post('/api/todos/toggle', async (req, res) => { const m = await loadMemory(); const t = (m.todos || []).find(t => t.ts === req.body?.ts); if (t) { t.done = !t.done; await saveMemory(m); } res.json({ ok: true }); });
-app.post('/api/chat', async (req, res) => { try { res.json({ reply: await askIva(req.body?.message || '', req.body?.sessionId || 'web') }); } catch (e) { res.json({ reply: 'Fehler: ' + e.message }); } });
+app.post('/api/chat', async (req, res) => { try { res.json({ reply: await askIva(req.body?.message || '', req.body?.sessionId || 'web', req.body?.voice === true) }); } catch (e) { res.json({ reply: 'Fehler: ' + e.message }); } });
 app.post('/api/speak', async (req, res) => {
   try { const audio = await speak(req.body?.text || ''); if (!audio) return res.status(204).end();
     res.set('Content-Type', audio.mime); res.send(audio.buffer);
