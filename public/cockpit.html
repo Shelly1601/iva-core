@@ -197,9 +197,36 @@
   function isBusyState(){ return state==='thinking' || state==='speaking'; }
   function setState(next){ if(state===next) return; state=next; document.body.dataset.state=next; }
   const evaAudio=new Audio(); let audioReady=false;
+  // AudioContext + Analyser fuer den echten Audio-Level (Phase 4). Werden beim ersten
+  // unlockAudio() eingerichtet (User-Gesture noetig fuer AudioContext + Autoplay-Policy).
+  let audioCtx=null, analyser=null, freqBuf=null;
+  function setupAudioAnalyser(){
+    if(audioCtx) return;
+    const Ctx=window.AudioContext||window.webkitAudioContext;
+    if(!Ctx) return;
+    try{
+      audioCtx=new Ctx();
+      const src=audioCtx.createMediaElementSource(evaAudio);
+      analyser=audioCtx.createAnalyser();
+      analyser.fftSize=256;
+      analyser.smoothingTimeConstant=0.4;
+      freqBuf=new Uint8Array(analyser.frequencyBinCount);
+      src.connect(analyser); analyser.connect(audioCtx.destination);
+      audioCtx.resume().catch(()=>{});
+      // Waehrend 'speaking' echter Audio-RMS 0..1 (Time-Domain, um 128 zentriert),
+      // sonst null -> CoreLevel faellt auf synthetisch zurueck.
+      if(window.IvaCore) window.IvaCore.setLevelSource((now,state)=>{
+        if(state!=='speaking'||!analyser) return null;
+        analyser.getByteTimeDomainData(freqBuf);
+        let sq=0; for(let i=0;i<freqBuf.length;i++){ const v=freqBuf[i]-128; sq+=v*v; }
+        return Math.min(1, (Math.sqrt(sq/freqBuf.length)/128)*3);
+      });
+    }catch(e){ console.error('AudioContext-Setup fehlgeschlagen:', e); }
+  }
   function unlockAudio(){ if(audioReady)return; audioReady=true;
     try{ evaAudio.src='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
-      evaAudio.play().catch(()=>{}); }catch(e){} }
+      evaAudio.play().catch(()=>{}); }catch(e){}
+    setupAudioAnalyser(); }
   function afterSpeak(){ setState(wakeOn?'listening':'idle'); if(wakeOn) startRec(); }   // Ohr wieder an, sobald Eva fertig geredet hat
   // ---- TTS-Queue: satzweise Wiedergabe waehrend Claude streamt (Phase 2) ----
   // Trigger fuer "Satz abgeschlossen":
@@ -373,12 +400,12 @@
   $('overlay').addEventListener('click',e=>{if(e.target===$('overlay'))$('overlay').classList.remove('show');});
 
   // ---- Tabs ----
-  let netStarted=false;
+  let netLoopAlive=false;
   document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
     document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
     document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
     t.classList.add('active');const v=t.dataset.v;$('view-'+v).classList.add('active');
-    if(v==='network'){running=true;resizeNet();if(!netStarted){netStarted=true;requestAnimationFrame(loop);}}else running=false;}));
+    if(v==='network'){running=true;resizeNet();if(!netLoopAlive){netLoopAlive=true;requestAnimationFrame(loop);}}else running=false;}));
 
   connect();
 
@@ -435,7 +462,7 @@
   };
   window.IvaCore={ setLevelSource:(fn)=>CoreLevel.setSource(fn) };
   let t=0;
-  function loop(){if(!running)return;t+=0.006;const cx=W/2,cy=H/2,m=Math.min(W,H),XS=1.4;
+  function loop(){if(!running){netLoopAlive=false;return;}t+=0.006;const cx=W/2,cy=H/2,m=Math.min(W,H),XS=1.4;
     const state=document.body.dataset.state||'idle';const level=CoreLevel.get(t,state);const cfg=CORE_CFG[state]||CORE_CFG.idle;
     ctx.globalCompositeOperation='source-over';ctx.clearRect(0,0,W,H);
     stars.forEach(s=>{ctx.globalAlpha=s.a*(0.6+0.4*Math.sin(t*2+s.x));ctx.fillStyle='#7fb0e6';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,7);ctx.fill();});ctx.globalAlpha=1;
