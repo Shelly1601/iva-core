@@ -161,7 +161,7 @@
   function bubble(cls,text){const d=document.createElement('div');d.className='bubble '+cls;d.textContent=text;$('msgs').appendChild(d);$('msgs').scrollTop=$('msgs').scrollHeight;return d;}
   async function sendChat(viaVoice){const inp=$('chatIn');const t=inp.value.trim();if(!t)return;
     unlockAudio();
-    if(viaVoice===true){ busy=true; try{if(rec)rec.stop();}catch(e){} }   // Ohr aus, solange IVA denkt+spricht
+    if(viaVoice===true){ setState('thinking'); try{if(rec)rec.stop();}catch(e){} }   // Ohr aus, solange IVA denkt+spricht
     bubble('user',t);inp.value='';const b=bubble('iva','…');
     try{const res=await api('/api/chat',{method:'POST',body:JSON.stringify({message:t,sessionId:'cockpit',voice:viaVoice===true})});
       b.textContent=res.reply||'(keine Antwort)';speak(b.textContent);}
@@ -170,18 +170,28 @@
   $('chatIn').addEventListener('keydown',e=>{if(e.key==='Enter')sendChat();});
 
   // ---- Evas Stimme (ElevenLabs) + Gespraechs-Koordination ----
-  let ttsOn=true, busy=false;
+  let ttsOn=true;
+  // Client-seitige Voice-State-Machine (Phase 0). idle | listening | thinking | speaking.
+  // Ersetzt das frühere Boolean `busy`. wakeOn, awake, ttsOn, audioReady bleiben
+  // als Modus/Präferenz/Technik-Flags orthogonal zum State bestehen.
+  // Sichtbares Verhalten (Mic-Button-Rot, Wake-Highlight, TTS-Off) ist unverändert;
+  // data-state am Body ist Anker für spätere Phasen (keine CSS-Regel in Phase 0).
+  let state='idle';
+  document.body.dataset.state=state;
+  function isBusyState(){ return state==='thinking' || state==='speaking'; }
+  function setState(next){ if(state===next) return; state=next; document.body.dataset.state=next; }
   const evaAudio=new Audio(); let audioReady=false;
   function unlockAudio(){ if(audioReady)return; audioReady=true;
     try{ evaAudio.src='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
       evaAudio.play().catch(()=>{}); }catch(e){} }
-  function afterSpeak(){ busy=false; if(wakeOn) startRec(); }   // Ohr wieder an, sobald Eva fertig geredet hat
+  function afterSpeak(){ setState(wakeOn?'listening':'idle'); if(wakeOn) startRec(); }   // Ohr wieder an, sobald Eva fertig geredet hat
   async function speak(text){ if(!ttsOn||!text){ afterSpeak(); return; }
     try{ const c=cfg();
       const r=await fetch(c.url+'/api/speak',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+c.tok},body:JSON.stringify({text:String(text).slice(0,900)})});
       if(!r.ok){ afterSpeak(); return; } const buf=await r.arrayBuffer(); if(!buf.byteLength){ afterSpeak(); return; }
       evaAudio.src=URL.createObjectURL(new Blob([buf],{type:'audio/mpeg'}));
       evaAudio.onended=afterSpeak;
+      setState('speaking');
       evaAudio.play().catch(afterSpeak);
     }catch(e){ afterSpeak(); }
   }
@@ -190,14 +200,14 @@
   // ---- Sprache: Mikro + Wake-Word „Eva wake up" + Gespraechsmodus (nur Chrome) ----
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   let rec=null, wakeOn=false, awake=false;
-  function startRec(){ if(!rec||busy)return; try{rec.start();}catch(e){} }
+  function startRec(){ if(!rec||isBusyState())return; try{rec.start();}catch(e){} }
   function ensureRec(){
     if(!SR){ bubble('sys','Sprache/Wake-Word geht nur in Chrome — Safari kann das leider nicht.'); return null; }
     if(rec) return rec;
     rec=new SR(); rec.lang='de-DE'; rec.interimResults=false;
     rec.onresult=e=>{ const txt=(e.results[e.results.length-1][0].transcript||'').trim();
       if(wakeOn) handleWake(txt); else { $('chatIn').value=txt; sendChat(true); } };
-    rec.onend=()=>{ $('micBtn').classList.remove('rec'); if(wakeOn && !busy){ startRec(); } };
+    rec.onend=()=>{ $('micBtn').classList.remove('rec'); if(wakeOn && !isBusyState()){ startRec(); } else if(!wakeOn && state==='listening'){ setState('idle'); } };
     rec.onerror=()=>{ $('micBtn').classList.remove('rec'); };
     return rec;
   }
@@ -215,11 +225,11 @@
     }
   }
   function toggleMic(){ if(wakeOn) return; const r=ensureRec(); if(!r)return;
-    $('micBtn').classList.add('rec'); try{r.start();}catch(e){$('micBtn').classList.remove('rec');} }
+    setState('listening'); $('micBtn').classList.add('rec'); try{r.start();}catch(e){$('micBtn').classList.remove('rec');} }
   function toggleWake(){ const r=ensureRec(); if(!r)return;
     wakeOn=!wakeOn; awake=false; $('wakeBtn').classList.toggle('on',wakeOn);
-    if(wakeOn){ unlockAudio(); setStatus('on','👂 warte auf „Eva wake up"'); startRec(); }
-    else { busy=false; try{r.stop();}catch(e){} setStatus('on','verbunden'); } }
+    if(wakeOn){ unlockAudio(); if(!isBusyState()) setState('listening'); setStatus('on','👂 warte auf „Eva wake up"'); startRec(); }
+    else { if(!isBusyState()) setState('idle'); try{r.stop();}catch(e){} setStatus('on','verbunden'); } }
   $('micBtn').addEventListener('click',toggleMic);
   $('wakeBtn').addEventListener('click',toggleWake);
 
