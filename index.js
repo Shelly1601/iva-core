@@ -4,7 +4,7 @@ import fs from 'fs/promises';
 import ical from 'node-ical';
 import cron from 'node-cron';
 import { ImapFlow } from 'imapflow';
-import { generateText, tool } from 'ai';
+import { generateText, streamText, tool } from 'ai';
 import { anthropic } from '@ai-sdk/anthropic';
 import { z } from 'zod';
 import * as campaigns from './marketing/campaigns.js';
@@ -66,6 +66,9 @@ async function saveMemory(mem) {
 // --- Gespraechs-Gedaechtnis (pro Session/Chat), eigene Datei, stoert die Todos/Notizen nicht ---
 const CONV_FILE = DATA_DIR + '/conversations.json';
 const MAX_TURNS = 16; // letzte 16 Nachrichten (8 Paare) als Kontext je Session
+// Gemeinsamer Zusatz an den System-Prompt fuer sprach-getriggerte Anfragen.
+// Wird identisch von askIva (Telegram) und streamIva (Cockpit-Stream) angehaengt.
+const VOICE_SYSTEM_SUFFIX = '\n\nWICHTIG – diese Anfrage kam per SPRACHE: Antworte kurz und in fluessig gesprochenen Saetzen, wie du es einem Menschen ins Gesicht sagen wuerdest. KEINE Aufzaehlungen, keine Bindestrich-Listen, keine **Fett**-Ueberschriften, keine Abkuerzungen (Datum und Uhrzeit ausschreiben). Hoechstens 2-3 Saetze.';
 async function loadConversations() {
   try { return JSON.parse(await fs.readFile(CONV_FILE, 'utf8')); } catch { return {}; }
 }
@@ -273,7 +276,7 @@ const tools = {
 
 async function askIva(userText, sessionId = 'default', voice = false) {
   let system = await buildSystemPrompt();
-  if (voice) system += '\n\nWICHTIG – diese Anfrage kam per SPRACHE: Antworte kurz und in fluessig gesprochenen Saetzen, wie du es einem Menschen ins Gesicht sagen wuerdest. KEINE Aufzaehlungen, keine Bindestrich-Listen, keine **Fett**-Ueberschriften, keine Abkuerzungen (Datum und Uhrzeit ausschreiben). Hoechstens 2-3 Saetze.';
+  if (voice) system += VOICE_SYSTEM_SUFFIX;
   const conv = await loadConversations();
   const history = Array.isArray(conv[sessionId]) ? conv[sessionId] : [];
   const messages = [...history, { role: 'user', content: userText }];
@@ -281,6 +284,25 @@ async function askIva(userText, sessionId = 'default', voice = false) {
   conv[sessionId] = [...messages, { role: 'assistant', content: text || '(ok)' }].slice(-MAX_TURNS);
   await saveConversations(conv);
   return text;
+}
+
+// Streaming-Variante von askIva fuer /api/chat/stream (Phase 1). Teilt Prompt-Aufbau,
+// Verlauf und Tools mit askIva ueber die Modul-Helper (buildSystemPrompt, loadConversations,
+// saveConversations, tools, MAX_TURNS). askIva selbst bleibt unangetastet -> Telegram sicher.
+async function streamIva(userText, sessionId = 'default', voice = false) {
+  let system = await buildSystemPrompt();
+  if (voice) system += VOICE_SYSTEM_SUFFIX;
+  const conv = await loadConversations();
+  const history = Array.isArray(conv[sessionId]) ? conv[sessionId] : [];
+  const messages = [...history, { role: 'user', content: userText }];
+  return streamText({
+    model: anthropic('claude-sonnet-4-6'),
+    system, messages, tools, maxSteps: 6,
+    onFinish: async ({ text }) => {
+      conv[sessionId] = [...messages, { role: 'assistant', content: text || '(ok)' }].slice(-MAX_TURNS);
+      await saveConversations(conv);
+    },
+  });
 }
 
 function toTelegramHTML(s) {
@@ -363,6 +385,15 @@ app.get('/api/todos', async (_req, res) => { const m = await loadMemory(); res.j
 app.post('/api/todos', async (req, res) => { const m = await loadMemory(); m.todos = m.todos || []; m.todos.push({ text: req.body?.text || '', done: false, ts: Date.now() }); await saveMemory(m); res.json({ ok: true }); });
 app.post('/api/todos/toggle', async (req, res) => { const m = await loadMemory(); const t = (m.todos || []).find(t => t.ts === req.body?.ts); if (t) { t.done = !t.done; await saveMemory(m); } res.json({ ok: true }); });
 app.post('/api/chat', async (req, res) => { try { res.json({ reply: await askIva(req.body?.message || '', req.body?.sessionId || 'web', req.body?.voice === true) }); } catch (e) { res.json({ reply: 'Fehler: ' + e.message }); } });
+app.post('/api/chat/stream', async (req, res) => {
+  try {
+    const result = await streamIva(req.body?.message || '', req.body?.sessionId || 'web', req.body?.voice === true);
+    result.pipeTextStreamToResponse(res);
+  } catch (e) {
+    if (!res.headersSent) { res.status(500); res.setHeader('Content-Type', 'text/plain; charset=utf-8'); }
+    res.end('Fehler: ' + e.message);
+  }
+});
 app.post('/api/speak', async (req, res) => {
   try { const audio = await speak(req.body?.text || ''); if (!audio) return res.status(204).end();
     res.set('Content-Type', audio.mime); res.send(audio.buffer);

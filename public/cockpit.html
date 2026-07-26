@@ -163,8 +163,22 @@
     unlockAudio();
     if(viaVoice===true){ setState('thinking'); try{if(rec)rec.stop();}catch(e){} }   // Ohr aus, solange IVA denkt+spricht
     bubble('user',t);inp.value='';const b=bubble('iva','…');
-    try{const res=await api('/api/chat',{method:'POST',body:JSON.stringify({message:t,sessionId:'cockpit',voice:viaVoice===true})});
-      b.textContent=res.reply||'(keine Antwort)';speak(b.textContent);}
+    try{
+      const c=cfg();
+      const r=await fetch(c.url+'/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+c.tok},body:JSON.stringify({message:t,sessionId:'cockpit',voice:viaVoice===true})});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const reader=r.body.getReader(),dec=new TextDecoder();
+      let full=''; b.textContent='';
+      while(true){
+        const {done,value}=await reader.read();
+        if(done) break;
+        const chunk=dec.decode(value,{stream:true});
+        full+=chunk; b.textContent+=chunk;
+        $('msgs').scrollTop=$('msgs').scrollHeight;
+      }
+      if(!full.trim()){ b.textContent='(keine Antwort)'; full='(keine Antwort)'; }
+      speak(full);
+    }
     catch(e){b.textContent='Fehler: '+e.message+'. Prüf ⚙︎.';setStatus('err','Fehler');afterSpeak();}}
   $('chatSend').addEventListener('click',sendChat);
   $('chatIn').addEventListener('keydown',e=>{if(e.key==='Enter')sendChat();});
