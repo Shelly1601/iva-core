@@ -14,6 +14,22 @@ function clean(text) {
        .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}]/gu, '');
   // Abkuerzungen ausschreiben
   for (const [k, v] of Object.entries(ABK)) s = s.split(k).join(v);
+  // Einheiten & Symbole (Wortgrenzen, damit 'Wärmepumpe'/'CO2-Bilanz' korrekt bleiben).
+  s = s.replace(/\bkWh\b/g, 'Kilowattstunden')
+       .replace(/\bkW\b/g, 'Kilowatt')
+       .replace(/(?<![\p{L}\d])W(?![\p{L}\d])/gu, 'Watt')
+       .replace(/\bPV\b/g, 'Photovoltaik')
+       .replace(/\bWP\b/g, 'Wärmepumpe')
+       .replace(/\bCO2\b/g, 'CO zwei')
+       .replace(/°C\b/g, ' Grad Celsius')
+       .replace(/%/g, ' Prozent')
+       .replace(/€/g, ' Euro');
+  // Zahl-Bereiche 0..20 ("3-5" -> "drei bis fünf"). Muss vor dem Bindestrich-Schritt laufen.
+  const N0_20 = ['null','eins','zwei','drei','vier','fünf','sechs','sieben','acht','neun','zehn','elf','zwölf','dreizehn','vierzehn','fünfzehn','sechzehn','siebzehn','achtzehn','neunzehn','zwanzig'];
+  s = s.replace(/\b(\d+)\s*[-–]\s*(\d+)\b/g, (m, a, b) => {
+    const ai = parseInt(a, 10), bi = parseInt(b, 10);
+    return (ai <= 20 && bi <= 20) ? N0_20[ai] + ' bis ' + N0_20[bi] : m;
+  });
   // Wochentags-Kuerzel: "So." -> "Sonntag" (nur wenn ein Datum folgt)
   s = s.replace(/\b(Mo|Di|Mi|Do|Fr|Sa|So)\.(?=,?\s*\d)/g, (m, d) => TAG[d]);
   // Datum "26.07." / "26.07.2026" -> "26. Juli (2026)"
@@ -38,14 +54,14 @@ async function elevenlabs(text) {
   const key = process.env.ELEVENLABS_API_KEY;
   if (!key) { console.error('TTS: kein ELEVENLABS_API_KEY gesetzt'); return null; }
   const voice = process.env.ELEVENLABS_VOICE_ID || EL_DEFAULT_VOICE;
-  const model = process.env.ELEVENLABS_MODEL || 'eleven_multilingual_v2';
-  const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}`, {
+  const model = process.env.ELEVENLABS_MODEL || 'eleven_flash_v2_5';
+  const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}/stream?optimize_streaming_latency=4&output_format=mp3_44100_64`, {
     method: 'POST',
     headers: { 'xi-api-key': key, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
     body: JSON.stringify({
       text,
       model_id: model,
-      voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.2 },
+      voice_settings: { stability: 0.35, similarity_boost: 0.80, style: 0.45, use_speaker_boost: true, speed: 1.08 },
     }),
   });
   if (!r.ok) { console.error('TTS ElevenLabs:', r.status, (await r.text()).slice(0, 160)); return null; }

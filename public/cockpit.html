@@ -163,6 +163,7 @@
     unlockAudio();
     if(viaVoice===true){ setState('thinking'); try{if(rec)rec.stop();}catch(e){} }   // Ohr aus, solange IVA denkt+spricht
     bubble('user',t);inp.value='';const b=bubble('iva','…');
+    resetTTS();
     try{
       const c=cfg();
       const r=await fetch(c.url+'/api/chat/stream',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+c.tok},body:JSON.stringify({message:t,sessionId:'cockpit',voice:viaVoice===true})});
@@ -174,12 +175,13 @@
         if(done) break;
         const chunk=dec.decode(value,{stream:true});
         full+=chunk; b.textContent+=chunk;
+        ingestChunkForTTS(chunk);
         $('msgs').scrollTop=$('msgs').scrollHeight;
       }
-      if(!full.trim()){ b.textContent='(keine Antwort)'; full='(keine Antwort)'; }
-      speak(full);
+      if(!full.trim()){ b.textContent='(keine Antwort)'; if(ttsOn) enqueueTTS('(keine Antwort)'); }
+      flushRemainingTTS();
     }
-    catch(e){b.textContent='Fehler: '+e.message+'. Prüf ⚙︎.';setStatus('err','Fehler');afterSpeak();}}
+    catch(e){b.textContent='Fehler: '+e.message+'. Prüf ⚙︎.';setStatus('err','Fehler');resetTTS();afterSpeak();}}
   $('chatSend').addEventListener('click',sendChat);
   $('chatIn').addEventListener('keydown',e=>{if(e.key==='Enter')sendChat();});
 
@@ -199,17 +201,111 @@
     try{ evaAudio.src='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
       evaAudio.play().catch(()=>{}); }catch(e){} }
   function afterSpeak(){ setState(wakeOn?'listening':'idle'); if(wakeOn) startRec(); }   // Ohr wieder an, sobald Eva fertig geredet hat
-  async function speak(text){ if(!ttsOn||!text){ afterSpeak(); return; }
-    try{ const c=cfg();
-      const r=await fetch(c.url+'/api/speak',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+c.tok},body:JSON.stringify({text:String(text).slice(0,900)})});
-      if(!r.ok){ afterSpeak(); return; } const buf=await r.arrayBuffer(); if(!buf.byteLength){ afterSpeak(); return; }
-      evaAudio.src=URL.createObjectURL(new Blob([buf],{type:'audio/mpeg'}));
-      evaAudio.onended=afterSpeak;
-      setState('speaking');
-      evaAudio.play().catch(afterSpeak);
-    }catch(e){ afterSpeak(); }
+  // ---- TTS-Queue: satzweise Wiedergabe waehrend Claude streamt (Phase 2) ----
+  // Trigger fuer "Satz abgeschlossen":
+  //   1) Terminator (. ! ?) im Puffer wird gefolgt von weiterem gestreamten Text -> Ende bewiesen.
+  //   2) TTS_STABLE_MS ohne neuen Chunk UND mindestens ein Terminator im Puffer -> Ende stabil.
+  // Am Stream-Ende wird der verbliebene Puffer als letzter Satz eingereiht.
+  // Vermeidet halbe Saetze durch Chunk-Grenzen.
+  const TTS_STABLE_MS=400;
+  const TTS_TERM='.!?';
+  const TTS_CHUNK_INITIAL=1;   // Erster Chunk pro Antwort: 1 Satz -> Eva startet so frueh wie moeglich.
+  const TTS_CHUNK_STEADY=3;    // Waehrend Eva schon spricht: 3 Saetze buendeln.
+  const TTS_CHUNK_MAX=4;       // Obergrenze pro Request (2-4 Saetze).
+  let ttsQueue=[], ttsBuffer='', ttsPlaying=false, ttsFinished=false, ttsStableTimer=null;
+  function isTerm(ch){ return TTS_TERM.indexOf(ch)!==-1; }
+  function hasNonWhitespaceAfter(buf,i){
+    for(let j=i+1;j<buf.length;j++){ const c=buf[j];
+      if(c!==' '&&c!=='\n'&&c!=='\t'&&c!=='\r') return true; }
+    return false;
   }
-  $('ttsBtn').addEventListener('click',()=>{ttsOn=!ttsOn;$('ttsBtn').classList.toggle('off',!ttsOn);if(!ttsOn){try{evaAudio.pause();}catch(e){}afterSpeak();}});
+  function lastConfirmedTerminatorIndex(buf){
+    let last=-1;
+    for(let i=0;i<buf.length;i++) if(isTerm(buf[i])&&hasNonWhitespaceAfter(buf,i)) last=i;
+    return last;
+  }
+  function flushConfirmedSentences(){
+    // Buendelt bestaetigte Saetze in Chunks von 1 (Start) bzw. 3-4 (waehrend Eva spricht),
+    // reduziert die Anzahl der /api/speak-Calls und damit die Pausen zwischen Saetzen.
+    while(true){
+      const lastIdx=lastConfirmedTerminatorIndex(ttsBuffer);
+      if(lastIdx<0) return;
+      const minS=(ttsPlaying||ttsQueue.length>0)?TTS_CHUNK_STEADY:TTS_CHUNK_INITIAL;
+      const positions=[];
+      for(let i=0;i<=lastIdx;i++) if(isTerm(ttsBuffer[i])) positions.push(i);
+      if(positions.length<minS) return;
+      const cutIdx=positions.length>TTS_CHUNK_MAX?positions[TTS_CHUNK_MAX-1]:lastIdx;
+      const s=ttsBuffer.slice(0,cutIdx+1).trim();
+      ttsBuffer=ttsBuffer.slice(cutIdx+1);
+      if(s) enqueueTTS(s);
+    }
+  }
+  function armStabilityTimer(){
+    clearTimeout(ttsStableTimer);
+    ttsStableTimer=setTimeout(()=>{
+      // Nach Ruhe: bis zum letzten Terminator flushen, nicht-terminierten Rest stehen lassen
+      // (verhindert Splits mitten im Satz, auch wenn Chunks stark verzoegert eintreffen).
+      let lastTerm=-1;
+      for(let i=0;i<ttsBuffer.length;i++) if(isTerm(ttsBuffer[i])) lastTerm=i;
+      if(lastTerm<0) return; // kein vollstaendiger Satz -> weiter warten
+      const s=ttsBuffer.slice(0,lastTerm+1).trim();
+      ttsBuffer=ttsBuffer.slice(lastTerm+1);
+      if(s) enqueueTTS(s);
+    }, TTS_STABLE_MS);
+  }
+  function ingestChunkForTTS(chunk){
+    if(!ttsOn) return;
+    ttsBuffer+=chunk;
+    flushConfirmedSentences();
+    armStabilityTimer();
+  }
+  function flushRemainingTTS(){
+    clearTimeout(ttsStableTimer);
+    const rest=ttsBuffer.trim();
+    ttsBuffer='';
+    if(rest && ttsOn) enqueueTTS(rest);
+    ttsFinished=true;
+    if(!ttsPlaying && ttsQueue.length===0) afterSpeak();
+  }
+  function resetTTS(){
+    clearTimeout(ttsStableTimer);
+    ttsQueue=[]; ttsBuffer=''; ttsFinished=false;
+  }
+  function enqueueTTS(text){
+    // Fetch startet SOFORT beim Enqueue -> laeuft parallel zur laufenden Wiedergabe (Prefetch).
+    // Reihenfolge bleibt strikt: drainTTS awaitet die Job-Promises in FIFO-Order.
+    ttsQueue.push({ text, audio: fetchTTS(text) });
+    if(!ttsPlaying) drainTTS();
+  }
+  async function drainTTS(){
+    if(ttsPlaying) return;
+    ttsPlaying=true;
+    while(ttsQueue.length){
+      const job=ttsQueue.shift();
+      const buf=await job.audio;
+      await playBuf(buf);
+      if(!ttsOn) break;
+    }
+    ttsPlaying=false;
+    if(ttsFinished && ttsQueue.length===0) afterSpeak();
+  }
+  function fetchTTS(text){
+    const c=cfg();
+    return fetch(c.url+'/api/speak',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+c.tok},body:JSON.stringify({text:String(text).slice(0,900)})})
+      .then(r=>r.ok?r.arrayBuffer():null).catch(()=>null);
+  }
+  function playBuf(buf){
+    if(!buf||!buf.byteLength) return Promise.resolve();
+    return new Promise((resolve)=>{
+      const url=URL.createObjectURL(new Blob([buf],{type:'audio/mpeg'}));
+      evaAudio.src=url;
+      const done=()=>{ try{ URL.revokeObjectURL(url); }catch(e){} resolve(); };
+      evaAudio.onended=done;
+      setState('speaking');
+      evaAudio.play().catch(done);
+    });
+  }
+  $('ttsBtn').addEventListener('click',()=>{ttsOn=!ttsOn;$('ttsBtn').classList.toggle('off',!ttsOn);if(!ttsOn){ttsQueue=[];ttsBuffer='';ttsFinished=true;clearTimeout(ttsStableTimer);try{evaAudio.pause();}catch(e){}afterSpeak();}});
 
   // ---- Sprache: Mikro + Wake-Word „Eva wake up" + Gespraechsmodus (nur Chrome) ----
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
