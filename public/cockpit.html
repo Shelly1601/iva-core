@@ -278,6 +278,13 @@
     stars=Array.from({length:90},()=>({x:Math.random()*W,y:Math.random()*H,r:Math.random()*1.2+.2,a:Math.random()*.45+.08}));}
   window.addEventListener('resize',()=>{if(running)resizeNet();});
   const CY='#22e6d6',BL='#4f9dff',SL='#5b76a0';
+  // Kern-Parameter je Voice-State (Phase 0.5). Wird pro Frame gelesen, keine Layoutaenderung.
+  const CORE_CFG={
+    idle:     {amp:0.06, rot:0.30, glow:30, stop:'#eafffb'},
+    listening:{amp:0.10, rot:0.30, glow:38, stop:'#eafffb'},
+    thinking: {amp:0.14, rot:0.55, glow:44, stop:'#f4fffb'},
+    speaking: {amp:0.18, rot:0.42, glow:52, stop:'#eafffb'}
+  };
   const INNER=[{l:'Briefing',c:CY,st:'live'},{l:'Posteingang',c:BL,st:'build'},{l:'Vertrieb',c:BL,st:'build'},{l:'Termine',c:BL,st:'build'},{l:'Content',c:BL,st:'build'},{l:'Assistenz',c:BL,st:'build'}];
   const OUTER=[{l:'Recherche',c:SL,st:'plan'},{l:'Outreach',c:SL,st:'plan'},{l:'Zahlen',c:SL,st:'plan'},{l:'Voice',c:SL,st:'plan'},{l:'Rechner',c:SL,st:'plan'}];
   function seed(a,rf,sz){a.forEach((x,i)=>{x.a0=i/a.length*6.283+(Math.random()-.5)*.4;x.rf=rf*(0.9+Math.random()*.2);x.ph=Math.random()*6.283;x.sz=sz;x.off=(Math.random()-.5)*70;x.pk=Math.random();x.sp=(Math.random()-.5)*.05+.035;x.rot=Math.random()*6.283;});}
@@ -293,19 +300,40 @@
     ctx.globalAlpha=dim?.1:.22;ctx.strokeStyle=a.c;ctx.lineWidth=1;ctx.setLineDash(dim?[3,6]:[]);
     ctx.beginPath();ctx.moveTo(cx,cy);ctx.quadraticCurveTo(mx,my,a.x,a.y);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;
     if(dim)return;for(let k=0;k<3;k++){const p=((t*.32+a.pk+k/3)%1),q=1-p;const px=q*q*cx+2*q*p*mx+p*p*a.x,py=q*q*cy+2*q*p*my+p*p*a.y;glow(px,py,4.2,a.c);}}
-  function burst(cx,cy,t){glow(cx,cy,95,'rgba(34,230,214,.5)','rgba(120,255,245,.9)');
-    for(let i=0;i<130;i++){const a=i/130*6.283+t*.06,L=24+((Math.sin(i*12.9)*.5+.5)*58),x2=cx+Math.cos(a)*L,y2=cy+Math.sin(a)*L;
-      ctx.globalAlpha=.08+((Math.sin(i*7.3)*.5+.5)*.16);ctx.strokeStyle=i%3?CY:BL;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(cx+Math.cos(a)*7,cy+Math.sin(a)*7);ctx.lineTo(x2,y2);ctx.stroke();}ctx.globalAlpha=1;}
+  function burst(cx,cy,t,level=0.2){glow(cx,cy,95+level*40,'rgba(34,230,214,.5)','rgba(120,255,245,.9)');
+    const reach=58+level*30,alphaBase=.08+level*.08;
+    for(let i=0;i<130;i++){const a=i/130*6.283+t*.06,L=24+((Math.sin(i*12.9)*.5+.5)*reach),x2=cx+Math.cos(a)*L,y2=cy+Math.sin(a)*L;
+      ctx.globalAlpha=alphaBase+((Math.sin(i*7.3)*.5+.5)*.16);ctx.strokeStyle=i%3?CY:BL;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(cx+Math.cos(a)*7,cy+Math.sin(a)*7);ctx.lineTo(x2,y2);ctx.stroke();}ctx.globalAlpha=1;}
   function lbl(a){ctx.font='600 11px -apple-system,Segoe UI,sans-serif';const tx=a.l+(a.st==='plan'?' ·soon':''),w=ctx.measureText(tx).width;
     ctx.globalAlpha=.55;ctx.fillStyle='#05070e';ctx.fillRect(a.x-w/2-4,a.y+a.sz+6,w+8,15);ctx.globalAlpha=1;ctx.fillStyle=a.st==='plan'?'#93a6c2':'#e9f1fb';ctx.fillText(tx,a.x,a.y+a.sz+17);}
+  // ---- Kern-Level fuer Phase 0.5 (synthetisch) / Phase 4 (Audio) ----
+  // State-basierte Amplitude 0..1. Phase 4 tauscht die Quelle via IvaCore.setLevelSource(fn)
+  // ohne die Zeichen-Logik anzufassen.
+  const CoreLevel={ source:null,
+    setSource(fn){ this.source=(typeof fn==='function')?fn:null; },
+    synthetic(t,state){
+      if(state==='listening') return 0.30 + 0.15*(Math.sin(t*2.8)*.5+.5);
+      if(state==='thinking')  return 0.40 + 0.30*((Math.sin(t*3.7)*.5+.5)*.6 + (Math.sin(t*7.1+1.3)*.5+.5)*.4);
+      if(state==='speaking')  return 0.55 + 0.35*(Math.sin(t*4.5)*.5+.5);
+      return 0.20 + 0.10*(Math.sin(t*1.9)*.5+.5); // idle
+    },
+    get(t,state){
+      let v=this.source?this.source(t,state):this.synthetic(t,state);
+      if(!Number.isFinite(v)) v=this.synthetic(t,state);
+      return Math.max(0,Math.min(1,v));
+    }
+  };
+  window.IvaCore={ setLevelSource:(fn)=>CoreLevel.setSource(fn) };
   let t=0;
   function loop(){if(!running)return;t+=0.006;const cx=W/2,cy=H/2,m=Math.min(W,H),XS=1.4;
+    const state=document.body.dataset.state||'idle';const level=CoreLevel.get(t,state);const cfg=CORE_CFG[state]||CORE_CFG.idle;
     ctx.globalCompositeOperation='source-over';ctx.clearRect(0,0,W,H);
     stars.forEach(s=>{ctx.globalAlpha=s.a*(0.6+0.4*Math.sin(t*2+s.x));ctx.fillStyle='#7fb0e6';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,7);ctx.fill();});ctx.globalAlpha=1;
     const ALL=[...OUTER,...INNER];ALL.forEach(a=>{const ang=a.a0+t*a.sp,R=a.rf*m+Math.sin(t*1.1+a.ph)*7;a.x=cx+Math.cos(ang)*R*XS;a.y=cy+Math.sin(ang)*R;});
     ctx.globalCompositeOperation='lighter';ctx.textAlign='center';
-    ALL.forEach(a=>link(cx,cy,a,t));burst(cx,cy,t);OUTER.forEach(a=>cell(a,t));INNER.forEach(a=>cell(a,t));
-    const R0=24*(1+Math.sin(t*2)*.06);ctx.globalAlpha=.6;ctx.strokeStyle=CY;ctx.lineWidth=1.5;hexPath(cx,cy,R0,t*.3);ctx.stroke();ctx.globalAlpha=1;glow(cx,cy,30,CY,'#eafffb');
+    ALL.forEach(a=>link(cx,cy,a,t));burst(cx,cy,t,level);OUTER.forEach(a=>cell(a,t));INNER.forEach(a=>cell(a,t));
+    const pulse=state==='thinking'?Math.sin(t*3.7)*.6+Math.sin(t*7.1+1.3)*.4:state==='speaking'?Math.sin(t*4.5):state==='listening'?(Math.sin(t*2)*.8+Math.sin(t*.7)*.3):Math.sin(t*2);
+    const R0=24*(1+pulse*(cfg.amp+level*0.06));ctx.globalAlpha=.6;ctx.strokeStyle=CY;ctx.lineWidth=1.5;hexPath(cx,cy,R0,t*cfg.rot);ctx.stroke();ctx.globalAlpha=1;glow(cx,cy,cfg.glow+level*12,CY,cfg.stop);
     ctx.globalCompositeOperation='source-over';ALL.forEach(lbl);
     ctx.fillStyle='#04121a';ctx.font='800 15px -apple-system,Segoe UI,sans-serif';ctx.fillText('IVA',cx,cy+5);
     requestAnimationFrame(loop);}
