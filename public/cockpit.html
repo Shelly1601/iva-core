@@ -396,7 +396,6 @@
     if(document.hidden){ running=false; }
     else{ bootCanvas(); }
   });
-  bootCanvas();
 
   connect();
 
@@ -465,6 +464,10 @@
     ctx.globalCompositeOperation='source-over';ALL.forEach(lbl);
     ctx.fillStyle='#04121a';ctx.font='800 15px -apple-system,Segoe UI,sans-serif';ctx.fillText('IVA',cx,cy+5);
     requestAnimationFrame(loop);}
+
+  // Boot am Script-Ende, damit alle Canvas-Variablen (cv, ctx, W, H, running, stars)
+  // und alle Zeichen-Funktionen (loop, resizeNet, burst, cell, link, glow, hexPath) definiert sind.
+  bootCanvas();
 </script>
 </body>
 </html>
