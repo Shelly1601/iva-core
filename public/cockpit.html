@@ -27,10 +27,17 @@
   .toolbtn{background:var(--panel2);border:1px solid var(--border);color:var(--muted);border-radius:10px;padding:8px 12px;cursor:pointer;font-size:14px}
   .clock{text-align:right;font-variant-numeric:tabular-nums}
   .clock .t{font-size:20px;font-weight:700}.clock .d{font-size:12px;color:var(--muted);text-transform:capitalize}
-  .hud-stage{display:grid;grid-template-columns:minmax(220px,1fr) minmax(360px,1.4fr) minmax(220px,1fr);gap:var(--gap);align-items:stretch;flex:1;min-height:420px}
-  .hud-col{display:flex;flex-direction:column;gap:var(--gap)}
-  .hud-core{position:relative;background:radial-gradient(700px 500px at 50% 46%,#0a1226,#04060d 70%,#02040a);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;min-height:420px}
-  @media(max-width:900px){.hud-stage{grid-template-columns:1fr}.hud-core{order:-1;aspect-ratio:1;min-height:0;max-height:60vh}.hud-col{flex-direction:row;overflow-x:auto;padding-bottom:6px}.hud-col > .card{flex:0 0 260px}}
+  .hud-stage{position:relative;display:grid;grid-template-columns:minmax(220px,1fr) minmax(360px,1.4fr) minmax(220px,1fr);gap:var(--gap);align-items:stretch;flex:1;min-height:480px;overflow:hidden}
+  .hud-col{display:flex;flex-direction:column;gap:var(--gap);position:relative;z-index:1}
+  .hud-left{grid-column:1}
+  .hud-right{grid-column:3}
+  .hud-col > .card{background:rgba(16,24,44,.72)}
+  .hud-left > .card,.hud-right > .card{position:relative}
+  .hud-left > .card::after,.hud-right > .card::after{content:'';position:absolute;top:50%;height:1px;width:calc(var(--gap) + 24px);background:linear-gradient(to right,rgba(34,230,214,.55),rgba(34,230,214,0));pointer-events:none;opacity:.75}
+  .hud-left > .card::after{right:calc(-1 * (var(--gap) + 24px))}
+  .hud-right > .card::after{left:calc(-1 * (var(--gap) + 24px));transform:scaleX(-1)}
+  .hud-label{position:absolute;top:16px;left:50%;transform:translateX(-50%);z-index:3;font-size:11px;letter-spacing:.34em;text-transform:uppercase;color:var(--blue-lt);text-shadow:0 0 12px rgba(34,230,214,.35);pointer-events:none;white-space:nowrap;font-weight:700}
+  @media(max-width:900px){.hud-stage{grid-template-columns:1fr;overflow:visible;min-height:auto}.hud-left,.hud-right{grid-column:auto}.hud-col{flex-direction:row;overflow-x:auto;padding-bottom:6px}.hud-col > .card{flex:0 0 260px}.hud-label{position:static;transform:none;margin-bottom:8px;text-align:center;display:block}.hud-left > .card::after,.hud-right > .card::after{display:none}#net{position:relative;height:55vh;min-height:280px;z-index:0}}
   .chat{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);backdrop-filter:blur(12px);overflow:hidden;max-height:44vh;min-height:260px}
   .chat .head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-weight:700}
   .chat .head .o{width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#9ff4ec,var(--cyan) 55%,var(--blue));box-shadow:0 0 16px var(--cyan)}
@@ -57,7 +64,7 @@
   .row .tag{font-size:10px;font-weight:700;padding:1px 7px;border-radius:20px;background:rgba(79,157,255,.16);color:var(--blue-lt);margin-right:6px}
   .row .tm{color:var(--cyan);font-weight:600;margin-right:6px}
   .muted{color:var(--muted);font-size:12.5px}
-  #net{display:block;position:absolute;inset:0;width:100%;height:100%}
+  #net{display:block;position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
   .overlay{position:fixed;inset:0;background:rgba(3,6,14,.82);backdrop-filter:blur(6px);display:none;align-items:center;justify-content:center;z-index:50}
   .overlay.show{display:flex}
   .setup{width:min(440px,92vw);background:linear-gradient(180deg,#0d1730,#0a1122);border:1px solid var(--border2);border-radius:20px;padding:26px}
@@ -83,12 +90,13 @@
     </div>
   </div>
   <main class="hud-stage">
+    <div class="hud-label">IVA · COMMAND CENTER</div>
+    <canvas id="net"></canvas>
     <aside class="hud-col hud-left">
       <div class="card"><h3><span class="ic">📅</span> Termine <span class="cnt" id="c-cal">–</span></h3><div id="d-cal"><div class="muted">—</div></div></div>
       <div class="card"><h3><span class="ic">🔥</span> Leads <span class="cnt" id="c-lead">–</span></h3><div id="d-lead"><div class="muted">—</div></div></div>
       <div class="card"><h3><span class="ic">✉️</span> Postfächer <span class="cnt" id="c-mail">–</span></h3><div id="d-mail"><div class="muted">—</div></div></div>
     </aside>
-    <div class="hud-core"><canvas id="net"></canvas></div>
     <aside class="hud-col hud-right">
       <div class="card"><h3><span class="ic">🗓</span> Calendly <span class="cnt" id="c-cly">–</span></h3><div id="d-cly"><div class="muted">—</div></div></div>
       <div class="card"><h3><span class="ic">✓</span> Todos <span class="cnt" id="c-todo">–</span></h3><div id="d-todo"><div class="muted">—</div></div></div>
