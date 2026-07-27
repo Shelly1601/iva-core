@@ -15,6 +15,7 @@ import * as brands from './marketing/brands.js';
 import { refineTone, analyzeWebsite } from './marketing/assist.js';
 import { marketAnalysis } from './marketing/market.js';
 import { speak } from './voice.js';
+import { askArchitect } from './agents/architect.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -237,6 +238,7 @@ Tool-Nutzung:
 
 - Live-Daten oder Aktion nötig (Kalender, Mails, Leads, Todos, Kampagnen, Bilder): Tool sofort aufrufen. Nie "hätte ich Zugriff auf…", nie "soll ich mal nachsehen?" — machen und dann zusammenfassen.
 - Mehrere Quellen relevant (z. B. Kalender + Mails + Leads): parallel abrufen.
+- Tiefe Fachfragen zu Finanz, Versicherung, Vorsorge oder Rente (ohne Live-Daten): askArchitect mit der präzisen Frage — der Router delegiert an einen Fach-Agenten. Für Live-Daten stattdessen direkt das passende Tool.
 - Nach Toolaufruf: Ergebnis im passenden Antwort-Format (siehe oben), nicht die Rohdaten.
 
 Voice-Modus überschreibt die Format-Regeln oben, wenn Sprache aktiviert ist:
@@ -311,6 +313,8 @@ const tools = {
     execute: async (input) => await brands.createBrand(input) }),
   updateBrand: tool({ description: 'Aktualisiert ein Marken-Profil per id (beliebige Felder: name, website, instagram, linkedin, colors, tone, audience).', parameters: z.object({ id: z.string(), name: z.string().optional(), website: z.string().optional(), instagram: z.string().optional(), linkedin: z.string().optional(), colors: z.array(z.string()).optional(), tone: z.string().optional(), audience: z.string().optional() }),
     execute: async ({ id, ...patch }) => await brands.updateBrand(id, patch) }),
+  askArchitect: tool({ description: 'Router fuer tiefe Fachfragen zu Finanz, Versicherung, Vorsorge, Rente. Delegiert an den Knowledge-Agent, wenn passend. NICHT fuer Live-Daten (Kalender/Mails/CRM/Leads) - dafuer die direkten Tools nutzen. Ergebnis: { source:"knowledge", answer } (Fachantwort weitergeben) ODER { source:"architect", question } (Rueckfrage an Nadine stellen) ODER { source:"architect", note } (passte nicht, kurz erklaeren).', parameters: z.object({ intent: z.string() }),
+    execute: async ({ intent }) => await askArchitect(intent) }),
 };
 
 async function askIva(userText, sessionId = 'default', voice = false) {
