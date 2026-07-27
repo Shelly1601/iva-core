@@ -435,7 +435,7 @@ app.post('/api/chat/stream', async (req, res) => {
   }
 });
 app.post('/api/speak', async (req, res) => {
-  try { const audio = await speak(req.body?.text || ''); if (!audio) return res.status(204).end();
+  try { const audio = await speak(req.body?.text || '', { voiceId: req.body?.voiceId }); if (!audio) return res.status(204).end();
     res.set('Content-Type', audio.mime); res.send(audio.buffer);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

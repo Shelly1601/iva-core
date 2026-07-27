@@ -50,10 +50,10 @@ function clean(text) {
 // in ElevenLabs waehlen und die Voice-ID in ELEVENLABS_VOICE_ID eintragen.
 const EL_DEFAULT_VOICE = '21m00Tcm4TlvDq8ikWAM';
 
-async function elevenlabs(text) {
+async function elevenlabs(text, voiceOverride) {
   const key = process.env.ELEVENLABS_API_KEY;
   if (!key) { console.error('TTS: kein ELEVENLABS_API_KEY gesetzt'); return null; }
-  const voice = process.env.ELEVENLABS_VOICE_ID || EL_DEFAULT_VOICE;
+  const voice = voiceOverride || process.env.ELEVENLABS_VOICE_ID || EL_DEFAULT_VOICE;
   const model = process.env.ELEVENLABS_MODEL || 'eleven_flash_v2_5';
   const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}/stream?optimize_streaming_latency=4&output_format=mp3_44100_64`, {
     method: 'POST',
@@ -75,13 +75,13 @@ async function piper(text) {
 }
 
 // speak(text) -> { buffer, mime, ext } | null
-export async function speak(text, { provider } = {}) {
+export async function speak(text, { provider, voiceId } = {}) {
   const t = clean(text);
   if (!t) return null;
   const prov = provider || process.env.TTS_PROVIDER || 'elevenlabs';
   try {
     if (prov === 'piper') return await piper(t);
-    return await elevenlabs(t);
+    return await elevenlabs(t, voiceId);
   } catch (e) {
     console.error('TTS-Fehler:', e.message);
     return null;
