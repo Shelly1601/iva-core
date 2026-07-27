@@ -37,7 +37,53 @@
   .hud-left > .card::after{right:calc(-1 * (var(--gap) + 24px))}
   .hud-right > .card::after{left:calc(-1 * (var(--gap) + 24px));transform:scaleX(-1)}
   .hud-label{position:absolute;top:16px;left:50%;transform:translateX(-50%);z-index:3;font-size:11px;letter-spacing:.34em;text-transform:uppercase;color:var(--blue-lt);text-shadow:0 0 12px rgba(34,230,214,.35);pointer-events:none;white-space:nowrap;font-weight:700}
-  @media(max-width:900px){.hud-stage{grid-template-columns:1fr;overflow:visible;min-height:auto}.hud-left,.hud-right{grid-column:auto}.hud-col{flex-direction:row;overflow-x:auto;padding-bottom:6px}.hud-col > .card{flex:0 0 260px}.hud-label{position:static;transform:none;margin-bottom:8px;text-align:center;display:block}.hud-left > .card::after,.hud-right > .card::after{display:none}#net{position:relative;height:55vh;min-height:280px;z-index:0}}
+  /* --- Mobile-only shells (hidden on desktop) --- */
+  .dock,.sheet-dash,.sheet-backdrop{display:none}
+  @media(max-width:900px){
+    :root{--dock-h:64px}
+    body{padding:0;min-height:100dvh}
+    .wrap{max-width:100%;padding:14px 14px 0;gap:12px;min-height:100dvh}
+    .top{margin-bottom:0}
+    .footer{display:none}
+
+    /* Core is the screen */
+    .hud-stage{grid-template-columns:1fr;overflow:hidden;min-height:0;flex:1;position:relative;height:calc(100dvh - 168px - env(safe-area-inset-bottom));padding:0}
+    .hud-label{position:absolute;top:8px;left:50%;transform:translateX(-50%);margin:0}
+    .hud-col{display:none}
+    #net{position:absolute;inset:0;width:100%;height:100%;z-index:0}
+
+    /* Chat becomes a bottom sheet, docked above the dock */
+    .chat{position:fixed;left:0;right:0;bottom:calc(var(--dock-h) + env(safe-area-inset-bottom));width:100%;max-width:100%;height:calc(85dvh - var(--dock-h) - env(safe-area-inset-bottom));max-height:none;min-height:0;border-radius:20px 20px 0 0;transform:translateY(calc(100% + var(--dock-h) + env(safe-area-inset-bottom)));transition:transform 260ms cubic-bezier(.22,.61,.36,1);z-index:65;box-shadow:0 -18px 40px rgba(0,0,0,.5)}
+    body.chat-open .chat{transform:translateY(0)}
+    .chat .msgs{padding:14px}
+    .chat .ask{padding:12px}
+
+    /* Widgets sheet */
+    .sheet-dash{display:flex;flex-direction:column;position:fixed;left:0;right:0;bottom:calc(var(--dock-h) + env(safe-area-inset-bottom));height:calc(82dvh - var(--dock-h) - env(safe-area-inset-bottom));background:linear-gradient(180deg,#0d1730,#0a1122);border:1px solid var(--border2);border-bottom:0;border-radius:20px 20px 0 0;transform:translateY(calc(100% + var(--dock-h) + env(safe-area-inset-bottom)));transition:transform 260ms cubic-bezier(.22,.61,.36,1);z-index:65;box-shadow:0 -18px 40px rgba(0,0,0,.5);padding:6px 14px 18px}
+    body.dash-open .sheet-dash{transform:translateY(0)}
+    .sheet-handle{width:44px;height:4px;border-radius:2px;background:var(--border2);margin:6px auto 10px;flex:none}
+    .sheet-body{overflow-y:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;gap:12px;padding-bottom:8px}
+    .sheet-body .hud-col{display:flex;flex-direction:column;gap:12px;flex:none}
+    .sheet-body .hud-col > .card{flex:none;width:100%}
+    .sheet-body .hud-col > .card::after{display:none}
+
+    /* Shared backdrop */
+    .sheet-backdrop{display:block;position:fixed;inset:0;background:rgba(3,6,14,.55);backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:opacity 220ms ease;z-index:60}
+    body.chat-open .sheet-backdrop,body.dash-open .sheet-backdrop{opacity:1;pointer-events:auto}
+    body.chat-open,body.dash-open{overflow:hidden}
+
+    /* Bottom dock — hosts moved #wakeBtn, #micBtn, #ttsBtn plus Chat/Widgets */
+    .dock{display:flex;align-items:stretch;gap:8px;position:fixed;left:0;right:0;bottom:0;padding:8px 12px calc(8px + env(safe-area-inset-bottom));background:linear-gradient(180deg,rgba(5,7,14,0),rgba(5,7,14,.85) 30%,rgba(5,7,14,.96));border-top:1px solid var(--border);z-index:70;backdrop-filter:blur(10px);height:calc(var(--dock-h) + env(safe-area-inset-bottom))}
+    .dock > .dock-btn,.dock #wakeBtn,.dock #micBtn,.dock #ttsBtn{flex:1;height:48px;min-width:0;border-radius:14px;background:rgba(16,24,44,.75);border:1px solid var(--border2);color:var(--text);font-size:20px;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;line-height:1;animation:none}
+    .dock > .dock-btn{font-size:18px;flex-direction:column;gap:2px}
+    .dock > .dock-btn .lbl{font-size:10px;letter-spacing:.5px;color:var(--muted);text-transform:uppercase}
+    .dock > .dock-btn.active{background:linear-gradient(135deg,var(--cyan),var(--blue));color:#04121a}
+    .dock > .dock-btn.active .lbl{color:#04121a}
+    /* Preserve state-driven look of the reused buttons */
+    .dock #micBtn.rec{background:var(--cyan);color:#04121a;animation:pulse 1.1s infinite}
+    .dock #wakeBtn.on{background:var(--blue);color:#04121a;box-shadow:0 0 12px var(--blue)}
+    .dock #ttsBtn.off{color:var(--slate)}
+  }
   .chat{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);backdrop-filter:blur(12px);overflow:hidden;max-height:44vh;min-height:260px}
   .chat .head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-weight:700}
   .chat .head .o{width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#9ff4ec,var(--cyan) 55%,var(--blue));box-shadow:0 0 16px var(--cyan)}
@@ -92,12 +138,12 @@
   <main class="hud-stage">
     <div class="hud-label">IVA · COMMAND CENTER</div>
     <canvas id="net"></canvas>
-    <aside class="hud-col hud-left">
+    <aside class="hud-col hud-left" id="colLeft">
       <div class="card"><h3><span class="ic">📅</span> Termine <span class="cnt" id="c-cal">–</span></h3><div id="d-cal"><div class="muted">—</div></div></div>
       <div class="card"><h3><span class="ic">🔥</span> Leads <span class="cnt" id="c-lead">–</span></h3><div id="d-lead"><div class="muted">—</div></div></div>
       <div class="card"><h3><span class="ic">✉️</span> Postfächer <span class="cnt" id="c-mail">–</span></h3><div id="d-mail"><div class="muted">—</div></div></div>
     </aside>
-    <aside class="hud-col hud-right">
+    <aside class="hud-col hud-right" id="colRight">
       <div class="card"><h3><span class="ic">🗓</span> Calendly <span class="cnt" id="c-cly">–</span></h3><div id="d-cly"><div class="muted">—</div></div></div>
       <div class="card"><h3><span class="ic">✓</span> Todos <span class="cnt" id="c-todo">–</span></h3><div id="d-todo"><div class="muted">—</div></div></div>
     </aside>
@@ -116,6 +162,19 @@
   <div class="footer">IVA-Cockpit · v7 · Command Center · live vom Server</div>
   <span id="m-mail" hidden></span><span id="m-lead" hidden></span><span id="m-stat" hidden></span>
 </div>
+
+<div class="sheet-backdrop" id="sheetBackdrop"></div>
+<aside class="sheet-dash" id="sheetDash" aria-label="Widgets">
+  <div class="sheet-handle"></div>
+  <div class="sheet-body" id="sheetDashBody"></div>
+</aside>
+<nav class="dock" id="dock" aria-label="Steuerung">
+  <button type="button" class="dock-btn" id="dockChat"><span>💬</span><span class="lbl">Chat</span></button>
+  <span class="dock-slot" id="dockWake"></span>
+  <span class="dock-slot" id="dockMic"></span>
+  <button type="button" class="dock-btn" id="dockWidgets"><span>▦</span><span class="lbl">Widgets</span></button>
+  <span class="dock-slot" id="dockTts"></span>
+</nav>
 
 <div class="overlay" id="overlay">
   <div class="setup">
@@ -464,6 +523,38 @@
     ctx.globalCompositeOperation='source-over';ALL.forEach(lbl);
     ctx.fillStyle='#04121a';ctx.font='800 15px -apple-system,Segoe UI,sans-serif';ctx.fillText('IVA',cx,cy+5);
     requestAnimationFrame(loop);}
+
+  // ---- Mobile layout: dock + sheets. Moves #wakeBtn/#micBtn/#ttsBtn between
+  // .ask (desktop) and .dock slots (mobile). Handlers/IDs unchanged. ----
+  const mqMobile=window.matchMedia('(max-width:900px)');
+  function toMobile(){
+    $('dockWake').appendChild($('wakeBtn'));
+    $('dockMic').appendChild($('micBtn'));
+    $('dockTts').appendChild($('ttsBtn'));
+    const body=$('sheetDashBody');
+    body.appendChild($('colLeft'));
+    body.appendChild($('colRight'));
+  }
+  function toDesktop(){
+    const ask=document.querySelector('.ask'), chatIn=$('chatIn');
+    ask.insertBefore($('wakeBtn'),chatIn);
+    ask.insertBefore($('micBtn'),chatIn);
+    ask.appendChild($('ttsBtn'));
+    const stage=document.querySelector('.hud-stage');
+    stage.appendChild($('colLeft'));
+    stage.appendChild($('colRight'));
+    document.body.classList.remove('chat-open','dash-open');
+    $('dockChat').classList.remove('active');
+    $('dockWidgets').classList.remove('active');
+  }
+  function applyLayout(){ if(mqMobile.matches) toMobile(); else toDesktop(); }
+  applyLayout();
+  mqMobile.addEventListener('change',applyLayout);
+  function closeSheets(){ document.body.classList.remove('chat-open','dash-open'); $('dockChat').classList.remove('active'); $('dockWidgets').classList.remove('active'); }
+  $('dockChat').addEventListener('click',()=>{ const open=document.body.classList.contains('chat-open'); closeSheets(); if(!open){ document.body.classList.add('chat-open'); $('dockChat').classList.add('active'); $('chatIn').focus(); } });
+  $('dockWidgets').addEventListener('click',()=>{ const open=document.body.classList.contains('dash-open'); closeSheets(); if(!open){ document.body.classList.add('dash-open'); $('dockWidgets').classList.add('active'); } });
+  $('sheetBackdrop').addEventListener('click',closeSheets);
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeSheets(); });
 
   // Boot am Script-Ende, damit alle Canvas-Variablen (cv, ctx, W, H, running, stars)
   // und alle Zeichen-Funktionen (loop, resizeNet, burst, cell, link, glow, hexPath) definiert sind.
