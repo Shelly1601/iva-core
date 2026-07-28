@@ -164,11 +164,16 @@ export async function speak(text, { provider, voiceId } = {}) {
   const t = clean(text);
   if (!t) return null;
   const prov = provider || process.env.TTS_PROVIDER || 'elevenlabs';
+  const t0 = Date.now();
+  console.log(`[${new Date().toISOString()}] [TTS] start | provider=${prov} | chars=${t.length}`);
   try {
-    if (prov === 'piper') return await piper(t);
-    return await elevenlabs(t, voiceId);
+    const out = (prov === 'piper') ? await piper(t) : await elevenlabs(t, voiceId);
+    const dur = Date.now() - t0;
+    console.log(`[${new Date().toISOString()}] [TTS] done | duration=${dur}ms | ${out ? out.buffer.length + 'B ' + out.mime : 'null'}`);
+    return out;
   } catch (e) {
-    console.error('TTS-Fehler:', e.message);
+    const dur = Date.now() - t0;
+    console.error(`[${new Date().toISOString()}] [TTS] error | duration=${dur}ms | ${e.message}`);
     return null;
   }
 }

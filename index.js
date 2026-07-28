@@ -315,7 +315,13 @@ const tools = {
   updateBrand: tool({ description: 'Aktualisiert ein Marken-Profil per id (beliebige Felder: name, website, instagram, linkedin, colors, tone, audience).', parameters: z.object({ id: z.string(), name: z.string().optional(), website: z.string().optional(), instagram: z.string().optional(), linkedin: z.string().optional(), colors: z.array(z.string()).optional(), tone: z.string().optional(), audience: z.string().optional() }),
     execute: async ({ id, ...patch }) => await brands.updateBrand(id, patch) }),
   askArchitect: tool({ description: 'Router fuer Fach- UND Recherche-Anfragen. Delegiert intern an: knowledge (zeitloses Fachwissen zu Finanz/Versicherung/Vorsorge/Rente OHNE Aktualitaets-Anspruch) ODER web-research (aktuelle oeffentliche Fakten: Gesetze, Grenzwerte, Sozialversicherungs-Beitragsbemessungsgrenzen, Steuersaetze, Freibetraege, Foerderbedingungen, Produktdatenblaetter, Versicherungsbedingungen, Preise, Nachrichten, Wetter, Oeffnungszeiten, allgemeine Live-Recherche im Web). PFLICHT fuer JEDE Frage nach einem konkreten aktuellen Wert (Grenzwerte, Steuersaetze, Freibetraege, Beitraege, Preise, Datum-abhaengige Fakten) - solche Werte NIEMALS aus dem Kopf beantworten oder schaetzen, IMMER diesen Router nutzen. NICHT fuer eigene Systeme (Kalender/Mails/CRM/Leads/Kampagnen/Todos) - dafuer die direkten Tools. Ergebnis-Formen: { source:"knowledge", answer } | { source:"web-research", result: { overallConfidence, claims[], answerBrief, gaps[], unverifiedNotice? } } | { source:"architect", question|note }. WICHTIG bei web-research: wenn overallConfidence "unknown" ist ODER unverifiedNotice gesetzt ist, antworte woertlich "Ich konnte dazu gerade keine verlaessliche Information finden." - nichts erfinden, nichts hinzuschaetzen, nicht mit eigenem Wissen mischen. Sonst uebernimm ausschliesslich die recherchierten Werte.', parameters: z.object({ intent: z.string() }),
-    execute: async ({ intent }) => await askArchitect(intent) }),
+    execute: async ({ intent }) => {
+      const t0 = Date.now();
+      console.log(`[${new Date().toISOString()}] [IVA] tool askArchitect start | intent="${String(intent).slice(0, 80)}"`);
+      const res = await askArchitect(intent);
+      console.log(`[${new Date().toISOString()}] [IVA] tool askArchitect finished | source=${res?.source || 'n/a'} | duration=${Date.now() - t0}ms`);
+      return res;
+    } }),
 };
 
 async function askIva(userText, sessionId = 'default', voice = false) {

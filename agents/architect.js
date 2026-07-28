@@ -72,20 +72,35 @@ async function planOnce(intent, strictReminder = '') {
 
 export async function askArchitect(intent) {
   const q = String(intent || '').trim();
-  if (!q) return { source: 'architect', note: 'Keine Anfrage.' };
+  const t0 = Date.now();
+  console.log(`[${new Date().toISOString()}] [ARCH] plan start | intent="${q.slice(0, 80)}"`);
+  if (!q) {
+    console.log(`[${new Date().toISOString()}] [ARCH] return | route=empty | duration=${Date.now() - t0}ms`);
+    return { source: 'architect', note: 'Keine Anfrage.' };
+  }
 
   let plan = await planOnce(q);
   if (!plan) plan = await planOnce(q, 'WICHTIG: Antworte ausschliesslich mit einem einzigen JSON-Objekt, keine Prosa, keine Markdown-Fences.');
-  if (!plan) return { source: 'architect', note: 'Router-Antwort nicht parseable.' };
+  if (!plan) {
+    console.log(`[${new Date().toISOString()}] [ARCH] return | route=unparseable | duration=${Date.now() - t0}ms`);
+    return { source: 'architect', note: 'Router-Antwort nicht parseable.' };
+  }
+  console.log(`[${new Date().toISOString()}] [ARCH] plan done | action=${plan.action} | duration=${Date.now() - t0}ms`);
 
   if (plan.action === 'call-knowledge') {
     const ans = await knowledgeAnswer(plan.question);
+    console.log(`[${new Date().toISOString()}] [ARCH] return | route=knowledge | totalDuration=${Date.now() - t0}ms`);
     return { source: 'knowledge', answer: ans };
   }
   if (plan.action === 'call-web-research') {
     const result = await webResearch(plan.query, plan.preferDomains ? { preferDomains: plan.preferDomains } : {});
+    console.log(`[${new Date().toISOString()}] [ARCH] return | route=web-research | overallConfidence=${result?.overallConfidence || 'n/a'} | totalDuration=${Date.now() - t0}ms`);
     return { source: 'web-research', result };
   }
-  if (plan.action === 'clarify') return { source: 'architect', question: plan.clarify };
+  if (plan.action === 'clarify') {
+    console.log(`[${new Date().toISOString()}] [ARCH] return | route=clarify | totalDuration=${Date.now() - t0}ms`);
+    return { source: 'architect', question: plan.clarify };
+  }
+  console.log(`[${new Date().toISOString()}] [ARCH] return | route=not-relevant | totalDuration=${Date.now() - t0}ms`);
   return { source: 'architect', note: plan.note };
 }

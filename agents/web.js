@@ -557,31 +557,44 @@ async function runFastPath(state) {
   pushTrace(state, 'fast', 'start', 'single search + up to 2 parallel fetches');
   state.researchStartedAt = t0;
 
+  if (state.overallSignal?.aborted) { console.log(`[${new Date().toISOString()}] [FAST] pre-tavily aborted`); return; }
+  console.log(`[${new Date().toISOString()}] [FAST] tavily start`);
+  const tavT0 = Date.now();
   const sr = await tavilySearch(state.query, { limit: 6 });
+  const tavDur = Date.now() - tavT0;
   state.searches = 1;
   if (sr.error) {
+    console.log(`[${new Date().toISOString()}] [FAST] tavily error | duration=${tavDur}ms | code=${sr.error.code}`);
     pushTrace(state, 'fast', 'search-error', sr.error.code);
     return;
   }
   const hits = sr.results || [];
+  console.log(`[${new Date().toISOString()}] [FAST] tavily done | duration=${tavDur}ms | hits=${hits.length}`);
   for (const h of hits) {
     const tier = effectiveTier(h.url, { query: state.query });
     state.hints.set(h.url, { title: h.title, snippet: h.snippet, publishedAt: h.publishedAt, tier });
   }
-  pushTrace(state, 'fast', 'search-done', `${hits.length} candidates`);
+  pushTrace(state, 'fast', 'search-done', `${hits.length} candidates | ${tavDur}ms`);
+
+  if (state.overallSignal?.aborted) { console.log(`[${new Date().toISOString()}] [FAST] pre-fetch aborted`); return; }
 
   const ranked = hits
     .map(h => ({ ...h, tier: effectiveTier(h.url, { query: state.query }) }))
     .sort((a, b) => a.tier - b.tier);
   const toFetch = ranked.slice(0, 2);
   if (toFetch.length === 0) {
+    console.log(`[${new Date().toISOString()}] [FAST] no fetch candidates`);
     pushTrace(state, 'fast', 'no-fetch-candidates', '');
     return;
   }
 
+  console.log(`[${new Date().toISOString()}] [FAST] fetch start | urls=${toFetch.map(x => x.url).join(', ')}`);
+  const fetT0 = Date.now();
   const fetchResults = await Promise.all(toFetch.map(cand =>
     fetchAndExtract(cand.url).catch(e => ({ url: cand.url, error: { code: 'fetch_exception', message: String(e?.message || e) } }))
   ));
+  const fetDur = Date.now() - fetT0;
+  let ok = 0;
   for (const r of fetchResults) {
     state.fetches++;
     if (r.error) {
@@ -594,7 +607,9 @@ async function runFastPath(state) {
       publishedAt: r.publishedAt, tier, bytes: r.bytes, truncated: r.truncated,
     });
     pushTrace(state, 'fast', 'fetch-done', `${r.url} tier=${tier} bytes=${r.bytes}`);
+    ok++;
   }
+  console.log(`[${new Date().toISOString()}] [FAST] fetch done | duration=${fetDur}ms | ok=${ok}/${toFetch.length}`);
   pushTrace(state, 'fast', 'done', `duration=${Date.now() - t0}ms | evidence=${state.evidence.size} hints=${state.hints.size}`);
 }
 
@@ -757,10 +772,15 @@ async function synthesize(state) {
   // Ein Versuch = eigener AbortController + eigener Timer + volles Budget.
   // Fast-Path: Haiku + einmaliger Versuch (kein Retry) fuer Latenz-Ziel <10s.
   // Normal: Sonnet mit einem Retry auf Schema-Fehler.
+  // Fast-Path ausserdem: state.overallSignal (15s Hart-Cap) chained -> Phasen-Ctrl.
   const modelId = state.fastPath ? FAST_MODEL_ID : MODEL_ID;
   async function attempt(reminder) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), state.synthesisBudgetMs);
+    if (state.overallSignal) {
+      if (state.overallSignal.aborted) ctrl.abort();
+      else state.overallSignal.addEventListener('abort', () => ctrl.abort(), { once: true });
+    }
     const startedAt = Date.now();
     try {
       const { object } = await generateObject({
@@ -779,8 +799,10 @@ async function synthesize(state) {
     }
   }
 
+  if (state.fastPath) console.log(`[${new Date().toISOString()}] [FAST] synth start | model=${modelId} | budget=${state.synthesisBudgetMs}ms`);
   pushTrace(state, 'synthesize', 'start', `budget=${state.synthesisBudgetMs}ms | model=${modelId}${state.fastPath ? ' | fast-path' : ''}`);
   const r1 = await attempt();
+  if (state.fastPath) console.log(`[${new Date().toISOString()}] [FAST] synth done | duration=${r1.duration}ms | ok=${r1.ok}${r1.ok ? '' : ' | timedOut=' + r1.timedOut}`);
   if (r1.ok) {
     const out = coalesceSynth(r1.object);
     pushTrace(state, 'synthesize', 'done', `duration=${r1.duration}ms | attempt=1 | ${out.claims.length} claims / ${out.gaps.length} gaps`);
@@ -1151,8 +1173,24 @@ export async function research(query, opts = {}) {
     return { kind: 'web-research', query: q, error: { code: 'invalid_query', message: 'Leere Anfrage.' }, trace: [], budgets: { stepsUsed: 0, fetchesUsed: 0, elapsedMs: 0 }, fetchedAt: now };
   }
 
+  // Fast-Path: 15s Gesamt-Hart-Cap. state.overallSignal wird an synth chained
+  // und an Phasen-Grenzen in runFastPath geprueft. Bei Timeout: sofortiger
+  // Abbruch, unten wird das Fallback-Result geliefert.
+  let fastPathTimer = null;
+  let fastPathHardTimeout = false;
+  if (fastPath) {
+    const overallCtrl = new AbortController();
+    state.overallSignal = overallCtrl.signal;
+    fastPathTimer = setTimeout(() => {
+      fastPathHardTimeout = true;
+      console.log(`[${new Date().toISOString()}] [FAST] HARD 15s TIMEOUT - aborting fast-path`);
+      overallCtrl.abort();
+    }, 15_000);
+  }
+
   try {
     if (fastPath) {
+      console.log(`[${new Date().toISOString()}] [FAST] detected | query="${q.slice(0, 100)}"`);
       pushTrace(state, 'fast', 'detected', 'query looks like simple fact — fast-path aktiviert');
       await runFastPath(state);
     } else {
@@ -1273,6 +1311,26 @@ export async function research(query, opts = {}) {
       gaps = [`AnswerBrief enthielt nicht belegte Angaben (${audit.unbacked.length}): ${preview}`, ...gaps].slice(0, 15);
     }
 
+    // Fast-Path Hart-Timeout: unabhaengig davon, wo in der Pipeline wir gerade
+    // stehen, bei ueberschrittener 15s-Grenze wird ausschliesslich der
+    // Fallback-Satz geliefert. Kein Fallback in die Full-Pipeline.
+    if (fastPath && fastPathHardTimeout) {
+      const dur = Date.now() - state.startedAt;
+      console.log(`[${new Date().toISOString()}] [FAST] return | outcome=hard-timeout | duration=${dur}ms`);
+      return {
+        kind: 'web-research', query: q,
+        overallConfidence: 'unknown',
+        unverifiedNotice: UNVERIFIED_NOTICE,
+        claims: [],
+        answerBrief: '',
+        gaps: ['Fast-Path: 15-Sekunden-Hart-Timeout erreicht, keine verlaessliche Information geliefert.'],
+        trace: state.trace,
+        budgets: { stepsUsed: state.trace.length, fetchesUsed: state.fetches, elapsedMs: dur },
+        fetchedAt: now,
+        error: { code: 'fast_path_timeout' },
+      };
+    }
+
     const result = {
       kind: 'web-research',
       query: q,
@@ -1290,10 +1348,12 @@ export async function research(query, opts = {}) {
       fetchedAt: now,
     };
     if (overall === 'unknown') result.unverifiedNotice = unverifiedNotice || UNVERIFIED_NOTICE;
+    if (fastPath) console.log(`[${new Date().toISOString()}] [FAST] return | outcome=${overall} | duration=${result.budgets.elapsedMs}ms | claims=${claims.length}`);
     return result;
   } catch (e) {
     // Unerwarteter Fehler ausserhalb der Phasen-try/catch (jede Phase hat ihren
-    // eigenen Timer und faengt AbortError selbst ab). Kein globaler Timer mehr.
+    // eigenen Timer und faengt AbortError selbst ab).
+    if (fastPath) console.log(`[${new Date().toISOString()}] [FAST] return | outcome=error | duration=${Date.now() - state.startedAt}ms | ${String(e?.message || e).slice(0, 160)}`);
     return {
       kind: 'web-research', query: q,
       error: { code: 'internal_error', message: String(e?.message || e).slice(0, 300) },
@@ -1301,5 +1361,7 @@ export async function research(query, opts = {}) {
       budgets: { stepsUsed: state.trace.length, fetchesUsed: state.fetches, elapsedMs: Date.now() - state.startedAt },
       fetchedAt: now,
     };
+  } finally {
+    if (fastPathTimer) clearTimeout(fastPathTimer);
   }
 }
