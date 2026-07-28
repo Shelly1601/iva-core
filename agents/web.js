@@ -19,6 +19,10 @@ import { effectiveTier } from './web.sources.js';
 
 // Zentrale Konstanten. Modell-Wechsel = eine Zeile.
 const MODEL_ID = 'claude-sonnet-4-6';
+// Fast-Path Modell: Haiku ist bei generateObject deutlich schneller (~3-5s)
+// als Sonnet (~15-25s). Fuer einfache Faktenfragen ausreichend, weil nur 1-2
+// Primaerquellen synthetisiert werden.
+const FAST_MODEL_ID = 'claude-haiku-4-5-20251001';
 const TAVILY_ENDPOINT = 'https://api.tavily.com/search';
 
 // Budgets
@@ -514,6 +518,86 @@ function pushTrace(state, action, detail, resultSummary) {
   });
 }
 
+// Fast-Path-Erkennung: einfache Einzelfaktenfrage.
+// Positive Signale: "wie hoch", "wann", "was ist der aktuelle …", einzelne
+// Fach-/Grenzwert-Begriffe, Wetter/Preis/Oeffnungszeiten. Negative Signale:
+// Vergleich/Empfehlung/Meinung, Mehrfach-Fragezeichen, Query laenger als 160
+// Zeichen. Heuristik, kein LLM.
+function looksLikeSimpleFact(query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q || q.length > 160) return false;
+  const factPatterns = [
+    /\bwie\s+hoch\b/,
+    /\bwie\s+viel\b/,
+    /\bwie\s+teuer\b/,
+    /\bwas\s+kostet\b/,
+    /\bwann\s+/,
+    /\baktuelle[nrs]?\b/,
+    /\b(oeffnungszeiten|öffnungszeiten|wetter|kurs|leitzins|mindestlohn|zinssatz|preis(?:e)?)\b/,
+    /\b(grundfreibetrag|freibetrag|beitragssatz|steuersatz|beitragsbemessungsgrenze|jahresarbeitsentgeltgrenze|krankenkassenbeitrag|regelbedarf|kirchensteuersatz|solidaritaetszuschlag|rentenbeitrag)\b/,
+    /\bwas\s+ist\s+(der|die|das)\s+(aktuelle|derzeitige|neue|geltende)\b/,
+    /\b(betraegt|beträgt|betrug|liegt|lag)\b.{0,60}\b(bei|auf)\b/,
+  ];
+  if (!factPatterns.some(re => re.test(q))) return false;
+  if ((q.match(/\?/g) || []).length > 1) return false;
+  const complexSignals = [
+    /\bvergleich/, /\bunterschied/, /\bpro\s+und\s+contra/,
+    /\bwelche\s+(optionen|moeglichkeiten|möglichkeiten|alternativen)/,
+    /\brate\s+mir/, /\bempfiehlst/, /\bwas\s+(haeltst|hältst)\b/,
+    /\berklaer|\berklär/, /\bschritt\s+f(u|ü)r\s+schritt/,
+  ];
+  if (complexSignals.some(re => re.test(q))) return false;
+  return true;
+}
+
+// Fast-Path-Pipeline: 1 Tavily-Suche + parallel bis zu 2 Fetches auf die
+// Tier-1-priorisierten Kandidaten. Kein LLM-Tool-Loop, kein Refute.
+async function runFastPath(state) {
+  const t0 = Date.now();
+  pushTrace(state, 'fast', 'start', 'single search + up to 2 parallel fetches');
+  state.researchStartedAt = t0;
+
+  const sr = await tavilySearch(state.query, { limit: 6 });
+  state.searches = 1;
+  if (sr.error) {
+    pushTrace(state, 'fast', 'search-error', sr.error.code);
+    return;
+  }
+  const hits = sr.results || [];
+  for (const h of hits) {
+    const tier = effectiveTier(h.url, { query: state.query });
+    state.hints.set(h.url, { title: h.title, snippet: h.snippet, publishedAt: h.publishedAt, tier });
+  }
+  pushTrace(state, 'fast', 'search-done', `${hits.length} candidates`);
+
+  const ranked = hits
+    .map(h => ({ ...h, tier: effectiveTier(h.url, { query: state.query }) }))
+    .sort((a, b) => a.tier - b.tier);
+  const toFetch = ranked.slice(0, 2);
+  if (toFetch.length === 0) {
+    pushTrace(state, 'fast', 'no-fetch-candidates', '');
+    return;
+  }
+
+  const fetchResults = await Promise.all(toFetch.map(cand =>
+    fetchAndExtract(cand.url).catch(e => ({ url: cand.url, error: { code: 'fetch_exception', message: String(e?.message || e) } }))
+  ));
+  for (const r of fetchResults) {
+    state.fetches++;
+    if (r.error) {
+      pushTrace(state, 'fast', 'fetch-error', `${r.url}: ${r.error.code}`);
+      continue;
+    }
+    const tier = effectiveTier(r.url, { contentType: r.contentType, query: state.query });
+    state.evidence.set(r.url, {
+      url: r.url, title: r.title, contentType: r.contentType, text: r.text,
+      publishedAt: r.publishedAt, tier, bytes: r.bytes, truncated: r.truncated,
+    });
+    pushTrace(state, 'fast', 'fetch-done', `${r.url} tier=${tier} bytes=${r.bytes}`);
+  }
+  pushTrace(state, 'fast', 'done', `duration=${Date.now() - t0}ms | evidence=${state.evidence.size} hints=${state.hints.size}`);
+}
+
 async function runResearchLoop(state) {
   const tools = makeTools(state);
   // Eigener AbortController + Timer fuer die Recherche-Phase.
@@ -671,15 +755,16 @@ async function synthesize(state) {
   const prompt = `Anfrage: ${state.query}\n\nRecherche-Trail (Zusammenfassung des Loops, nur Kontext):\n${state.loopSummary || '(keine)'}\n\nBelegmaterial (Fetched-Originalquellen):\n${evidenceBlock || '(keine)'}\n\nHinweise aus dem Suchprovider (nur Hinweise, keine Belege):\n${hintsBlock || '(keine)'}\n\nErstelle jetzt die strukturierte Synthese.`;
 
   // Ein Versuch = eigener AbortController + eigener Timer + volles Budget.
-  // Es gibt maximal ZWEI Versuche: erster wie bisher, zweiter mit striktem
-  // Schema-Reminder falls der erste an NoObjectGeneratedError scheitert.
+  // Fast-Path: Haiku + einmaliger Versuch (kein Retry) fuer Latenz-Ziel <10s.
+  // Normal: Sonnet mit einem Retry auf Schema-Fehler.
+  const modelId = state.fastPath ? FAST_MODEL_ID : MODEL_ID;
   async function attempt(reminder) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), state.synthesisBudgetMs);
     const startedAt = Date.now();
     try {
       const { object } = await generateObject({
-        model: anthropic(MODEL_ID),
+        model: anthropic(modelId),
         schema: SynthesisSchema,
         system: SYNTHESIS_SYSTEM + (reminder ? '\n\n' + reminder : ''),
         prompt,
@@ -694,7 +779,7 @@ async function synthesize(state) {
     }
   }
 
-  pushTrace(state, 'synthesize', 'start', `budget=${state.synthesisBudgetMs}ms`);
+  pushTrace(state, 'synthesize', 'start', `budget=${state.synthesisBudgetMs}ms | model=${modelId}${state.fastPath ? ' | fast-path' : ''}`);
   const r1 = await attempt();
   if (r1.ok) {
     const out = coalesceSynth(r1.object);
@@ -710,6 +795,10 @@ async function synthesize(state) {
   if (isSchemaErr) traceZodIssues(state, 'attempt1', extractZodIssues(r1.error));
   if (!isSchemaErr) {
     return { answerBrief: '', claims: [], gaps: ['Synthese fehlgeschlagen.'] };
+  }
+  // Fast-Path: kein Retry - Latenz-Ziel hat Vorrang. Nutzer sieht den Fallback-Satz.
+  if (state.fastPath) {
+    return { answerBrief: '', claims: [], gaps: ['Synthese konnte kein gueltiges strukturiertes Ergebnis erzeugen.'] };
   }
 
   // Retry mit striktem Reminder. Frischer AbortController, volles Budget.
@@ -1032,20 +1121,26 @@ function verifyClaimTokens(claims, state) {
 export async function research(query, opts = {}) {
   const q = String(query || '').trim();
   const now = new Date().toISOString();
+  // Fast-Path: automatisch fuer einfache Faktenfragen, es sei denn opts.fast === false.
+  // opts.fast === true erzwingt Fast-Path unabhaengig vom Muster.
+  const fastPath = opts.fast === true || (opts.fast !== false && looksLikeSimpleFact(q));
+
   const state = {
     query: q,
     startedAt: Date.now(),
+    fastPath,
     // Jede Phase hat ihr eigenes Budget, eigenen AbortController + Timer.
-    // opts.budgetMs (falls gesetzt) ueberschreibt alle drei; pro-Phase-Opts
-    // gewinnen zusaetzlich.
+    // Fast-Path reduziert das Synthese-Budget stark (Haiku antwortet schnell).
     researchBudgetMs:  Math.min(Math.max(Number(opts.researchBudgetMs)  || Number(opts.budgetMs) || DEFAULT_RESEARCH_BUDGET_MS,  5000), MAX_BUDGET_MS),
-    synthesisBudgetMs: Math.min(Math.max(Number(opts.synthesisBudgetMs) || Number(opts.budgetMs) || DEFAULT_SYNTHESIS_BUDGET_MS, 5000), MAX_BUDGET_MS),
+    synthesisBudgetMs: fastPath
+      ? Math.min(Math.max(Number(opts.synthesisBudgetMs) || Number(opts.budgetMs) || 10_000, 5000), MAX_BUDGET_MS)
+      : Math.min(Math.max(Number(opts.synthesisBudgetMs) || Number(opts.budgetMs) || DEFAULT_SYNTHESIS_BUDGET_MS, 5000), MAX_BUDGET_MS),
     refutationBudgetMs:Math.min(Math.max(Number(opts.refutationBudgetMs)|| Number(opts.budgetMs) || DEFAULT_REFUTATION_BUDGET_MS,5000), MAX_BUDGET_MS),
     maxSteps: Math.min(Math.max(Number(opts.maxSteps) || DEFAULT_MAX_STEPS, 2), MAX_STEPS_CAP),
     maxFetches: Math.min(Math.max(Number(opts.maxFetches) || DEFAULT_MAX_FETCHES, 1), 8),
     maxSearches: Math.min(Math.max(Number(opts.maxSearches) || DEFAULT_MAX_SEARCHES, 1), 10),
     searches: 0, fetches: 0,
-    researchStartedAt: 0,       // gesetzt in runResearchLoop
+    researchStartedAt: 0,       // gesetzt in runResearchLoop/runFastPath
     evidence: new Map(),
     hints: new Map(),
     trace: [],
@@ -1057,7 +1152,12 @@ export async function research(query, opts = {}) {
   }
 
   try {
-    await runResearchLoop(state);
+    if (fastPath) {
+      pushTrace(state, 'fast', 'detected', 'query looks like simple fact — fast-path aktiviert');
+      await runFastPath(state);
+    } else {
+      await runResearchLoop(state);
+    }
     if (state.evidence.size === 0 && state.hints.size === 0) {
       return {
         kind: 'web-research', query: q,
@@ -1116,7 +1216,14 @@ export async function research(query, opts = {}) {
 
     // 5) B+C: Refute (nur high-Claims, minimales Schema). refute() filtert
     //    intern und ruft LLM nur wenn noetig.
-    const refu = await refute(state, claims);
+    //    Fast-Path: keine separate Falsifikations-Runde.
+    let refu;
+    if (fastPath) {
+      pushTrace(state, 'refute', 'skipped', 'fast-path');
+      refu = { refutations: [], failed: false, timedOut: false };
+    } else {
+      refu = await refute(state, claims);
+    }
 
     // 6) LLM-Refutations in bestehende Claims mergen (mutiert claims).
     applyRefutations(claims, refu.refutations);
