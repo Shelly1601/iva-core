@@ -316,7 +316,7 @@ async function fetchAndExtract(rawUrl) {
 // ---------------------------------------------------------------------------
 // Tavily-Search-Adapter. Antwort ist HINWEIS, kein Beleg.
 // ---------------------------------------------------------------------------
-async function tavilySearch(query, { limit = 5, includeDomains, excludeDomains } = {}) {
+async function tavilySearch(query, { limit = 5, includeDomains, excludeDomains, timeoutMs = SEARCH_TIMEOUT_MS } = {}) {
   const key = process.env.TAVILY_API_KEY;
   if (!key) return { error: { code: 'provider_down', message: 'TAVILY_API_KEY fehlt.' } };
   const body = {
@@ -330,7 +330,7 @@ async function tavilySearch(query, { limit = 5, includeDomains, excludeDomains }
   if (includeDomains?.length) body.include_domains = includeDomains.slice(0, 20);
   if (excludeDomains?.length) body.exclude_domains = excludeDomains.slice(0, 20);
   const ctrl = new AbortController();
-  const id = setTimeout(() => ctrl.abort(), SEARCH_TIMEOUT_MS);
+  const id = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(TAVILY_ENDPOINT, {
       method: 'POST',
@@ -550,6 +550,58 @@ function looksLikeSimpleFact(query) {
   return true;
 }
 
+// Offizielle deutsche Primaerquellen fuer Sozialversicherung / Steuern /
+// Gesetze / Grenzwerte. Wird genutzt, wenn die erste Tavily-Suche keinen
+// Tier-1-Hit liefert -> gezielte zweite Suche mit include_domains.
+const OFFICIAL_DE_DOMAINS = [
+  'bundesgesundheitsministerium.de',
+  'gesetze-im-internet.de',
+  'bundesregierung.de',
+  'bmas.de',
+  'deutsche-rentenversicherung.de',
+  'gkv-spitzenverband.de',
+];
+
+// Heuristik: passt die Query in eine der vier Kategorien
+// (Sozialversicherung, Steuern, Gesetze, Grenzwerte)? Nur dann macht die
+// gezielte Fallback-Suche auf OFFICIAL_DE_DOMAINS Sinn.
+function needsOfficialSources(query) {
+  const q = String(query || '').toLowerCase();
+  return (
+    /\b(grundfreibetrag|freibetrag|beitragssatz|steuersatz|beitragsbemessungsgrenze|jahresarbeitsentgeltgrenze|krankenkassenbeitrag|regelbedarf|kirchensteuersatz|solidaritaetszuschlag|solidaritätszuschlag|rentenbeitrag|mindestlohn|einkommensgrenze|beitragsgrenze|pflichtgrenze|zuzahlung)\b/.test(q)
+    || /\b(sozialversicherung|krankenversicherung|rentenversicherung|arbeitslosenversicherung|pflegeversicherung|rentenbeitraege|rentenbeiträge)\b/.test(q)
+    || /\b(gesetz|paragraph|paragraf|verordnung|steuergesetz|einkommensteuer|umsatzsteuer|estg|sgb|abgabenordnung)\b/.test(q)
+    || /§/.test(q)
+  );
+}
+
+// Kompakte Query fuer Retry: entfernt Frageeinleitung, Artikel-Fuellwoerter und
+// Interpunktion. Sonst Tavily kaut auf dem Frage-Boilerplate; die Kern-Nomen
+// sind das, was ranken soll.
+function shortenQuery(q) {
+  let s = String(q || '').trim();
+  s = s.replace(/^\s*wie\s+hoch\s+(ist|war|liegt|lag|betraegt|beträgt)\s+(der|die|das|den|dem|des)?\s*/i, '');
+  s = s.replace(/^\s*wie\s+viel\s+(ist|war|betraegt|beträgt|kostet)\s+(der|die|das|den|dem|des)?\s*/i, '');
+  s = s.replace(/^\s*wie\s+teuer\s+(ist|war)\s+(der|die|das|den|dem|des)?\s*/i, '');
+  s = s.replace(/^\s*was\s+(ist|war|betraegt|beträgt|kostet)\s+(der|die|das|den|dem|des)?\s*(aktuelle|derzeitige|neue|geltende)?\s*/i, '');
+  s = s.replace(/^\s*wann\s+(gilt|tritt|beginnt|endet|ist|war)\s+/i, '');
+  s = s.replace(/[?!.]+\s*$/, '');
+  s = s.replace(/\s+/g, ' ').trim();
+  return s.slice(0, 80) || String(q || '').slice(0, 80);
+}
+
+// Bevorzugung innerhalb gleicher Tier: offizielle Domain aus OFFICIAL_DE_DOMAINS
+// steht vor anderen. Return: true, wenn URL zu einer offiziellen Domain gehoert.
+function isOfficialDomain(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+    for (const d of OFFICIAL_DE_DOMAINS) {
+      if (host === d || host.endsWith('.' + d)) return true;
+    }
+  } catch { /* ignore */ }
+  return false;
+}
+
 // Fast-Path-Pipeline: 1 Tavily-Suche + parallel bis zu 2 Fetches auf die
 // Tier-1-priorisierten Kandidaten. Kein LLM-Tool-Loop, kein Refute.
 async function runFastPath(state) {
@@ -560,15 +612,44 @@ async function runFastPath(state) {
   if (state.overallSignal?.aborted) { console.log(`[${new Date().toISOString()}] [FAST] pre-tavily aborted`); return; }
   console.log(`[${new Date().toISOString()}] [FAST] tavily start`);
   const tavT0 = Date.now();
-  const sr = await tavilySearch(state.query, { limit: 6 });
-  const tavDur = Date.now() - tavT0;
-  state.searches = 1;
+  let sr = await tavilySearch(state.query, { limit: 6 });
+  let tavDur = Date.now() - tavT0;
+  state.searches++;
+
+  // Retry: genau EINMAL, ausschliesslich bei provider_down (inkl. Timeout).
+  // Kuerzere Query + optional include_domains bei offiziellen Themen. Hart auf
+  // 4 Sekunden begrenzt. Rate-Limit oder erfolgreiche leere Suche triggern
+  // KEINEN Retry.
+  if (sr.error && sr.error.code === 'provider_down' && !state.overallSignal?.aborted) {
+    console.log(`[${new Date().toISOString()}] [FAST] tavily error | duration=${tavDur}ms | code=provider_down - retry with shorter query + 4s cap`);
+    pushTrace(state, 'fast', 'search-retry', `after provider_down (${tavDur}ms)`);
+    const shortQ = shortenQuery(state.query);
+    const officialInclude = needsOfficialSources(state.query) ? OFFICIAL_DE_DOMAINS : undefined;
+    const rT0 = Date.now();
+    const retrySr = await tavilySearch(shortQ, { limit: 6, timeoutMs: 4000, includeDomains: officialInclude });
+    const rDur = Date.now() - rT0;
+    state.searches++;
+    if (retrySr.error) {
+      console.log(`[${new Date().toISOString()}] [FAST] tavily retry failed | duration=${rDur}ms | code=${retrySr.error.code}`);
+      pushTrace(state, 'fast', 'search-retry-failed', `${retrySr.error.code} | ${rDur}ms`);
+      state.fastPathProviderDown = true;
+      return;
+    }
+    console.log(`[${new Date().toISOString()}] [FAST] tavily retry ok | duration=${rDur}ms | hits=${(retrySr.results || []).length} | short-query="${shortQ}"${officialInclude ? ' | +official' : ''}`);
+    pushTrace(state, 'fast', 'search-retry-done', `${(retrySr.results || []).length} hits | ${rDur}ms | short-query`);
+    sr = retrySr;
+    tavDur = tavDur + rDur;
+  }
+
   if (sr.error) {
+    // Nicht retriable (z.B. rate_limited) oder Retry oben nicht ausgeloest, weil
+    // Bedingung nicht erfuellt: sofort ehrlicher Fallback, kein dritter Versuch.
     console.log(`[${new Date().toISOString()}] [FAST] tavily error | duration=${tavDur}ms | code=${sr.error.code}`);
     pushTrace(state, 'fast', 'search-error', sr.error.code);
+    state.fastPathProviderDown = true;
     return;
   }
-  const hits = sr.results || [];
+  let hits = sr.results || [];
   console.log(`[${new Date().toISOString()}] [FAST] tavily done | duration=${tavDur}ms | hits=${hits.length}`);
   for (const h of hits) {
     const tier = effectiveTier(h.url, { query: state.query });
@@ -576,11 +657,44 @@ async function runFastPath(state) {
   }
   pushTrace(state, 'fast', 'search-done', `${hits.length} candidates | ${tavDur}ms`);
 
+  // Fallback: keine Tier-1-Quelle in der ersten Suche + Query ist eine
+  // Sozialversicherungs-/Steuer-/Gesetzes-/Grenzwertfrage -> gezielt eine
+  // zweite Suche mit include_domains auf OFFICIAL_DE_DOMAINS.
+  const hasTier1 = hits.some(h => effectiveTier(h.url, { query: state.query }) === 1);
+  if (!hasTier1 && needsOfficialSources(state.query) && !state.overallSignal?.aborted) {
+    console.log(`[${new Date().toISOString()}] [FAST] tavily fallback start | domains=${OFFICIAL_DE_DOMAINS.length} official`);
+    const t2 = Date.now();
+    const sr2 = await tavilySearch(state.query, { limit: 6, includeDomains: OFFICIAL_DE_DOMAINS });
+    const t2Dur = Date.now() - t2;
+    state.searches++;
+    if (sr2.error) {
+      console.log(`[${new Date().toISOString()}] [FAST] tavily fallback error | duration=${t2Dur}ms | code=${sr2.error.code}`);
+      pushTrace(state, 'fast', 'search2-error', sr2.error.code);
+    } else {
+      const officialHits = sr2.results || [];
+      console.log(`[${new Date().toISOString()}] [FAST] tavily fallback done | duration=${t2Dur}ms | hits=${officialHits.length}`);
+      for (const h of officialHits) {
+        const tier = effectiveTier(h.url, { query: state.query });
+        state.hints.set(h.url, { title: h.title, snippet: h.snippet, publishedAt: h.publishedAt, tier });
+      }
+      // Offizielle Treffer nach vorne, alte Treffer ohne Duplikate danach.
+      const seen = new Set(officialHits.map(h => h.url));
+      hits = officialHits.concat(hits.filter(h => !seen.has(h.url)));
+      pushTrace(state, 'fast', 'search2-done', `${officialHits.length} official | ${t2Dur}ms`);
+    }
+  }
+
   if (state.overallSignal?.aborted) { console.log(`[${new Date().toISOString()}] [FAST] pre-fetch aborted`); return; }
 
+  // Priorisierung: Tier aufsteigend, innerhalb gleicher Tier offizielle Domain
+  // aus OFFICIAL_DE_DOMAINS vor sonstigen. Deterministisch.
   const ranked = hits
-    .map(h => ({ ...h, tier: effectiveTier(h.url, { query: state.query }) }))
-    .sort((a, b) => a.tier - b.tier);
+    .map(h => ({ ...h, tier: effectiveTier(h.url, { query: state.query }), official: isOfficialDomain(h.url) }))
+    .sort((a, b) => {
+      if (a.tier !== b.tier) return a.tier - b.tier;
+      if (a.official !== b.official) return a.official ? -1 : 1;
+      return 0;
+    });
   const toFetch = ranked.slice(0, 2);
   if (toFetch.length === 0) {
     console.log(`[${new Date().toISOString()}] [FAST] no fetch candidates`);
@@ -1193,6 +1307,24 @@ export async function research(query, opts = {}) {
       console.log(`[${new Date().toISOString()}] [FAST] detected | query="${q.slice(0, 100)}"`);
       pushTrace(state, 'fast', 'detected', 'query looks like simple fact — fast-path aktiviert');
       await runFastPath(state);
+      // Suchprovider auch nach Retry unerreichbar -> sofortiger ehrlicher
+      // Fallback, kein Wechsel in Full-Research.
+      if (state.fastPathProviderDown) {
+        const dur = Date.now() - state.startedAt;
+        console.log(`[${new Date().toISOString()}] [FAST] return | outcome=provider-down | duration=${dur}ms`);
+        return {
+          kind: 'web-research', query: q,
+          overallConfidence: 'unknown',
+          unverifiedNotice: 'Ich konnte dazu gerade keine verlässliche Information finden.',
+          claims: [],
+          answerBrief: '',
+          gaps: ['Suchprovider nicht erreichbar (auch nach Retry mit kürzerer Query).'],
+          trace: state.trace,
+          budgets: { stepsUsed: state.trace.length, fetchesUsed: state.fetches, searchesUsed: state.searches, elapsedMs: dur },
+          fetchedAt: now,
+          error: { code: 'provider_down', message: 'Tavily nicht erreichbar (2 Versuche).' },
+        };
+      }
     } else {
       await runResearchLoop(state);
     }
