@@ -382,7 +382,7 @@ async function askIva(userText, sessionId = 'default', voice = false, agentId = 
 // Streaming-Variante von askIva fuer /api/chat/stream (Phase 1). Teilt Prompt-Aufbau,
 // Verlauf und Tools mit askIva ueber die Modul-Helper (buildSystemPrompt, loadConversations,
 // saveConversations, tools, MAX_TURNS). askIva selbst bleibt unangetastet -> Telegram sicher.
-async function streamIva(userText, sessionId = 'default', voice = false, agentId = 'iva-standard') {
+async function streamIva(userText, sessionId = 'default', voice = false, agentId = 'iva-standard', abortSignal) {
   const agent = getAgent(agentId);
   const agentTools = agentId === 'iva-standard' ? tools : assembleTools(agent);
   let system = await buildSystemPrompt();
@@ -395,6 +395,7 @@ async function streamIva(userText, sessionId = 'default', voice = false, agentId
   return streamText({
     model: routed.model,
     system, messages, tools: agentTools, maxSteps: 6,
+    abortSignal,
     onFinish: async ({ text, usage }) => {
       await recordUsage(routed, usage);
       conv[sessionId] = [...messages, { role: 'assistant', content: text || '(ok)' }].slice(-MAX_TURNS);
@@ -507,10 +508,14 @@ app.post('/api/todos', async (req, res) => { const m = await loadMemory(); m.tod
 app.post('/api/todos/toggle', async (req, res) => { const m = await loadMemory(); const t = (m.todos || []).find(t => t.ts === req.body?.ts); if (t) { t.done = !t.done; await saveMemory(m); } res.json({ ok: true }); });
 app.post('/api/chat', async (req, res) => { try { res.json({ reply: await askIva(req.body?.message || '', req.body?.sessionId || 'web', req.body?.voice === true) }); } catch (e) { res.json({ reply: 'Fehler: ' + e.message }); } });
 app.post('/api/chat/stream', async (req, res) => {
+  const aborter = new AbortController();
+  req.on('aborted', () => aborter.abort());
+  res.on('close', () => { if (!res.writableEnded) aborter.abort(); });
   try {
-    const result = await streamIva(req.body?.message || '', req.body?.sessionId || 'web', req.body?.voice === true);
+    const result = await streamIva(req.body?.message || '', req.body?.sessionId || 'web', req.body?.voice === true, req.body?.agentId || 'iva-standard', aborter.signal);
     result.pipeTextStreamToResponse(res);
   } catch (e) {
+    if (aborter.signal.aborted) return;
     if (!res.headersSent) { res.status(500); res.setHeader('Content-Type', 'text/plain; charset=utf-8'); }
     res.end('Fehler: ' + e.message);
   }
