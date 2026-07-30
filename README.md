@@ -1,6 +1,6 @@
 # IVA-Core
 
-Backend („Gehirn") von IVA. Node.js + Express, deployt auf Railway. Bündelt Kalender, Mail, CRM-Leads, Todos, Calendly, Sprachnachrichten, Morning-Briefing — gesteuert über Telegram und eine kleine REST-API fürs Frontend.
+Backend („Gehirn") von IVA. Node.js + Express, deployt auf Railway. Bündelt Kalender, Mail, CRM-Leads, Todos, Calendly, Sprachnachrichten, Morning-Briefing — gesteuert über Telegram und eine kleine REST-API fürs Frontend. Das eigenständige Heat Hero CRM und der Heat-Hero-Bereich im Multi CRM sind bewusst getrennte Datenquellen.
 
 ## Lokal starten
 1. `npm install`

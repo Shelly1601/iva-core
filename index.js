@@ -36,8 +36,8 @@ const HEATHERO_LEADS_URL = 'https://thbvjafssbealqsswhdv.supabase.co/functions/v
 const MEINCRM_REST_URL = 'https://qqyoqshjwpkmerilhjus.supabase.co/rest/v1/leads';
 
 const CRM_SOURCES = [
-  { label: 'HeatHero', group: 'Arbeit', mode: 'gateway', projectId: null },
-  { label: 'HeatHero (Mein CRM)', group: 'Mein CRM', mode: 'rest', projectId: process.env.HEATHERO_PROJECT_ID },
+  { label: 'Heat Hero CRM (eigenstaendig)', group: 'Arbeit', mode: 'gateway', projectId: null },
+  { label: 'Heat Hero (im Multi CRM)', group: 'Mein CRM', mode: 'rest', projectId: process.env.HEATHERO_PROJECT_ID },
   { label: 'Goals & Concepts', group: 'Mein CRM', mode: 'rest', projectId: process.env.GOALS_CONCEPTS_PROJECT_ID },
   { label: 'Koop Steuerberater', group: 'Mein CRM', mode: 'rest', projectId: process.env.KOOP_STEUERBERATER_PROJECT_ID },
   { label: 'Sol', group: 'Mein CRM', mode: 'rest', projectId: process.env.SOL_PROJECT_ID },
@@ -157,10 +157,11 @@ function loadMailAccounts() {
   }
   return a;
 }
-async function fetchInbox(acc, limit) {
+async function fetchInbox(acc, limit, folder = 'INBOX') {
   const client = new ImapFlow({ host: acc.host, port: 993, secure: true, auth: { user: acc.user, pass: acc.pass }, logger: false });
+  const mailbox = String(folder || 'INBOX').trim() || 'INBOX';
   const out = []; await client.connect();
-  const lock = await client.getMailboxLock('INBOX');
+  const lock = await client.getMailboxLock(mailbox);
   try {
     const total = client.mailbox.exists;
     if (total > 0) {
@@ -170,7 +171,17 @@ async function fetchInbox(acc, limit) {
         let hdr = ''; try { hdr = m.headers ? m.headers.toString() : ''; } catch {}
         const hdrAddrs = hdr.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g) || [];
         const an = [...new Set([...toEnv, ...hdrAddrs])].join(', ');
-        out.push({ konto: acc.label, bereich: bereichFor(an), an, von: m.envelope?.from?.[0]?.address || '', betreff: m.envelope?.subject || '(kein Betreff)', ungelesen: !m.flags?.has('\\Seen') });
+        out.push({
+          konto: acc.label,
+          ordner: mailbox,
+          bereich: bereichFor(an),
+          an,
+          von: m.envelope?.from?.[0]?.address || '',
+          von_name: m.envelope?.from?.[0]?.name || '',
+          betreff: m.envelope?.subject || '(kein Betreff)',
+          datum: m.envelope?.date?.toISOString?.() || null,
+          ungelesen: !m.flags?.has('\\Seen'),
+        });
       }
     }
   } finally { lock.release(); await client.logout(); }
@@ -202,6 +213,55 @@ async function fetchLeads(src) {
 }
 async function fetchAllLeads() {
   return await Promise.all(CRM_SOURCES.map(fetchLeads));
+}
+
+async function heatHeroGateway(path = '', { method = 'GET', body } = {}) {
+  const key = process.env.HEATHERO_API_KEY;
+  if (!key) throw new Error('kein HEATHERO_API_KEY gesetzt');
+  const r = await fetchWithTimeout(`${HEATHERO_LEADS_URL}${path}`, {
+    method,
+    headers: {
+      'X-API-Key': key,
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  }, 8000);
+  const text = await r.text();
+  const payload = safeJson(text);
+  if (!r.ok) {
+    const message = payload && typeof payload === 'object' && payload.error
+      ? payload.error
+      : `${r.status}: ${String(text).slice(0, 200)}`;
+    throw new Error(message);
+  }
+  return payload;
+}
+
+async function searchHeatHeroLeads(search, limit = 20) {
+  const params = new URLSearchParams({ search: String(search || '').trim(), limit: String(Math.min(Math.max(limit || 20, 1), 50)) });
+  const payload = await heatHeroGateway(`?${params.toString()}`);
+  return { system: 'Heat Hero CRM (eigenstaendig)', count: payload?.count ?? payload?.data?.length ?? 0, leads: payload?.data ?? [] };
+}
+
+async function updateHeatHeroLeadStatus(id, status, reason) {
+  const leadId = encodeURIComponent(String(id));
+  const current = await heatHeroGateway(`/${leadId}`);
+  const oldStatus = current?.data?.status_detail ?? null;
+  const updated = await heatHeroGateway(`/${leadId}`, { method: 'PATCH', body: { status_detail: status } });
+  const note = `IVA: Status von "${oldStatus ?? 'unbekannt'}" auf "${status}" geaendert.${reason ? ` Anlass: ${reason}` : ''}`;
+  let noteSaved = true;
+  try {
+    await heatHeroGateway(`/${leadId}/notes`, { method: 'POST', body: { content: note } });
+  } catch (_) {
+    noteSaved = false;
+  }
+  return {
+    system: 'Heat Hero CRM (eigenstaendig)',
+    lead: updated?.data ?? updated,
+    alter_status: oldStatus,
+    neuer_status: status,
+    protokollnotiz_gespeichert: noteSaved,
+  };
 }
 
 async function buildSystemPrompt() {
@@ -262,7 +322,7 @@ Jetzt gerade: ${jetzt} (Europe/Berlin). Nutze das für "heute", "morgen" und "di
 Über Nadine und ihr Business:
 
 - Sie betreut mehrere Marken und Unternehmen.
-- HeatHero (heat-hero.com): eigenes CRM über api-gateway.
+- Heat Hero CRM (eigenständig, heat-hero.com): eigenes System über api-gateway. Nicht mit „Heat Hero im Multi CRM“ verwechseln.
 - Goals & Concepts (goalsandconcepts.de), Sol Living (sol-living.de), Versuro, Koop Steuerberater: Supabase.
 - Privat: sell.nadine@outlook.de.
 - E-Mails besitzen das Feld "bereich". Nutze es zum Filtern und Gruppieren.
@@ -281,7 +341,7 @@ const ALL_SKILLS = {
   memory:    memorySkill({ loadMemory, saveMemory }),
   calendar:  calendarSkill({ getEventsRaw, getCalendlyEvents, fmtEvents }),
   mails:     mailsSkill({ loadMailAccounts, fetchInbox }),
-  crm:       crmSkill({ fetchAllLeads }),
+  crm:       crmSkill({ fetchAllLeads, searchHeatHeroLeads, updateHeatHeroLeadStatus }),
   marketing: marketingSkill({ campaigns, brands, analyzeReferences, generateImage, generateContent }),
   research:  researchSkill({ askArchitect }),
 };
