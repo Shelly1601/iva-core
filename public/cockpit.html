@@ -216,7 +216,7 @@
   function bubble(cls,text){const d=document.createElement('div');d.className='bubble '+cls;d.textContent=text;$('msgs').appendChild(d);$('msgs').scrollTop=$('msgs').scrollHeight;return d;}
   async function sendChat(viaVoice){const inp=$('chatIn');const t=inp.value.trim();if(!t)return;
     unlockAudio();
-    if(viaVoice===true){ setState('thinking'); try{if(rec)rec.stop();}catch(e){} }   // Ohr aus, solange IVA denkt+spricht
+    if(viaVoice===true){ clearVoiceDraft(); setState('thinking'); try{if(rec)rec.stop();}catch(e){} }   // Ohr aus, solange IVA denkt+spricht
     bubble('user',t);inp.value='';const b=bubble('iva','…');
     resetTTS();
     try{
@@ -394,34 +394,65 @@
   // ---- Sprache: Mikro + Wake-Word „Eva wake up" + Gespraechsmodus (nur Chrome) ----
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   let rec=null, wakeOn=false, awake=false;
+  const VOICE_PAUSE_MS=3000;
+  let voiceDraft='', voicePauseTimer=null;
+  function clearVoiceDraft(){ clearTimeout(voicePauseTimer); voicePauseTimer=null; voiceDraft=''; }
+  function armVoicePause(){
+    clearTimeout(voicePauseTimer);
+    voicePauseTimer=setTimeout(()=>{
+      const txt=voiceDraft.trim(); voiceDraft=''; voicePauseTimer=null;
+      if(!txt||isBusyState()) return;
+      $('chatIn').value=txt;
+      sendChat(true);
+    },VOICE_PAUSE_MS);
+  }
+  function queueVoiceText(txt){
+    const clean=String(txt||'').trim();
+    if(clean) voiceDraft=(voiceDraft+' '+clean).trim();
+    if(!voiceDraft) return;
+    setStatus('on','Eva hört weiter zu …');
+    armVoicePause();
+  }
   function startRec(){ if(!rec||isBusyState())return; try{rec.start();}catch(e){} }
   function ensureRec(){
     if(!SR){ bubble('sys','Sprache/Wake-Word geht nur in Chrome — Safari kann das leider nicht.'); return null; }
     if(rec) return rec;
-    rec=new SR(); rec.lang='de-DE'; rec.interimResults=false;
-    rec.onresult=e=>{ const txt=(e.results[e.results.length-1][0].transcript||'').trim();
-      if(wakeOn) handleWake(txt); else { $('chatIn').value=txt; sendChat(true); } };
-    rec.onend=()=>{ $('micBtn').classList.remove('rec'); if(wakeOn && !isBusyState()){ startRec(); } else if(!wakeOn && state==='listening'){ setState('idle'); } };
+    rec=new SR(); rec.lang='de-DE'; rec.continuous=true; rec.interimResults=true;
+    rec.onresult=e=>{
+      let finalText='', hasInterim=false;
+      for(let i=e.resultIndex;i<e.results.length;i++){
+        const part=(e.results[i][0]?.transcript||'').trim();
+        if(e.results[i].isFinal) finalText=(finalText+' '+part).trim();
+        else if(part) hasInterim=true;
+      }
+      if(finalText){ if(wakeOn) handleWake(finalText); else queueVoiceText(finalText); }
+      else if(hasInterim&&voiceDraft) armVoicePause();
+    };
+    rec.onend=()=>{
+      $('micBtn').classList.remove('rec');
+      if(!isBusyState()&&(wakeOn||voiceDraft)){ startRec(); }
+      else if(!wakeOn&&state==='listening'){ setState('idle'); }
+    };
     rec.onerror=()=>{ $('micBtn').classList.remove('rec'); };
     return rec;
   }
   function handleWake(txt){ const low=txt.toLowerCase();
     // Im Gespraech: Stop-Kommando -> zurueck ins Warten aufs Weckwort
     if(awake && /\b(reicht|jetzt gut|jetzt reicht|stop|stopp|ruhe|sei still|h(ö|oe)r auf|schluss)\b/.test(low)){
-      awake=false; setStatus('on','👂 warte auf „Eva wake up"'); return; }
+      clearVoiceDraft(); awake=false; setStatus('on','👂 warte auf „Eva wake up"'); return; }
     // Im Gespraech aktiv: jede Aeusserung ist eine Frage
-    if(awake){ if(low.length<2)return; unlockAudio(); $('chatIn').value=txt; sendChat(true); return; }
+    if(awake){ if(low.length<2)return; unlockAudio(); queueVoiceText(txt); return; }
     // Noch nicht wach: auf „Eva wake up" warten
     if(low.includes('eva') && /(wake|wach|weck|w[eä]k)/.test(low)){
       awake=true; unlockAudio();
       const rest=txt.replace(/.*?(wake ?up|wake|wach ?auf|wach|weck\w*)/i,'').trim();
-      if(rest.length>2){ $('chatIn').value=rest; sendChat(true); } else { setStatus('on','Eva hört zu …'); }
+      if(rest.length>2){ queueVoiceText(rest); } else { setStatus('on','Eva hört zu …'); }
     }
   }
   function toggleMic(){ if(wakeOn) return; const r=ensureRec(); if(!r)return;
-    setState('listening'); $('micBtn').classList.add('rec'); try{r.start();}catch(e){$('micBtn').classList.remove('rec');} }
+    clearVoiceDraft(); setState('listening'); $('micBtn').classList.add('rec'); try{r.start();}catch(e){$('micBtn').classList.remove('rec');} }
   function toggleWake(){ const r=ensureRec(); if(!r)return;
-    wakeOn=!wakeOn; awake=false; $('wakeBtn').classList.toggle('on',wakeOn);
+    clearVoiceDraft(); wakeOn=!wakeOn; awake=false; $('wakeBtn').classList.toggle('on',wakeOn);
     if(wakeOn){ unlockAudio(); if(!isBusyState()) setState('listening'); setStatus('on','👂 warte auf „Eva wake up"'); startRec(); }
     else { if(!isBusyState()) setState('idle'); try{r.stop();}catch(e){} setStatus('on','verbunden'); } }
   $('micBtn').addEventListener('click',toggleMic);
