@@ -1,5 +1,5 @@
 import { generateText } from 'ai';
-import { anthropic } from '@ai-sdk/anthropic';
+import { chooseModel, recordUsage, checkBudget } from '../core/router.js';
 
 const KNOWLEDGE_SYSTEM = `Du bist Nadines Fach-Sparringspartner fuer Finanz, Versicherung und Vorsorge.
 
@@ -19,11 +19,14 @@ Ton: direkt, sachlich, senior. Keine Vorreden, keine Compliance-Vortraege, keine
 // messages-History, keine Datei-/Netz-/CRM-Zugriffe. Temperature hart auf 0.2
 // fuer Determinismus.
 export async function answer(question) {
-  const { text } = await generateText({
-    model: anthropic('claude-sonnet-4-6'),
+  const routed = chooseModel({ task: 'knowledge' });
+  await checkBudget(routed);
+  const { text, usage } = await generateText({
+    model: routed.model,
     system: KNOWLEDGE_SYSTEM,
     prompt: String(question || '').trim(),
     temperature: 0.2
   });
+  await recordUsage(routed, usage);
   return text;
 }

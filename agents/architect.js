@@ -1,8 +1,8 @@
 import { generateText } from 'ai';
-import { anthropic } from '@ai-sdk/anthropic';
 import { z } from 'zod';
 import { answer as knowledgeAnswer } from './knowledge.js';
 import { research as webResearch } from './web.js';
+import { chooseModel, recordUsage, checkBudget } from '../core/router.js';
 
 // System Architect. Reiner Router: entscheidet, ob Knowledge uebernimmt.
 // Formuliert NIEMALS selbst eine Fachantwort. Keine Rechnungen, keine
@@ -58,12 +58,15 @@ function extractJson(text) {
 }
 
 async function planOnce(intent, strictReminder = '') {
-  const { text } = await generateText({
-    model: anthropic('claude-haiku-4-5-20251001'),
+  const routed = chooseModel({ task: 'route' });
+  await checkBudget(routed);
+  const { text, usage } = await generateText({
+    model: routed.model,
     system: ARCH_SYSTEM + (strictReminder ? '\n\n' + strictReminder : ''),
     prompt: `Nadine fragt: "${intent}"\n\nWelche Aktion?`,
     temperature: 0
   });
+  await recordUsage(routed, usage);
   const raw = extractJson(text);
   if (!raw) return null;
   const parsed = PlanSchema.safeParse(raw);

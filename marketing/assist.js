@@ -5,19 +5,19 @@
 // ENV: GEMINI_API_KEY
 
 import { generateText } from 'ai';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-
-const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY });
-const MODEL = 'gemini-2.0-flash'; // kostenloser Tier, stabil
+import { chooseModel, recordUsage, checkBudget } from '../core/router.js';
 
 export async function refineTone(rawText) {
   if (!process.env.GEMINI_API_KEY) return { ok: false, error: 'GEMINI_API_KEY fehlt' };
   if (!rawText || !String(rawText).trim()) return { ok: false, error: 'kein Text' };
-  const { text } = await generateText({
-    model: google(MODEL),
+  const routed = chooseModel({ task: 'marketing-assist' });
+  await checkBudget(routed);
+  const { text, usage } = await generateText({
+    model: routed.model,
     system: 'Mach aus einer rohen, oft gesprochenen Beschreibung eine klare, kompakte Tonalitaets-Beschreibung fuer eine Marke: 2-3 Saetze, Deutsch, konkret (Stil, Ansprache, Wortwahl). Nur die Beschreibung, keine Vorrede.',
     prompt: String(rawText),
   });
+  await recordUsage(routed, usage);
   return { ok: true, tone: text.trim() };
 }
 
@@ -43,10 +43,13 @@ export async function analyzeWebsite(url) {
     return { ok: false, error: 'Website nicht erreichbar (' + (e.name === 'AbortError' ? 'Timeout' : e.message) + ')' };
   }
   if (!siteText) return { ok: false, error: 'Website hatte keinen lesbaren Text' };
-  const { text } = await generateText({
-    model: google(MODEL),
+  const routed = chooseModel({ task: 'marketing-assist' });
+  await checkBudget(routed);
+  const { text, usage } = await generateText({
+    model: routed.model,
     system: 'Analysiere den Text einer Firmen-Website und leite ab: (1) Tonalitaet der Marke, (2) wahrscheinliche Zielgruppe. Antworte kompakt auf Deutsch, GENAU in diesem Format:\nTonalitaet: <2-3 Saetze>\nZielgruppe: <Stichworte zu Beschaeftigung, Alter, Beruf, Einkommen>\nBeginne den Tonalitaets-Teil mit "Laut Website ...".',
     prompt: 'Website-Text:\n' + siteText,
   });
+  await recordUsage(routed, usage);
   return { ok: true, suggestion: text.trim() };
 }

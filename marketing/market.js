@@ -5,10 +5,7 @@
 // ENV: GEMINI_API_KEY
 
 import { generateText } from 'ai';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-
-const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY });
-const MODEL = 'gemini-2.0-flash';
+import { chooseModel, recordUsage, checkBudget } from '../core/router.js';
 
 async function fetchSiteText(url) {
   const full = String(url).trim().replace(/^https?:\/\//i, '');
@@ -28,8 +25,10 @@ export async function marketAnalysis(brand, { customerValue = null } = {}) {
   const context = [brand?.name && ('Marke: ' + brand.name), brand?.audience && ('Zielgruppe: ' + brand.audience), brand?.tone && ('Tonalitaet: ' + brand.tone)].filter(Boolean).join('\n');
   const siteText = brand?.website ? await fetchSiteText(brand.website) : '';
 
-  const { text } = await generateText({
-    model: google(MODEL),
+  const routed = chooseModel({ task: 'marketing-market' });
+  await checkBudget(routed);
+  const { text, usage } = await generateText({
+    model: routed.model,
     system: `Du bist ein nuechterner Markt-Analyst. Schaetze fuer die beschriebene Marke die Marktlage. Gib AUSSCHLIESSLICH valides JSON zurueck (keine Erklaerung, kein Markdown), exakt dieses Schema:
 {
   "branche": "<kurze Branchen-/Nischenbezeichnung>",
@@ -46,6 +45,7 @@ export async function marketAnalysis(brand, { customerValue = null } = {}) {
 Alles auf Deutsch. Es sind Schaetzungen - lieber ehrliche Spannen als falsche Praezision.`,
     prompt: `${context}\n${siteText ? 'Website-Auszug:\n' + siteText : '(keine Website)'}${customerValue ? '\nMein durchschnittlicher Kundenwert: ' + customerValue : ''}`,
   });
+  await recordUsage(routed, usage);
 
   let analysis;
   try { analysis = JSON.parse(text.replace(/```json|```/gi, '').trim()); }

@@ -4,15 +4,23 @@ import fs from 'fs/promises';
 import ical from 'node-ical';
 import cron from 'node-cron';
 import { ImapFlow } from 'imapflow';
-import { generateText, streamText, tool } from 'ai';
-import { anthropic } from '@ai-sdk/anthropic';
-import { z } from 'zod';
+import { generateText, streamText } from 'ai';
 import * as campaigns from './marketing/campaigns.js';
 import { analyzeReferences } from './marketing/analyze.js';
 import { generateImage } from './marketing/images.js';
 import { generateContent } from './marketing/content.js';
 import * as brands from './marketing/brands.js';
 import { refineTone, analyzeWebsite } from './marketing/assist.js';
+import { klassifiziereMailBatch } from './klassifikation.js';
+// Stufe 1-3: Model Router, Skills, Agent-Registry.
+import { chooseModel, recordUsage, checkBudget } from './core/router.js';
+import { memorySkill } from './skills/memory.js';
+import { calendarSkill } from './skills/calendar.js';
+import { mailsSkill } from './skills/mails.js';
+import { crmSkill } from './skills/crm.js';
+import { marketingSkill } from './skills/marketing.js';
+import { researchSkill } from './skills/research.js';
+import { getAgent } from './agents/registry.js';
 import { marketAnalysis } from './marketing/market.js';
 import { speak } from './voice.js';
 import { askArchitect } from './agents/architect.js';
@@ -266,71 +274,46 @@ Offene Todos:
 ${todoText}`;
 }
 
-const tools = {
-  createTodo: tool({ description: 'Legt ein neues Todo an.', parameters: z.object({ text: z.string() }),
-    execute: async ({ text }) => { const m = await loadMemory(); m.todos = m.todos || []; m.todos.push({ text, done: false, ts: Date.now() }); await saveMemory(m); return { ok: true, text }; } }),
-  completeTodo: tool({ description: 'Markiert ein Todo per Textsuche als erledigt.', parameters: z.object({ text: z.string() }),
-    execute: async ({ text }) => { const m = await loadMemory(); const t = (m.todos || []).find(t => !t.done && t.text.toLowerCase().includes(text.toLowerCase())); if (t) { t.done = true; await saveMemory(m); return { ok: true, done: t.text }; } return { ok: false }; } }),
-  remember: tool({ description: 'Merkt sich dauerhaft eine Info.', parameters: z.object({ fact: z.string() }),
-    execute: async ({ fact }) => { const m = await loadMemory(); m.notes = m.notes || []; m.notes.push(fact); await saveMemory(m); return { ok: true, fact }; } }),
-  getCalendar: tool({ description: 'Liest Termine aus den Kalendern.', parameters: z.object({ days: z.number().optional() }),
-    execute: async ({ days }) => { const ev = fmtEvents(await getEventsRaw(days || 7)); return { count: ev.length, events: ev }; } }),
-  getCalendly: tool({ description: 'Liest kommende Calendly-Buchungen.', parameters: z.object({ days: z.number().optional() }),
-    execute: async ({ days }) => await getCalendlyEvents(days || 14) }),
-  getMails: tool({ description: 'Liest die neuesten E-Mails. Feld "bereich" = Firma (aus Empfaenger).', parameters: z.object({ proKonto: z.number().optional() }),
-    execute: async ({ proKonto }) => { let all = []; for (const acc of loadMailAccounts()) { try { all = all.concat(await fetchInbox(acc, proKonto || 12)); } catch (e) { all.push({ konto: acc.label, fehler: e.message }); } } return { count: all.length, mails: all }; } }),
-  getLeads: tool({ description: 'Ruft Leads ab. Ohne projekt: alle. Mit projekt: nur dieses.', parameters: z.object({ projekt: z.string().optional() }),
-    execute: async ({ projekt }) => {
-      let list = await fetchAllLeads();
-      if (projekt) list = list.filter(x => x.projekt.toLowerCase().includes(projekt.toLowerCase()));
-      return list.map(x => ({ projekt: x.projekt, gruppe: x.gruppe, fehler: x.fehler, leads: x.leads ? JSON.stringify(x.leads).slice(0, 5000) : null }));
-    } }),
-  listCampaigns: tool({ description: 'Listet alle Marketing-Kampagnen.', parameters: z.object({}),
-    execute: async () => ({ campaigns: await campaigns.listCampaigns() }) }),
-  createCampaign: tool({ description: 'Legt eine Marketing-Kampagne an. type: content|lead-gen|ads. autonomy: observe|suggest|auto.', parameters: z.object({ name: z.string(), brand: z.string().optional(), type: z.enum(['content', 'lead-gen', 'ads']).optional(), references: z.array(z.string()).optional(), tone: z.string().optional(), targetChannel: z.string().optional(), autonomy: z.enum(['observe', 'suggest', 'auto']).optional() }),
-    execute: async (input) => await campaigns.createCampaign(input) }),
-  analyzeReferences: tool({ description: 'Analysiert Referenz-Konten (Instagram-Handles) und liefert ein Muster-Profil + Content-Ideen. Dauert ~30-60s (scrapt live via Apify).', parameters: z.object({ handles: z.array(z.string()), brand: z.string().optional() }),
-    execute: async ({ handles, brand }) => await analyzeReferences(handles, { brand }) }),
-  analyzeCampaign: tool({ description: 'Analysiert die Referenz-Konten einer bestehenden Kampagne (per id) und speichert das Muster-Profil in der Kampagne.', parameters: z.object({ id: z.string() }),
-    execute: async ({ id }) => {
-      const c = await campaigns.getCampaign(id);
-      if (!c) return { ok: false, error: 'Kampagne nicht gefunden' };
-      const res = await analyzeReferences(c.references, { brand: c.brand });
-      if (res.ok) await campaigns.updateCampaign(id, { analysis: { profile: res.profile, accounts: res.accounts, at: new Date().toISOString() } });
-      return res;
-    } }),
-  generateImage: tool({ description: 'Generiert ein Bild aus einem Prompt (fal.ai). model: schnell (guenstig, default) | flux | flux-pro | nanobanana (premium, stark bei Text im Bild). Gibt Bild-URLs zurueck.', parameters: z.object({ prompt: z.string(), model: z.string().optional(), numImages: z.number().optional() }),
-    execute: async ({ prompt, model, numImages }) => await generateImage(prompt, { model: model || 'nanobanana', numImages: numImages || 1 }) }),
-  generateContent: tool({ description: 'Erzeugt fertigen Content fuer eine Kampagne im gelernten Stil + Brand-Profil. format: reel (Reel-Skript, default) | image (Bild-Post) | email. Optionale Vorgabe (briefing).', parameters: z.object({ campaignId: z.string(), briefing: z.string().optional(), count: z.number().optional(), format: z.enum(['reel', 'image', 'email']).optional() }),
-    execute: async ({ campaignId, briefing, count, format }) => {
-      const c = await campaigns.getCampaign(campaignId);
-      if (!c) return { ok: false, error: 'Kampagne nicht gefunden' };
-      const brand = c.brandId ? await brands.getBrand(c.brandId) : null;
-      return await generateContent(c, brand, { briefing, count: count || 3, format: format || 'reel' });
-    } }),
-  listBrands: tool({ description: 'Listet alle Marken-Profile (eigene + Referenz-Brands).', parameters: z.object({}),
-    execute: async () => ({ brands: await brands.listBrands() }) }),
-  createBrand: tool({ description: 'Legt ein Marken-Profil an. type: own (eigene Marke) | reference (Vorbild-Marke). Felder: name, website, instagram, linkedin, colors[], tone, audience.', parameters: z.object({ name: z.string(), type: z.enum(['own', 'reference']).optional(), website: z.string().optional(), instagram: z.string().optional(), linkedin: z.string().optional(), colors: z.array(z.string()).optional(), tone: z.string().optional(), audience: z.string().optional() }),
-    execute: async (input) => await brands.createBrand(input) }),
-  updateBrand: tool({ description: 'Aktualisiert ein Marken-Profil per id (beliebige Felder: name, website, instagram, linkedin, colors, tone, audience).', parameters: z.object({ id: z.string(), name: z.string().optional(), website: z.string().optional(), instagram: z.string().optional(), linkedin: z.string().optional(), colors: z.array(z.string()).optional(), tone: z.string().optional(), audience: z.string().optional() }),
-    execute: async ({ id, ...patch }) => await brands.updateBrand(id, patch) }),
-  askArchitect: tool({ description: 'Router fuer Fach- UND Recherche-Anfragen. Delegiert intern an: knowledge (zeitloses Fachwissen zu Finanz/Versicherung/Vorsorge/Rente OHNE Aktualitaets-Anspruch) ODER web-research (aktuelle oeffentliche Fakten: Gesetze, Grenzwerte, Sozialversicherungs-Beitragsbemessungsgrenzen, Steuersaetze, Freibetraege, Foerderbedingungen, Produktdatenblaetter, Versicherungsbedingungen, Preise, Nachrichten, Wetter, Oeffnungszeiten, allgemeine Live-Recherche im Web). PFLICHT fuer JEDE Frage nach einem konkreten aktuellen Wert (Grenzwerte, Steuersaetze, Freibetraege, Beitraege, Preise, Datum-abhaengige Fakten) - solche Werte NIEMALS aus dem Kopf beantworten oder schaetzen, IMMER diesen Router nutzen. NICHT fuer eigene Systeme (Kalender/Mails/CRM/Leads/Kampagnen/Todos) - dafuer die direkten Tools. Ergebnis-Formen: { source:"knowledge", answer } | { source:"web-research", result: { overallConfidence, claims[], answerBrief, gaps[], unverifiedNotice? } } | { source:"architect", question|note }. WICHTIG bei web-research: wenn overallConfidence "unknown" ist ODER unverifiedNotice gesetzt ist, antworte woertlich "Ich konnte dazu gerade keine verlaessliche Information finden." - nichts erfinden, nichts hinzuschaetzen, nicht mit eigenem Wissen mischen. Sonst uebernimm ausschliesslich die recherchierten Werte.', parameters: z.object({ intent: z.string() }),
-    execute: async ({ intent }) => {
-      const t0 = Date.now();
-      console.log(`[${new Date().toISOString()}] [IVA] tool askArchitect start | intent="${String(intent).slice(0, 80)}"`);
-      const res = await askArchitect(intent);
-      console.log(`[${new Date().toISOString()}] [IVA] tool askArchitect finished | source=${res?.source || 'n/a'} | duration=${Date.now() - t0}ms`);
-      return res;
-    } }),
+// Stufe 2: Skill-Registrierung via Dependency Injection. Alle Tool-Namen,
+// -Descriptions und -Schemas bleiben 1:1 (die Skills importieren die
+// identischen Definitionen aus skills/*.js). Neue Skills werden hier ergaenzt.
+const ALL_SKILLS = {
+  memory:    memorySkill({ loadMemory, saveMemory }),
+  calendar:  calendarSkill({ getEventsRaw, getCalendlyEvents, fmtEvents }),
+  mails:     mailsSkill({ loadMailAccounts, fetchInbox }),
+  crm:       crmSkill({ fetchAllLeads }),
+  marketing: marketingSkill({ campaigns, brands, analyzeReferences, generateImage, generateContent }),
+  research:  researchSkill({ askArchitect }),
 };
 
-async function askIva(userText, sessionId = 'default', voice = false) {
+// Baut die Tool-Map fuer einen konkreten Agenten aus dessen allowedSkills.
+// Fuer iva-standard = alle Skills -> identisches Tool-Set wie zuvor.
+function assembleTools(agent) {
+  const out = {};
+  for (const skillId of agent.allowedSkills) {
+    const s = ALL_SKILLS[skillId];
+    if (!s) { console.warn(`[REGISTRY] Skill "${skillId}" fuer Agent "${agent.id}" nicht gefunden.`); continue; }
+    Object.assign(out, s);
+  }
+  return out;
+}
+
+// Ohne Agent-Argument bleibt das Default-Verhalten (iva-standard, alle Skills)
+// erhalten. Genutzt von den Endpoints die keinen agentId setzen.
+const tools = assembleTools(getAgent('iva-standard'));
+
+async function askIva(userText, sessionId = 'default', voice = false, agentId = 'iva-standard') {
+  const agent = getAgent(agentId);
+  const agentTools = agentId === 'iva-standard' ? tools : assembleTools(agent);
   let system = await buildSystemPrompt();
   if (voice) system += VOICE_SYSTEM_SUFFIX;
   const conv = await loadConversations();
   const history = Array.isArray(conv[sessionId]) ? conv[sessionId] : [];
   const messages = [...history, { role: 'user', content: userText }];
-  const { text } = await generateText({ model: anthropic('claude-sonnet-4-6'), system, messages, tools, maxSteps: 6 });
+  const routed = chooseModel({ task: agent.modelProfile });
+  await checkBudget(routed);
+  const { text, usage } = await generateText({ model: routed.model, system, messages, tools: agentTools, maxSteps: 6 });
+  await recordUsage(routed, usage);
   conv[sessionId] = [...messages, { role: 'assistant', content: text || '(ok)' }].slice(-MAX_TURNS);
   await saveConversations(conv);
   return text;
@@ -339,16 +322,21 @@ async function askIva(userText, sessionId = 'default', voice = false) {
 // Streaming-Variante von askIva fuer /api/chat/stream (Phase 1). Teilt Prompt-Aufbau,
 // Verlauf und Tools mit askIva ueber die Modul-Helper (buildSystemPrompt, loadConversations,
 // saveConversations, tools, MAX_TURNS). askIva selbst bleibt unangetastet -> Telegram sicher.
-async function streamIva(userText, sessionId = 'default', voice = false) {
+async function streamIva(userText, sessionId = 'default', voice = false, agentId = 'iva-standard') {
+  const agent = getAgent(agentId);
+  const agentTools = agentId === 'iva-standard' ? tools : assembleTools(agent);
   let system = await buildSystemPrompt();
   if (voice) system += VOICE_SYSTEM_SUFFIX;
   const conv = await loadConversations();
   const history = Array.isArray(conv[sessionId]) ? conv[sessionId] : [];
   const messages = [...history, { role: 'user', content: userText }];
+  const routed = chooseModel({ task: agent.modelProfile });
+  await checkBudget(routed);
   return streamText({
-    model: anthropic('claude-sonnet-4-6'),
-    system, messages, tools, maxSteps: 6,
-    onFinish: async ({ text }) => {
+    model: routed.model,
+    system, messages, tools: agentTools, maxSteps: 6,
+    onFinish: async ({ text, usage }) => {
+      await recordUsage(routed, usage);
       conv[sessionId] = [...messages, { role: 'assistant', content: text || '(ok)' }].slice(-MAX_TURNS);
       await saveConversations(conv);
     },
@@ -396,9 +384,12 @@ async function sendBriefing() {
   const open = (mem.todos || []).filter(t => !t.done).map(t => t.text);
   const todosText = open.length ? open.map(t => '- ' + t).join('\n') : 'keine offenen';
   const blocks = leadsAll.map(x => `[${x.gruppe} / ${x.projekt}]\n${x.fehler ? ('Fehler: ' + x.fehler) : JSON.stringify(x.leads).slice(0, 3500)}`);
-  const { text } = await generateText({ model: anthropic('claude-haiku-4-5-20251001'),
+  const briefingRouted = chooseModel({ task: 'route' });
+  await checkBudget(briefingRouted);
+  const { text, usage: briefingUsage } = await generateText({ model: briefingRouted.model,
     system: 'Du bist IVA. Morning-Briefing auf Deutsch fuer Telegram. **Fett** nur fuer Ueberschriften, KEINE Tabellen, kurze Zeilen mit Bindestrich. Aufbau: kurze Begruessung, **Termine heute**, **Offene Todos**, dann **Arbeit - HeatHero**, danach **Mein CRM (privat)** mit den Unterprojekten. Je Projekt die Kategorien (nur nicht-leere zeigen): Neue unbearbeitete Leads, Follow-Ups heute, Wiedervorlagen heute, Ohne Update nach Termin, Status "Montage terminieren". Pro Lead: Name + kurzer Grund. Leere Projekte weglassen. Motivierender Schlusssatz.',
     prompt: `Heute ist ${today}.\nTermine heute:\n${eventsText}\n\nOffene Todos:\n${todosText}\n\nLeads je Projekt (rohe Daten):\n${blocks.join('\n\n')}` });
+  await recordUsage(briefingRouted, briefingUsage);
   await sendTelegram(mem.chatId, text);
 }
 
@@ -430,6 +421,25 @@ app.use('/api', (req, res, next) => {
 });
 app.get('/api/leads', async (_req, res) => res.json(await fetchAllLeads()));
 app.get('/api/mails', async (_req, res) => { let all = []; for (const acc of loadMailAccounts()) { try { all = all.concat(await fetchInbox(acc, 15)); } catch (e) {} } res.json(all); });
+app.get('/api/mails/klassifiziert', async (req, res) => {
+  const limit = Math.min(Math.max(parseInt(req.query?.limit) || 15, 1), 50);
+  try {
+    let mails = [];
+    for (const acc of loadMailAccounts()) {
+      try { mails = mails.concat(await fetchInbox(acc, limit)); } catch (e) { /* Account-Fehler ignorieren, andere weiter */ }
+    }
+    if (mails.length === 0) return res.json({ ergebnisse: [], _meta: { hinweis: 'keine Mails geladen (Konten / IMAP?)' } });
+    const out = await klassifiziereMailBatch(mails);
+    // Ergebnis fuer Traceability persistieren (letzter Lauf ueberschreibt).
+    try {
+      await fs.mkdir(DATA_DIR, { recursive: true }).catch(() => {});
+      await fs.writeFile(DATA_DIR + '/mail-klassifikation.json', JSON.stringify({ ts: new Date().toISOString(), ...out }, null, 2));
+    } catch (e) { /* Persistenz-Fehler nicht kritisch */ }
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 app.get('/api/calendar', async (_req, res) => res.json(fmtEvents(await getEventsRaw(7))));
 app.get('/api/calendly', async (_req, res) => res.json(await getCalendlyEvents(14)));
 app.get('/api/todos', async (_req, res) => { const m = await loadMemory(); res.json((m.todos || []).filter(t => !t.done)); });
