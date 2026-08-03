@@ -22,6 +22,7 @@ import { marketingSkill } from './skills/marketing.js';
 import { researchSkill } from './skills/research.js';
 import { workspacesSkill } from './skills/workspaces.js';
 import { qonektoSkill } from './skills/qonekto.js';
+import { adviceSkill } from './skills/advice.js';
 import { getAgent } from './agents/registry.js';
 import { marketAnalysis } from './marketing/market.js';
 import { speak } from './voice.js';
@@ -43,6 +44,8 @@ import {
   prepareQonektoCustomerAction,
   qonektoCustomerCapabilityStatus,
 } from './integrations/qonekto-customers.js';
+import { adviceConnectorStatus, publicAdviceCatalog } from './advice/catalog.js';
+import { addAdviceKnowledgeSource, adviceKnowledgeStatus, listAdviceKnowledge } from './advice/knowledge-store.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -328,6 +331,7 @@ Tool-Nutzung:
 - Mehrere Quellen relevant (z. B. Kalender + Mails + Leads): parallel abrufen.
 - Fach-/Recherche-Anfragen: askArchitect mit der präzisen Frage. Der Router entscheidet zwischen knowledge (zeitloses Fachwissen zu Finanz/Versicherung/Vorsorge/Rente) und web-research (aktuelle öffentliche Fakten wie Gesetze, Grenzwerte, Beitragssätze, Freibeträge, Fördersätze, Produktdatenblätter, Versicherungsbedingungen, Preise, Nachrichten, Öffnungszeiten). Für JEDE aktuelle Zahl / jeden aktuellen Grenzwert PFLICHT diesen Router nutzen statt aus dem Kopf zu antworten. Für eigene Systeme (Kalender/Mails/CRM/Leads/Kampagnen/Todos/Bilder) stattdessen direkt das passende Tool.
 - Kundinnen, Kunden, Vertraege, Dokumente, Archiv, Aufgaben oder Schaeden aus blau direkt/AMEISE/Qonekto: zuerst listQonektoTools nutzen. Lesende Werkzeuge mit callQonektoReadTool sofort ausfuehren. Veraendernde Werkzeuge ausschliesslich mit prepareQonektoWrite vorbereiten, Aenderung klar wiederholen und Nadine fragen, ob sie das wirklich will. Ausgefuehrt wird serverseitig erst nach ihrer separaten, exakten Antwort "Ja, Qonekto-Aenderung ausfuehren". Niemals behaupten, eine nur vorbereitete Aenderung sei bereits erfolgt. Destruktive Werkzeuge bleiben blockiert. Niemals Qonekto-Daten raten oder durch oeffentliche Web-Recherche ersetzen.
+- Beratungsarten und vorhandene Fachmodule mit listAdviceModules ermitteln. Bei Tarif-, Altvertrags- oder Produktvergleichen zuerst searchAdviceKnowledge nutzen. Leistungsmerkmale ausschliesslich aus belegten Originalunterlagen nennen; fehlende Tarifstaende, Bedingungen oder Produktinformationsblaetter als Datenluecke markieren und niemals erfinden. DIN 77230 betrifft Privathaushalte, DIN 77235 Selbststaendige und KMU. Ohne vollstaendig hinterlegtes lizenziertes Regelwerk nur "DIN-orientierte Vorbereitung" sagen, niemals "DIN-konform".
 - Nach Toolaufruf: Ergebnis im passenden Antwort-Format (siehe oben), nicht die Rohdaten.
 
 Voice-Modus überschreibt die Format-Regeln oben, wenn Sprache aktiviert ist:
@@ -365,6 +369,7 @@ const ALL_SKILLS = {
   marketing: marketingSkill({ campaigns, brands, analyzeReferences, generateImage, generateContent }),
   research:  researchSkill({ askArchitect }),
   workspaces: workspacesSkill({ workspaces }),
+  advice:    adviceSkill({ publicAdviceCatalog, listAdviceKnowledge }),
   qonekto:   null, // wird pro Anfrage mit der echten sessionId erzeugt
 };
 
@@ -625,6 +630,24 @@ app.post('/api/customers/actions/confirm', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// --- Beratungs-Suite: Module, Rechner-Basis, Quellenwissen und vorbereitete Connectoren. ---
+app.get('/api/advice/catalog', (_req, res) => {
+  res.json({ ...publicAdviceCatalog(), connectors: adviceConnectorStatus() });
+});
+app.get('/api/advice/knowledge', async (req, res) => {
+  try {
+    res.json(await listAdviceKnowledge({
+      search: String(req.query?.search || '').slice(0, 200),
+      category: String(req.query?.category || '').slice(0, 100),
+      limit: Math.min(Math.max(Number(req.query?.limit) || 50, 1), 200),
+    }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/advice/knowledge', async (req, res) => {
+  try { res.status(201).json(await addAdviceKnowledgeSource(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // --- Gemeinsame Fallakten: Beratung, Kundenmaske, Energieplanung ---
 app.get('/api/workspaces', async (req, res) => {
   const mode = workspaces.WORKSPACE_MODES.includes(req.query?.mode) ? req.query.mode : undefined;
@@ -753,6 +776,7 @@ app.use(express.static(path.join(__dirnameIva, 'public')));
 app.get('/cockpit', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'cockpit.html')));
 app.get('/workspace', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'workspace.html')));
 app.get('/customers', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'customers.html')));
+app.get('/advice', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'advice.html')));
 app.get('/health/qonekto', async (_req, res) => {
   const status = await qonektoStatus();
   if (status.reachable) {
@@ -760,6 +784,10 @@ app.get('/health/qonekto', async (_req, res) => {
     catch { status.customerPortal = { customers: false, customerDetails: false, contracts: false }; }
   }
   res.status(status.reachable ? 200 : 503).json(status);
+});
+app.get('/health/advice', async (_req, res) => {
+  const catalog = publicAdviceCatalog();
+  res.json({ ok: true, moduleCount: catalog.modules.length, groups: catalog.groups.length, connectors: adviceConnectorStatus(), knowledge: await adviceKnowledgeStatus() });
 });
 app.get('/', (_req, res) => res.send('IVA laeuft.'));
 const PORT = process.env.PORT || 3000;

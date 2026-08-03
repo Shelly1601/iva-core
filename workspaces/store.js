@@ -73,7 +73,7 @@ function initialData(mode) {
   if (mode === 'energie') {
     return initialEnergyData();
   }
-  if (mode === 'beratung') return { appointmentAt: '', topic: '', goal: '', facts: '', recommendation: '' };
+  if (mode === 'beratung') return { schemaVersion: 'iva-advice-1.0', appointmentAt: '', topic: '', goal: '', facts: '', recommendation: '', adviceModules: [], activeAdviceModule: '', moduleData: {} };
   return { project: '', company: '', relationship: '', nextStep: '' };
 }
 

@@ -28,6 +28,10 @@ let current = null;
 let rooms = [];
 let photoAssignments = [];
 let pendingPhotoCategory = '';
+let adviceCatalog = { groups: [], modules: [], connectors: {} };
+let selectedAdviceModules = [];
+let adviceModuleData = {};
+let activeAdviceModuleId = '';
 
 function headers(extra = {}) {
   return { Authorization: 'Bearer ' + (localStorage.getItem(LS_TOKEN) || ''), ...extra };
@@ -171,6 +175,251 @@ function renderPhotoChecklist() {
     : `${relevantItems.length - completed} Fotopunkte fehlen noch.`;
 }
 
+function adviceModule(id) {
+  return adviceCatalog.modules.find(module => module.id === id) || null;
+}
+
+async function loadAdviceCatalog() {
+  try {
+    adviceCatalog = await api('/api/advice/catalog');
+    const select = $('adviceModuleSelect');
+    select.innerHTML = '<option value="">Modul wählen</option>';
+    for (const group of adviceCatalog.groups || []) {
+      const optionGroup = document.createElement('optgroup');
+      optionGroup.label = group.label;
+      for (const module of (adviceCatalog.modules || []).filter(item => item.group === group.id)) {
+        const option = document.createElement('option');
+        option.value = module.id; option.textContent = module.title;
+        optionGroup.appendChild(option);
+      }
+      select.appendChild(optionGroup);
+    }
+  } catch (error) {
+    status('Beratungsmodule konnten nicht geladen werden: ' + error.message, 'err');
+  }
+}
+
+function moduleDefaults(module) {
+  const defaults = {};
+  for (const section of module?.sections || []) {
+    for (const field of section.fields || []) if (field.value !== undefined) defaults[field.key] = String(field.value);
+  }
+  return defaults;
+}
+
+function ensureAdviceModule(id) {
+  const module = adviceModule(id);
+  if (!module) return false;
+  if (!selectedAdviceModules.includes(id)) selectedAdviceModules.push(id);
+  adviceModuleData[id] = { ...moduleDefaults(module), ...(adviceModuleData[id] || {}) };
+  activeAdviceModuleId = id;
+  renderAdviceModules();
+  return true;
+}
+
+function removeAdviceModule(id) {
+  selectedAdviceModules = selectedAdviceModules.filter(moduleId => moduleId !== id);
+  if (activeAdviceModuleId === id) activeAdviceModuleId = selectedAdviceModules[0] || '';
+  renderAdviceModules();
+}
+
+function numeric(value) {
+  let normalized = String(value ?? '').replace(/\s/g, '');
+  if (normalized.includes(',')) normalized = normalized.replace(/\./g, '').replace(',', '.');
+  else if (/^\d{1,3}(?:\.\d{3})+$/.test(normalized)) normalized = normalized.replace(/\./g, '');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function euro(value) {
+  return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(Number.isFinite(value) ? value : 0);
+}
+
+function percent(value) {
+  return new Intl.NumberFormat('de-DE', { maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0) + ' %';
+}
+
+function futureValue(initial, monthly, annualRate, years) {
+  const months = Math.max(0, Math.round(years * 12));
+  const rate = annualRate / 100 / 12;
+  if (!months) return initial;
+  if (!rate) return initial + monthly * months;
+  return initial * Math.pow(1 + rate, months) + monthly * ((Math.pow(1 + rate, months) - 1) / rate);
+}
+
+function remainingLoan(principal, annualInterest, annualRepayment, years) {
+  const monthlyRate = annualInterest / 100 / 12;
+  const payment = principal * ((annualInterest + annualRepayment) / 100) / 12;
+  const months = Math.max(0, Math.round(years * 12));
+  if (!principal || !months) return { payment, remaining: principal };
+  if (!monthlyRate) return { payment, remaining: Math.max(0, principal - payment * months) };
+  const remaining = principal * Math.pow(1 + monthlyRate, months) - payment * ((Math.pow(1 + monthlyRate, months) - 1) / monthlyRate);
+  return { payment, remaining: Math.max(0, remaining) };
+}
+
+function calculateAdvice(module, data) {
+  if (module.calculator === 'financial-summary') {
+    const income = numeric(data.monthlyIncome), expenses = numeric(data.monthlyExpenses || data.essentialExpenses);
+    return { title: 'Finanzübersicht', items: [{ label: 'Freier Cashflow', value: euro(income - expenses) + ' / Monat' }, { label: 'Nettovermögen', value: euro(numeric(data.assets) - numeric(data.liabilities)) }, { label: 'Liquiditätsreichweite', value: expenses ? `${(numeric(data.liquidAssets || data.liquidityReserve) / expenses).toFixed(1)} Monate` : '–' }] };
+  }
+  if (module.calculator === 'business-summary') {
+    const employees = Math.max(1, numeric(data.employees));
+    return { title: 'Unternehmensübersicht', items: [{ label: 'Liquidität abzüglich Schulden', value: euro(numeric(data.liquidity) - numeric(data.liabilities)) }, { label: 'Umsatz je Beschäftigtem', value: euro(numeric(data.annualRevenue) / employees) }, { label: 'Erfasste Schlüsselpersonen', value: data.keyPersons ? 'Ja' : 'Noch offen' }] };
+  }
+  if (module.calculator === 'retirement-gap') {
+    const years = Math.max(0, numeric(data.retirementAge) - numeric(data.currentAge));
+    const desiredFuture = numeric(data.desiredNetPension) * Math.pow(1 + numeric(data.inflation) / 100, years);
+    const gap = Math.max(0, desiredFuture - numeric(data.expectedPension) - numeric(data.existingPrivatePension));
+    const neededCapital = numeric(data.withdrawalRate) ? gap * 12 / (numeric(data.withdrawalRate) / 100) : 0;
+    const remainingCapital = Math.max(0, neededCapital - numeric(data.existingCapital));
+    const monthly = years ? futureValue(0, 1, numeric(data.returnRate), years) : 0;
+    return { title: 'Vorsorgebedarf · Modellrechnung', items: [{ label: 'Projizierter Netto-Wunsch', value: euro(desiredFuture) + ' / Monat' }, { label: 'Versorgungslücke', value: euro(gap) + ' / Monat' }, { label: 'Zusätzliches Kapital', value: euro(remainingCapital) }, { label: 'Erforderliche Sparrate', value: monthly ? euro(remainingCapital / monthly) + ' / Monat' : '–' }], note: 'Vereinfachte Modellrechnung; Steuern, Krankenversicherung, Rentendynamik und konkrete Produktkosten sind noch nicht berücksichtigt.' };
+  }
+  if (module.calculator === 'depot-comparison') {
+    const years = numeric(data.years), months = years * 12, tax = numeric(data.taxRate) / 100;
+    const scenario = suffix => {
+      const initial = numeric(data['initial' + suffix]), monthly = numeric(data['monthly' + suffix]);
+      const gross = futureValue(initial, monthly, numeric(data['return' + suffix]) - numeric(data['cost' + suffix]), years);
+      const paid = initial + monthly * months, gain = Math.max(0, gross - paid);
+      return Math.max(0, gross - gain * tax);
+    };
+    return { title: 'Vermögensvergleich · vereinfachte Nettobetrachtung', items: [{ label: data.scenarioAName || 'Variante A', value: euro(scenario('A')) }, { label: data.scenarioBName || 'Variante B', value: euro(scenario('B')) }, { label: 'Differenz', value: euro(Math.abs(scenario('A') - scenario('B'))) }], note: 'Die Steuer wird pauschal auf den modellierten Gewinn angewendet. Produktindividuelle Besteuerung, Teilfreistellung, Versicherungsprivilegien und Abschlusskosten müssen separat ergänzt werden.' };
+  }
+  if (module.calculator === 'property-financing') {
+    const price = numeric(data.purchasePrice), ancillary = price * numeric(data.ancillaryPercent) / 100;
+    const loan = Math.max(0, price + ancillary - numeric(data.equity));
+    const result = remainingLoan(loan, numeric(data.interestRate), numeric(data.repaymentRate), numeric(data.years));
+    const rent = numeric(data.monthlyRent), maintenance = numeric(data.maintenance);
+    return { title: 'Immobilienrechnung', items: [{ label: 'Finanzierungsbedarf', value: euro(loan) }, { label: 'Monatliche Annuität', value: euro(result.payment) }, { label: 'Restschuld', value: euro(result.remaining) }, { label: 'Bruttomietrendite', value: price ? percent(rent * 12 / price * 100) : '–' }, { label: 'Monatlicher Cashflow vor Steuer', value: euro(rent - maintenance - result.payment) }] };
+  }
+  return null;
+}
+
+function renderCalculation(root, module, data) {
+  const result = calculateAdvice(module, data);
+  if (!result) return;
+  data.calculation = { ...result, calculatedAt: new Date().toISOString() };
+  const card = document.createElement('div'); card.className = 'calc-result';
+  const heading = document.createElement('h3'); heading.textContent = result.title; card.appendChild(heading);
+  const grid = document.createElement('div'); grid.className = 'calc-grid';
+  for (const item of result.items) {
+    const value = document.createElement('div'); value.className = 'calc-value';
+    const label = document.createElement('span'); label.textContent = item.label;
+    const amount = document.createElement('b'); amount.textContent = item.value;
+    value.append(label, amount); grid.appendChild(value);
+  }
+  card.appendChild(grid);
+  if (result.note) { const note = document.createElement('div'); note.className = 'hint'; note.textContent = result.note; card.appendChild(note); }
+  root.appendChild(card);
+}
+
+function refreshAdviceCalculation(moduleId) {
+  const module = adviceModule(moduleId);
+  const root = $('adviceSpecific');
+  root.querySelector('.calc-result')?.remove();
+  if (module) renderCalculation(root, module, adviceModuleData[moduleId] || {});
+}
+
+async function searchModuleKnowledge(module, root) {
+  const data = adviceModuleData[module.id] || {};
+  const queries = [
+    { side: 'Altvertrag', query: [data.oldCompany, data.oldTariff, data.oldYear].filter(Boolean).join(' ') },
+    { side: 'Neuvertrag', query: [data.newCompany, data.newTariff, data.newYear].filter(Boolean).join(' ') },
+  ].filter(item => item.query);
+  const hits = root.querySelector('.knowledge-hits');
+  if (!queries.length) {
+    hits.innerHTML = '<div class="muted">Bitte zuerst Gesellschaft, Tarif oder Tarifstand des Alt- beziehungsweise Neuvertrags eingeben.</div>';
+    return;
+  }
+  hits.innerHTML = '<div class="muted">Quellen werden durchsucht …</div>';
+  try {
+    const results = await Promise.all(queries.map(async item => ({
+      ...item,
+      result: await api('/api/advice/knowledge?limit=30&search=' + encodeURIComponent(item.query)),
+    })));
+    hits.innerHTML = '';
+    let hitCount = 0;
+    for (const { side, result } of results) {
+      for (const source of result.sources || []) {
+        hitCount += 1;
+        const row = document.createElement('div'); row.className = 'knowledge-hit';
+        const title = document.createElement('b'); title.textContent = `${side} · ${source.title}`;
+        const detail = document.createElement('small'); detail.textContent = [source.provider, source.tariff, source.year, source.scope].filter(Boolean).join(' · ');
+        const link = document.createElement('a'); link.href = source.url; link.target = '_blank'; link.rel = 'noopener'; link.textContent = 'Originalquelle öffnen ↗'; link.className = 'linkbtn';
+        row.append(title, detail, link); hits.appendChild(row);
+      }
+    }
+    if (!hitCount) hits.innerHTML = '<div class="muted">Keine belastbare Originalquelle gefunden. Bitte Versicherungsbedingungen oder Produktinformationsblatt unten als Dokument hochladen.</div>';
+  } catch (error) { hits.innerHTML = '<div class="muted">Wissenssuche fehlgeschlagen: ' + error.message + '</div>'; }
+}
+
+function createAdviceField(moduleId, spec, data, moduleRoot) {
+  const wrap = document.createElement('div'); wrap.className = 'advice-field' + (spec.wide ? ' wide' : '');
+  const label = document.createElement('label'); label.textContent = spec.label;
+  if (spec.unit) { const unit = document.createElement('em'); unit.textContent = spec.unit; label.appendChild(unit); }
+  let input;
+  if (spec.type === 'textarea') input = document.createElement('textarea');
+  else if (spec.type === 'select') {
+    input = document.createElement('select');
+    const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'bitte wählen'; input.appendChild(empty);
+    for (const value of spec.options || []) { const option = document.createElement('option'); option.value = value; option.textContent = value; input.appendChild(option); }
+  } else {
+    input = document.createElement('input'); input.type = spec.type === 'text' ? 'text' : 'text';
+    if (spec.type !== 'text') input.inputMode = 'decimal';
+  }
+  input.value = data[spec.key] ?? spec.value ?? '';
+  if (spec.placeholder) input.placeholder = spec.placeholder;
+  input.addEventListener('input', () => { data[spec.key] = input.value; refreshAdviceCalculation(moduleId); });
+  wrap.append(label, input); return wrap;
+}
+
+function renderAdviceActiveModule() {
+  const root = $('adviceSpecific'); root.innerHTML = '';
+  const module = adviceModule(activeAdviceModuleId);
+  $('adviceModuleNotice').hidden = !module?.notice;
+  $('adviceModuleNotice').textContent = module?.notice || '';
+  if (!module) {
+    root.innerHTML = '<div class="module"><strong>Noch kein Fachmodul ausgewählt</strong><p>Wähle oben ein Modul. In dieser Beratungsakte kannst du anschließend weitere Module ergänzen.</p><span class="module-state">Gemeinsame Kunden- und Dokumentenakte ist bereit</span></div>';
+    return;
+  }
+  const data = adviceModuleData[module.id] || (adviceModuleData[module.id] = moduleDefaults(module));
+  for (const section of module.sections || []) {
+    const card = document.createElement('section'); card.className = 'advice-section';
+    const heading = document.createElement('h3'); heading.textContent = section.title; card.appendChild(heading);
+    const fields = document.createElement('div'); fields.className = 'advice-fields';
+    for (const spec of section.fields || []) fields.appendChild(createAdviceField(module.id, spec, data, root));
+    card.appendChild(fields); root.appendChild(card);
+  }
+  renderCalculation(root, module, data);
+  if (module.knowledgeSearch) {
+    const card = document.createElement('section'); card.className = 'advice-section';
+    card.innerHTML = '<h3>Originalquellen für den Vergleich</h3><div class="hint">IVA sucht nach Gesellschaft, Tarif und Tarifstand. Ohne Originalquelle wird keine Leistungsaussage erzeugt.</div><div style="height:9px"></div><div class="knowledge-hits"></div>';
+    const button = document.createElement('button'); button.className = 'btn'; button.type = 'button'; button.textContent = 'Wissensdatenbank durchsuchen';
+    button.addEventListener('click', () => searchModuleKnowledge(module, card)); card.insertBefore(button, card.querySelector('.knowledge-hits'));
+    root.appendChild(card);
+  }
+  if (module.id === 'gkv-comparison') {
+    const gkv = adviceCatalog.connectors?.gkv || {};
+    const card = document.createElement('section'); card.className = 'advice-section';
+    card.innerHTML = `<h3>${gkv.configured ? (gkv.provider || 'GKV-Portal') + ' verbunden' : 'GKV-Portal noch nicht verbunden'}</h3><div class="hint">${gkv.configured ? 'Kundendaten bleiben in der Beratungsakte; der eigentliche Tarifvergleich öffnet sich im angebundenen Portal.' : 'Das Datenmodell ist vorbereitet. Später werden nur Anbieter und Start-/API-URL ergänzt.'}</div>`;
+    if (gkv.configured) { const button = document.createElement('button'); button.className = 'btn'; button.textContent = 'Vergleich öffnen'; button.addEventListener('click', () => window.open(gkv.launchUrl, '_blank', 'noopener')); card.appendChild(button); }
+    root.appendChild(card);
+  }
+}
+
+function renderAdviceModules() {
+  const root = $('adviceModulePills'); root.innerHTML = '';
+  for (const id of selectedAdviceModules) {
+    const module = adviceModule(id); if (!module) continue;
+    const button = document.createElement('button'); button.className = 'module-pill' + (activeAdviceModuleId === id ? ' active' : '');
+    button.type = 'button'; button.append(document.createTextNode(module.title));
+    const remove = document.createElement('span'); remove.className = 'remove'; remove.textContent = '×'; remove.title = 'Modul entfernen';
+    remove.addEventListener('click', event => { event.stopPropagation(); removeAdviceModule(id); }); button.appendChild(remove);
+    button.addEventListener('click', () => { activeAdviceModuleId = id; renderAdviceModules(); }); root.appendChild(button);
+  }
+  renderAdviceActiveModule();
+}
+
 function showMode() {
   for (const name of Object.keys(MODES)) $(name + 'Card').hidden = name !== mode;
   document.querySelectorAll('[data-energy-card]').forEach(card => { card.hidden = mode !== 'energie'; });
@@ -191,6 +440,9 @@ function fresh(nextMode = mode) {
   current = null;
   rooms = [];
   photoAssignments = [];
+  selectedAdviceModules = [];
+  adviceModuleData = {};
+  activeAdviceModuleId = '';
   history.replaceState({}, '', location.pathname + '?mode=' + mode);
   document.querySelectorAll('input:not([type=file]),textarea').forEach(input => {
     if (input.type === 'checkbox') input.checked = false;
@@ -206,6 +458,17 @@ function fresh(nextMode = mode) {
     setVal('customerAddress', params.get('customerAddress'));
     setVal('customerEmail', params.get('customerEmail'));
     setVal('customerPhone', params.get('customerPhone'));
+  }
+  if (mode === 'beratung') {
+    const requestedModule = params.get('adviceType');
+    if (requestedModule) ensureAdviceModule(requestedModule);
+    else renderAdviceModules();
+    const selected = adviceModule(requestedModule);
+    if (selected) {
+      setVal('topic', selected.title);
+      if (!val('title')) setVal('title', `${params.get('customerName') || 'Neue Beratung'} · ${selected.title}`);
+      $('pageTitle').textContent = selected.title;
+    }
   }
   renderRooms();
   renderFiles();
@@ -272,7 +535,7 @@ function collect() {
   const data = mode === 'energie'
     ? collectEnergyData()
     : mode === 'beratung'
-      ? { appointmentAt: val('appointmentAt'), topic: val('topic'), goal: val('goal'), facts: val('facts'), recommendation: val('recommendation') }
+      ? { schemaVersion: 'iva-advice-1.0', appointmentAt: val('appointmentAt'), topic: val('topic'), goal: val('goal'), facts: val('facts'), recommendation: val('recommendation'), adviceModules: selectedAdviceModules, activeAdviceModule: activeAdviceModuleId, moduleData: adviceModuleData }
       : { project: val('project'), company: val('company'), relationship: val('relationship'), nextStep: val('nextStep') };
   return {
     mode,
@@ -364,8 +627,12 @@ function apply(workspace) {
   $('statusBadge').textContent = ({ draft: 'Entwurf', active: 'Aktiv', review: 'Prüfung', complete: 'Fertig' })[workspace.status] || 'Entwurf';
   if (mode === 'energie') applyEnergy(workspace.data || {});
   if (mode === 'beratung') {
+    selectedAdviceModules = Array.isArray(workspace.data?.adviceModules) ? workspace.data.adviceModules.filter(id => adviceModule(id)) : [];
+    adviceModuleData = workspace.data?.moduleData && typeof workspace.data.moduleData === 'object' ? workspace.data.moduleData : {};
+    activeAdviceModuleId = adviceModule(workspace.data?.activeAdviceModule) ? workspace.data.activeAdviceModule : (selectedAdviceModules[0] || '');
     setVal('appointmentAt', workspace.data?.appointmentAt); setVal('topic', workspace.data?.topic); setVal('goal', workspace.data?.goal);
     setVal('facts', workspace.data?.facts); setVal('recommendation', workspace.data?.recommendation);
+    renderAdviceModules();
   }
   if (mode === 'kunde') {
     setVal('project', workspace.data?.project); setVal('company', workspace.data?.company);
@@ -719,6 +986,19 @@ function buildSimpleReport() {
     reportRow(section, 'Ziel', collected.data.goal); reportRow(section, 'Fakten', collected.data.facts);
     reportRow(section, 'Empfehlung', collected.data.recommendation);
   });
+  if (mode === 'beratung') {
+    for (const moduleId of collected.data.adviceModules || []) {
+      const module = adviceModule(moduleId); const data = collected.data.moduleData?.[moduleId] || {};
+      if (!module) continue;
+      reportSection(root, module.title, section => {
+        for (const moduleSection of module.sections || []) for (const spec of moduleSection.fields || []) reportRow(section, spec.label, data[spec.key]);
+        const calculation = calculateAdvice(module, data);
+        for (const item of calculation?.items || []) reportRow(section, item.label, item.value);
+        if (calculation?.note) reportRow(section, 'Hinweis zur Modellrechnung', calculation.note);
+        if (module.notice) reportRow(section, 'Fachlicher Hinweis', module.notice);
+      });
+    }
+  }
   if (mode === 'kunde') reportSection(root, 'Kundenakte', section => {
     reportRow(section, 'Projekt', collected.data.project); reportRow(section, 'Firma', collected.data.company);
     reportRow(section, 'Ausgangslage', collected.data.relationship); reportRow(section, 'Nächster Schritt', collected.data.nextStep);
@@ -761,16 +1041,28 @@ $('pdfBtn').addEventListener('click', downloadTmbPdf);
 $('pdfBtn2').addEventListener('click', downloadTmbPdf);
 $('addRoomBtn').addEventListener('click', addRoom);
 $('addNoteBtn').addEventListener('click', addNote);
+$('addAdviceModule').addEventListener('click', () => {
+  const id = val('adviceModuleSelect');
+  if (id) { ensureAdviceModule(id); $('adviceModuleSelect').value = ''; }
+});
 $('addGeneralPhotoBtn').addEventListener('click', () => { pendingPhotoCategory = 'sonstiges'; $('photoInput').click(); });
-document.querySelectorAll('[data-new]').forEach(button => button.addEventListener('click', () => fresh(button.dataset.new)));
+document.querySelectorAll('[data-new]').forEach(button => button.addEventListener('click', () => {
+  if (button.dataset.new === 'beratung') location.href = '/advice';
+  else fresh(button.dataset.new);
+}));
 document.querySelectorAll('input[type=file][data-kind]').forEach(input => input.addEventListener('change', () => upload(input)));
 document.querySelectorAll('[data-trigger]').forEach(button => button.addEventListener('click', () => $(button.dataset.trigger).click()));
 document.querySelectorAll('input:not([type=file]),select,textarea').forEach(input => input.addEventListener('input', () => { updateCompletion(); renderPhotoChecklist(); }));
 window.addEventListener('beforeprint', () => { if (mode !== 'energie') buildSimpleReport(); });
+$('ivaHelper').addEventListener('click', () => window.open('/cockpit', '_blank', 'noopener'));
 
-showMode();
-loadList().then(() => {
+async function initWorkspace() {
+  await loadAdviceCatalog();
+  showMode();
+  await loadList();
   const id = params.get('id');
   if (id) loadOne(id);
   else fresh(mode);
-});
+}
+
+initWorkspace();

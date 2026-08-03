@@ -358,8 +358,8 @@ async function uploadDocument(file) {
 
 function openConsultation() {
   const customer = currentCustomer();
-  const query = new URLSearchParams({ mode: 'beratung', customerId: customer.id || '', customerName: customer.name || '', customerEmail: customer.email || '', customerPhone: customer.mobile || customer.phone || '', customerAddress: sourceAddress(customer) });
-  window.open(`/workspace?${query}`, '_blank', 'noopener');
+  const query = new URLSearchParams({ customerId: customer.id || '', customerName: customer.name || '', customerEmail: customer.email || '', customerPhone: customer.mobile || customer.phone || '', customerAddress: sourceAddress(customer) });
+  window.open(`/advice?${query}`, '_blank', 'noopener');
 }
 
 function openAddressDialog() {

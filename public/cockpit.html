@@ -224,7 +224,7 @@
   let chatAbort=null;
   function bubble(cls,text){const d=document.createElement('div');d.className='bubble '+cls;d.textContent=text;$('msgs').appendChild(d);$('msgs').scrollTop=$('msgs').scrollHeight;return d;}
   function workspaceIntent(text){const s=String(text||'').toLowerCase();if(!/(öffne|oeffne|geh|gehe|wechsel|möchte|moechte|will)/.test(s))return null;if(/kunden|kundenmaske|kundenakte/.test(s))return'kunde';if(/beratungsmodus|beratung/.test(s))return'beratung';if(/energieplaner|energieplanung|wärmepumpenplaner|waermepumpenplaner/.test(s))return'energie';return null;}
-  function openWorkspace(mode,prompt=''){const q=new URLSearchParams({mode});if(prompt)q.set('prompt',prompt);const url=mode==='kunde'?'/customers':'/workspace?'+q;const win=window.open(url,'_blank','noopener');if(!win)location.href=url;}
+  function openWorkspace(mode,prompt=''){const q=new URLSearchParams({mode});if(prompt)q.set('prompt',prompt);const url=mode==='kunde'?'/customers':mode==='beratung'?'/advice':'/workspace?'+q;const win=window.open(url,'_blank','noopener');if(!win)location.href=url;}
   async function sendChat(viaVoice){const inp=$('chatIn');const t=inp.value.trim();if(!t)return;
     const target=workspaceIntent(t);if(target){bubble('user',t);inp.value='';openWorkspace(target,t);bubble('sys',({beratung:'Beratungsmodus',kunde:'Kundenbereich',energie:'Energieplaner'})[target]+' wurde in einem neuen Tab geöffnet.');return;}
     unlockAudio();
