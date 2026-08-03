@@ -21,12 +21,20 @@ import { crmSkill } from './skills/crm.js';
 import { marketingSkill } from './skills/marketing.js';
 import { researchSkill } from './skills/research.js';
 import { workspacesSkill } from './skills/workspaces.js';
+import { qonektoSkill } from './skills/qonekto.js';
 import { getAgent } from './agents/registry.js';
 import { marketAnalysis } from './marketing/market.js';
 import { speak } from './voice.js';
 import { askArchitect } from './agents/architect.js';
 import * as workspaces from './workspaces/store.js';
 import { createTmbPdf } from './workspaces/tmb-pdf.js';
+import {
+  qonektoStatus,
+  listQonektoTools,
+  callQonektoReadTool,
+  prepareQonektoWriteAction,
+  handleQonektoConfirmation,
+} from './integrations/qonekto.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -308,9 +316,10 @@ Challenge- und Alternativen-Reflex:
 
 Tool-Nutzung:
 
-- Live-Daten oder Aktion nötig (Kalender, Mails, Leads, Todos, Kampagnen, Bilder): Tool sofort aufrufen. Nie "hätte ich Zugriff auf…", nie "soll ich mal nachsehen?" — machen und dann zusammenfassen.
+- Live-Daten oder Aktion nötig (Kalender, Mails, Leads, Todos, Kampagnen, Bilder, Qonekto/blau direkt): Tool sofort aufrufen. Nie "hätte ich Zugriff auf…", nie "soll ich mal nachsehen?" — machen und dann zusammenfassen.
 - Mehrere Quellen relevant (z. B. Kalender + Mails + Leads): parallel abrufen.
 - Fach-/Recherche-Anfragen: askArchitect mit der präzisen Frage. Der Router entscheidet zwischen knowledge (zeitloses Fachwissen zu Finanz/Versicherung/Vorsorge/Rente) und web-research (aktuelle öffentliche Fakten wie Gesetze, Grenzwerte, Beitragssätze, Freibeträge, Fördersätze, Produktdatenblätter, Versicherungsbedingungen, Preise, Nachrichten, Öffnungszeiten). Für JEDE aktuelle Zahl / jeden aktuellen Grenzwert PFLICHT diesen Router nutzen statt aus dem Kopf zu antworten. Für eigene Systeme (Kalender/Mails/CRM/Leads/Kampagnen/Todos/Bilder) stattdessen direkt das passende Tool.
+- Kundinnen, Kunden, Vertraege, Dokumente, Archiv, Aufgaben oder Schaeden aus blau direkt/AMEISE/Qonekto: zuerst listQonektoTools nutzen. Lesende Werkzeuge mit callQonektoReadTool sofort ausfuehren. Veraendernde Werkzeuge ausschliesslich mit prepareQonektoWrite vorbereiten, Aenderung klar wiederholen und Nadine fragen, ob sie das wirklich will. Ausgefuehrt wird serverseitig erst nach ihrer separaten, exakten Antwort "Ja, Qonekto-Aenderung ausfuehren". Niemals behaupten, eine nur vorbereitete Aenderung sei bereits erfolgt. Destruktive Werkzeuge bleiben blockiert. Niemals Qonekto-Daten raten oder durch oeffentliche Web-Recherche ersetzen.
 - Nach Toolaufruf: Ergebnis im passenden Antwort-Format (siehe oben), nicht die Rohdaten.
 
 Voice-Modus überschreibt die Format-Regeln oben, wenn Sprache aktiviert ist:
@@ -348,27 +357,48 @@ const ALL_SKILLS = {
   marketing: marketingSkill({ campaigns, brands, analyzeReferences, generateImage, generateContent }),
   research:  researchSkill({ askArchitect }),
   workspaces: workspacesSkill({ workspaces }),
+  qonekto:   null, // wird pro Anfrage mit der echten sessionId erzeugt
 };
 
 // Baut die Tool-Map fuer einen konkreten Agenten aus dessen allowedSkills.
 // Fuer iva-standard = alle Skills -> identisches Tool-Set wie zuvor.
-function assembleTools(agent) {
+function assembleTools(agent, { sessionId = 'default' } = {}) {
   const out = {};
   for (const skillId of agent.allowedSkills) {
-    const s = ALL_SKILLS[skillId];
+    const s = skillId === 'qonekto'
+      ? qonektoSkill({ sessionId, qonektoStatus, listQonektoTools, callQonektoReadTool, prepareQonektoWriteAction })
+      : ALL_SKILLS[skillId];
     if (!s) { console.warn(`[REGISTRY] Skill "${skillId}" fuer Agent "${agent.id}" nicht gefunden.`); continue; }
     Object.assign(out, s);
   }
   return out;
 }
 
-// Ohne Agent-Argument bleibt das Default-Verhalten (iva-standard, alle Skills)
-// erhalten. Genutzt von den Endpoints die keinen agentId setzen.
-const tools = assembleTools(getAgent('iva-standard'));
+async function recordDirectAnswer(sessionId, userText, answer) {
+  const conv = await loadConversations();
+  const history = Array.isArray(conv[sessionId]) ? conv[sessionId] : [];
+  conv[sessionId] = [...history, { role: 'user', content: userText }, { role: 'assistant', content: answer }].slice(-MAX_TURNS);
+  await saveConversations(conv);
+}
+
+function directTextStream(answer) {
+  return {
+    pipeTextStreamToResponse(res) {
+      res.status(200);
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.end(answer);
+    },
+  };
+}
 
 async function askIva(userText, sessionId = 'default', voice = false, agentId = 'iva-standard') {
+  const directAnswer = await handleQonektoConfirmation(sessionId, userText);
+  if (directAnswer) {
+    await recordDirectAnswer(sessionId, userText, directAnswer);
+    return directAnswer;
+  }
   const agent = getAgent(agentId);
-  const agentTools = agentId === 'iva-standard' ? tools : assembleTools(agent);
+  const agentTools = assembleTools(agent, { sessionId });
   let system = await buildSystemPrompt();
   if (voice) system += VOICE_SYSTEM_SUFFIX;
   const conv = await loadConversations();
@@ -387,8 +417,13 @@ async function askIva(userText, sessionId = 'default', voice = false, agentId = 
 // Verlauf und Tools mit askIva ueber die Modul-Helper (buildSystemPrompt, loadConversations,
 // saveConversations, tools, MAX_TURNS). askIva selbst bleibt unangetastet -> Telegram sicher.
 async function streamIva(userText, sessionId = 'default', voice = false, agentId = 'iva-standard', abortSignal) {
+  const directAnswer = await handleQonektoConfirmation(sessionId, userText);
+  if (directAnswer) {
+    await recordDirectAnswer(sessionId, userText, directAnswer);
+    return directTextStream(directAnswer);
+  }
   const agent = getAgent(agentId);
-  const agentTools = agentId === 'iva-standard' ? tools : assembleTools(agent);
+  const agentTools = assembleTools(agent, { sessionId });
   let system = await buildSystemPrompt();
   if (voice) system += VOICE_SYSTEM_SUFFIX;
   const conv = await loadConversations();
@@ -530,6 +565,16 @@ app.post('/api/speak', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Qonekto-Diagnose liefert nur Werkzeug-Schemas, niemals Kunden- oder Token-Daten.
+app.get('/api/qonekto/status', async (req, res) => {
+  const status = await qonektoStatus({ force: req.query?.force === '1' });
+  res.status(status.reachable ? 200 : 503).json(status);
+});
+app.get('/api/qonekto/tools', async (req, res) => {
+  try { res.json(await listQonektoTools({ search: String(req.query?.search || '').slice(0, 100) })); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+
 // --- Gemeinsame Fallakten: Beratung, Kundenmaske, Energieplanung ---
 app.get('/api/workspaces', async (req, res) => {
   const mode = workspaces.WORKSPACE_MODES.includes(req.query?.mode) ? req.query.mode : undefined;
@@ -657,6 +702,10 @@ const __dirnameIva = path.dirname(fileURLToPath(import.meta.url));
 app.use(express.static(path.join(__dirnameIva, 'public')));
 app.get('/cockpit', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'cockpit.html')));
 app.get('/workspace', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'workspace.html')));
+app.get('/health/qonekto', async (_req, res) => {
+  const status = await qonektoStatus();
+  res.status(status.reachable ? 200 : 503).json(status);
+});
 app.get('/', (_req, res) => res.send('IVA laeuft.'));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => { console.log('IVA-Core auf Port ' + PORT); setupTelegramWebhook(); setBotCommands(); });

@@ -3,15 +3,20 @@
   "version": "0.1.0",
   "type": "module",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node index.js",
     "test:smoke": "node scripts/smoke.js",
     "test:tmb": "node scripts/verify-tmb.mjs",
-    "test:workspaces": "node scripts/verify-workspaces.mjs"
+    "test:workspaces": "node scripts/verify-workspaces.mjs",
+    "test:qonekto": "node scripts/verify-qonekto.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.0.0",
     "@ai-sdk/google": "^1.0.0",
+    "@modelcontextprotocol/client": "2.0.0",
     "ai": "^4.0.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
