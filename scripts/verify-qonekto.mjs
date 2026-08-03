@@ -3,6 +3,7 @@ import {
   isReadOnlyQonektoTool,
   isConfirmableQonektoWriteTool,
   isExplicitQonektoConfirmation,
+  normalizeQonektoToolCollection,
   qonektoStatus,
   QONEKTO_DEFAULT_MCP_URL,
 } from '../integrations/qonekto.js';
@@ -33,6 +34,18 @@ assert.equal(isExplicitQonektoConfirmation('Ja, Qonekto-Änderung ausführen'), 
 assert.equal(isExplicitQonektoConfirmation('ja qonekto änderung ausführen.'), true);
 assert.equal(isExplicitQonektoConfirmation('Ja, mach das'), false);
 assert.equal(isExplicitQonektoConfirmation('Ändere die Adresse'), false);
+
+assert.deepEqual(
+  normalizeQonektoToolCollection({
+    get_customer: { description: 'Kunde lesen', input_schema: { type: 'object', properties: { id: { type: 'string' } } } },
+    update_customer: { description: 'Kunde aendern', inputSchema: { type: 'object' } },
+  }).map(tool => tool.name),
+  ['get_customer', 'update_customer'],
+);
+assert.deepEqual(
+  normalizeQonektoToolCollection({ data: [{ name: 'list_contracts', description: 'Vertraege' }] }).map(tool => tool.name),
+  ['list_contracts'],
+);
 
 const oldToken = process.env.QONEKTO_MCP_TOKEN;
 delete process.env.QONEKTO_MCP_TOKEN;

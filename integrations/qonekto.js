@@ -5,6 +5,7 @@ import {
 } from '@modelcontextprotocol/client';
 import fs from 'fs/promises';
 import { randomUUID } from 'crypto';
+import { z } from 'zod';
 
 const DEFAULT_MCP_URL = 'https://app.qonekto.de/api/goalsandconcepts/mcp';
 const CONNECT_TIMEOUT_MS = 12_000;
@@ -13,6 +14,7 @@ const MAX_ARGUMENT_BYTES = 24_000;
 const MAX_RESULT_CHARS = 60_000;
 const CONFIRMATION_TTL_MS = 10 * 60_000;
 const CONFIRMATION_PHRASE = 'Ja, Qonekto-Änderung ausführen';
+const compatibilityClients = new WeakSet();
 
 const CONFIRMABLE_WRITE_NAME_PARTS = [
   'add', 'assign', 'change', 'create', 'edit', 'link', 'move', 'patch',
@@ -208,12 +210,64 @@ function publicTool(tool) {
 }
 
 async function listToolsOn(client) {
-  const result = await withTimeout(
-    client.listTools(),
+  try {
+    const result = await withTimeout(
+      client.listTools(),
+      REQUEST_TIMEOUT_MS,
+      'Qonekto tools/list',
+    );
+    return Array.isArray(result?.tools) ? result.tools : [];
+  } catch (error) {
+    // Qonekto liefert tools derzeit als Objekt statt als MCP-Array. Nur genau
+    // diesen bekannten Shape-Fehler kompatibel lesen; alle anderen Fehler bleiben hart.
+    if (error?.code !== 'INVALID_RESULT' || !/tools\/list/i.test(String(error?.message || ''))) throw error;
+    const raw = await rawMcpRequest(client, 'tools/list', {}, 'Qonekto tools/list compatibility');
+    compatibilityClients.add(client);
+    return normalizeQonektoToolCollection(raw?.tools);
+  }
+}
+
+async function rawMcpRequest(client, method, params, label) {
+  return withTimeout(
+    client.request({ method, params }, z.unknown(), { timeout: REQUEST_TIMEOUT_MS }),
     REQUEST_TIMEOUT_MS,
-    'Qonekto tools/list',
+    label,
   );
-  return Array.isArray(result?.tools) ? result.tools : [];
+}
+
+export function normalizeQonektoToolCollection(value, inheritedName = '', depth = 0) {
+  if (depth > 5 || value === null || value === undefined) return [];
+  if (Array.isArray(value)) {
+    return value.flatMap(item => normalizeQonektoToolCollection(item, '', depth + 1));
+  }
+  if (typeof value !== 'object') return [];
+  if (typeof value.name === 'string') return [value];
+  if (inheritedName && (value.description || value.inputSchema || value.input_schema)) {
+    return [{
+      ...value,
+      name: inheritedName,
+      inputSchema: value.inputSchema || value.input_schema || { type: 'object', properties: {} },
+    }];
+  }
+  const priorityKeys = ['data', 'items', 'results', 'tools'];
+  for (const key of priorityKeys) {
+    if (key in value) {
+      const nested = normalizeQonektoToolCollection(value[key], '', depth + 1);
+      if (nested.length) return nested;
+    }
+  }
+  return Object.entries(value).flatMap(([key, nested]) => normalizeQonektoToolCollection(nested, key, depth + 1));
+}
+
+async function callToolOn(client, name, args) {
+  if (compatibilityClients.has(client)) {
+    return rawMcpRequest(client, 'tools/call', { name, arguments: args }, `Qonekto tool ${name} compatibility`);
+  }
+  return withTimeout(
+    client.callTool({ name, arguments: args }),
+    REQUEST_TIMEOUT_MS,
+    `Qonekto tool ${name}`,
+  );
 }
 
 export async function listQonektoReadTools({ search = '' } = {}) {
@@ -277,11 +331,7 @@ export async function callQonektoReadTool(toolName, args = {}) {
     const selected = available.find(tool => tool.name === name);
     if (!selected) throw new Error(`Qonekto-Werkzeug "${name}" existiert nicht.`);
     if (!isReadOnlyQonektoTool(selected)) throw new Error(`Qonekto-Werkzeug "${name}" ist durch IVAs Leseschutz blockiert.`);
-    const result = await withTimeout(
-      client.callTool({ name, arguments: args }),
-      REQUEST_TIMEOUT_MS,
-      `Qonekto tool ${name}`,
-    );
+    const result = await callToolOn(client, name, args);
     return compactResult({ readOnly: true, tool: name, result });
   } finally {
     await closeQuietly(client, transport);
@@ -448,11 +498,7 @@ async function executeClaimedAction(action) {
   try {
     const selected = (await listToolsOn(client)).find(tool => tool.name === action.toolName);
     if (!selected || !isConfirmableQonektoWriteTool(selected)) throw new Error('Die vorbereitete Qonekto-Aenderung ist nicht mehr freigegeben.');
-    return await withTimeout(
-      client.callTool({ name: action.toolName, arguments: action.arguments }),
-      REQUEST_TIMEOUT_MS,
-      `Qonekto write ${action.toolName}`,
-    );
+    return await callToolOn(client, action.toolName, action.arguments);
   } finally {
     await closeQuietly(client, transport);
   }
@@ -499,6 +545,7 @@ async function queryQonektoStatus() {
         blockedToolCount: tools.filter(tool => !isReadOnlyQonektoTool(tool) && !isConfirmableQonektoWriteTool(tool)).length,
         destructiveWriteProtection: true,
         confirmationRequired: true,
+        compatibilityMode: compatibilityClients.has(client) ? 'qonekto-object-tools' : 'standard-mcp',
       };
     } finally {
       await closeQuietly(client, transport);
