@@ -26,11 +26,21 @@ async function save(data) {
 }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
+function whatsappConfig(input = {}, current = {}) {
+  return {
+    enabled: input.enabled === undefined ? (current.enabled ?? false) : input.enabled === true,
+    profileId: String(input.profileId ?? current.profileId ?? '').trim().slice(0, 120),
+    mode: ['lead', 'service', 'hybrid'].includes(input.mode) ? input.mode : (current.mode || 'lead'),
+    appointmentUrl: String(input.appointmentUrl ?? current.appointmentUrl ?? '').trim().slice(0, 1000),
+  };
+}
+
 export async function listCampaigns() {
-  return (await load()).campaigns || [];
+  return ((await load()).campaigns || []).map(campaign => ({ ...campaign, whatsapp: whatsappConfig(campaign.whatsapp) }));
 }
 export async function getCampaign(id) {
-  return ((await load()).campaigns || []).find(c => c.id === id) || null;
+  const campaign = ((await load()).campaigns || []).find(c => c.id === id) || null;
+  return campaign ? { ...campaign, whatsapp: whatsappConfig(campaign.whatsapp) } : null;
 }
 export async function createCampaign(input = {}) {
   const data = await load();
@@ -45,6 +55,7 @@ export async function createCampaign(input = {}) {
     tone: input.tone || '',
     targetChannel: input.targetChannel || '',                   // CRM-project_id | Social-Handle | Ad-Account
     autonomy: AUTONOMY.includes(input.autonomy) ? input.autonomy : 'observe',
+    whatsapp: whatsappConfig(input.whatsapp),
     analysis: null,                                             // letztes Muster-Profil (aus analyze.js)
     active: true,
     createdAt: new Date().toISOString(),
@@ -61,6 +72,7 @@ export async function updateCampaign(id, patch = {}) {
   for (const k of ['name', 'brandId', 'brand', 'type', 'references', 'tone', 'targetChannel', 'autonomy', 'analysis', 'active']) {
     if (k in patch) c[k] = patch[k];
   }
+  if ('whatsapp' in patch) c.whatsapp = whatsappConfig(patch.whatsapp, c.whatsapp);
   c.updatedAt = new Date().toISOString();
   await save(data);
   return c;

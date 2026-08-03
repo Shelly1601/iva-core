@@ -92,6 +92,18 @@ function normalizeRoom(room = {}, fallbackHeight = '') {
     use: room.use || '',
     area: room.area || '',
     height: room.height || fallbackHeight || '',
+    targetTemperature: room.targetTemperature || '',
+    airChanges: room.airChanges || '',
+    envelope: {
+      externalWallArea: room.envelope?.externalWallArea || '',
+      externalWallUValue: room.envelope?.externalWallUValue || '',
+      windowArea: room.envelope?.windowArea || '',
+      windowUValue: room.envelope?.windowUValue || '',
+      ceilingArea: room.envelope?.ceilingArea || '',
+      ceilingUValue: room.envelope?.ceilingUValue || '',
+      floorArea: room.envelope?.floorArea || '',
+      floorUValue: room.envelope?.floorUValue || '',
+    },
     radiators: radiators.map(normalizeRadiator),
   };
 }
@@ -451,6 +463,9 @@ function fresh(nextMode = mode) {
   document.querySelectorAll('select').forEach(select => { select.selectedIndex = 0; });
   setVal('consumptionUnit', 'kWh');
   setVal('upgradeNeeded', 'unknown');
+  setVal('fundingApplicantType', 'private-owner');
+  renderHeatLoadResult(null);
+  renderFundingResult(null);
   $('pageTitle').textContent = ({ beratung: 'Neue Beratung', kunde: 'Neue Kundenakte', energie: 'Neue Energieplanung' })[mode];
   $('statusBadge').textContent = 'Entwurf';
   if (params.get('customerName')) {
@@ -492,6 +507,7 @@ function collectEnergyData() {
       heatedArea: val('heatedArea'), units: val('buildingUnits'), occupants: val('occupants'), construction: val('construction'),
       glazing: val('glazing'), roof: val('roof'), basement: val('basement'), exteriorInsulation: val('exteriorInsulation'),
       roofInsulation: val('roofInsulation'), basementInsulation: val('basementInsulation'),
+      designOutdoorTemperature: val('designOutdoorTemperature'), thermalBridgePercent: val('thermalBridgePercent'),
     },
     existingHeating: {
       energySource: val('energySource'), manufacturer: val('heatingManufacturer'), model: val('heatingModel'),
@@ -525,6 +541,14 @@ function collectEnergyData() {
     rooms,
     photoAssignments,
     calculation: current?.data?.calculation || { status: 'not-started' },
+    funding: {
+      applicantType: val('fundingApplicantType') || 'private-owner', selfUsed: checked('fundingSelfUsed'),
+      existingBuildingAgeYears: val('existingBuildingAgeYears'), projectCosts: val('fundingProjectCosts'),
+      householdIncome: val('householdIncome'), eligibleMinorChild: checked('eligibleMinorChild'),
+      climateBonusEligible: checked('climateBonusEligible'), contractConditional: checked('contractConditional'),
+      applicationBeforeStart: checked('applicationBeforeStart'), hydraulicBalancingPlanned: checked('hydraulicBalancingPlanned'),
+      result: current?.data?.funding?.result || null,
+    },
     declaration: {
       reviewed: checked('reviewed'), reviewedBy: val('reviewedBy'), reviewedAt: val('reviewedAt'), notes: val('declarationNotes'),
     },
@@ -553,6 +577,69 @@ function collect() {
   };
 }
 
+function calcValue(label, value) {
+  const box = document.createElement('div'); box.className = 'calc-value';
+  const name = document.createElement('span'); const content = document.createElement('b');
+  name.textContent = label; content.textContent = value; box.append(name, content); return box;
+}
+
+function renderHeatLoadResult(result = null) {
+  const root = $('heatLoadResult'); if (!root) return;
+  root.replaceChildren();
+  const heading = document.createElement('h3');
+  if (!result || result.status === 'not-started') {
+    heading.textContent = 'Noch nicht berechnet';
+    const note = document.createElement('div'); note.className = 'muted'; note.textContent = 'Fehlende Pflichtangaben werden nach dem Start konkret angezeigt.';
+    root.append(heading, note); return;
+  }
+  if (result.status === 'data-required') {
+    heading.textContent = `${result.missing?.length || 0} Angaben fehlen`;
+    const list = document.createElement('div'); list.className = 'knowledge-hits';
+    for (const item of (result.missing || []).slice(0, 14)) { const line = document.createElement('div'); line.className = 'knowledge-hit'; line.textContent = item.label; list.appendChild(line); }
+    const note = document.createElement('div'); note.className = 'hint'; note.textContent = result.notice || '';
+    root.append(heading, list, note); return;
+  }
+  heading.textContent = 'Heizlast-Vorplanung berechnet';
+  const grid = document.createElement('div'); grid.className = 'calc-grid';
+  grid.append(calcValue('Gesamt', `${Number(result.totalKw || 0).toLocaleString('de-DE')} kW`), calcValue('Räume', String(result.rooms?.length || 0)), calcValue('Status', 'Vorplanung, nicht DIN-Nachweis'));
+  const note = document.createElement('div'); note.className = 'hint'; note.textContent = result.notice || '';
+  root.append(heading, grid, note);
+}
+
+function renderFundingResult(result = null) {
+  const root = $('fundingResult'); if (!root) return;
+  root.replaceChildren();
+  const heading = document.createElement('h3');
+  if (!result) {
+    heading.textContent = 'Noch nicht berechnet';
+    const note = document.createElement('div'); note.className = 'muted'; note.textContent = 'Der Check ist keine Förderzusage und zeigt offene Voraussetzungen separat.';
+    root.append(heading, note); return;
+  }
+  heading.textContent = result.status === 'precheck-positive' ? 'Förder-Vorcheck vollständig' : 'Förder-Vorcheck mit offenen Punkten';
+  const euro = value => Number(value || 0).toLocaleString('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
+  const grid = document.createElement('div'); grid.className = 'calc-grid';
+  grid.append(calcValue('Fördersatz', `${result.rate || 0} %`), calcValue('Förderfähige Kosten', euro(result.eligibleCosts)), calcValue('Rechnerischer Zuschuss', euro(result.estimatedGrant)));
+  root.append(heading, grid);
+  if (result.blockers?.length) {
+    const list = document.createElement('div'); list.className = 'knowledge-hits'; list.style.marginTop = '10px';
+    for (const blocker of result.blockers) { const line = document.createElement('div'); line.className = 'knowledge-hit'; line.textContent = blocker; list.appendChild(line); }
+    root.appendChild(list);
+  }
+  const note = document.createElement('div'); note.className = 'hint'; note.textContent = `${result.notice || ''} Regelstand: ${result.rulesAsOf || 'unbekannt'}.`;
+  root.appendChild(note);
+}
+
+async function calculateEnergy() {
+  try {
+    status('Energiedaten werden gespeichert und geprüft ...');
+    await save();
+    const response = await api(`/api/workspaces/${current.id}/energy/calculate`, { method: 'POST', body: JSON.stringify({}) });
+    current = response.workspace; apply(current);
+    const missing = response.calculation?.missing?.length || 0;
+    status(missing ? `Berechnung geprüft · ${missing} Angaben fehlen noch.` : 'Heizlast-Vorplanung und Fördercheck wurden berechnet.', missing ? '' : 'ok');
+  } catch (error) { status('Rechenfehler: ' + error.message, 'err'); }
+}
+
 async function save() {
   status('speichert ...');
   try {
@@ -579,6 +666,7 @@ function applyEnergy(data = {}) {
   const hydraulics = data.hydraulics || {};
   const electrical = data.electrical || {};
   const pv = data.pv || {};
+  const funding = data.funding || {};
   const declaration = data.declaration || {};
   rooms = (Array.isArray(data.rooms) ? data.rooms : []).map(room => normalizeRoom(room, building.floorHeight));
   photoAssignments = normalizePhotoAssignments(data, current?.files || []);
@@ -589,6 +677,7 @@ function applyEnergy(data = {}) {
     heatedArea: building.heatedArea, buildingUnits: building.units, occupants: building.occupants, construction: building.construction,
     glazing: building.glazing, roof: building.roof, basement: building.basement, exteriorInsulation: building.exteriorInsulation,
     roofInsulation: building.roofInsulation, basementInsulation: building.basementInsulation,
+    designOutdoorTemperature: building.designOutdoorTemperature, thermalBridgePercent: building.thermalBridgePercent,
     energySource: heating.energySource, heatingManufacturer: heating.manufacturer, heatingModel: heating.model,
     heatingYear: heating.installationYear, nominalPower: heating.nominalPower, boilerLocation: heating.boilerLocation,
     systemType: heating.systemType, pipeSystem: heating.pipeSystem, pipeDiameter: heating.pipeDiameter,
@@ -603,6 +692,8 @@ function applyEnergy(data = {}) {
     freeSlots: electrical.freeSlots, cabinetNotes: electrical.cabinetNotes, upgradeNeeded: electrical.upgradeNeeded || 'unknown',
     pvPower: pv.power, batteryCapacity: pv.batteryCapacity, reviewedBy: declaration.reviewedBy,
     reviewedAt: declaration.reviewedAt, declarationNotes: declaration.notes,
+    fundingApplicantType: funding.applicantType || 'private-owner', existingBuildingAgeYears: funding.existingBuildingAgeYears,
+    fundingProjectCosts: funding.projectCosts, householdIncome: funding.householdIncome,
   };
   for (const [id, value] of Object.entries(fields)) setVal(id, value);
   setChecked('protectedBuilding', site.protectedBuilding);
@@ -613,6 +704,14 @@ function applyEnergy(data = {}) {
   setChecked('batteryPresent', pv.batteryPresent);
   setChecked('solarThermal', pv.solarThermal);
   setChecked('reviewed', declaration.reviewed);
+  setChecked('fundingSelfUsed', funding.selfUsed);
+  setChecked('eligibleMinorChild', funding.eligibleMinorChild);
+  setChecked('climateBonusEligible', funding.climateBonusEligible);
+  setChecked('contractConditional', funding.contractConditional);
+  setChecked('applicationBeforeStart', funding.applicationBeforeStart);
+  setChecked('hydraulicBalancingPlanned', funding.hydraulicBalancingPlanned);
+  renderHeatLoadResult(data.calculation);
+  renderFundingResult(funding.result);
 }
 
 function apply(workspace) {
@@ -709,6 +808,25 @@ function renderRooms() {
     for (const [label, key] of roomSpecs) {
       roomFields.appendChild(fieldElement(label, room[key], value => { room[key] = value; if (key === 'name') title.textContent = (roomIndex + 1) + '. ' + (value || 'Neuer Raum'); }));
     }
+    const heatLoadTitle = document.createElement('strong');
+    heatLoadTitle.textContent = 'Heizlast-Eingaben';
+    heatLoadTitle.style.display = 'block';
+    heatLoadTitle.style.marginTop = '14px';
+    const heatLoadFields = document.createElement('div');
+    heatLoadFields.className = 'room-fields';
+    heatLoadFields.style.marginTop = '8px';
+    const heatLoadSpecs = [
+      ['Solltemperatur °C', 'targetTemperature'], ['Luftwechsel 1/h', 'airChanges'],
+      ['Außenwand m²', 'externalWallArea'], ['U-Wert Außenwand', 'externalWallUValue'],
+      ['Fenster m²', 'windowArea'], ['U-Wert Fenster', 'windowUValue'],
+      ['Decke/Dach m²', 'ceilingArea'], ['U-Wert Decke/Dach', 'ceilingUValue'],
+      ['Boden/Kellerdecke m²', 'floorArea'], ['U-Wert Boden', 'floorUValue'],
+    ];
+    for (const [label, key] of heatLoadSpecs) {
+      const direct = key === 'targetTemperature' || key === 'airChanges';
+      const source = direct ? room : room.envelope;
+      heatLoadFields.appendChild(fieldElement(label, source[key], value => { source[key] = value; }));
+    }
     const radiatorList = document.createElement('div');
     radiatorList.className = 'radiators';
     if (!room.radiators.length) {
@@ -742,7 +860,7 @@ function renderRooms() {
       radiatorElement.append(radiatorHead, radiatorFields);
       radiatorList.appendChild(radiatorElement);
     });
-    card.append(head, roomFields, radiatorList);
+    card.append(head, roomFields, heatLoadTitle, heatLoadFields, radiatorList);
     $('rooms').appendChild(card);
   });
   updateCompletion();
@@ -1039,6 +1157,7 @@ async function downloadTmbPdf() {
 $('saveBtn').addEventListener('click', save);
 $('pdfBtn').addEventListener('click', downloadTmbPdf);
 $('pdfBtn2').addEventListener('click', downloadTmbPdf);
+$('calculateEnergyBtn').addEventListener('click', calculateEnergy);
 $('addRoomBtn').addEventListener('click', addRoom);
 $('addNoteBtn').addEventListener('click', addNote);
 $('addAdviceModule').addEventListener('click', () => {

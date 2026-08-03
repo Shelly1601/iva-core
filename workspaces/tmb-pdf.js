@@ -31,6 +31,11 @@ function asMetric(value, unit) {
   return String(value ?? '').trim() ? `${clean(value)} ${unit}` : 'Nicht angegeben';
 }
 
+function asEuro(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toLocaleString('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }) : 'Nicht angegeben';
+}
+
 function displayName(workspace) {
   return clean(workspace?.customer?.name, 'Kunde nicht angegeben');
 }
@@ -169,6 +174,8 @@ export async function createTmbPdf(workspace, { readFile } = {}) {
     ['Dach', data.building.roof],
     ['Keller', data.building.basement],
     ['Dämmung', [data.building.exteriorInsulation && `Fassade: ${data.building.exteriorInsulation}`, data.building.roofInsulation && `Dach: ${data.building.roofInsulation}`, data.building.basementInsulation && `Keller: ${data.building.basementInsulation}`].filter(Boolean).join(' | ')],
+    ['Norm-Außentemperatur', asMetric(data.building.designOutdoorTemperature, 'Grad C')],
+    ['Wärmebrücken-Zuschlag', asMetric(data.building.thermalBridgePercent, '%')],
   ]);
 
   section('3. Bestandsheizung');
@@ -249,7 +256,34 @@ export async function createTmbPdf(workspace, { readFile } = {}) {
     }
   }
 
-  section('7. Prüfung und Bemerkungen');
+  section('7. Heizlast-Vorplanung und Fördercheck');
+  if (data.calculation?.status === 'preliminary') {
+    compactFields([
+      ['Heizlast-Vorplanung gesamt', `${clean(data.calculation.totalKw)} kW`],
+      ['Räume berechnet', data.calculation.rooms?.length],
+      ['Berechnungsstatus', 'Technische Vorplanung, kein DIN-Nachweis'],
+      ['Rechenweg', data.calculation.formula],
+      ['Hinweis', data.calculation.notice],
+    ]);
+  } else {
+    compactFields([
+      ['Heizlaststatus', data.calculation?.status === 'data-required' ? `${data.calculation.missing?.length || 0} Pflichtangaben fehlen` : 'Noch nicht berechnet'],
+      ['Hinweis', data.calculation?.notice || 'Für diese Fallakte liegt noch keine Heizlast-Vorplanung vor.'],
+    ]);
+  }
+  const funding = data.funding?.result;
+  if (funding) {
+    compactFields([
+      ['KfW-Regelstand', funding.rulesAsOf],
+      ['Fördersatz im Vorcheck', `${clean(funding.rate, '0')} %`],
+      ['Förderfähige Kosten im Vorcheck', asEuro(funding.eligibleCosts)],
+      ['Rechnerischer Zuschuss', asEuro(funding.estimatedGrant)],
+      ['Offene Voraussetzungen', funding.blockers?.length ? funding.blockers.join(' | ') : 'Keine offenen Eingaben im IVA-Vorcheck'],
+      ['Förderhinweis', funding.notice],
+    ]);
+  } else field('Fördercheck', 'Noch nicht berechnet.');
+
+  section('8. Prüfung und Bemerkungen');
   compactFields([
     ['Fachlich geprüft', yesNo(data.declaration.reviewed)],
     ['Geprüft durch', data.declaration.reviewedBy],
@@ -262,7 +296,7 @@ export async function createTmbPdf(workspace, { readFile } = {}) {
   const assignments = (data.photoAssignments || []).filter(assignment => assignment?.fileId);
   if (assignments.length && typeof readFile === 'function') {
     doc.addPage();
-    section('8. Fotodokumentation', `${assignments.length} zugeordnete Dateien`);
+    section('9. Fotodokumentation', `${assignments.length} zugeordnete Dateien`);
     for (let i = 0; i < assignments.length; i += 1) {
       const assignment = assignments[i];
       let stored;

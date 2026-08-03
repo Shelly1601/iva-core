@@ -34,6 +34,7 @@ const TASK_DEFAULTS = {
   route:              'anthropic:claude-haiku-4-5-20251001',
   knowledge:          'anthropic:claude-sonnet-4-6',
   classification:     'anthropic:claude-haiku-4-5-20251001',
+  whatsapp:           'anthropic:claude-haiku-4-5-20251001',
   'marketing-assist': 'google:gemini-2.0-flash',
   'marketing-market': 'google:gemini-2.0-flash',
 };
@@ -47,6 +48,7 @@ const TASK_SAFETY = {
   route:              'creative',
   knowledge:          'operational',
   classification:     'operational',
+  whatsapp:           'operational',
   'marketing-assist': 'creative',
   'marketing-market': 'creative',
 };

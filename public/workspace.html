@@ -117,6 +117,8 @@
           <div class="field"><label>Fassadendämmung</label><input id="exteriorInsulation"></div>
           <div class="field"><label>Dachdämmung</label><input id="roofInsulation"></div>
           <div class="field"><label>Kellerdeckendämmung</label><input id="basementInsulation"></div>
+          <div class="field"><label>Norm-Außentemperatur in °C</label><input id="designOutdoorTemperature" inputmode="decimal" placeholder="standortabhängig"></div>
+          <div class="field"><label>Wärmebrücken-Zuschlag in %</label><input id="thermalBridgePercent" inputmode="decimal"></div>
         </div>
         <div style="height:12px"></div>
         <div class="module"><strong>3D-Hausplaner</strong><p>Grundriss und Seitenansicht werden hier zum prüfbaren Gebäudemodell. Wände, Fenster, Heizkörper und Wärmepumpen-Komponenten bleiben anschließend verschiebbar.</p><span class="module-state">Datenmodell und Upload bereit · 3D-Editor folgt</span></div>
@@ -196,7 +198,30 @@
       <section class="card full" id="roomsCard" hidden>
         <h2>Räume & Heizkörper <button class="btn" id="addRoomBtn" style="margin-left:auto;padding:6px 10px">+ Raum</button></h2>
         <div class="rooms" id="rooms"></div>
-        <div class="hint">Pro Raum können beliebig viele Heizkörper mit Bauart, Typ 10/21/22/33 und Abmessungen erfasst werden.</div>
+        <div class="hint">Pro Raum werden Heizkörper und die für eine nachvollziehbare Heizlast-Vorplanung benötigten Bauteilflächen/U-Werte erfasst.</div>
+      </section>
+
+      <section class="card full" id="energyCalculationCard" data-energy-card hidden>
+        <h2>Heizlast & Förderung <span class="badge">prüfbarer Rechenweg</span></h2>
+        <div class="module"><strong>Heizlast-Vorplanung</strong><p>IVA rechnet raumweise aus Außenflächen, U-Werten, Luftwechsel und Temperaturdifferenz. Das Ergebnis ist eine technische Vorplanung; die finale Auslegung bleibt eine normgerechte Berechnung nach DIN EN 12831-1 zusammen mit DIN/TS 12831-1.</p><button class="btn primary" id="calculateEnergyBtn" type="button">Heizlast & Förderung berechnen</button></div>
+        <div style="height:12px"></div>
+        <div class="calc-result" id="heatLoadResult"><h3>Noch nicht berechnet</h3><div class="muted">Fehlende Pflichtangaben werden nach dem Start konkret angezeigt.</div></div>
+        <div style="height:18px"></div>
+        <h2>KfW-458-Fördercheck <span class="badge">Stand 21.07.2026</span></h2>
+        <div class="fields">
+          <div class="field"><label>Antragsteller</label><select id="fundingApplicantType"><option value="private-owner">Private Eigentümerin / privater Eigentümer</option><option value="other">Andere Rechtsform</option></select></div>
+          <div class="field"><label>Gebäudealter in Jahren</label><input id="existingBuildingAgeYears" inputmode="numeric"></div>
+          <div class="field"><label>Förderfähige Projektkosten in €</label><input id="fundingProjectCosts" inputmode="decimal"></div>
+          <div class="field"><label>Zu versteuerndes Haushaltsjahreseinkommen in €</label><input id="householdIncome" inputmode="decimal"></div>
+          <label class="check"><input type="checkbox" id="fundingSelfUsed"><span>Wohneinheit wird selbst genutzt</span></label>
+          <label class="check"><input type="checkbox" id="eligibleMinorChild"><span>Förderfähiges minderjähriges Kind im Haushalt</span></label>
+          <label class="check"><input type="checkbox" id="climateBonusEligible"><span>Klimageschwindigkeitsbonus nach Vorprüfung möglich</span></label>
+          <label class="check"><input type="checkbox" id="contractConditional"><span>Liefer-/Leistungsvertrag enthält Förderbedingung</span></label>
+          <label class="check"><input type="checkbox" id="applicationBeforeStart"><span>Antrag wird vor Vorhabenbeginn gestellt</span></label>
+          <label class="check"><input type="checkbox" id="hydraulicBalancingPlanned"><span>Hydraulischer Abgleich / Anlagenoptimierung eingeplant</span></label>
+        </div>
+        <div style="height:12px"></div>
+        <div class="calc-result" id="fundingResult"><h3>Noch nicht berechnet</h3><div class="muted">Der Check ist keine Förderzusage und zeigt offene Voraussetzungen separat.</div></div>
       </section>
 
       <section class="card">

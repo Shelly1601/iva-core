@@ -63,6 +63,8 @@ export function initialEnergyData() {
       exteriorInsulation: '',
       roofInsulation: '',
       basementInsulation: '',
+      designOutdoorTemperature: '',
+      thermalBridgePercent: '',
     },
     existingHeating: {
       energySource: '',
@@ -124,6 +126,19 @@ export function initialEnergyData() {
     rooms: [],
     photoAssignments: [],
     calculation: { status: 'not-started' },
+    funding: {
+      applicantType: 'private-owner',
+      selfUsed: false,
+      existingBuildingAgeYears: '',
+      projectCosts: '',
+      householdIncome: '',
+      eligibleMinorChild: false,
+      climateBonusEligible: false,
+      contractConditional: false,
+      applicationBeforeStart: false,
+      hydraulicBalancingPlanned: false,
+      result: null,
+    },
     declaration: {
       reviewed: false,
       reviewedBy: '',
@@ -143,6 +158,18 @@ export function normalizeRoom(room = {}, fallbackHeight = '') {
     use: room.use || '',
     area: room.area || '',
     height: room.height || fallbackHeight || '',
+    targetTemperature: room.targetTemperature || '',
+    airChanges: room.airChanges || '',
+    envelope: {
+      externalWallArea: room.envelope?.externalWallArea || '',
+      externalWallUValue: room.envelope?.externalWallUValue || '',
+      windowArea: room.envelope?.windowArea || '',
+      windowUValue: room.envelope?.windowUValue || '',
+      ceilingArea: room.envelope?.ceilingArea || '',
+      ceilingUValue: room.envelope?.ceilingUValue || '',
+      floorArea: room.envelope?.floorArea || '',
+      floorUValue: room.envelope?.floorUValue || '',
+    },
     radiators: radiators.map(radiator => ({
       id: radiator?.id || crypto.randomUUID(),
       type: radiator?.type || '',
@@ -169,6 +196,7 @@ export function normalizeEnergyData(data = {}) {
     pv: { ...initial.pv, ...(data.pv || {}) },
     site: { ...initial.site, ...(data.site || {}) },
     calculation: { ...initial.calculation, ...(data.calculation || {}) },
+    funding: { ...initial.funding, ...(data.funding || {}) },
     declaration: { ...initial.declaration, ...(data.declaration || {}) },
   };
   merged.schemaVersion = TMB_SCHEMA_VERSION;

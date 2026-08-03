@@ -21,17 +21,33 @@ Backend („Gehirn") von IVA. Node.js + Express, deployt auf Railway. Bündelt K
 - `GET/POST /api/*` – Frontend-API (Bearer `API_TOKEN`): leads, mails, calendar, calendly, todos (+toggle), chat.
 - `GET/POST/PATCH /api/workspaces` – gemeinsame Fallakten für Beratung, Kunde und Energieplanung.
 - `GET /api/workspaces/:id/tmb.pdf` – A4-TMB aus einer Energie-Fallakte mit Raum-/Heizkörpertabelle und zugeordnetem Fotoanhang.
+- `POST /api/workspaces/:id/energy/calculate` – speichert Heizlast-Vorplanung und KfW-458-Fördervorcheck in der Energie-Fallakte.
+- `GET/POST/PATCH /api/whatsapp/profiles` – getrennte Lead-, Service- und Hybridprofile; `/api/whatsapp/simulate` testet Antworten ohne Versand.
+- `GET/POST /webhooks/whatsapp` – signierter Meta-Webhook für eingehende WhatsApp-Nachrichten.
 
 ## Lokale Prüfungen
 - `npm run test:workspaces` – Fallakten, Dateien und Persistenz.
 - `npm run test:tmb` – versioniertes TMB-Schema und visuell prüfbares Muster-PDF unter `output/pdf/IVA-TMB-Muster.pdf`.
 - `npm run test:qonekto` – Qonekto-Konfiguration und serverseitigen Leseschutz prüfen (ohne echten Token).
+- `npm run test:energy` – Heizlast-Rechenweg, Pflichtfelder und versionierte KfW-458-Regeln.
+- `npm run test:whatsapp` – Webhook-HMAC, Nachrichtenerkennung und Sicherheits-Intents.
 
 ## Qonekto / blau direkt
 - Railway-Variable `QONEKTO_MCP_TOKEN` enthält den Qonekto-MCP-Token.
 - Optionaler Endpoint: `QONEKTO_MCP_URL` (Default für Tenant `goalsandconcepts` ist in `.env.example`).
 - IVA führt eindeutig lesende MCP-Werkzeuge direkt aus. Nicht-destruktive Änderungen werden nur vorbereitet und erst nach der separaten exakten Bestätigung „Ja, Qonekto-Änderung ausführen“ ausgeführt.
 - Löschen, Stornieren, Versenden und andere destruktive oder unbekannte Werkzeuge bleiben blockiert, selbst wenn der hinterlegte Token mehr Rechte hat.
+
+## WhatsApp
+- Verwaltung unter `/whatsapp`; der Testchat funktioniert bereits ohne Meta-Verbindung.
+- Live benötigt `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` und eine explizite `WHATSAPP_GRAPH_VERSION` in Railway.
+- Vertragsstammdaten dürfen erklärt werden. Eine konkrete Deckungsentscheidung wird nur mit belastbarem Policen-/Bedingungsbeleg getroffen; fehlt er, erzwingt IVA die persönliche Prüfung.
+- Schadenmeldungen werden als eigener Eingang erfasst, aber weder als gedeckt bestätigt noch automatisch beim Versicherer eingereicht.
+
+## Energie-Rechenkern
+- Die raumweise Heizlast-Vorplanung rechnet transparent mit Bauteilflächen, U-Werten, Lüftung, Wärmebrücken und Temperaturdifferenz.
+- Sie ist bewusst als Vorplanung gekennzeichnet und ersetzt keine normgerechte Heizlast nach DIN EN 12831-1 zusammen mit DIN/TS 12831-1.
+- Der Fördercheck speichert immer Regelstand, Rechenweg und offene Voraussetzungen. Die produktive Entscheidung erfolgt nach aktuellem KfW-Merkblatt und BzA.
 
 ## Befehle (Telegram)
 `/briefing` `/leads` `/termine` `/calendly` `/mails` `/todos`

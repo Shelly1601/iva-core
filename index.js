@@ -29,6 +29,7 @@ import { speak } from './voice.js';
 import { askArchitect } from './agents/architect.js';
 import * as workspaces from './workspaces/store.js';
 import { createTmbPdf } from './workspaces/tmb-pdf.js';
+import { calculateHeatLoad, calculateKfw458Funding, ENERGY_SOURCES } from './workspaces/energy-calculations.js';
 import {
   qonektoStatus,
   listQonektoTools,
@@ -46,13 +47,26 @@ import {
   upsertQonektoCustomerAutomatically,
 } from './integrations/qonekto-customers.js';
 import { crmQonektoSyncStatus, runCrmQonektoSync } from './integrations/crm-qonekto-sync.js';
+import { extractWhatsAppMessages, sendWhatsAppText, verifyWhatsAppChallenge, verifyWhatsAppSignature, whatsappStatus } from './integrations/whatsapp.js';
+import { handleWhatsAppMessage } from './integrations/whatsapp-agent.js';
+import {
+  createWhatsAppProfile,
+  deleteWhatsAppProfile,
+  listClaimIntakes,
+  listWhatsAppProfiles,
+  updateWhatsAppProfile,
+} from './integrations/whatsapp-store.js';
 import { adviceConnectorStatus, publicAdviceCatalog } from './advice/catalog.js';
 import { addAdviceKnowledgeSource, adviceKnowledgeStatus, listAdviceKnowledge } from './advice/knowledge-store.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const app = express();
-app.use(express.json());
+app.use(express.json({
+  verify(req, _res, buffer) {
+    if (req.originalUrl?.startsWith('/webhooks/whatsapp')) req.rawBody = Buffer.from(buffer);
+  },
+}));
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const MEM_FILE = DATA_DIR + '/memory.json';
@@ -535,6 +549,36 @@ app.post('/telegram', async (req, res) => {
   } catch (e) { console.error('Fehler:', e); }
 });
 
+// Meta ruft diese beiden Endpunkte ohne IVA-API-Token auf. Die Verifikation
+// erfolgt mit separatem Verify-Token und bei Nachrichten zusätzlich mit der
+// HMAC-Signatur des WhatsApp App-Secrets.
+app.get('/webhooks/whatsapp', (req, res) => {
+  const challenge = verifyWhatsAppChallenge(req.query || {});
+  if (challenge === null) return res.sendStatus(403);
+  res.type('text/plain').send(challenge);
+});
+app.post('/webhooks/whatsapp', (req, res) => {
+  if (!verifyWhatsAppSignature(req.rawBody, req.headers['x-hub-signature-256'])) return res.sendStatus(401);
+  const messages = extractWhatsAppMessages(req.body || {});
+  res.sendStatus(200);
+  void (async () => {
+    for (const message of messages) {
+      try {
+        const result = await handleWhatsAppMessage({
+          phoneNumberId: message.phoneNumberId,
+          sender: message.sender,
+          text: message.text,
+          messageId: message.id,
+        });
+        if (result.duplicate) continue;
+        await sendWhatsAppText({ to: message.sender, text: result.reply, phoneNumberId: message.phoneNumberId });
+      } catch (error) {
+        console.error('WhatsApp-Nachricht:', error.message);
+      }
+    }
+  })();
+});
+
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type', 'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS' };
 app.use('/api', (req, res, next) => {
   res.set(CORS);
@@ -727,6 +771,36 @@ app.get('/api/workspaces/:id/tmb.pdf', async (req, res) => {
   }
 });
 
+// --- Energie-Rechenkern: nachvollziehbare Vorplanung + versionierter Fördercheck ---
+app.get('/api/energy/sources', (_req, res) => res.json(ENERGY_SOURCES));
+app.post('/api/energy/heat-load', (req, res) => {
+  try { res.json(calculateHeatLoad(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/energy/funding', (req, res) => {
+  try { res.json(calculateKfw458Funding(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/workspaces/:id/energy/calculate', async (req, res) => {
+  try {
+    const workspace = await workspaces.getWorkspace(req.params.id);
+    if (!workspace) return res.status(404).json({ error: 'not found' });
+    if (workspace.mode !== 'energie') return res.status(400).json({ error: 'Berechnungen sind nur für Energie-Fallakten verfügbar.' });
+    const data = { ...(workspace.data || {}), ...(req.body?.data || {}) };
+    const calculation = calculateHeatLoad(data);
+    const fundingInput = { units: data.building?.units, ...(data.funding || {}), ...(req.body?.funding || {}) };
+    const fundingResult = calculateKfw458Funding(fundingInput);
+    const updated = await workspaces.updateWorkspace(workspace.id, {
+      data: {
+        ...data,
+        calculation,
+        funding: { ...(data.funding || {}), result: fundingResult },
+      },
+    });
+    res.json({ calculation, funding: fundingResult, workspace: updated });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // --- Marketing-Maschine: Kampagnen + Analyse-Engine ---
 app.get('/api/campaigns', async (_req, res) => res.json(await campaigns.listCampaigns()));
 app.get('/api/campaigns/:id', async (req, res) => { const c = await campaigns.getCampaign(req.params.id); res.status(c ? 200 : 404).json(c || { error: 'not found' }); });
@@ -757,6 +831,33 @@ app.post('/api/campaigns/:id/generate', async (req, res) => {
     const brand = c.brandId ? await brands.getBrand(c.brandId) : null;
     res.json(await generateContent(c, brand, { briefing: req.body?.briefing || '', count: req.body?.count || 3, format: req.body?.format || 'reel' }));
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// --- WhatsApp: mehrere Bot-Profile, sicherer Testchat und Schaden-Eingang ---
+app.get('/api/whatsapp/status', (_req, res) => res.json(whatsappStatus()));
+app.get('/api/whatsapp/profiles', async (_req, res) => res.json(await listWhatsAppProfiles()));
+app.post('/api/whatsapp/profiles', async (req, res) => {
+  try { res.status(201).json(await createWhatsAppProfile(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.patch('/api/whatsapp/profiles/:id', async (req, res) => {
+  try {
+    const profile = await updateWhatsAppProfile(req.params.id, req.body || {});
+    res.status(profile ? 200 : 404).json(profile || { error: 'not found' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/whatsapp/profiles/:id', async (req, res) => res.json({ ok: await deleteWhatsAppProfile(req.params.id) }));
+app.get('/api/whatsapp/claims', async (req, res) => res.json(await listClaimIntakes({ status: String(req.query?.status || ''), limit: req.query?.limit })));
+app.post('/api/whatsapp/simulate', async (req, res) => {
+  try {
+    res.json(await handleWhatsAppMessage({
+      profileId: String(req.body?.profileId || ''),
+      campaignId: String(req.body?.campaignId || ''),
+      sender: String(req.body?.sender || '491700000000'),
+      text: String(req.body?.message || '').slice(0, 6000),
+      simulate: true,
+    }));
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.get('/api/brands', async (_req, res) => res.json(await brands.listBrands()));
 app.get('/api/brands/:id', async (req, res) => { const b = await brands.getBrand(req.params.id); res.status(b ? 200 : 404).json(b || { error: 'not found' }); });
@@ -806,6 +907,7 @@ app.get('/cockpit', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public'
 app.get('/workspace', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'workspace.html')));
 app.get('/customers', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'customers.html')));
 app.get('/advice', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'advice.html')));
+app.get('/whatsapp', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'whatsapp.html')));
 app.get('/health/qonekto', async (_req, res) => {
   const status = await qonektoStatus();
   if (status.reachable) {
