@@ -91,6 +91,23 @@ function safeError(error) {
   return 'Die Qonekto-MCP-Verbindung ist fehlgeschlagen.';
 }
 
+function errorCategory(error) {
+  const message = `${error?.name || ''} ${error?.code || ''} ${error?.message || error || ''}`;
+  if (/401|unauthori|token|credential/i.test(message)) return 'authentication';
+  if (/403|forbidden|scope|permission/i.test(message)) return 'permission';
+  if (/timeout|timed out|abort/i.test(message)) return 'timeout';
+  if (/fetch|network|enotfound|econn|socket/i.test(message)) return 'network';
+  if (/protocol|initialize|method|parse|json.?rpc/i.test(message)) return 'protocol';
+  return 'connection';
+}
+
+function connectionError(source, cause) {
+  const error = new Error(safeError(source));
+  error.category = errorCategory(source);
+  error.cause = cause || source;
+  return error;
+}
+
 function withTimeout(promise, ms, label, onTimeout) {
   let timeout;
   const expired = new Promise((_, reject) => {
@@ -136,11 +153,20 @@ async function connectQonekto() {
   try {
     return await connectWith(StreamableHTTPClientTransport, config);
   } catch (streamableError) {
+    const primaryCategory = errorCategory(streamableError);
+    // Auth-/Rechtefehler sind transportunabhaengig. Ein SSE-Fallback wuerde
+    // nur die aussagekraeftige Ursache verdecken und eine zweite Anfrage senden.
+    if (primaryCategory === 'authentication' || primaryCategory === 'permission') {
+      throw connectionError(streamableError);
+    }
     try { return await connectWith(SSEClientTransport, config); }
     catch (sseError) {
-      const error = new Error(safeError(sseError));
-      error.cause = { streamableError, sseError };
-      throw error;
+      throw connectionError(
+        errorCategory(sseError) === 'authentication' || errorCategory(sseError) === 'permission'
+          ? sseError
+          : streamableError,
+        { streamableError, sseError },
+      );
     }
   }
 }
@@ -457,6 +483,7 @@ async function queryQonektoStatus() {
       destructiveWriteProtection: true,
       confirmationRequired: true,
       error: safeError(error),
+      errorCategory: error?.category || errorCategory(error),
     };
   }
 }
