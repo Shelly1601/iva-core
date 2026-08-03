@@ -13,6 +13,7 @@
     "test:workspaces": "node scripts/verify-workspaces.mjs",
     "test:qonekto": "node scripts/verify-qonekto.mjs",
     "test:qonekto-customers": "node scripts/verify-qonekto-customers.mjs",
+    "test:crm-qonekto": "node scripts/verify-crm-qonekto-sync.mjs",
     "test:advice": "node scripts/verify-advice.mjs"
   },
   "dependencies": {

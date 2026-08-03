@@ -338,6 +338,34 @@ export async function callQonektoReadTool(toolName, args = {}) {
   }
 }
 
+// Eng begrenzter Maschinenweg fuer genau eine von Nadine beauftragte
+// Automatik: CRM-Kunden per Qonekto-Upsert anlegen/aktualisieren. Dieser Weg
+// akzeptiert weder beliebige Toolnamen noch destruktive oder sendende Aktionen.
+export async function callQonektoCustomerUpsertAutomation(toolName, args = {}) {
+  if (String(process.env.CRM_QONEKTO_SYNC_ENABLED || '').toLowerCase() !== 'true') {
+    throw new Error('CRM-Qonekto-Automatik ist nicht aktiviert.');
+  }
+  const name = String(toolName || '').trim();
+  if (!name || !/upsert/i.test(name) || !/(kunde|customer)/i.test(name)) {
+    throw new Error('Nur das freigegebene Qonekto-Kunden-Upsert darf automatisch ausgefuehrt werden.');
+  }
+  if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Qonekto-Argumente muessen ein Objekt sein.');
+  if (Buffer.byteLength(JSON.stringify(args), 'utf8') > MAX_ARGUMENT_BYTES) throw new Error('Qonekto-Aenderung ist zu gross.');
+
+  const { client, transport } = await connectQonekto();
+  try {
+    const selected = (await listToolsOn(client)).find(tool => tool.name === name);
+    if (!selected || !isConfirmableQonektoWriteTool(selected)) {
+      throw new Error('Das Qonekto-Kunden-Upsert ist nicht fuer die Automatik freigegeben.');
+    }
+    const result = await callToolOn(client, name, args);
+    if (result?.isError) throw new Error('Qonekto hat das Kunden-Upsert abgelehnt.');
+    return compactResult({ automated: true, scope: 'crm-customer-upsert', tool: name, result });
+  } finally {
+    await closeQuietly(client, transport);
+  }
+}
+
 function actionsFile() {
   return `${process.env.DATA_DIR || '/data'}/qonekto-pending-actions.json`;
 }

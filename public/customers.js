@@ -220,9 +220,23 @@ function contractRows(contracts) {
 function rawCustomerFields(customer) {
   const raw = customer.raw || {};
   const excluded = new Set(['ameise_id', 'id', 'vorname', 'nachname', 'titel', 'strasse', 'plz', 'ort', 'email', 'telefon', 'mobil', 'kommunikationen', 'details']);
-  const entries = Object.entries(raw)
-    .filter(([key, value]) => !excluded.has(key) && value !== null && value !== '' && value !== undefined && typeof value !== 'object')
-    .slice(0, 18);
+  const entries = [];
+  const collect = (value, prefix = '', depth = 0) => {
+    if (!value || typeof value !== 'object' || depth > 4 || entries.length >= 30) return;
+    for (const [key, child] of Object.entries(value)) {
+      const path = prefix ? `${prefix} · ${key}` : key;
+      if (!prefix && excluded.has(key)) continue;
+      if (child === null || child === '' || child === undefined) continue;
+      if (Array.isArray(child)) {
+        const scalars = child.filter(item => item === null || typeof item !== 'object');
+        if (scalars.length) entries.push([path, scalars.join(', ')]);
+        child.filter(item => item && typeof item === 'object').forEach((item, index) => collect(item, `${path} ${index + 1}`, depth + 1));
+      } else if (typeof child === 'object') collect(child, path, depth + 1);
+      else entries.push([path, child]);
+      if (entries.length >= 30) break;
+    }
+  };
+  collect(raw);
   if (!entries.length) return '<div class="empty-card">Keine weiteren Stammdaten übermittelt.</div>';
   return `<div class="raw-grid">${entries.map(([key, value]) => `<div class="raw-item"><span>${escapeHtml(key.replaceAll('_', ' '))}</span><b>${escapeHtml(displayValue(value))}</b></div>`).join('')}</div>`;
 }
@@ -295,6 +309,17 @@ async function openCustomer(listId, { force = false } = {}) {
     const detail = listed.source === 'iva'
       ? localDetail(listed.workspace)
       : await api(`/api/customers/${encodeURIComponent(listed.id)}${force ? '?force=1' : ''}`);
+    // List Kunde und Show Kunde liefern je nach Qonekto-Version verschiedene
+    // Feldmengen. Zusammengeführt bleibt die Akte auch bei Teilantworten nutzbar.
+    if (listed.source !== 'iva') {
+      detail.customer = {
+        ...listed,
+        ...(detail.customer || {}),
+        id: detail.customer?.id || listed.id,
+        name: detail.customer?.name && !/^Kunde\b/.test(detail.customer.name) ? detail.customer.name : listed.name,
+        raw: { ...(listed.raw || {}), ...(detail.customer?.raw || {}) },
+      };
+    }
     state.current.detail = detail;
     renderDetail(detail, listId);
     if (detail.warnings?.length) showNotice('Ein Teil der Zusatzdaten konnte nicht geladen werden. Stammdaten und verfügbare Bereiche werden trotzdem angezeigt.');

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  arrayFromPayload,
   normalizeQonektoContract,
   normalizeQonektoCustomer,
   unwrapQonektoResult,
@@ -33,6 +34,25 @@ assert.equal(customer.email, 'mara@example.test');
 assert.equal(customer.mobile, '+49 170 1234567');
 assert.equal(customer.address, 'Testweg 1, 12345 Berlin');
 
+const nestedCustomer = normalizeQonektoCustomer({
+  data: {
+    kunde: {
+      ameise_id: 'K-789',
+      stammdaten: { vorname: 'Nora', nachname: 'Nested', geburtsdatum: '1980-02-03' },
+      hauptadresse: { strasse: 'Innenweg 4', plz: '54321', ort: 'Köln' },
+      kommunikation: {
+        1: { kommunikationsart: 'E-Mail', wert: 'nora@example.test' },
+        2: { kommunikationsart: 'Mobiltelefon', wert: '+49 171 7654321' },
+      },
+    },
+  },
+});
+assert.equal(nestedCustomer.id, 'K-789');
+assert.equal(nestedCustomer.name, 'Nora Nested');
+assert.equal(nestedCustomer.email, 'nora@example.test');
+assert.equal(nestedCustomer.mobile, '+49 171 7654321');
+assert.equal(nestedCustomer.address, 'Innenweg 4, 54321 Köln');
+
 const contract = normalizeQonektoContract({
   ameise_id: 456,
   kunde_id: 123,
@@ -46,4 +66,30 @@ assert.equal(contract.customerId, '123');
 assert.equal(contract.category, 'Hausrat');
 assert.equal(contract.netPremium, 19.95);
 
-console.log('PASS Qonekto-Kunden: MCP-Ergebnis, Kunden- und Vertragsnormalisierung');
+const nestedContracts = arrayFromPayload({
+  response: {
+    data: {
+      vertraege: {
+        first: { vertrag: { ameise_id: 'V-1', kunde_ameise_id: 'K-789', sparte: 'Haftpflicht' } },
+        second: { vertrag: { ameise_id: 'V-2', kunde_ameise_id: 'K-789', sparte: 'Hausrat' } },
+      },
+    },
+  },
+}, ['vertraege', 'contracts']);
+assert.equal(nestedContracts.length, 2);
+assert.equal(normalizeQonektoContract(nestedContracts[0]).customerId, 'K-789');
+assert.equal(normalizeQonektoContract(nestedContracts[1]).category, 'Hausrat');
+
+const referencedContract = normalizeQonektoContract({
+  vertrag: {
+    id: 'V-3',
+    kunde: { ameise_id: 'K-789' },
+    sparte: { bezeichnung: 'Wohngebäude' },
+    gesellschaft: { name: 'Beispiel Versicherer' },
+  },
+});
+assert.equal(referencedContract.id, 'V-3', 'verschachtelte Kunden-ID darf die Vertrags-ID nicht ueberschreiben');
+assert.equal(referencedContract.category, 'Wohngebäude');
+assert.equal(referencedContract.company, 'Beispiel Versicherer');
+
+console.log('PASS Qonekto-Kunden: verschachtelte MCP-Ergebnisse, Kunden- und Vertragsnormalisierung');

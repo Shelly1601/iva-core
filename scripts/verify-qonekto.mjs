@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  callQonektoCustomerUpsertAutomation,
   isReadOnlyQonektoTool,
   isConfirmableQonektoWriteTool,
   isExplicitQonektoConfirmation,
@@ -48,6 +49,19 @@ assert.deepEqual(
 );
 
 const oldToken = process.env.QONEKTO_MCP_TOKEN;
+const oldSyncEnabled = process.env.CRM_QONEKTO_SYNC_ENABLED;
+delete process.env.CRM_QONEKTO_SYNC_ENABLED;
+await assert.rejects(
+  () => callQonektoCustomerUpsertAutomation('upsertKunde', { nachname: 'Test' }),
+  /nicht aktiviert/,
+);
+process.env.CRM_QONEKTO_SYNC_ENABLED = 'true';
+await assert.rejects(
+  () => callQonektoCustomerUpsertAutomation('updateVertrag', { id: 'V-1' }),
+  /Nur das freigegebene Qonekto-Kunden-Upsert/,
+);
+if (oldSyncEnabled === undefined) delete process.env.CRM_QONEKTO_SYNC_ENABLED;
+else process.env.CRM_QONEKTO_SYNC_ENABLED = oldSyncEnabled;
 delete process.env.QONEKTO_MCP_TOKEN;
 assert.deepEqual(await qonektoStatus(), {
   configured: false,

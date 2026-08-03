@@ -43,7 +43,9 @@ import {
   listQonektoCustomers,
   prepareQonektoCustomerAction,
   qonektoCustomerCapabilityStatus,
+  upsertQonektoCustomerAutomatically,
 } from './integrations/qonekto-customers.js';
+import { crmQonektoSyncStatus, runCrmQonektoSync } from './integrations/crm-qonekto-sync.js';
 import { adviceConnectorStatus, publicAdviceCatalog } from './advice/catalog.js';
 import { addAdviceKnowledgeSource, adviceKnowledgeStatus, listAdviceKnowledge } from './advice/knowledge-store.js';
 import path from 'path';
@@ -65,6 +67,7 @@ const CRM_SOURCES = [
   { label: 'Sol', group: 'Mein CRM', mode: 'rest', projectId: process.env.SOL_PROJECT_ID },
   { label: 'Versuro', group: 'Mein CRM', mode: 'rest', projectId: process.env.VERSURO_PROJECT_ID },
 ];
+const GOALS_CONCEPTS_CRM_SOURCE = CRM_SOURCES.find(source => source.label === 'Goals & Concepts');
 
 const MAIL_BEREICHE = [
   { match: 'heat-hero.com', label: 'HeatHero' },
@@ -235,6 +238,14 @@ async function fetchLeads(src) {
 }
 async function fetchAllLeads() {
   return await Promise.all(CRM_SOURCES.map(fetchLeads));
+}
+
+async function syncStrategyCustomersToQonekto({ force = false } = {}) {
+  return runCrmQonektoSync({
+    fetchLeads: () => fetchLeads(GOALS_CONCEPTS_CRM_SOURCE),
+    upsertCustomer: upsertQonektoCustomerAutomatically,
+    force,
+  });
 }
 
 async function heatHeroGateway(path = '', { method = 'GET', body } = {}) {
@@ -533,6 +544,15 @@ app.use('/api', (req, res, next) => {
   next();
 });
 app.get('/api/leads', async (_req, res) => res.json(await fetchAllLeads()));
+app.get('/api/crm-qonekto-sync/status', async (_req, res) => res.json(await crmQonektoSyncStatus()));
+app.post('/api/crm-qonekto-sync/run', async (req, res) => {
+  try {
+    const result = await syncStrategyCustomersToQonekto({ force: req.body?.force === true });
+    res.status(result.enabled ? 200 : 409).json(result);
+  } catch (error) {
+    res.status(502).json({ error: error.message });
+  }
+});
 app.get('/api/mails', async (_req, res) => { let all = []; for (const acc of loadMailAccounts()) { try { all = all.concat(await fetchInbox(acc, 15)); } catch (e) {} } res.json(all); });
 app.get('/api/mails/klassifiziert', async (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query?.limit) || 15, 1), 50);
@@ -771,6 +791,15 @@ async function setBotCommands() {
 }
 
 cron.schedule('0 7 * * *', sendBriefing, { timezone: 'Europe/Berlin' });
+cron.schedule('*/5 * * * *', () => {
+  void syncStrategyCustomersToQonekto().catch(error => console.error('CRM-Qonekto-Sync:', error.message));
+}, { timezone: 'Europe/Berlin' });
+if (String(process.env.CRM_QONEKTO_SYNC_ENABLED || '').toLowerCase() === 'true') {
+  const firstCrmSync = setTimeout(() => {
+    void syncStrategyCustomersToQonekto().catch(error => console.error('CRM-Qonekto-Erstsync:', error.message));
+  }, 30_000);
+  firstCrmSync.unref?.();
+}
 const __dirnameIva = path.dirname(fileURLToPath(import.meta.url));
 app.use(express.static(path.join(__dirnameIva, 'public')));
 app.get('/cockpit', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'cockpit.html')));
@@ -783,6 +812,7 @@ app.get('/health/qonekto', async (_req, res) => {
     try { status.customerPortal = await qonektoCustomerCapabilityStatus(); }
     catch { status.customerPortal = { customers: false, customerDetails: false, contracts: false }; }
   }
+  status.crmStrategySync = await crmQonektoSyncStatus();
   res.status(status.reachable ? 200 : 503).json(status);
 });
 app.get('/health/advice', async (_req, res) => {

@@ -1,5 +1,6 @@
 import {
   QONEKTO_CONFIRMATION_PHRASE,
+  callQonektoCustomerUpsertAutomation,
   callQonektoReadTool,
   listQonektoTools,
   prepareQonektoWriteAction,
@@ -60,88 +61,193 @@ export function unwrapQonektoResult(value, depth = 0) {
   return value;
 }
 
-function arrayFromPayload(payload, keys = []) {
+function objectValuesAsArray(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  const entries = Object.entries(value);
+  if (!entries.length) return [];
+  if (entries.every(([, item]) => item && typeof item === 'object')) return entries.map(([, item]) => item);
+  return [];
+}
+
+export function arrayFromPayload(payload, keys = [], depth = 0) {
+  if (depth > 10) return [];
   const value = unwrapQonektoResult(payload);
   if (Array.isArray(value)) {
     if (value.length === 1 && Array.isArray(value[0])) return value[0];
     return value;
   }
   if (!value || typeof value !== 'object') return [];
-  for (const key of [...keys, 'data', 'items', 'results']) {
-    if (Array.isArray(value[key])) return value[key];
-    if (value[key] && typeof value[key] === 'object') {
-      const nested = arrayFromPayload(value[key], keys);
+  const domainKeys = keys.map(normalizeName);
+  const wanted = [...domainKeys, 'data', 'items', 'results'];
+  for (const [key, item] of Object.entries(value)) {
+    const normalizedKey = normalizeName(key);
+    if (!wanted.includes(normalizedKey)) continue;
+    if (Array.isArray(item)) return item;
+    if (domainKeys.includes(normalizedKey)) {
+      const mapped = objectValuesAsArray(item);
+      if (mapped.length) return mapped;
+    }
+    if (item && typeof item === 'object') {
+      const nested = arrayFromPayload(item, keys, depth + 1);
       if (nested.length) return nested;
     }
+  }
+  // Qonekto kapselt Nutzdaten je nach Connector-Version zusätzlich in
+  // response/result/payload oder in einer einzelnen Inhalts-Eigenschaft.
+  for (const item of Object.values(value)) {
+    if (!item || typeof item !== 'object') continue;
+    const nested = arrayFromPayload(item, keys, depth + 1);
+    if (nested.length) return nested;
   }
   return [];
 }
 
-function communicationValue(raw, types) {
-  for (const key of types) {
-    if (raw?.[key]) return cleanText(raw[key], 320);
+function objectNodes(value, maxDepth = 7) {
+  const root = unwrapQonektoResult(value);
+  const queue = [{ value: root, depth: 0 }];
+  const seen = new Set();
+  const nodes = [];
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current?.value || typeof current.value !== 'object' || current.depth > maxDepth || seen.has(current.value)) continue;
+    seen.add(current.value);
+    nodes.push(current.value);
+    for (const child of Array.isArray(current.value) ? current.value : Object.values(current.value)) {
+      if (child && typeof child === 'object') queue.push({ value: child, depth: current.depth + 1 });
+    }
   }
-  const communications = Array.isArray(raw?.kommunikationen) ? raw.kommunikationen : [];
+  return nodes;
+}
+
+function deepValue(raw, aliases, { allowObject = false } = {}) {
+  const nodes = objectNodes(raw);
+  for (const alias of aliases.map(normalizeName)) {
+    for (const node of nodes) {
+      if (Array.isArray(node)) continue;
+      const entry = Object.entries(node).find(([key]) => normalizeName(key) === alias);
+      if (!entry) continue;
+      const value = entry[1];
+      if (value === undefined || value === null || value === '') continue;
+      if (!allowObject && typeof value === 'object') continue;
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function entityValue(entity, aliases) {
+  if (entity && typeof entity === 'object' && !Array.isArray(entity)) {
+    for (const alias of aliases.map(normalizeName)) {
+      const entry = Object.entries(entity).find(([key]) => normalizeName(key) === alias);
+      if (entry && entry[1] !== undefined && entry[1] !== null && entry[1] !== '' && typeof entry[1] !== 'object') return entry[1];
+    }
+  }
+  return deepValue(entity, aliases);
+}
+
+function referenceLabel(entity, containerAliases) {
+  const container = deepValue(entity, containerAliases, { allowObject: true });
+  if (!container || typeof container !== 'object') return '';
+  return cleanText(deepValue(container, ['bezeichnung', 'name', 'label', 'titel', 'kurzbezeichnung']), 240);
+}
+
+function extractEntityObject(raw, aliases) {
+  const value = unwrapQonektoResult(raw);
+  if (!value || typeof value !== 'object') return {};
+  const wanted = aliases.map(normalizeName);
+  for (const node of objectNodes(value, 5)) {
+    if (Array.isArray(node)) continue;
+    for (const [key, item] of Object.entries(node)) {
+      if (!wanted.includes(normalizeName(key)) || !item || typeof item !== 'object') continue;
+      return Array.isArray(item) ? (item[0] || {}) : item;
+    }
+  }
+  return Array.isArray(value) ? (value[0] || {}) : value;
+}
+
+function communicationValue(raw, types) {
+  const direct = deepValue(raw, types);
+  if (direct !== undefined) return cleanText(direct, 320);
+  const communications = [];
+  const communicationKeys = ['kommunikationen', 'kommunikation', 'communications', 'communication', 'contact', 'kontakte'];
+  for (const node of objectNodes(raw)) {
+    if (Array.isArray(node)) continue;
+    for (const [key, value] of Object.entries(node)) {
+      if (!communicationKeys.map(normalizeName).includes(normalizeName(key))) continue;
+      if (Array.isArray(value)) communications.push(...value);
+      else if (value && typeof value === 'object') communications.push(...(objectValuesAsArray(value).length ? objectValuesAsArray(value) : [value]));
+    }
+  }
   const wanted = types.map(normalizeName);
   for (const item of communications) {
-    const type = normalizeName(item?.art || item?.typ || item?.type || item?.bezeichnung || item?.key);
+    const type = normalizeName(item?.art || item?.typ || item?.type || item?.bezeichnung || item?.key || item?.kommunikationsart);
     if (!wanted.some(candidate => type.includes(candidate))) continue;
-    const value = item?.wert || item?.value || item?.inhalt || item?.adresse;
+    const value = item?.wert || item?.value || item?.inhalt || item?.adresse || item?.kontakt;
     if (value) return cleanText(value, 320);
   }
   return '';
 }
 
+function booleanValue(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  return ['1', 'true', 'ja', 'yes'].includes(normalizeName(value));
+}
+
 export function normalizeQonektoCustomer(raw = {}) {
-  const firstName = cleanText(raw.vorname ?? raw.first_name ?? raw.firstName, 160);
-  const lastName = cleanText(raw.nachname ?? raw.last_name ?? raw.lastName, 200);
-  const company = cleanText(raw.firma ?? raw.unternehmen ?? raw.company, 240);
-  const title = cleanText(raw.titel ?? raw.title, 80);
-  const id = cleanText(raw.ameise_id ?? raw.kunde_ameise_id ?? raw.customer_id ?? raw.id, 160);
-  const name = cleanText(raw.name, 320) || company || [title, firstName, lastName].filter(Boolean).join(' ') || `Kunde ${id}`;
-  const street = cleanText(raw.strasse ?? raw.street, 240);
-  const zip = cleanText(raw.plz ?? raw.postleitzahl ?? raw.zip, 40);
-  const city = cleanText(raw.ort ?? raw.city, 160);
+  const entity = extractEntityObject(raw, ['kunde', 'customer', 'kundendaten', 'customerData']);
+  const firstName = cleanText(deepValue(entity, ['vorname', 'first_name', 'firstName', 'given_name']), 160);
+  const lastName = cleanText(deepValue(entity, ['nachname', 'last_name', 'lastName', 'surname']), 200);
+  const company = cleanText(deepValue(entity, ['firma', 'unternehmen', 'company', 'firmenname']), 240);
+  const title = cleanText(deepValue(entity, ['titel', 'title']), 80);
+  const id = cleanText(entityValue(entity, ['kunde_ameise_id', 'customer_id', 'kunden_id', 'ameise_id', 'id']), 160);
+  const name = cleanText(deepValue(entity, ['name', 'kundenname', 'display_name']), 320) || company || [title, firstName, lastName].filter(Boolean).join(' ') || `Kunde ${id}`;
+  const street = cleanText(deepValue(entity, ['strasse', 'straße', 'street', 'strasse_hausnummer', 'address_line_1']), 240);
+  const zip = cleanText(deepValue(entity, ['plz', 'postleitzahl', 'zip', 'postal_code']), 40);
+  const city = cleanText(deepValue(entity, ['ort', 'city', 'stadt']), 160);
+  const perDu = deepValue(entity, ['per_du', 'perDu']);
+  const deceased = deepValue(entity, ['verstorben', 'deceased']);
   return {
     id,
     name,
     firstName,
     lastName,
     company,
-    email: communicationValue(raw, ['email', 'e_mail', 'mail']),
-    phone: communicationValue(raw, ['telefon', 'phone', 'festnetz']),
-    mobile: communicationValue(raw, ['mobil', 'mobile', 'handy']),
+    email: communicationValue(entity, ['email', 'e_mail', 'mail']),
+    phone: communicationValue(entity, ['telefon', 'phone', 'festnetz']),
+    mobile: communicationValue(entity, ['mobil', 'mobile', 'handy', 'mobiltelefon']),
     street,
     zip,
     city,
     address: [street, [zip, city].filter(Boolean).join(' ')].filter(Boolean).join(', '),
-    birthDate: cleanText(raw.geburtsdatum ?? raw.birth_date, 80),
-    profession: cleanText(raw.beruf ?? raw.profession, 200),
-    brokerId: cleanText(raw.vermittler_id ?? raw.broker_id, 100),
-    salutation: cleanText(raw.anrede ?? raw.salutation, 100),
-    legalForm: cleanText(raw.rechtsform ?? raw.legal_form, 160),
-    simplrUsername: cleanText(raw.benutzername_simplr ?? raw.simplr_username, 200),
-    perDu: Boolean(raw.per_du ?? raw.perDu),
-    deceased: Boolean(raw.verstorben ?? raw.deceased),
-    raw,
+    birthDate: cleanText(deepValue(entity, ['geburtsdatum', 'birth_date', 'date_of_birth']), 80),
+    profession: cleanText(deepValue(entity, ['beruf', 'profession', 'berufsbezeichnung']), 200),
+    brokerId: cleanText(deepValue(entity, ['vermittler_id', 'broker_id', 'vermittler_ameise_id']), 100),
+    salutation: cleanText(deepValue(entity, ['anrede', 'salutation', 'anrede_bezeichnung']), 100) || referenceLabel(entity, ['anrede', 'salutation']),
+    legalForm: cleanText(deepValue(entity, ['rechtsform', 'legal_form']), 160),
+    simplrUsername: cleanText(deepValue(entity, ['benutzername_simplr', 'simplr_username']), 200),
+    perDu: booleanValue(perDu),
+    deceased: booleanValue(deceased),
+    raw: entity,
   };
 }
 
 export function normalizeQonektoContract(raw = {}) {
+  const entity = extractEntityObject(raw, ['vertrag', 'contract', 'vertragsdaten', 'contractData']);
   return {
-    id: cleanText(raw.ameise_id ?? raw.vertrag_ameise_id ?? raw.contract_id ?? raw.id, 160),
-    customerId: cleanText(raw.kunde_id ?? raw.customer_id, 160),
-    category: cleanText(raw.sparte ?? raw.category, 200) || 'Sonstige',
-    company: cleanText(raw.gesellschaft ?? raw.company ?? raw.insurer, 240),
-    companyId: cleanText(raw.gesellschaft_id ?? raw.company_id, 120),
-    policyNumber: cleanText(raw.versicherungsscheinnummer ?? raw.vertragsnummer ?? raw.policy_number, 200),
-    status: cleanText(raw.status ?? raw.status_id, 120),
-    start: cleanText(raw.beginn ?? raw.start_date, 80),
-    end: cleanText(raw.ablauf ?? raw.end_date, 80),
-    paymentFrequency: cleanText(raw.zahlweise ?? raw.payment_frequency, 120),
-    netPremium: raw.beitrag_netto ?? raw.tarifbeitrag ?? raw.net_premium ?? null,
-    risk: cleanText(raw.risiko ?? raw.risk, 500),
-    raw,
+    id: cleanText(entityValue(entity, ['vertrag_ameise_id', 'contract_id', 'vertrags_id', 'ameise_id', 'id']), 160),
+    customerId: cleanText(deepValue(entity, ['kunde_id', 'kunde_ameise_id', 'customer_id', 'kunden_id']), 160),
+    category: cleanText(deepValue(entity, ['sparte', 'category', 'sparten_bezeichnung', 'produktgruppe']), 200) || referenceLabel(entity, ['sparte', 'category', 'produktgruppe']) || 'Sonstige',
+    company: cleanText(deepValue(entity, ['gesellschaft', 'company', 'insurer', 'gesellschaft_name', 'versicherer']), 240) || referenceLabel(entity, ['gesellschaft', 'company', 'insurer', 'versicherer']),
+    companyId: cleanText(deepValue(entity, ['gesellschaft_id', 'company_id', 'versicherer_id']), 120),
+    policyNumber: cleanText(deepValue(entity, ['versicherungsscheinnummer', 'vertragsnummer', 'policy_number', 'v_schein_nummer']), 200),
+    status: cleanText(deepValue(entity, ['status', 'status_bezeichnung', 'status_id']), 120),
+    start: cleanText(deepValue(entity, ['beginn', 'start_date', 'vertragsbeginn']), 80),
+    end: cleanText(deepValue(entity, ['ablauf', 'end_date', 'vertragsende']), 80),
+    paymentFrequency: cleanText(deepValue(entity, ['zahlweise', 'payment_frequency', 'zahlungsweise']), 120),
+    netPremium: deepValue(entity, ['beitrag_netto', 'tarifbeitrag', 'net_premium', 'nettobeitrag']) ?? null,
+    risk: cleanText(deepValue(entity, ['risiko', 'risk', 'risikobeschreibung']), 500),
+    raw: entity,
   };
 }
 
@@ -181,6 +287,7 @@ function findTool(tools, spec) {
 const TOOL_SPECS = {
   customerList: { candidates: ['listKunden', 'list_kunden', 'list_customers'], words: ['list', 'kunden'] },
   customerShow: { candidates: ['showKunde', 'show_kunde', 'get_customer', 'customer_details'], words: ['show', 'kunde', 'detail'] },
+  contractFilter: { candidates: ['filterVertraege', 'filter_vertraege', 'filter_contracts'], words: ['filter', 'vertraege'] },
   contracts: { candidates: ['listVertraege', 'list_vertraege', 'list_contracts'], words: ['list', 'vertraege'] },
   notes: { candidates: ['listCustomerNotes', 'list_customer_notes'], words: ['list', 'kunde', 'notiz'] },
   addresses: { candidates: ['listCustomerAdditionalAddresses', 'list_customer_additional_addresses'], words: ['list', 'kunde', 'adresse'] },
@@ -188,6 +295,7 @@ const TOOL_SPECS = {
   claims: { candidates: ['listClaimsByCustomer', 'list_claims_by_customer'], words: ['list', 'schaden', 'kunde'] },
   salutations: { candidates: ['anreden', 'listAnreden', 'list_salutations'], words: ['anreden'] },
   brokers: { candidates: ['vermittler', 'listVermittler', 'list_brokers'], words: ['vermittler'] },
+  upsertCustomer: { candidates: ['upsertKunde', 'upsert_kunde', 'upsert_customer'], words: ['upsert', 'kunde'], mode: 'write-with-confirmation' },
   createCustomer: { candidates: ['createKunde', 'create_kunde', 'create_customer'], words: ['create', 'kunde'], mode: 'write-with-confirmation' },
   updateCustomer: { candidates: ['updateKunde', 'update_kunde', 'update_customer'], words: ['update', 'kunde'], mode: 'write-with-confirmation' },
 };
@@ -197,24 +305,41 @@ async function customerTools() {
   return Object.fromEntries(Object.entries(TOOL_SPECS).map(([key, spec]) => [key, findTool(tools, spec)]));
 }
 
-function schemaProperties(tool) {
-  return tool?.inputSchema?.properties && typeof tool.inputSchema.properties === 'object'
-    ? tool.inputSchema.properties
+function schemaProperties(schemaOrTool) {
+  const schema = schemaOrTool?.inputSchema || schemaOrTool;
+  return schema?.properties && typeof schema.properties === 'object'
+    ? schema.properties
     : {};
 }
 
-function matchingProperty(tool, aliases) {
-  const properties = schemaProperties(tool);
+function matchingPropertyPath(schemaOrTool, aliases, depth = 0) {
+  if (depth > 6) return null;
+  const properties = schemaProperties(schemaOrTool);
   const aliasNames = aliases.map(normalizeName);
-  return Object.keys(properties).find(key => aliasNames.includes(normalizeName(key)))
-    || Object.keys(properties).find(key => aliasNames.some(alias => normalizeName(key).includes(alias)))
-    || null;
+  const direct = Object.keys(properties).find(key => aliasNames.includes(normalizeName(key)))
+    || Object.keys(properties).find(key => aliasNames.some(alias => normalizeName(key).includes(alias)));
+  if (direct) return [direct];
+  for (const [key, property] of Object.entries(properties)) {
+    const nested = matchingPropertyPath(property, aliases, depth + 1);
+    if (nested) return [key, ...nested];
+    if (property?.items) {
+      const itemPath = matchingPropertyPath(property.items, aliases, depth + 1);
+      if (itemPath) return [key, ...itemPath];
+    }
+  }
+  return null;
 }
 
 function setKnownArgument(args, tool, aliases, value) {
   if (value === undefined || value === null || value === '') return;
-  const key = matchingProperty(tool, aliases);
-  if (key) args[key] = value;
+  const path = matchingPropertyPath(tool, aliases);
+  if (!path) return;
+  let target = args;
+  for (const key of path.slice(0, -1)) {
+    if (!target[key] || typeof target[key] !== 'object') target[key] = {};
+    target = target[key];
+  }
+  target[path.at(-1)] = value;
 }
 
 function customerIdArguments(tool, customerId) {
@@ -259,13 +384,15 @@ export async function qonektoCustomerCapabilityStatus() {
   return {
     customers: Boolean(selected.customerList),
     customerDetails: Boolean(selected.customerShow),
-    contracts: Boolean(selected.contracts),
+    contracts: Boolean(selected.contractFilter || selected.contracts),
     notes: Boolean(selected.notes),
     additionalAddresses: Boolean(selected.addresses),
     relations: Boolean(selected.relations),
     claims: Boolean(selected.claims),
+    automaticUpsertReady: Boolean(selected.upsertCustomer),
     createWithConfirmation: Boolean(selected.createCustomer),
     updateWithConfirmation: Boolean(selected.updateCustomer),
+    selectedTools: Object.fromEntries(Object.entries(selected).filter(([, tool]) => tool).map(([key, tool]) => [key, tool.name])),
   };
 }
 
@@ -338,14 +465,15 @@ export async function getQonektoCustomerDetail(customerId, { force = false } = {
   setKnownArgument(detailArgs, selected.customerShow, ['with-kommunikationen', 'with_kommunikationen', 'withCommunications'], true);
   setKnownArgument(detailArgs, selected.customerShow, ['with-details', 'with_details', 'withDetails'], true);
   const detailRaw = await callQonektoReadTool(selected.customerShow.name, detailArgs);
-  const customerPayload = unwrapQonektoResult(detailRaw);
-  const customerRaw = customerPayload?.data && !Array.isArray(customerPayload.data) ? customerPayload.data : customerPayload;
+  const customerRaw = extractEntityObject(detailRaw, ['kunde', 'customer', 'kundendaten', 'customerData']);
+
+  const contractTool = selected.contractFilter || selected.contracts;
 
   const [contractsResult, notesResult, addressesResult, relationsResult, claimsResult] = await Promise.all([
-    optionalRead(selected.contracts, (() => {
-      const args = customerIdArguments(selected.contracts, id);
-      setKnownArgument(args, selected.contracts, ['kunde_id', 'customer_id', 'kunde_ameise_id'], id);
-      setKnownArgument(args, selected.contracts, ['per_page', 'limit', '_limit'], 100);
+    optionalRead(contractTool, (() => {
+      const args = customerIdArguments(contractTool, id);
+      setKnownArgument(args, contractTool, ['kunde_id', 'customer_id', 'kunde_ameise_id', 'kunden_id'], id);
+      setKnownArgument(args, contractTool, ['per_page', 'limit', '_limit'], 100);
       return args;
     })(), ['vertraege', 'contracts']),
     optionalRead(selected.notes, customerIdArguments(selected.notes, id), ['notes', 'notizen']),
@@ -358,7 +486,9 @@ export async function getQonektoCustomerDetail(customerId, { force = false } = {
     source: 'qonekto',
     connected: true,
     customer: normalizeQonektoCustomer(customerRaw || {}),
-    contracts: contractsResult.data.map(normalizeQonektoContract).filter(contract => contract.id),
+    contracts: contractsResult.data
+      .map(normalizeQonektoContract)
+      .filter(contract => contract.id && (!contract.customerId || contract.customerId === id)),
     archiveNotes: notesResult.data,
     additionalAddresses: addressesResult.data,
     relations: relationsResult.data,
@@ -399,6 +529,22 @@ export async function prepareQonektoCustomerAction({ sessionId, kind, customerId
     ...prepared,
     kind,
     confirmationPhrase: QONEKTO_CONFIRMATION_PHRASE,
+  };
+}
+
+export async function upsertQonektoCustomerAutomatically(values = {}) {
+  const selected = await customerTools();
+  if (!selected.upsertCustomer) throw new Error('Qonekto stellt kein Kunden-Upsert fuer die CRM-Automatik bereit.');
+  const safeValues = Object.fromEntries(Object.entries(values || {}).filter(([, value]) => value !== '' && value !== undefined && value !== null));
+  if (!cleanText(safeValues.nachname ?? safeValues.last_name ?? safeValues.name, 200)) {
+    throw new Error('Nachname fuer das Qonekto-Upsert fehlt.');
+  }
+  const raw = await callQonektoCustomerUpsertAutomation(selected.upsertCustomer.name, writeBody(selected.upsertCustomer, safeValues));
+  invalidateQonektoCustomerCache();
+  return {
+    tool: selected.upsertCustomer.name,
+    customer: normalizeQonektoCustomer(raw),
+    raw,
   };
 }
 
