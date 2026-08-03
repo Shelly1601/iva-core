@@ -20,10 +20,13 @@ import { mailsSkill } from './skills/mails.js';
 import { crmSkill } from './skills/crm.js';
 import { marketingSkill } from './skills/marketing.js';
 import { researchSkill } from './skills/research.js';
+import { workspacesSkill } from './skills/workspaces.js';
 import { getAgent } from './agents/registry.js';
 import { marketAnalysis } from './marketing/market.js';
 import { speak } from './voice.js';
 import { askArchitect } from './agents/architect.js';
+import * as workspaces from './workspaces/store.js';
+import { createTmbPdf } from './workspaces/tmb-pdf.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -344,6 +347,7 @@ const ALL_SKILLS = {
   crm:       crmSkill({ fetchAllLeads, searchHeatHeroLeads, updateHeatHeroLeadStatus }),
   marketing: marketingSkill({ campaigns, brands, analyzeReferences, generateImage, generateContent }),
   research:  researchSkill({ askArchitect }),
+  workspaces: workspacesSkill({ workspaces }),
 };
 
 // Baut die Tool-Map fuer einen konkreten Agenten aus dessen allowedSkills.
@@ -526,6 +530,65 @@ app.post('/api/speak', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// --- Gemeinsame Fallakten: Beratung, Kundenmaske, Energieplanung ---
+app.get('/api/workspaces', async (req, res) => {
+  const mode = workspaces.WORKSPACE_MODES.includes(req.query?.mode) ? req.query.mode : undefined;
+  res.json(await workspaces.listWorkspaces({ mode }));
+});
+app.get('/api/workspaces/:id', async (req, res) => {
+  const workspace = await workspaces.getWorkspace(req.params.id);
+  res.status(workspace ? 200 : 404).json(workspace || { error: 'not found' });
+});
+app.post('/api/workspaces', async (req, res) => {
+  try { res.status(201).json(await workspaces.createWorkspace(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.patch('/api/workspaces/:id', async (req, res) => {
+  try {
+    const workspace = await workspaces.updateWorkspace(req.params.id, req.body || {});
+    res.status(workspace ? 200 : 404).json(workspace || { error: 'not found' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/workspaces/:id/notes', async (req, res) => {
+  const workspace = await workspaces.addWorkspaceNote(req.params.id, req.body?.text || '', req.body?.source || 'manual');
+  res.status(workspace ? 200 : 404).json(workspace || { error: 'not found' });
+});
+app.post('/api/workspaces/:id/files', express.raw({ type: '*/*', limit: '25mb' }), async (req, res) => {
+  try {
+    const file = await workspaces.storeWorkspaceFile(req.params.id, {
+      name: req.query?.name,
+      kind: req.query?.kind,
+      mime: req.query?.mime || req.headers['content-type'],
+      buffer: req.body,
+    });
+    res.status(file ? 201 : 404).json(file || { error: 'not found' });
+  } catch (e) { res.status(e?.type === 'entity.too.large' ? 413 : 400).json({ error: e.message }); }
+});
+app.get('/api/workspaces/:id/files/:fileId', async (req, res) => {
+  try {
+    const file = await workspaces.readWorkspaceFile(req.params.id, req.params.fileId);
+    if (!file) return res.status(404).json({ error: 'not found' });
+    res.set('Content-Type', file.meta.mime || 'application/octet-stream');
+    res.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(file.meta.name)}`);
+    res.send(file.buffer);
+  } catch { res.status(404).json({ error: 'not found' }); }
+});
+app.get('/api/workspaces/:id/tmb.pdf', async (req, res) => {
+  try {
+    const workspace = await workspaces.getWorkspace(req.params.id);
+    if (!workspace) return res.status(404).json({ error: 'not found' });
+    if (workspace.mode !== 'energie') return res.status(400).json({ error: 'TMB-PDF ist nur fuer Energie-Fallakten verfuegbar.' });
+    const pdf = await createTmbPdf(workspace, { readFile: workspaces.readWorkspaceFile });
+    const safeName = String(workspace.customer?.name || workspace.title || 'Fallakte')
+      .normalize('NFKD').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 80) || 'Fallakte';
+    res.set('Content-Type', 'application/pdf');
+    res.set('Content-Disposition', `attachment; filename="IVA-TMB-${safeName}.pdf"`);
+    res.send(pdf);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // --- Marketing-Maschine: Kampagnen + Analyse-Engine ---
 app.get('/api/campaigns', async (_req, res) => res.json(await campaigns.listCampaigns()));
 app.get('/api/campaigns/:id', async (req, res) => { const c = await campaigns.getCampaign(req.params.id); res.status(c ? 200 : 404).json(c || { error: 'not found' }); });
@@ -593,6 +656,7 @@ cron.schedule('0 7 * * *', sendBriefing, { timezone: 'Europe/Berlin' });
 const __dirnameIva = path.dirname(fileURLToPath(import.meta.url));
 app.use(express.static(path.join(__dirnameIva, 'public')));
 app.get('/cockpit', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'cockpit.html')));
+app.get('/workspace', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'workspace.html')));
 app.get('/', (_req, res) => res.send('IVA laeuft.'));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => { console.log('IVA-Core auf Port ' + PORT); setupTelegramWebhook(); setBotCommands(); });

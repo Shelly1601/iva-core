@@ -122,6 +122,9 @@
   .row .tag{font-size:10px;font-weight:700;padding:1px 7px;border-radius:20px;background:rgba(79,157,255,.16);color:var(--blue-lt);margin-right:6px}
   .row .tm{color:var(--cyan);font-weight:600;margin-right:6px}
   .muted{color:var(--muted);font-size:12.5px}
+  .workspace-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+  .workspace-actions button{border:1px solid var(--border2);background:rgba(3,6,14,.52);color:var(--text);border-radius:10px;padding:9px 5px;cursor:pointer;font-size:11px;line-height:1.25}
+  .workspace-actions button:hover{border-color:var(--cyan);color:var(--cyan)}
   #net{display:block;position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
   .overlay{position:fixed;inset:0;background:rgba(3,6,14,.82);backdrop-filter:blur(6px);display:none;align-items:center;justify-content:center;z-index:50}
   .overlay.show{display:flex}
@@ -158,6 +161,7 @@
     <aside class="hud-col hud-right" id="colRight">
       <div class="card"><h3><span class="ic">🗓</span> Calendly <span class="cnt" id="c-cly">–</span></h3><div id="d-cly"><div class="muted">—</div></div></div>
       <div class="card"><h3><span class="ic">✓</span> Todos <span class="cnt" id="c-todo">–</span></h3><div id="d-todo"><div class="muted">—</div></div></div>
+      <div class="card"><h3><span class="ic">↗</span> Arbeitsbereiche</h3><div class="workspace-actions"><button data-open-workspace="beratung">Beratung</button><button data-open-workspace="kunde">Kundenmaske</button><button data-open-workspace="energie">Energieplaner</button></div></div>
     </aside>
   </main>
   <section class="chat">
@@ -219,7 +223,10 @@
   // ---- Chat ----
   let chatAbort=null;
   function bubble(cls,text){const d=document.createElement('div');d.className='bubble '+cls;d.textContent=text;$('msgs').appendChild(d);$('msgs').scrollTop=$('msgs').scrollHeight;return d;}
+  function workspaceIntent(text){const s=String(text||'').toLowerCase();if(!/(öffne|oeffne|geh|gehe|wechsel|möchte|moechte|will)/.test(s))return null;if(/kundenmaske|kundenakte/.test(s))return'kunde';if(/beratungsmodus|beratung/.test(s))return'beratung';if(/energieplaner|energieplanung|wärmepumpenplaner|waermepumpenplaner/.test(s))return'energie';return null;}
+  function openWorkspace(mode,prompt=''){const q=new URLSearchParams({mode});if(prompt)q.set('prompt',prompt);const url='/workspace?'+q;const win=window.open(url,'_blank','noopener');if(!win)location.href=url;}
   async function sendChat(viaVoice){const inp=$('chatIn');const t=inp.value.trim();if(!t)return;
+    const target=workspaceIntent(t);if(target){bubble('user',t);inp.value='';openWorkspace(target,t);bubble('sys',({beratung:'Beratungsmodus',kunde:'Kundenmaske',energie:'Energieplaner'})[target]+' wurde in einem neuen Tab geöffnet.');return;}
     unlockAudio();
     if(viaVoice===true){ clearVoiceDraft(); setState('thinking'); try{if(rec)rec.stop();}catch(e){} }   // Ohr aus, solange IVA denkt+spricht
     bubble('user',t);inp.value='';const b=bubble('iva','…');
@@ -249,6 +256,7 @@
     finally{ if(chatAbort===aborter) chatAbort=null; }}
   $('chatSend').addEventListener('click',sendChat);
   $('chatIn').addEventListener('keydown',e=>{if(e.key==='Enter')sendChat();});
+  document.querySelectorAll('[data-open-workspace]').forEach(btn=>btn.addEventListener('click',()=>openWorkspace(btn.dataset.openWorkspace)));
 
   // ---- Evas Stimme (ElevenLabs) + Gespraechs-Koordination ----
   let ttsOn=true;
@@ -544,10 +552,64 @@
     ctx.globalAlpha=dim?.1:.22;ctx.strokeStyle=a.c;ctx.lineWidth=1;ctx.setLineDash(dim?[3,6]:[]);
     ctx.beginPath();ctx.moveTo(cx,cy);ctx.quadraticCurveTo(mx,my,a.x,a.y);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;
     if(dim)return;for(let k=0;k<3;k++){const p=((t*.32+a.pk+k/3)%1),q=1-p;const px=q*q*cx+2*q*p*mx+p*p*a.x,py=q*q*cy+2*q*p*my+p*p*a.y;glow(px,py,4.2,a.c);}}
-  function burst(cx,cy,t,level=0.2){glow(cx,cy,95+level*40,'rgba(34,230,214,.5)','rgba(120,255,245,.9)');
-    const reach=58+level*30,alphaBase=.08+level*.08;
-    for(let i=0;i<130;i++){const a=i/130*6.283+t*.06,L=24+((Math.sin(i*12.9)*.5+.5)*reach),x2=cx+Math.cos(a)*L,y2=cy+Math.sin(a)*L;
-      ctx.globalAlpha=alphaBase+((Math.sin(i*7.3)*.5+.5)*.16);ctx.strokeStyle=i%3?CY:BL;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(cx+Math.cos(a)*7,cy+Math.sin(a)*7);ctx.lineTo(x2,y2);ctx.stroke();}ctx.globalAlpha=1;}
+  // ---- Core 2.0 seeds. Counts capped on high-DPR mobile to protect frame rate. ----
+  const HIGH_DPR=(window.devicePixelRatio||1)>2;
+  const ARC_COUNT=HIGH_DPR?18:26;
+  const PART_COUNT=HIGH_DPR?20:32;
+  const particles=Array.from({length:PART_COUNT},(_,i)=>({a0:i/PART_COUNT*6.283+Math.random()*0.4,rj:0.85+Math.random()*0.35,ph:Math.random()*6.283,sp:0.6+Math.random()*0.6}));
+  // Core 2.0 renderer: depth stack + flowing corona arcs + state overlays.
+  // Returns CORE_R so the caller can size the central hex + text consistently.
+  function burst(cx,cy,t,state,level=0.2){
+    const CORE_R=Math.max(38,Math.min(W,H)*0.045);
+    const boost=state==='speaking'?1.4:state==='thinking'?1.15:1.0;
+    const speed=state==='speaking'?0.22:state==='thinking'?0.14:state==='listening'?0.06:0.04;
+    const jitter=state==='speaking'?0.55:state==='thinking'?0.42:state==='listening'?0.22:0.15;
+    const breathe=state==='listening'?(0.06*Math.sin(t*0.9)+level*0.05)
+                 :state==='idle'?(0.03*Math.sin(t*0.5))
+                 :state==='thinking'?(level*0.08+0.02*Math.sin(t*1.4))
+                 :(level*0.28+0.04*Math.sin(t*3.2));
+    const soft=state==='listening';
+    const layers=[
+      {r:CORE_R*3.6,c:'rgba(34,230,214,'+(0.09*boost).toFixed(3)+')',s:'rgba(34,230,214,'+(0.16*boost).toFixed(3)+')'},
+      {r:CORE_R*2.4,c:'rgba(79,157,255,'+((soft?0.05:0.14)*boost).toFixed(3)+')',s:'rgba(34,230,214,'+(0.28*boost).toFixed(3)+')'},
+      {r:CORE_R*1.6,c:'rgba(34,230,214,'+(0.22*boost).toFixed(3)+')',s:'rgba(120,255,245,'+(0.55*boost).toFixed(3)+')'},
+      {r:CORE_R*1.1,c:'rgba(34,230,214,'+(0.42*boost).toFixed(3)+')',s:'rgba(200,255,250,'+(0.75*boost).toFixed(3)+')'}
+    ];
+    for(const L of layers){const rr=L.r*(1+breathe);const g=ctx.createRadialGradient(cx,cy,0,cx,cy,rr);g.addColorStop(0,L.s);g.addColorStop(0.55,L.c);g.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=g;ctx.beginPath();ctx.arc(cx,cy,rr,0,7);ctx.fill();}
+    const hsR=CORE_R*0.55;const hs=ctx.createRadialGradient(cx,cy,0,cx,cy,hsR);
+    hs.addColorStop(0,'rgba(255,255,255,'+Math.min(0.55,0.32+level*0.22).toFixed(3)+')');
+    hs.addColorStop(0.5,'rgba(200,255,250,'+(0.22+level*0.15).toFixed(3)+')');
+    hs.addColorStop(1,'rgba(120,255,245,0)');
+    ctx.fillStyle=hs;ctx.beginPath();ctx.arc(cx,cy,hsR,0,7);ctx.fill();
+    const reach=CORE_R*(1.35+level*0.9);
+    for(let i=0;i<ARC_COUNT;i++){
+      const base=i/ARC_COUNT*6.283;
+      const drift=t*speed+Math.sin(t*1.3+i*0.7)*0.25+Math.sin(t*0.6+i*2.1)*0.18;
+      const a=base+drift;
+      const wob=Math.sin(t*2.1+i*1.7)*0.5+0.5;
+      const L=reach*(0.65+wob*jitter);
+      const x1=cx+Math.cos(a)*CORE_R*0.95,y1=cy+Math.sin(a)*CORE_R*0.95;
+      const x2=cx+Math.cos(a)*L,y2=cy+Math.sin(a)*L;
+      ctx.globalAlpha=Math.min(0.85,(0.12+wob*0.28)*boost);
+      ctx.strokeStyle=(i%3===0)?BL:CY;ctx.lineWidth=1.3;
+      ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+    }
+    ctx.globalAlpha=1;
+    if(state==='thinking'||state==='speaking'){
+      const ringSpeed=state==='speaking'?0.9:0.55;
+      ctx.setLineDash([6,6]);ctx.lineWidth=1.4;
+      ctx.strokeStyle=CY;ctx.globalAlpha=0.55;hexPath(cx,cy,CORE_R*1.9,t*ringSpeed);ctx.stroke();
+      ctx.strokeStyle=BL;ctx.globalAlpha=0.45;hexPath(cx,cy,CORE_R*2.7,-t*ringSpeed*0.75);ctx.stroke();
+      ctx.setLineDash([]);ctx.globalAlpha=1;
+      const pR=CORE_R*2.1;const pSpeed=state==='speaking'?1.4:0.85;const pSize=state==='speaking'?3.4:2.6;
+      for(const p of particles){
+        const a=p.a0+t*pSpeed*p.sp;
+        const r=pR*p.rj*(1+Math.sin(t*1.6+p.ph)*0.06);
+        glow(cx+Math.cos(a)*r,cy+Math.sin(a)*r,pSize,CY,'rgba(255,255,255,0.9)');
+      }
+    }
+    return CORE_R;
+  }
   function lbl(a){ctx.font='600 11px -apple-system,Segoe UI,sans-serif';const tx=a.l+(a.st==='plan'?' ·soon':''),w=ctx.measureText(tx).width;
     ctx.globalAlpha=.55;ctx.fillStyle='#05070e';ctx.fillRect(a.x-w/2-4,a.y+a.sz+6,w+8,15);ctx.globalAlpha=1;ctx.fillStyle=a.st==='plan'?'#93a6c2':'#e9f1fb';ctx.fillText(tx,a.x,a.y+a.sz+17);}
   // ---- Kern-Level fuer Phase 0.5 (synthetisch) / Phase 4 (Audio) ----
@@ -575,11 +637,16 @@
     stars.forEach(s=>{ctx.globalAlpha=s.a*(0.6+0.4*Math.sin(t*2+s.x));ctx.fillStyle='#7fb0e6';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,7);ctx.fill();});ctx.globalAlpha=1;
     const ALL=[...OUTER,...INNER];ALL.forEach(a=>{const ang=a.a0+t*a.sp,R=a.rf*m+Math.sin(t*1.1+a.ph)*7;a.x=cx+Math.cos(ang)*R*XS;a.y=cy+Math.sin(ang)*R;});
     ctx.globalCompositeOperation='lighter';ctx.textAlign='center';
-    ALL.forEach(a=>link(cx,cy,a,t));burst(cx,cy,t,level);OUTER.forEach(a=>cell(a,t));INNER.forEach(a=>cell(a,t));
-    const pulse=state==='thinking'?Math.sin(t*3.7)*.6+Math.sin(t*7.1+1.3)*.4:state==='speaking'?Math.sin(t*4.5):state==='listening'?(Math.sin(t*2)*.8+Math.sin(t*.7)*.3):Math.sin(t*2);
-    const R0=24*(1+pulse*(cfg.amp+level*0.06));ctx.globalAlpha=.6;ctx.strokeStyle=CY;ctx.lineWidth=1.5;hexPath(cx,cy,R0,t*cfg.rot);ctx.stroke();ctx.globalAlpha=1;glow(cx,cy,cfg.glow+level*12,CY,cfg.stop);
+    ALL.forEach(a=>link(cx,cy,a,t));const CORE_R=burst(cx,cy,t,state,level);OUTER.forEach(a=>cell(a,t));INNER.forEach(a=>cell(a,t));
+    const pulse=state==='thinking'?Math.sin(t*3.7)*.6+Math.sin(t*7.1+1.3)*.4
+              :state==='speaking'?Math.sin(t*4.8)
+              :state==='listening'?Math.sin(t*0.9)*.9
+              :Math.sin(t*1.4);
+    const audioPulse=state==='speaking'?level*0.35:level*0.06;
+    const R0=CORE_R*(1+pulse*cfg.amp+audioPulse);
+    ctx.globalAlpha=.7;ctx.strokeStyle=CY;ctx.lineWidth=1.8;hexPath(cx,cy,R0,t*cfg.rot);ctx.stroke();ctx.globalAlpha=1;
     ctx.globalCompositeOperation='source-over';ALL.forEach(lbl);
-    ctx.fillStyle='#04121a';ctx.font='800 15px -apple-system,Segoe UI,sans-serif';ctx.fillText('IVA',cx,cy+5);
+    ctx.fillStyle='#04121a';const fs=Math.round(CORE_R*0.5);ctx.font='800 '+fs+'px -apple-system,Segoe UI,sans-serif';ctx.fillText('IVA',cx,cy+fs*0.34);
     requestAnimationFrame(loop);}
 
   // ---- Mobile layout: dock + sheets. Moves #wakeBtn/#micBtn/#ttsBtn between

@@ -12,7 +12,7 @@
 // Nur "iva-standard" ist aktiviert. Die anderen drei Vorlagen sind bewusst
 // leer und deaktiviert - sie erzeugen weder UI noch neues Verhalten.
 
-const ALL_SKILLS = ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research'];
+const ALL_SKILLS = ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research', 'workspaces'];
 
 export const AGENTS = {
   'iva-standard': {
