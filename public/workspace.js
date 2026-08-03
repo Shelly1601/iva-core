@@ -183,6 +183,10 @@ function showMode() {
 }
 
 function fresh(nextMode = mode) {
+  if (nextMode === 'kunde') {
+    location.href = '/customers';
+    return;
+  }
   mode = nextMode;
   current = null;
   rooms = [];
@@ -197,6 +201,12 @@ function fresh(nextMode = mode) {
   setVal('upgradeNeeded', 'unknown');
   $('pageTitle').textContent = ({ beratung: 'Neue Beratung', kunde: 'Neue Kundenakte', energie: 'Neue Energieplanung' })[mode];
   $('statusBadge').textContent = 'Entwurf';
+  if (params.get('customerName')) {
+    setVal('customerName', params.get('customerName'));
+    setVal('customerAddress', params.get('customerAddress'));
+    setVal('customerEmail', params.get('customerEmail'));
+    setVal('customerPhone', params.get('customerPhone'));
+  }
   renderRooms();
   renderFiles();
   renderNotes();
@@ -267,7 +277,7 @@ function collect() {
   return {
     mode,
     title: val('title'),
-    customer: { name: val('customerName'), address: val('customerAddress'), email: val('customerEmail'), phone: val('customerPhone') },
+    customer: { id: current?.customer?.id || params.get('customerId') || '', name: val('customerName'), address: val('customerAddress'), email: val('customerEmail'), phone: val('customerPhone') },
     data,
     visit: {
       consent: {

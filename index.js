@@ -35,6 +35,14 @@ import {
   prepareQonektoWriteAction,
   handleQonektoConfirmation,
 } from './integrations/qonekto.js';
+import {
+  getQonektoCustomerDetail,
+  getQonektoCustomerReferences,
+  invalidateQonektoCustomerCache,
+  listQonektoCustomers,
+  prepareQonektoCustomerAction,
+  qonektoCustomerCapabilityStatus,
+} from './integrations/qonekto-customers.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -575,6 +583,48 @@ app.get('/api/qonekto/tools', async (req, res) => {
   catch (e) { res.status(502).json({ error: e.message }); }
 });
 
+// --- Kundenportal: Qonekto/Blau direkt ist Stammdatenquelle, IVA die Arbeitsakte. ---
+app.get('/api/customers/capabilities', async (_req, res) => {
+  try { res.json(await qonektoCustomerCapabilityStatus()); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.get('/api/customers/references', async (req, res) => {
+  try { res.json(await getQonektoCustomerReferences({ force: req.query?.force === '1' })); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.get('/api/customers', async (req, res) => {
+  try {
+    res.json(await listQonektoCustomers({
+      search: String(req.query?.search || '').slice(0, 160),
+      limit: Math.min(Math.max(Number(req.query?.limit) || 50, 1), 100),
+      force: req.query?.force === '1',
+    }));
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.get('/api/customers/:id', async (req, res) => {
+  try { res.json(await getQonektoCustomerDetail(req.params.id, { force: req.query?.force === '1' })); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post('/api/customers/actions/prepare', async (req, res) => {
+  try {
+    res.json(await prepareQonektoCustomerAction({
+      sessionId: String(req.body?.sessionId || 'customers-web').slice(0, 200),
+      kind: req.body?.kind,
+      customerId: req.body?.customerId,
+      values: req.body?.values || {},
+    }));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/customers/actions/confirm', async (req, res) => {
+  try {
+    const sessionId = String(req.body?.sessionId || 'customers-web').slice(0, 200);
+    const result = await handleQonektoConfirmation(sessionId, req.body?.confirmation || '');
+    if (!result) return res.status(400).json({ error: 'Die eindeutige Qonekto-Bestaetigung fehlt.' });
+    invalidateQonektoCustomerCache();
+    res.json({ ok: /^Erledigt\./.test(result), message: result });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // --- Gemeinsame Fallakten: Beratung, Kundenmaske, Energieplanung ---
 app.get('/api/workspaces', async (req, res) => {
   const mode = workspaces.WORKSPACE_MODES.includes(req.query?.mode) ? req.query.mode : undefined;
@@ -702,8 +752,13 @@ const __dirnameIva = path.dirname(fileURLToPath(import.meta.url));
 app.use(express.static(path.join(__dirnameIva, 'public')));
 app.get('/cockpit', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'cockpit.html')));
 app.get('/workspace', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'workspace.html')));
+app.get('/customers', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'customers.html')));
 app.get('/health/qonekto', async (_req, res) => {
   const status = await qonektoStatus();
+  if (status.reachable) {
+    try { status.customerPortal = await qonektoCustomerCapabilityStatus(); }
+    catch { status.customerPortal = { customers: false, customerDetails: false, contracts: false }; }
+  }
   res.status(status.reachable ? 200 : 503).json(status);
 });
 app.get('/', (_req, res) => res.send('IVA laeuft.'));
