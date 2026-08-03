@@ -108,6 +108,34 @@ function connectionError(source, cause) {
   return error;
 }
 
+function diagnosticEntry(error) {
+  if (!error) return null;
+  const message = String(error?.message || error)
+    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/\b[A-Za-z0-9_-]{24,}\b/g, '[redacted]')
+    .replace(/https?:\/\/\S+/gi, '[url]')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 240);
+  return {
+    name: String(error?.name || 'Error').slice(0, 80),
+    ...(error?.code !== undefined ? { code: String(error.code).slice(0, 40) } : {}),
+    ...(error?.status !== undefined ? { status: String(error.status).slice(0, 20) } : {}),
+    message,
+  };
+}
+
+function safeDiagnostics(error) {
+  const cause = error?.cause;
+  if (cause?.streamableError || cause?.sseError) {
+    return {
+      streamable: diagnosticEntry(cause.streamableError),
+      sseFallback: diagnosticEntry(cause.sseError),
+    };
+  }
+  return { primary: diagnosticEntry(cause || error) };
+}
+
 function withTimeout(promise, ms, label, onTimeout) {
   let timeout;
   const expired = new Promise((_, reject) => {
@@ -484,6 +512,7 @@ async function queryQonektoStatus() {
       confirmationRequired: true,
       error: safeError(error),
       errorCategory: error?.category || errorCategory(error),
+      diagnostic: safeDiagnostics(error),
     };
   }
 }
