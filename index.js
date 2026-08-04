@@ -23,6 +23,7 @@ import { researchSkill } from './skills/research.js';
 import { workspacesSkill } from './skills/workspaces.js';
 import { qonektoSkill } from './skills/qonekto.js';
 import { adviceSkill } from './skills/advice.js';
+import { opportunitiesSkill } from './skills/opportunities.js';
 import { getAgent } from './agents/registry.js';
 import { marketAnalysis } from './marketing/market.js';
 import { fetchMetaAdsInsights, marketingConnectorStatus } from './marketing/connectors.js';
@@ -44,6 +45,18 @@ import {
   updateAccountingDocument,
 } from './accounting/store.js';
 import { createTmbPdf } from './workspaces/tmb-pdf.js';
+import {
+  getOpportunity,
+  getOpportunitySettings,
+  listOpportunities,
+  listOpportunityRuns,
+  prepareOpportunityHandoff,
+  updateOpportunity,
+  updateOpportunitySettings,
+  upsertOpportunity,
+} from './opportunities/store.js';
+import { formatWeeklyPitch, scoreOpportunity } from './opportunities/score.js';
+import { opportunityRadarStatus, runOpportunityScout } from './opportunities/scout.js';
 import { calculateHeatLoad, calculateKfw458Funding, ENERGY_SOURCES } from './workspaces/energy-calculations.js';
 import {
   qonektoStatus,
@@ -417,6 +430,7 @@ const ALL_SKILLS = {
   research:  researchSkill({ askArchitect }),
   workspaces: workspacesSkill({ workspaces }),
   advice:    adviceSkill({ publicAdviceCatalog, listAdviceKnowledge }),
+  opportunities: opportunitiesSkill({ listOpportunities, runOpportunityScout, prepareOpportunityHandoff }),
   qonekto:   null, // wird pro Anfrage mit der echten sessionId erzeugt
 };
 
@@ -560,6 +574,15 @@ async function sendMarketingMorningReport() {
   await sendTelegram(mem.chatId, report.text);
 }
 
+async function sendWeeklyOpportunityPitch() {
+  const settings = await getOpportunitySettings();
+  if (!settings.weeklyEnabled || !process.env.APIFY_TOKEN) return;
+  const mem = await loadMemory();
+  if (!mem.chatId) return;
+  const result = await runOpportunityScout({ trigger: 'weekly' });
+  await sendTelegram(mem.chatId, result.pitch);
+}
+
 app.post('/telegram', async (req, res) => {
   const msg = req.body?.message; const chatId = msg?.chat?.id;
   res.sendStatus(200); if (!chatId) return;
@@ -570,6 +593,11 @@ app.post('/telegram', async (req, res) => {
     if (wasVoice) userText = await transcribeVoice(msg.voice.file_id);
     if (!userText) return;
     if (userText.trim().toLowerCase() === '/briefing') { await sendBriefing(); return; }
+    if (userText.trim().toLowerCase() === '/chancen') {
+      const settings = await getOpportunitySettings();
+      await sendTelegram(chatId, formatWeeklyPitch(await listOpportunities({ limit: settings.topIdeasPerPitch }), { max: settings.topIdeasPerPitch }));
+      return;
+    }
     if (userText.trim().toLowerCase() === '/reset') { const c = await loadConversations(); delete c[String(chatId)]; await saveConversations(c); await sendTelegram(chatId, 'Okay, ich hab unseren Gespraechsfaden zurueckgesetzt. Frischer Start.'); return; }
     if (userText.trim().toLowerCase() === '/stimme') { const m = await loadMemory(); m.voiceOn = !m.voiceOn; await saveMemory(m); await sendTelegram(chatId, m.voiceOn ? 'Stimme an - ich antworte ab jetzt auch gesprochen.' : 'Stimme aus - nur noch Text.'); return; }
     const antwort = await askIva(userText, String(chatId));
@@ -969,6 +997,46 @@ app.post('/api/marketing/reports', async (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// --- Chancen-Agent: Instagram-Signale -> Quellencheck -> Potenzialranking ---
+app.get('/api/opportunities/status', async (_req, res) => res.json(await opportunityRadarStatus()));
+app.get('/api/opportunities/settings', async (_req, res) => res.json(await getOpportunitySettings()));
+app.patch('/api/opportunities/settings', async (req, res) => {
+  try { res.json(await updateOpportunitySettings(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/api/opportunities/runs', async (req, res) => res.json(await listOpportunityRuns({ limit: req.query?.limit || 30 })));
+app.get('/api/opportunities', async (req, res) => res.json(await listOpportunities({ status: req.query?.status || '', limit: req.query?.limit || 100 })));
+app.get('/api/opportunities/:id', async (req, res) => {
+  const item = await getOpportunity(req.params.id);
+  res.status(item ? 200 : 404).json(item || { error: 'not found' });
+});
+app.post('/api/opportunities/scout', async (_req, res) => {
+  try { res.status(201).json(await runOpportunityScout({ trigger: 'manual' })); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/opportunities', async (req, res) => {
+  try {
+    const settings = await getOpportunitySettings();
+    const scoring = scoreOpportunity(req.body || {}, settings);
+    const item = await upsertOpportunity({ ...(req.body || {}), status: req.body?.status || 'new' });
+    res.status(201).json(await updateOpportunity(item.id, { score: scoring.score, scoreBreakdown: scoring }));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.patch('/api/opportunities/:id', async (req, res) => {
+  try {
+    const current = await getOpportunity(req.params.id);
+    if (!current) return res.status(404).json({ error: 'not found' });
+    const settings = await getOpportunitySettings();
+    const merged = { ...current, ...(req.body || {}), ratings: { ...(current.ratings || {}), ...(req.body?.ratings || {}) } };
+    const scoring = scoreOpportunity(merged, settings);
+    res.json(await updateOpportunity(req.params.id, { ...(req.body || {}), score: scoring.score, scoreBreakdown: scoring }));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/opportunities/:id/handoff', async (req, res) => {
+  try { res.status(201).json(await prepareOpportunityHandoff(req.params.id)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // --- WhatsApp: mehrere Bot-Profile, sicherer Testchat und Schaden-Eingang ---
 app.get('/api/whatsapp/status', (_req, res) => {
   const meta = whatsappStatus();
@@ -1047,6 +1115,7 @@ async function setBotCommands() {
     { command: 'calendly', description: 'Kommende Calendly-Buchungen' },
     { command: 'mails', description: 'Neue Mails zusammenfassen' },
     { command: 'todos', description: 'Offene Todos anzeigen' },
+    { command: 'chancen', description: 'Aktuelles Chancen-Ranking' },
     { command: 'stimme', description: 'Sprachausgabe an/aus' },
   ];
   try { await fetch(`https://api.telegram.org/bot${token}/setMyCommands`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ commands }) }); }
@@ -1055,6 +1124,7 @@ async function setBotCommands() {
 
 cron.schedule('0 7 * * *', sendBriefing, { timezone: 'Europe/Berlin' });
 cron.schedule('10 7 * * *', () => { void sendMarketingMorningReport().catch(error => console.error('Marketing-Morgenreport:', error.message)); }, { timezone: 'Europe/Berlin' });
+cron.schedule('30 8 * * 1', () => { void sendWeeklyOpportunityPitch().catch(error => console.error('Chancenradar-Wochenpitch:', error.message)); }, { timezone: 'Europe/Berlin' });
 cron.schedule('*/5 * * * *', () => {
   void syncStrategyCustomersToQonekto().catch(error => console.error('CRM-Qonekto-Sync:', error.message));
 }, { timezone: 'Europe/Berlin' });
@@ -1073,6 +1143,7 @@ app.get('/advice', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public',
 app.get('/whatsapp', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'whatsapp.html')));
 app.get('/marketing', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'marketing.html')));
 app.get('/accounting', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'accounting.html')));
+app.get('/opportunities', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'opportunities.html')));
 app.get('/health/qonekto', async (_req, res) => {
   const status = await qonektoStatus();
   if (status.reachable) {
