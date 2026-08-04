@@ -135,10 +135,11 @@ function clean(value, max = 2000) {
 export function normalizePresentationProfile(input = {}) {
   const conceptId = PRESENTATION_CONCEPTS.some(item => item.id === input.conceptId) ? input.conceptId : 'iva-premium';
   const designId = PRESENTATION_DESIGNS[input.designId] ? input.designId : 'executive-blue';
-  const maxPages = [4, 6, 8].includes(Number(input.maxPages)) ? Number(input.maxPages) : 6;
+  const maxPages = [4, 6, 8, 10, 14].includes(Number(input.maxPages)) ? Number(input.maxPages) : 6;
   return {
     conceptId,
     conceptName: clean(input.conceptName, 120),
+    bundleMode: ['compact', 'master'].includes(input.bundleMode) ? input.bundleMode : 'master',
     audience: ['private', 'management', 'hr', 'employees'].includes(input.audience) ? input.audience : 'private',
     tone: ['premium', 'management', 'emotional'].includes(input.tone) ? input.tone : 'premium',
     designId,
@@ -147,6 +148,12 @@ export function normalizePresentationProfile(input = {}) {
     promise: clean(input.promise, 800),
     uspNotes: clean(input.uspNotes, 1200),
     cta: clean(input.cta, 600),
+    welcomeSalutation: clean(input.welcomeSalutation, 160),
+    welcomeTitle: clean(input.welcomeTitle, 220),
+    welcomeText: clean(input.welcomeText, 1800),
+    closingTitle: clean(input.closingTitle, 220),
+    closingText: clean(input.closingText, 1400),
+    signature: clean(input.signature, 320),
   };
 }
 

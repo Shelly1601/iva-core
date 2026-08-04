@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import {
   PRESENTATION_CONCEPTS,
   normalizePresentationProfile,
@@ -12,6 +13,7 @@ const defaults = normalizePresentationProfile();
 assert.equal(defaults.conceptId, 'iva-premium');
 assert.equal(defaults.designId, 'executive-blue');
 assert.equal(defaults.maxPages, 6);
+assert.equal(defaults.bundleMode, 'master');
 
 const custom = normalizePresentationProfile({
   conceptId: 'custom',
@@ -19,11 +21,19 @@ const custom = normalizePresentationProfile({
   audience: 'management',
   tone: 'management',
   designId: 'warm-premium',
-  maxPages: 4,
+  maxPages: 14,
+  bundleMode: 'compact',
   uspNotes: '- Schnelle Einführung\n- Persönliche Begleitung',
+  welcomeSalutation: 'Sehr geehrte Frau Muster,',
+  welcomeText: 'Ihre individuelle Einleitung.',
+  closingText: 'Ihre gemeinsame Schlussseite.',
+  signature: 'Herzliche Grüße\nNadine Sell',
 });
 assert.equal(custom.conceptName, 'Arbeitgeber-Kompass');
-assert.equal(custom.maxPages, 4);
+assert.equal(custom.maxPages, 14);
+assert.equal(custom.bundleMode, 'compact');
+assert.equal(custom.welcomeText, 'Ihre individuelle Einleitung.');
+assert.equal(custom.signature, 'Herzliche Grüße\nNadine Sell');
 assert.deepEqual(presentationCopy('corporate-benefits', custom).usps, ['Schnelle Einführung', 'Persönliche Begleitung']);
 
 assert.equal(presentationConcept('goto').ready, false);
@@ -39,4 +49,11 @@ const evidence = presentationEvidence(['retirement-planning', 'property-calculat
 assert.ok(evidence.every(item => /^https:\/\//.test(item.url)));
 assert.ok(evidence.every(item => item.publisher && item.scope));
 
-console.log('Presentation concepts, source cards, USP copy and limits verified.');
+const workspaceSource = await readFile(new URL('../public/workspace.js', import.meta.url), 'utf8');
+assert.match(workspaceSource, /profile\.bundleMode === 'master'/);
+assert.match(workspaceSource, /toc\.className = 'print-toc'/);
+assert.match(workspaceSource, /letter\.className = 'print-letter'/);
+assert.match(workspaceSource, /profile\.closingText \|\| profile\.cta/);
+assert.match(workspaceSource, /schemaVersion: 'iva-advice-1\.2'/);
+
+console.log('Presentation concepts, Master-PDF structure, source cards, USP copy and limits verified.');

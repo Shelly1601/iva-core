@@ -660,15 +660,31 @@ function renderAdviceActiveModule() {
 
 function renderAdviceModules() {
   const root = $('adviceModulePills'); root.innerHTML = '';
-  for (const id of selectedAdviceModules) {
+  for (const [index, id] of selectedAdviceModules.entries()) {
     const module = adviceModule(id); if (!module) continue;
     const button = document.createElement('button'); button.className = 'module-pill' + (activeAdviceModuleId === id ? ' active' : '');
     button.type = 'button'; button.append(document.createTextNode(module.title));
+    const up = document.createElement('span'); up.className = 'move'; up.textContent = '↑'; up.title = 'Baustein nach vorne';
+    up.setAttribute('role', 'button'); up.setAttribute('aria-label', `${module.title} nach vorne verschieben`);
+    up.hidden = index === 0;
+    up.addEventListener('click', event => { event.stopPropagation(); moveAdviceModule(id, -1); }); button.appendChild(up);
+    const down = document.createElement('span'); down.className = 'move'; down.textContent = '↓'; down.title = 'Baustein nach hinten';
+    down.setAttribute('role', 'button'); down.setAttribute('aria-label', `${module.title} nach hinten verschieben`);
+    down.hidden = index === selectedAdviceModules.length - 1;
+    down.addEventListener('click', event => { event.stopPropagation(); moveAdviceModule(id, 1); }); button.appendChild(down);
     const remove = document.createElement('span'); remove.className = 'remove'; remove.textContent = '×'; remove.title = 'Modul entfernen';
     remove.addEventListener('click', event => { event.stopPropagation(); removeAdviceModule(id); }); button.appendChild(remove);
     button.addEventListener('click', () => { activeAdviceModuleId = id; renderAdviceModules(); }); root.appendChild(button);
   }
   renderAdviceActiveModule();
+}
+
+function moveAdviceModule(id, direction) {
+  const from = selectedAdviceModules.indexOf(id);
+  const to = from + direction;
+  if (from < 0 || to < 0 || to >= selectedAdviceModules.length) return;
+  [selectedAdviceModules[from], selectedAdviceModules[to]] = [selectedAdviceModules[to], selectedAdviceModules[from]];
+  renderAdviceModules();
 }
 
 function showMode() {
@@ -686,6 +702,7 @@ function presentationInputProfile() {
   return normalizePresentationProfile({
     conceptId: val('presentationConcept'),
     conceptName: val('presentationConceptName'),
+    bundleMode: val('presentationBundleMode'),
     audience: val('presentationAudience'),
     tone: val('presentationTone'),
     designId: val('presentationDesign'),
@@ -694,6 +711,12 @@ function presentationInputProfile() {
     promise: val('presentationPromise'),
     uspNotes: val('presentationUspNotes'),
     cta: val('presentationCta'),
+    welcomeSalutation: val('presentationWelcomeSalutation'),
+    welcomeTitle: val('presentationWelcomeTitle'),
+    welcomeText: val('presentationWelcomeText'),
+    closingTitle: val('presentationClosingTitle'),
+    closingText: val('presentationClosingText'),
+    signature: val('presentationSignature'),
   });
 }
 
@@ -701,6 +724,7 @@ function applyPresentationProfile(input = {}) {
   const profile = normalizePresentationProfile(input);
   setVal('presentationConcept', profile.conceptId);
   setVal('presentationConceptName', profile.conceptName);
+  setVal('presentationBundleMode', profile.bundleMode);
   setVal('presentationAudience', profile.audience);
   setVal('presentationTone', profile.tone);
   setVal('presentationDesign', profile.designId);
@@ -709,6 +733,12 @@ function applyPresentationProfile(input = {}) {
   setVal('presentationPromise', profile.promise);
   setVal('presentationUspNotes', profile.uspNotes);
   setVal('presentationCta', profile.cta);
+  setVal('presentationWelcomeSalutation', profile.welcomeSalutation);
+  setVal('presentationWelcomeTitle', profile.welcomeTitle);
+  setVal('presentationWelcomeText', profile.welcomeText);
+  setVal('presentationClosingTitle', profile.closingTitle);
+  setVal('presentationClosingText', profile.closingText);
+  setVal('presentationSignature', profile.signature);
   updatePresentationHint();
 }
 
@@ -716,10 +746,13 @@ function updatePresentationHint() {
   const hint = $('presentationConceptHint');
   if (!hint) return;
   const concept = presentationConcept(val('presentationConcept'));
+  const bundleHint = val('presentationBundleMode') === 'master'
+    ? ' Die Master-PDF enthält alle gewählten Bausteine in der gezeigten Reihenfolge sowie Deckblatt, Begrüßung, Inhaltsübersicht und Schlussseite jeweils genau einmal.'
+    : ' Die kompakte Ausgabe vertieft nur die wichtigsten Bausteine innerhalb des gewählten Seitenbudgets.';
   hint.classList.toggle('warn', !concept.ready);
   hint.textContent = concept.ready
-    ? concept.description
-    : `${concept.description} Bis die Unterlagen hinterlegt sind, nutzt die PDF die neutrale IVA-Value-Story und bezeichnet sie gegenüber dem Kunden nicht fälschlich als vollständige GO-TO-Methodik.`;
+    ? concept.description + bundleHint
+    : `${concept.description} Bis die Unterlagen hinterlegt sind, nutzt die PDF die neutrale IVA-Value-Story und bezeichnet sie gegenüber dem Kunden nicht fälschlich als vollständige GO-TO-Methodik.${bundleHint}`;
 }
 
 function fresh(nextMode = mode) {
@@ -839,7 +872,7 @@ function collect() {
   const data = mode === 'energie'
     ? collectEnergyData()
     : mode === 'beratung'
-      ? { schemaVersion: 'iva-advice-1.1', appointmentAt: val('appointmentAt'), topic: val('topic'), goal: val('goal'), facts: val('facts'), recommendation: val('recommendation'), adviceModules: selectedAdviceModules, activeAdviceModule: activeAdviceModuleId, moduleData: adviceModuleData, presentation: presentationInputProfile() }
+      ? { schemaVersion: 'iva-advice-1.2', appointmentAt: val('appointmentAt'), topic: val('topic'), goal: val('goal'), facts: val('facts'), recommendation: val('recommendation'), adviceModules: selectedAdviceModules, activeAdviceModule: activeAdviceModuleId, moduleData: adviceModuleData, presentation: presentationInputProfile() }
       : { project: val('project'), company: val('company'), relationship: val('relationship'), nextStep: val('nextStep') };
   return {
     mode,
@@ -1497,6 +1530,23 @@ function buildAdvicePresentationReport(collected, root) {
   meta.append(customer, documentMeta); cover.append(mark, kicker, title, lead, meta); root.appendChild(cover);
 
   const executive = document.createElement('section'); executive.className = 'print-section';
+  const letter = document.createElement('div'); letter.className = 'print-letter';
+  const welcomeTitle = document.createElement('h2'); welcomeTitle.textContent = profile.welcomeTitle || 'Ihr persönliches Beratungskonzept';
+  const salutation = document.createElement('p'); salutation.className = 'salutation';
+  salutation.textContent = profile.welcomeSalutation || (collected.customer.name ? `Guten Tag ${collected.customer.name},` : 'Guten Tag,');
+  const welcomeText = document.createElement('p');
+  welcomeText.textContent = profile.welcomeText || 'vielen Dank für Ihr Vertrauen. Diese Unterlage bündelt die gemeinsam ausgewählten Beratungsbausteine in einem klaren Gesamtkonzept. Sie zeigt Ihre Ausgangslage, die wichtigsten Handlungsfelder und die empfohlenen nächsten Schritte kompakt und nachvollziehbar.';
+  letter.append(welcomeTitle, salutation, welcomeText); executive.appendChild(letter);
+  if (moduleIds.length) {
+    reportSubheading(executive, 'Inhalt Ihrer Beratungsmappe');
+    const toc = document.createElement('div'); toc.className = 'print-toc';
+    for (const [index, moduleId] of moduleIds.entries()) {
+      const module = adviceModule(moduleId); if (!module) continue;
+      const entry = document.createElement('div'); const number = document.createElement('b'); const label = document.createElement('span');
+      number.textContent = String(index + 1).padStart(2, '0'); label.textContent = module.title; entry.append(number, label); toc.appendChild(entry);
+    }
+    executive.appendChild(toc);
+  }
   const hero = document.createElement('div'); hero.className = 'print-hero';
   const heroKicker = document.createElement('div'); heroKicker.className = 'print-kicker'; heroKicker.textContent = 'Ihre Entscheidung auf einen Blick';
   const heroTitle = document.createElement('h2'); heroTitle.textContent = firstCopy.headline;
@@ -1517,7 +1567,9 @@ function buildAdvicePresentationReport(collected, root) {
   }
   root.appendChild(executive);
 
-  const detailLimit = profile.maxPages <= 4 ? 1 : profile.maxPages <= 6 ? 2 : 3;
+  const detailLimit = profile.bundleMode === 'master'
+    ? moduleIds.length
+    : profile.maxPages <= 4 ? 1 : profile.maxPages <= 6 ? 2 : 3;
   const detailedModules = moduleIds.slice(0, detailLimit);
   const reportSources = [...allEvidence];
   for (const [index, moduleId] of detailedModules.entries()) {
@@ -1567,7 +1619,7 @@ function buildAdvicePresentationReport(collected, root) {
   }
 
   const overflow = moduleIds.slice(detailLimit).map(id => adviceModule(id)).filter(Boolean);
-  const closing = reportSection(root, 'Ihre nächsten Schritte', section => {
+  const closing = reportSection(root, profile.closingTitle || 'Gemeinsam vom Konzept zur Umsetzung', section => {
     if (overflow.length) {
       const text = document.createElement('div'); text.className = 'print-page-summary';
       reportText(text, `Weitere Bestandteile der Beratungsakte wurden bewusst kompakt zusammengefasst, damit die Präsentation im gewählten Seitenbudget bleibt.`);
@@ -1576,9 +1628,12 @@ function buildAdvicePresentationReport(collected, root) {
       text.appendChild(list); section.appendChild(text);
     }
     const cta = document.createElement('div'); cta.className = 'print-cta';
-    const ctaTitle = document.createElement('h2'); ctaTitle.textContent = 'Vom Konzept zur Umsetzung';
-    const ctaText = document.createElement('p'); ctaText.textContent = profile.cta || collected.data.recommendation || 'Offene Fragen klären, Entscheidung bestätigen und den Umsetzungstermin gemeinsam festlegen.';
+    const ctaTitle = document.createElement('h2'); ctaTitle.textContent = 'Ihr nächster Schritt';
+    const ctaText = document.createElement('p'); ctaText.textContent = profile.closingText || profile.cta || collected.data.recommendation || 'Offene Fragen klären, Entscheidung bestätigen und den Umsetzungstermin gemeinsam festlegen.';
     cta.append(ctaTitle, ctaText); section.appendChild(cta);
+    if (profile.signature) {
+      const signature = document.createElement('div'); signature.className = 'print-signature'; signature.textContent = profile.signature; section.appendChild(signature);
+    }
     reportSubheading(section, 'Quellen und Transparenz');
     reportSourceList(section, reportSources);
     const disclaimer = document.createElement('div'); disclaimer.className = 'print-disclaimer';
@@ -1671,6 +1726,7 @@ document.querySelectorAll('input[type=file][data-kind]').forEach(input => input.
 document.querySelectorAll('[data-trigger]').forEach(button => button.addEventListener('click', () => $(button.dataset.trigger).click()));
 document.querySelectorAll('input:not([type=file]),select,textarea').forEach(input => input.addEventListener('input', () => { updateCompletion(); renderPhotoChecklist(); }));
 $('presentationConcept')?.addEventListener('change', updatePresentationHint);
+$('presentationBundleMode')?.addEventListener('change', updatePresentationHint);
 window.addEventListener('beforeprint', () => { if (mode !== 'energie') buildSimpleReport(); });
 $('ivaHelper').addEventListener('click', () => window.open('/cockpit', '_blank', 'noopener'));
 
