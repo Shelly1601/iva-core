@@ -162,7 +162,18 @@ Technische Grenze auf dem iPhone: Eine normale App kann wegen der iOS-Sandbox ni
 
 Optional kann ein dediziertes Android-Arbeits-/Testgerät nach ausdrücklicher Freigabe neue Benachrichtigungen an IVA spiegeln. Auch das ist kein Zugriff auf alte Chats und sollte nicht der Kernweg für sensible Kundendaten sein.
 
-## 9. Railway-Betrieb
+## 9. IVA Sales Coach
+
+| Status | Baustein | Nächster Schritt |
+|---|---|---|
+| ✅ | Zielbild | Spezifikation in `IVA_SALES_COACH_SPEZIFIKATION.md`: No-Bot-Overlay, Einwandampel, Redeanteil, nächste Frage und Nachbereitung. |
+| ⬜ | macOS-Begleit-App | Mikrofon und System-/Meetingaudio nach Berechtigung getrennt erfassen; PWA allein reicht für Zoom/Teams/Kopfhörer nicht zuverlässig. |
+| ⬜ | Streaming-Transkription | Anbieter erst nach Latenz-/Deutsch-/Kostentest auswählen; bis dahin bewusst noch keinen Railway-Key festlegen. |
+| ⬜ | Einwilligungs-Gate | Aktives Ja vor jedem Start dokumentieren; Roh-Audio standardmäßig nicht dauerhaft speichern. |
+| ⬜ | Sales-Wissen | Nadines Leitfäden, Einwandbibliothek und freigegebene Formulierungen versioniert hinterlegen. |
+| ⬜ | CRM-Nachbereitung | Ergebnis nur als Vorschau in Kunden-/Beratungsakte schreiben; Versand und Änderungen bleiben bestätigungspflichtig. |
+
+## 10. Railway-Betrieb
 
 - 🟡 Railway-Hobby-Plan aktiv und Zahlungsstatus prüfen.
 - ✅ Volume mit Mount-Pfad `/data` beibehalten; nicht durch flüchtige Speicherung ersetzen.

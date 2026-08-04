@@ -4,6 +4,8 @@ Backend („Gehirn") von IVA. Node.js + Express, deployt auf Railway. Bündelt K
 
 Die dauerhafte Einrichtungs- und Variablenliste liegt in [`INTEGRATIONS_CHECKLIST.md`](./INTEGRATIONS_CHECKLIST.md). Echte Tokens und Passwörter gehören ausschließlich in Railway, niemals in diese Datei oder in den Chat.
 
+Das Zielbild für den unsichtbaren Live-Meeting-Coach steht in [`IVA_SALES_COACH_SPEZIFIKATION.md`](./IVA_SALES_COACH_SPEZIFIKATION.md).
+
 ## Lokal starten
 1. `npm install`
 2. `.env.example` zu `.env` kopieren und Werte eintragen
