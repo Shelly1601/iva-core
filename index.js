@@ -761,6 +761,7 @@ async function controlSnapshot() {
   const connectors = [
     connector('core-api', 'IVA API-Schutz', envReady('API_TOKEN'), ['API_TOKEN'], 'Schuetzt Cockpit und App-Zugriffe.'),
     connector('anthropic', 'IVA Kernmodell', envReady('ANTHROPIC_API_KEY'), ['ANTHROPIC_API_KEY'], 'Chat, Planung und Fachagenten.'),
+    connector('gemini', 'Gemini Nebenmodell', envReady('GEMINI_API_KEY'), ['GEMINI_API_KEY'], 'Guentige Marketing-, Markt- und Nebenanalysen.'),
     connector('telegram', 'Telegram', envReady('TELEGRAM_BOT_TOKEN'), ['TELEGRAM_BOT_TOKEN'], 'Assistentenkanal und proaktive Berichte.'),
     connector('voice-input', 'Spracheingabe', Boolean(voiceResult.configured?.groq), ['GROQ_API_KEY'], 'Transkription mit Groq Whisper.'),
     connector('voice-output', 'IVA Stimme', Boolean(voiceResult.configured?.elevenLabs), ['ELEVENLABS_API_KEY'], 'Sprachausgabe mit ElevenLabs; eine feste Voice-ID ist optional.'),
@@ -777,6 +778,7 @@ async function controlSnapshot() {
     connector('calendar', 'Kalender', CALENDARS.some(item => item.url), ['PRIVAT_GOOGLE_ICS_URL oder weitere ICS-URL'], `${CALENDARS.filter(item => item.url).length} Kalender verbunden.`),
     connector('mail', 'E-Mail-Eingang', loadMailAccounts().length > 0, ['MAIL_1_USER/MAIL_1_PASS oder MAIL_2_USER/MAIL_2_PASS'], `${loadMailAccounts().length} Postfaecher konfiguriert.`),
     connector('calendly', 'Calendly', envReady('CALENDLY_TOKEN'), ['CALENDLY_TOKEN'], 'Termine und Bucher.'),
+    connector('fal-images', 'fal.ai Bildgenerierung', envReady('FAL_KEY'), ['FAL_KEY'], 'Bilder und Creatives fuer freigegebene Content-Plaene.'),
     ...marketing.connectors.filter(item => item.id !== 'whatsapp').map(item => connector(`marketing-${item.id}`, item.label, item.configured, item.requires || [], item.capabilities?.join(' · ') || '')),
     connector('whatsapp-meta', 'WhatsApp Business · Meta', metaWhatsApp.configured, ['WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID', 'WHATSAPP_VERIFY_TOKEN', 'WHATSAPP_APP_SECRET', 'WHATSAPP_GRAPH_VERSION'], metaWhatsApp.configured ? 'Ein- und Ausgang bereit.' : 'Live-Kanal noch nicht komplett.'),
     connector('whatsapp-hub', 'Multi-WhatsApp Hub', hubWhatsApp.configured, ['WHATSAPP_HUB_API_KEY'], hubWhatsApp.configured ? 'Konten und Chats lesbar.' : 'Hub-Key fehlt.'),
