@@ -20,7 +20,8 @@
     "test:marketing": "node scripts/verify-marketing.mjs",
     "test:accounting": "node scripts/verify-accounting.mjs",
     "test:opportunities": "node scripts/verify-opportunities.mjs",
-    "test:voice": "node scripts/verify-voice-lab.mjs"
+    "test:voice": "node scripts/verify-voice-lab.mjs",
+    "test:operations": "node scripts/verify-operations.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.0.0",

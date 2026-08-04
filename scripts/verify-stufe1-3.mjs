@@ -83,12 +83,12 @@ console.log(`  registriert: ${registered.length} Tools`);
 console.log('\n[3] Agent-Registry - Fallbacks');
 console.log('  Registrierte Agenten:', listAgents().map(a => `${a.id}(enabled=${a.enabled})`).join(', '));
 eq('  Standard-Agent existiert', getAgent('iva-standard').id, 'iva-standard');
-eq('  iva-marketing disabled', AGENTS['iva-marketing'].enabled, false);
-eq('  iva-finance disabled', AGENTS['iva-finance'].enabled, false);
-eq('  iva-sales disabled', AGENTS['iva-sales'].enabled, false);
-eq('  getAgent(disabled) -> iva-standard (kein Aktivierungs-Bypass)', getAgent('iva-marketing').id, 'iva-standard');
+eq('  iva-marketing enabled', AGENTS['iva-marketing'].enabled, true);
+eq('  iva-finance enabled', AGENTS['iva-finance'].enabled, true);
+eq('  iva-sales enabled', AGENTS['iva-sales'].enabled, true);
+eq('  getAgent(disabled) -> iva-standard (kein Aktivierungs-Bypass)', getAgent('iva-builder').id, 'iva-standard');
 eq('  getAgent(unbekannt) -> iva-standard', getAgent('does-not-exist').id, 'iva-standard');
-eq('  iva-standard allowedSkills', getAgent('iva-standard').allowedSkills, ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research']);
+eq('  iva-standard allowedSkills', getAgent('iva-standard').allowedSkills, ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'selfImprovement', 'qonekto']);
 eq('  iva-standard modelProfile', getAgent('iva-standard').modelProfile, 'chat');
 
 console.log('\n[4] Echter LLM-Call via Router (chat-Profil, ohne Tools)');

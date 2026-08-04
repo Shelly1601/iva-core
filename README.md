@@ -8,6 +8,14 @@ Das Zielbild für den unsichtbaren Live-Meeting-Coach steht in [`IVA_SALES_COACH
 
 Das Zielbild für die sichere Beleg- und Steuerberater-Vorbereitung steht in [`IVA_BUCHHALTUNGSAGENT_SPEZIFIKATION.md`](./IVA_BUCHHALTUNGSAGENT_SPEZIFIKATION.md).
 
+## Agenten- und Kontrollschicht
+
+- IVA bleibt die zentrale Ansprechpartnerin. Sie routet Anfragen deterministisch an sieben aktive Rollen: Zentrale, Kunden/Backoffice, Beratung/Fachprüfung, Marketing/Growth, Energie/Vor Ort, Buchhaltung/Controlling und Sales/Gesprächscoach.
+- Jede Rolle erhält nur ihre erlaubten Skills. Marketing kann beispielsweise nicht auf Qonekto schreiben; Buchhaltung liest im Chat nur Belege und Status, während Änderungen in der Fachoberfläche bleiben.
+- Wissen/Kurse und Entwicklung/QA sind bereits als Rollen sichtbar, aber bewusst deaktiviert, bis Quellenimport beziehungsweise Git-/Deployment-Freigaben sicher getrennt sind.
+- `/control` zeigt Rollen, Connector-Bereitschaft, offene Freigaben, anonymisierte Agentenläufe, Auditereignisse und die Bauwarteschlange. Der kleine IVA-Bildschirmagent bleibt Teil jeder zentralen Oberfläche.
+- Kundendatenänderungen über Qonekto werden zehn Minuten lang vorbereitet, im Freigaberegister gespiegelt und nur mit dem exakten Bestätigungssatz ausgeführt.
+
 ## Lokal starten
 1. `npm install`
 2. `.env.example` zu `.env` kopieren und Werte eintragen
@@ -33,6 +41,7 @@ Das Zielbild für die sichere Beleg- und Steuerberater-Vorbereitung steht in [`I
 - `GET/POST /webhooks/whatsapp` – signierter Meta-Webhook für eingehende WhatsApp-Nachrichten.
 - `GET /marketing` – Marketing-Zentrale für Marken, Marktanalysen, Firmenrecherche, Kampagnen, Content-/E-Mail-Pläne, Ads-Checks und Reports.
 - `GET /api/marketing/status` – Connector-Bereitschaft ohne Ausgabe von Secrets; `/api/marketing/*` verwaltet Research, Unternehmen, Pläne, Ads-Snapshots und Reports.
+- `GET /control` – Betriebs- und Agentenzentrale; `/api/control/status`, `/runs`, `/approvals` und `/audit` sind mit `API_TOKEN` geschützt und geben keine Secret-Werte aus.
 - `GET /accounting` – eigener interner IVA-Buchhaltungsbereich mit Beleg-Inbox, Firmen, Ampel und Monatsübersicht.
 - `GET/POST/PATCH /api/accounting/*` – geschützte Beleg-, Firmen-, Prüf- und Export-API; Originalbelege werden nicht überschrieben oder gelöscht.
 
@@ -44,6 +53,7 @@ Das Zielbild für die sichere Beleg- und Steuerberater-Vorbereitung steht in [`I
 - `npm run test:whatsapp` – Webhook-HMAC, Nachrichtenerkennung und Sicherheits-Intents.
 - `npm run test:marketing` – Marketing-Persistenz, öffentliche Kontakt-Schutzlogik, Ads-Auswertung, E-Mail-Sperre und Reporting.
 - `npm run test:accounting` – Originalbeleg, Hash, Ampel, Dublettenprüfung, Monatsstatus und neutralen Export prüfen.
+- `npm run test:operations` – Rollenrouting, Werkzeuggrenzen, Freigaben, Redigierung und Audit prüfen.
 
 ## Qonekto / blau direkt
 - Railway-Variable `QONEKTO_MCP_TOKEN` enthält den Qonekto-MCP-Token.

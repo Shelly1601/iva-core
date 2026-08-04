@@ -25,7 +25,8 @@ import { qonektoSkill } from './skills/qonekto.js';
 import { adviceSkill } from './skills/advice.js';
 import { opportunitiesSkill } from './skills/opportunities.js';
 import { selfImprovementSkill } from './skills/self-improvement.js';
-import { getAgent } from './agents/registry.js';
+import { accountingSkill } from './skills/accounting.js';
+import { listAgents, routeAgent } from './agents/registry.js';
 import { marketAnalysis } from './marketing/market.js';
 import { fetchMetaAdsInsights, marketingConnectorStatus } from './marketing/connectors.js';
 import { listResearchRuns, listResearchedCompanies, runMarketIntelligence } from './marketing/intelligence.js';
@@ -105,6 +106,17 @@ import {
 } from './integrations/whatsapp-store.js';
 import { adviceConnectorStatus, publicAdviceCatalog } from './advice/catalog.js';
 import { addAdviceKnowledgeSource, adviceKnowledgeStatus, listAdviceKnowledge } from './advice/knowledge-store.js';
+import {
+  beginAgentRun,
+  createApproval,
+  finishAgentRun,
+  listAgentRuns,
+  listApprovals,
+  listAudit,
+  operationsSummary,
+  recordAudit,
+  resolveApprovalByExternalKey,
+} from './operations/store.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -457,6 +469,7 @@ const ALL_SKILLS = {
   workspaces: workspacesSkill({ workspaces }),
   advice:    adviceSkill({ publicAdviceCatalog, listAdviceKnowledge }),
   opportunities: opportunitiesSkill({ listOpportunities, runOpportunityScout, prepareOpportunityHandoff }),
+  accounting: accountingSkill({ listAccountingEntities, listAccountingDocuments, getAccountingDocument, accountingSummary }),
   selfImprovement: selfImprovementSkill({ savePronunciationCorrection, saveCommunicationPreference, captureImprovementRequest, listVoiceLearning }),
   qonekto:   null, // wird pro Anfrage mit der echten sessionId erzeugt
 };
@@ -467,12 +480,42 @@ function assembleTools(agent, { sessionId = 'default' } = {}) {
   const out = {};
   for (const skillId of agent.allowedSkills) {
     const s = skillId === 'qonekto'
-      ? qonektoSkill({ sessionId, qonektoStatus, listQonektoTools, callQonektoReadTool, prepareQonektoWriteAction })
+      ? qonektoSkill({ sessionId, qonektoStatus, listQonektoTools, callQonektoReadTool, prepareQonektoWriteAction: prepareTrackedQonektoWrite })
       : ALL_SKILLS[skillId];
     if (!s) { console.warn(`[REGISTRY] Skill "${skillId}" fuer Agent "${agent.id}" nicht gefunden.`); continue; }
     Object.assign(out, s);
   }
   return out;
+}
+
+function qonektoApprovalKey(sessionId) { return `qonekto:${String(sessionId || 'default').slice(0, 180)}`; }
+
+async function prepareTrackedQonektoWrite(input = {}) {
+  const prepared = await prepareQonektoWriteAction(input);
+  await createApproval({
+    type: 'qonekto-write',
+    title: `Qonekto-Aenderung: ${input.toolName || 'Werkzeug'}`,
+    summary: prepared?.preview || prepared?.message || `Vorbereitete Aenderung mit ${input.toolName || 'Qonekto'}`,
+    agentId: 'iva-customer',
+    externalKey: qonektoApprovalKey(input.sessionId),
+    confirmationPhrase: 'Ja, Qonekto-Aenderung ausfuehren',
+    expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+  });
+  await recordAudit({ category: 'approval', action: 'qonekto-write-prepared', status: 'pending', actor: 'iva-customer', target: input.toolName });
+  return prepared;
+}
+
+async function handleTrackedQonektoConfirmation(sessionId, userText) {
+  const directAnswer = await handleQonektoConfirmation(sessionId, userText);
+  if (!directAnswer) return null;
+  const succeeded = /^Erledigt\./.test(directAnswer);
+  await resolveApprovalByExternalKey(qonektoApprovalKey(sessionId), { status: succeeded ? 'approved' : 'failed', result: directAnswer });
+  await recordAudit({ category: 'approval', action: 'qonekto-write-confirmation', status: succeeded ? 'completed' : 'failed', actor: 'nadine', detail: directAnswer });
+  return directAnswer;
+}
+
+function usedToolNames(steps = []) {
+  return [...new Set((steps || []).flatMap(step => (step.toolCalls || []).map(call => call.toolName).filter(Boolean)))];
 }
 
 async function recordDirectAnswer(sessionId, userText, answer) {
@@ -493,56 +536,76 @@ function directTextStream(answer) {
 }
 
 async function askIva(userText, sessionId = 'default', voice = false, agentId = 'iva-standard') {
-  const directAnswer = await handleQonektoConfirmation(sessionId, userText);
+  const directAnswer = await handleTrackedQonektoConfirmation(sessionId, userText);
   if (directAnswer) {
     await recordDirectAnswer(sessionId, userText, directAnswer);
     return directAnswer;
   }
-  const agent = getAgent(agentId);
+  const routedAgent = routeAgent(userText, agentId);
+  const agent = routedAgent.agent;
+  const started = Date.now();
+  const run = await beginAgentRun({ agentId: agent.id, agentName: agent.name, routeReason: routedAgent.reason, channel: voice ? 'voice' : 'chat', sessionId, requestPreview: userText });
   const agentTools = assembleTools(agent, { sessionId });
   let system = await buildSystemPrompt();
+  if (agent.rolePrompt) system += `\n\nAktiver Fachagent: ${agent.name}\n${agent.rolePrompt}`;
   if (voice) system += VOICE_SYSTEM_SUFFIX;
   const conv = await loadConversations();
   const history = Array.isArray(conv[sessionId]) ? conv[sessionId] : [];
   const messages = [...history, { role: 'user', content: userText }];
-  const routed = chooseModel({ task: agent.modelProfile });
-  await checkBudget(routed);
-  const { text, usage } = await generateText({ model: routed.model, system, messages, tools: agentTools, maxSteps: 6, ...(voice ? { maxTokens: 420 } : {}) });
-  await recordUsage(routed, usage);
-  conv[sessionId] = [...messages, { role: 'assistant', content: text || '(ok)' }].slice(-MAX_TURNS);
-  await saveConversations(conv);
-  return text;
+  try {
+    const routed = chooseModel({ task: agent.modelProfile });
+    await checkBudget(routed);
+    const { text, usage, steps } = await generateText({ model: routed.model, system, messages, tools: agentTools, maxSteps: 6, ...(voice ? { maxTokens: 420 } : {}) });
+    await recordUsage(routed, usage);
+    conv[sessionId] = [...messages, { role: 'assistant', content: text || '(ok)' }].slice(-MAX_TURNS);
+    await saveConversations(conv);
+    await finishAgentRun(run.id, { status: 'completed', durationMs: Date.now() - started, tools: usedToolNames(steps), resultPreview: text });
+    return text;
+  } catch (error) {
+    await finishAgentRun(run.id, { status: 'failed', durationMs: Date.now() - started, error: error.message });
+    throw error;
+  }
 }
 
 // Streaming-Variante von askIva fuer /api/chat/stream (Phase 1). Teilt Prompt-Aufbau,
 // Verlauf und Tools mit askIva ueber die Modul-Helper (buildSystemPrompt, loadConversations,
 // saveConversations, tools, MAX_TURNS). askIva selbst bleibt unangetastet -> Telegram sicher.
 async function streamIva(userText, sessionId = 'default', voice = false, agentId = 'iva-standard', abortSignal) {
-  const directAnswer = await handleQonektoConfirmation(sessionId, userText);
+  const directAnswer = await handleTrackedQonektoConfirmation(sessionId, userText);
   if (directAnswer) {
     await recordDirectAnswer(sessionId, userText, directAnswer);
     return directTextStream(directAnswer);
   }
-  const agent = getAgent(agentId);
+  const routedAgent = routeAgent(userText, agentId);
+  const agent = routedAgent.agent;
+  const started = Date.now();
+  const run = await beginAgentRun({ agentId: agent.id, agentName: agent.name, routeReason: routedAgent.reason, channel: voice ? 'voice' : 'chat', sessionId, requestPreview: userText });
   const agentTools = assembleTools(agent, { sessionId });
   let system = await buildSystemPrompt();
+  if (agent.rolePrompt) system += `\n\nAktiver Fachagent: ${agent.name}\n${agent.rolePrompt}`;
   if (voice) system += VOICE_SYSTEM_SUFFIX;
   const conv = await loadConversations();
   const history = Array.isArray(conv[sessionId]) ? conv[sessionId] : [];
   const messages = [...history, { role: 'user', content: userText }];
-  const routed = chooseModel({ task: agent.modelProfile });
-  await checkBudget(routed);
-  return streamText({
-    model: routed.model,
-    system, messages, tools: agentTools, maxSteps: 6,
-    ...(voice ? { maxTokens: 420 } : {}),
-    abortSignal,
-    onFinish: async ({ text, usage }) => {
-      await recordUsage(routed, usage);
-      conv[sessionId] = [...messages, { role: 'assistant', content: text || '(ok)' }].slice(-MAX_TURNS);
-      await saveConversations(conv);
-    },
-  });
+  try {
+    const routed = chooseModel({ task: agent.modelProfile });
+    await checkBudget(routed);
+    return streamText({
+      model: routed.model,
+      system, messages, tools: agentTools, maxSteps: 6,
+      ...(voice ? { maxTokens: 420 } : {}),
+      abortSignal,
+      onFinish: async ({ text, usage, steps }) => {
+        await recordUsage(routed, usage);
+        conv[sessionId] = [...messages, { role: 'assistant', content: text || '(ok)' }].slice(-MAX_TURNS);
+        await saveConversations(conv);
+        await finishAgentRun(run.id, { status: abortSignal?.aborted ? 'stopped' : 'completed', durationMs: Date.now() - started, tools: usedToolNames(steps), resultPreview: text });
+      },
+    });
+  } catch (error) {
+    await finishAgentRun(run.id, { status: 'failed', durationMs: Date.now() - started, error: error.message });
+    throw error;
+  }
 }
 
 function toTelegramHTML(s) {
@@ -665,9 +728,84 @@ app.use('/api', (req, res, next) => {
   res.set(CORS);
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   const expected = process.env.API_TOKEN;
+  if (!expected && (process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PUBLIC_DOMAIN)) {
+    return res.status(503).json({ error: 'API_TOKEN fehlt in der Produktionsumgebung.' });
+  }
   if (expected && (req.headers.authorization || '') !== 'Bearer ' + expected) return res.status(401).json({ error: 'unauthorized' });
   next();
 });
+
+function envReady(...names) {
+  return names.every(name => Boolean(String(process.env[name] || '').trim()));
+}
+
+function connector(id, label, ready, missing = [], detail = '') {
+  return { id, label, ready: Boolean(ready), missing: ready ? [] : missing, detail };
+}
+
+async function controlSnapshot() {
+  const [ops, qonektoResult, syncResult, voiceResult, knowledgeResult, opportunityResult, learningResult] = await Promise.all([
+    operationsSummary(),
+    qonektoStatus().catch(error => ({ configured: envReady('QONEKTO_MCP_TOKEN'), reachable: false, error: error.message })),
+    crmQonektoSyncStatus().catch(error => ({ enabled: false, error: error.message })),
+    voiceLabSummary().catch(error => ({ configured: {}, error: error.message })),
+    adviceKnowledgeStatus().catch(error => ({ total: 0, error: error.message })),
+    opportunityRadarStatus().catch(error => ({ configured: false, ready: false, missing: ['APIFY_TOKEN'], error: error.message })),
+    listVoiceLearning().catch(() => ({ improvementRequests: [] })),
+  ]);
+  const marketing = marketingConnectorStatus();
+  const metaWhatsApp = whatsappStatus();
+  const hubWhatsApp = whatsappHubStatus();
+  const adviceConnectors = adviceConnectorStatus();
+  const projectIds = CRM_SOURCES.filter(source => source.mode === 'rest' && source.projectId).length;
+  const connectors = [
+    connector('core-api', 'IVA API-Schutz', envReady('API_TOKEN'), ['API_TOKEN'], 'Schuetzt Cockpit und App-Zugriffe.'),
+    connector('anthropic', 'IVA Kernmodell', envReady('ANTHROPIC_API_KEY'), ['ANTHROPIC_API_KEY'], 'Chat, Planung und Fachagenten.'),
+    connector('telegram', 'Telegram', envReady('TELEGRAM_BOT_TOKEN'), ['TELEGRAM_BOT_TOKEN'], 'Assistentenkanal und proaktive Berichte.'),
+    connector('voice-input', 'Spracheingabe', Boolean(voiceResult.configured?.groq), ['GROQ_API_KEY'], 'Transkription mit Groq Whisper.'),
+    connector('voice-output', 'IVA Stimme', Boolean(voiceResult.configured?.elevenLabs), ['ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID'], 'Sprachausgabe mit ElevenLabs.'),
+    connector('qonekto', 'Qonekto / blau direkt', Boolean(qonektoResult.reachable), ['QONEKTO_MCP_TOKEN'], qonektoResult.reachable ? `${qonektoResult.toolCount || qonektoResult.tools?.total || 0} Werkzeuge erreichbar.` : (qonektoResult.error || 'Nicht erreichbar.')),
+    connector('crm-goals', 'CRM · Goals & Concepts', envReady('MEINCRM_SERVICE_KEY', 'GOALS_CONCEPTS_PROJECT_ID'), ['MEINCRM_SERVICE_KEY', 'GOALS_CONCEPTS_PROJECT_ID'], `${projectIds} CRM-Projektzuordnungen hinterlegt.`),
+    connector('crm-heathero', 'HeatHero CRM', envReady('HEATHERO_API_KEY'), ['HEATHERO_API_KEY'], 'Eigener Lead-Zugang.'),
+    connector('crm-qonekto-sync', 'Strategiegespraech → Qonekto', Boolean(syncResult.enabled), ['CRM_QONEKTO_SYNC_ENABLED=true', 'CRM_QONEKTO_DEFAULT_SALUTATION_ID', 'CRM_QONEKTO_DEFAULT_BROKER_ID'], syncResult.enabled ? 'Automatischer Abgleich aktiv.' : 'Bewusst noch nicht aktiviert.'),
+    connector('calendar', 'Kalender', CALENDARS.some(item => item.url), ['PRIVAT_GOOGLE_ICS_URL oder weitere ICS-URL'], `${CALENDARS.filter(item => item.url).length} Kalender verbunden.`),
+    connector('mail', 'E-Mail-Eingang', loadMailAccounts().length > 0, ['MAIL_1_USER/MAIL_1_PASS oder MAIL_2_USER/MAIL_2_PASS'], `${loadMailAccounts().length} Postfaecher konfiguriert.`),
+    connector('calendly', 'Calendly', envReady('CALENDLY_TOKEN'), ['CALENDLY_TOKEN'], 'Termine und Bucher.'),
+    ...marketing.connectors.filter(item => item.id !== 'whatsapp').map(item => connector(`marketing-${item.id}`, item.label, item.configured, item.requires || [], item.capabilities?.join(' · ') || '')),
+    connector('whatsapp-meta', 'WhatsApp Business · Meta', metaWhatsApp.configured, ['WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID', 'WHATSAPP_VERIFY_TOKEN', 'WHATSAPP_APP_SECRET', 'WHATSAPP_GRAPH_VERSION'], metaWhatsApp.configured ? 'Ein- und Ausgang bereit.' : 'Live-Kanal noch nicht komplett.'),
+    connector('whatsapp-hub', 'Multi-WhatsApp Hub', hubWhatsApp.configured, ['WHATSAPP_HUB_API_KEY'], hubWhatsApp.configured ? 'Konten und Chats lesbar.' : 'Hub-Key fehlt.'),
+    connector('gkv', 'GKV-Vergleich', Boolean(adviceConnectors.gkv?.configured), ['GKV_COMPARE_PROVIDER', 'GKV_COMPARE_URL'], 'Sicherer Startlink/API des gewaehlten Portals.'),
+    connector('opportunity-radar', 'Chancenradar', Boolean(opportunityResult.ready), opportunityResult.missing || ['APIFY_TOKEN'], opportunityResult.provider || ''),
+  ];
+  const uniqueConnectors = [...new Map(connectors.map(item => [item.id, item])).values()];
+  const agents = listAgents();
+  return {
+    generatedAt: new Date().toISOString(),
+    agents,
+    operations: ops,
+    connectors: {
+      ready: uniqueConnectors.filter(item => item.ready).length,
+      total: uniqueConnectors.length,
+      items: uniqueConnectors,
+    },
+    systems: {
+      qonekto: qonektoResult,
+      crmQonektoSync: syncResult,
+      voice: voiceResult,
+      adviceKnowledge: knowledgeResult,
+      opportunityRadar: opportunityResult,
+    },
+    buildBacklog: (learningResult.improvementRequests || []).filter(item => !['done', 'rejected'].includes(item.status)).slice(-30).reverse(),
+  };
+}
+
+app.get('/api/control/status', async (_req, res) => {
+  try { res.json(await controlSnapshot()); }
+  catch (error) { res.status(500).json({ error: error.message }); }
+});
+app.get('/api/control/runs', async (req, res) => res.json(await listAgentRuns({ limit: req.query?.limit, status: String(req.query?.status || ''), agentId: String(req.query?.agentId || '') })));
+app.get('/api/control/approvals', async (req, res) => res.json(await listApprovals({ limit: req.query?.limit, status: String(req.query?.status || '') })));
+app.get('/api/control/audit', async (req, res) => res.json(await listAudit({ limit: req.query?.limit, category: String(req.query?.category || '') })));
 app.get('/api/leads', async (_req, res) => res.json(await fetchAllLeads()));
 app.get('/api/crm-qonekto-sync/status', async (_req, res) => res.json(await crmQonektoSyncStatus()));
 app.post('/api/crm-qonekto-sync/run', async (req, res) => {
@@ -703,7 +841,7 @@ app.get('/api/calendly', async (_req, res) => res.json(await getCalendlyEvents(1
 app.get('/api/todos', async (_req, res) => { const m = await loadMemory(); res.json((m.todos || []).filter(t => !t.done)); });
 app.post('/api/todos', async (req, res) => { const m = await loadMemory(); m.todos = m.todos || []; m.todos.push({ text: req.body?.text || '', done: false, ts: Date.now() }); await saveMemory(m); res.json({ ok: true }); });
 app.post('/api/todos/toggle', async (req, res) => { const m = await loadMemory(); const t = (m.todos || []).find(t => t.ts === req.body?.ts); if (t) { t.done = !t.done; await saveMemory(m); } res.json({ ok: true }); });
-app.post('/api/chat', async (req, res) => { try { res.json({ reply: await askIva(req.body?.message || '', req.body?.sessionId || 'web', req.body?.voice === true) }); } catch (e) { res.json({ reply: 'Fehler: ' + e.message }); } });
+app.post('/api/chat', async (req, res) => { try { res.json({ reply: await askIva(req.body?.message || '', req.body?.sessionId || 'web', req.body?.voice === true, req.body?.agentId || 'iva-standard') }); } catch (e) { res.json({ reply: 'Fehler: ' + e.message }); } });
 app.post('/api/chat/stream', async (req, res) => {
   const aborter = new AbortController();
   req.on('aborted', () => aborter.abort());
@@ -792,18 +930,30 @@ app.get('/api/customers/:id', async (req, res) => {
 });
 app.post('/api/customers/actions/prepare', async (req, res) => {
   try {
-    res.json(await prepareQonektoCustomerAction({
-      sessionId: String(req.body?.sessionId || 'customers-web').slice(0, 200),
+    const sessionId = String(req.body?.sessionId || 'customers-web').slice(0, 200);
+    const result = await prepareQonektoCustomerAction({
+      sessionId,
       kind: req.body?.kind,
       customerId: req.body?.customerId,
       values: req.body?.values || {},
-    }));
+    });
+    await createApproval({
+      type: 'qonekto-write',
+      title: result.kind === 'create-customer' ? 'Neue Qonekto-Kundenakte' : 'Qonekto-Stammdaten aendern',
+      summary: result.preview || result.message || result.kind,
+      agentId: 'iva-customer',
+      externalKey: qonektoApprovalKey(sessionId),
+      confirmationPhrase: result.confirmationPhrase,
+      expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+    });
+    await recordAudit({ category: 'approval', action: result.kind, status: 'pending', actor: 'iva-customer', target: req.body?.customerId || 'neuer-kunde' });
+    res.json(result);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/customers/actions/confirm', async (req, res) => {
   try {
     const sessionId = String(req.body?.sessionId || 'customers-web').slice(0, 200);
-    const result = await handleQonektoConfirmation(sessionId, req.body?.confirmation || '');
+    const result = await handleTrackedQonektoConfirmation(sessionId, req.body?.confirmation || '');
     if (!result) return res.status(400).json({ error: 'Die eindeutige Qonekto-Bestaetigung fehlt.' });
     invalidateQonektoCustomerCache();
     res.json({ ok: /^Erledigt\./.test(result), message: result });
@@ -1204,6 +1354,7 @@ app.get('/marketing', (_req, res) => res.sendFile(path.join(__dirnameIva, 'publi
 app.get('/accounting', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'accounting.html')));
 app.get('/opportunities', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'opportunities.html')));
 app.get('/voice-lab', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'voice-lab.html')));
+app.get('/control', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'control.html')));
 app.get('/health/qonekto', async (_req, res) => {
   const status = await qonektoStatus();
   if (status.reachable) {

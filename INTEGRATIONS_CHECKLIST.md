@@ -195,13 +195,22 @@ Für den internen Grundbetrieb ist **keine neue Railway-Variable** erforderlich;
 - `DATA_DIR` nur setzen, wenn der Mount-Pfad bewusst geändert wird.
 - Nach jedem Secret-Wechsel: Deploy prüfen, Healthchecks aufrufen und genau eine ungefährliche Testaktion ausführen.
 
+## 12. IVA-Kontrollzentrum und aktive Agenten
+
+- `/control` ist die zentrale Betriebsansicht. Sie verwendet denselben im Browser gespeicherten `API_TOKEN` wie das Cockpit.
+- Aktiv: **IVA · Zentrale**, **Kunden & Backoffice**, **Beratung & Fachprüfung**, **Marketing & Growth**, **Energie & Vor Ort**, **Buchhaltung & Controlling** und **Sales & Gesprächscoach**.
+- Bewusst gesperrt: **Wissen & Kurse**, bis der rechte- und quellengeprüfte Importweg steht; **Entwicklung & QA**, bis Vorschau, Git-Freigabe, Tests, Rollback und Produktionsfreigabe sauber getrennt sind.
+- Im Kontrollzentrum werden ausschließlich Secret-**Namen** als fehlend angezeigt, niemals Werte. Agentenläufe speichern nur gekürzte und automatisch redigierte Vorschauen; E-Mail, Telefonnummer und IBAN werden maskiert.
+- Ein gelber Connector bedeutet nicht, dass der vorhandene Modulbau fehlt. Es bedeutet, dass eine externe Live-Funktion noch ein Konto, einen Key oder eine bewusste Aktivierung benötigt.
+
 ## Empfohlene nächste Reihenfolge
 
-1. `API_TOKEN` rotieren und App-Verbindung testen.
-2. Marketing-Pilot mit `APIFY_TOKEN`, `GOOGLE_PLACES_API_KEY`, `FAL_KEY`, `GEMINI_API_KEY`, einer Marke und Referenzkonten starten.
-3. Multi-WhatsApp Hub absichern, danach `WHATSAPP_HUB_API_KEY` erstellen und in Railway hinterlegen.
-4. Nachrichtenverlauf + signierten Hub-Webhook ergänzen; erst danach automatische Bot-Profile aktivieren.
-5. Meta Business als optionalen stabilen Kanal für kritische Geschäftsnummern anbinden.
-6. Danach HeyGen und Brevo/Resend aktivieren.
-7. Als ersten Handy-Baustein den IVA-iPhone-Kurzbefehl und das Teilen-Menü bauen; die native App folgt danach.
-8. Im internen Buchhaltungs-MVP Rechtsträger anlegen und echte Testbelege prüfen; danach automatische Auslesung und erst im zweiten Schritt Bankdaten anbinden.
+1. Deployment öffnen, `/control` aufrufen und den bestehenden App-Token eintragen. Falls `API_TOKEN` noch der alte im Chat genannte Wert ist: in Railway rotieren und danach Cockpit plus Kontrollzentrum neu verbinden.
+2. In `/control` zuerst Qonekto, CRM, Kalender, Mail, Calendly und Voice auf Grün prüfen. Einen benannten Testkunden aus Qonekto rein lesend öffnen; noch keinen Massensync starten.
+3. Strategiegespräch-Sync mit genau einem Testkunden prüfen. Erst wenn Felder, Anrede und Vermittler stimmen, `CRM_QONEKTO_SYNC_ENABLED=true` setzen.
+4. Marketing-Pilot mit `APIFY_TOKEN`, `GOOGLE_PLACES_API_KEY`, `FAL_KEY`, `GEMINI_API_KEY`, einer Marke und 5–15 Referenzkonten starten.
+5. Multi-WhatsApp Hub absichern, danach `WHATSAPP_HUB_API_KEY` erstellen und in Railway hinterlegen. Nachrichtenverlauf und signierten Webhook ergänzen; erst danach Bot-Profile live aktivieren.
+6. Meta Business als stabilen Kanal für kritische Geschäftsnummern anbinden; danach HeyGen und Brevo/Resend.
+7. Im Buchhaltungsbereich Rechtsträger anlegen und echte Testbelege prüfen; danach automatische Auslesung und erst im zweiten Schritt Bankdaten anbinden.
+8. Als ersten Handy-Baustein den IVA-iPhone-Kurzbefehl und das Teilen-Menü bauen; die native App folgt danach.
+9. Eine Woche lang im Kontrollzentrum Freigaben, Fehlversuche und Datenlücken beobachten. Erst dann weitere Autonomie freischalten.
