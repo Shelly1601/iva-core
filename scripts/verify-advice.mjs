@@ -10,17 +10,19 @@ try {
   const catalog = await import('../advice/catalog.js');
   const knowledge = await import('../advice/knowledge-store.js');
   const publicCatalog = catalog.publicAdviceCatalog();
-  assert.equal(publicCatalog.modules.length, 11);
+  assert.equal(publicCatalog.modules.length, 12);
   assert.ok(catalog.getAdviceModule('din-77230'));
   assert.ok(catalog.getAdviceModule('din-77235'));
   assert.ok(catalog.getAdviceModule('contract-comparison')?.knowledgeSearch);
   assert.ok(catalog.getAdviceModule('gkv-comparison'));
   assert.equal(catalog.getAdviceModule('energy-planning')?.launchMode, 'energie');
   assert.ok(catalog.getAdviceModule('energy-tariff-comparison'));
+  assert.equal(catalog.getAdviceModule('corporate-benefits')?.calculator, 'corporate-benefits');
+  assert.equal(publicCatalog.groups.find(group => group.id === 'corporate')?.label, 'Firmenvorsorge & Benefits');
   assert.equal(publicCatalog.groups.find(group => group.id === 'energy')?.label, 'Energie & Versorgung');
 
   const initial = await knowledge.listAdviceKnowledge();
-  assert.equal(initial.referenceCount, 4);
+  assert.equal(initial.referenceCount, 12);
   assert.equal(initial.productDocumentCount, 4);
 
   await knowledge.addAdviceKnowledgeSource({
@@ -33,7 +35,7 @@ try {
   assert.equal(found.sources[0].status, 'pending-review');
 
   await assert.rejects(() => knowledge.addAdviceKnowledgeSource({ title: 'Unsicher', url: 'javascript:alert(1)' }), /HTTP/);
-  console.log('PASS Beratung: 11 Module, Energie-Einstiege, DIN-Trennung, Quellenbibliothek und Connector-Basis');
+  console.log('PASS Beratung: 12 Module, Firmenvorsorge, Energie-Einstiege, DIN-Trennung, Quellenbibliothek und Connector-Basis');
 } finally {
   await fs.rm(temp, { recursive: true, force: true });
 }

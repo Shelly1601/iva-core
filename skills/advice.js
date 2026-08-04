@@ -4,8 +4,8 @@ import { z } from 'zod';
 export function adviceSkill({ publicAdviceCatalog, listAdviceKnowledge }) {
   return {
     listAdviceModules: tool({
-      description: 'Listet die vorhandenen IVA-Beratungsmodule fuer Finanzplanung, DIN-orientierte Analyse, Altersvorsorge, Depotvergleich, Vertragsvergleich, Immobilien und GKV.',
-      parameters: z.object({ group: z.enum(['finance', 'retirement', 'insurance', 'property', 'health']).optional() }),
+      description: 'Listet die vorhandenen IVA-Beratungsmodule fuer Finanzplanung, DIN-orientierte Analyse, Firmenvorsorge, bKV/bAV, Altersvorsorge, Depotvergleich, Vertragsvergleich, Immobilien, GKV und Energie.',
+      parameters: z.object({ group: z.enum(['finance', 'retirement', 'insurance', 'property', 'health', 'corporate', 'energy']).optional() }),
       execute: async ({ group }) => {
         const catalog = publicAdviceCatalog();
         return { modules: catalog.modules.filter(module => !group || module.group === group).map(module => ({ id: module.id, title: module.title, short: module.short, status: module.status, notice: module.notice || '' })) };

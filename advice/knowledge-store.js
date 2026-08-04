@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
+import { CORPORATE_BENEFIT_SOURCES } from '../public/corporate-benefits-calculator.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const STORE_FILE = path.join(DATA_DIR, 'advice-knowledge.json');
@@ -11,6 +12,17 @@ const REFERENCE_SOURCES = [
   { id: 'ref-din-77235', kind: 'norm-reference', category: 'finanzanalyse', provider: 'DIN Media', title: 'DIN 77235:2021-10 · Selbstständige und KMU', url: 'https://www.dinmedia.de/de/norm/din-77235/343467665', verified: true, scope: 'Öffentliche Einordnung, nicht das lizenzierte Normregelwerk' },
   { id: 'ref-capitalflow', kind: 'benchmark', category: 'beratung', provider: 'CapitalFlow', title: 'Beratungssoftware und Finanzrechner', url: 'https://www.capital-flow.de/', verified: true, scope: 'Funktionsbenchmark' },
   { id: 'ref-finanzportal24', kind: 'benchmark', category: 'beratung', provider: 'FinanzPortal24', title: 'etops FinanzPortal · DIN-Analyse und Dokumentation', url: 'https://finanzportal24.de/', verified: true, scope: 'Funktionsbenchmark' },
+  ...CORPORATE_BENEFIT_SOURCES.map(source => ({
+    id: `ref-${source.id}`,
+    kind: 'benchmark',
+    category: 'firmenvorsorge',
+    provider: source.publisher,
+    title: source.title,
+    url: source.url,
+    year: source.year,
+    verified: true,
+    scope: source.scope,
+  })),
 ];
 
 const STARTER_PRODUCT_SOURCES = [

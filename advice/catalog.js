@@ -1,4 +1,5 @@
 import { energyTariffStatus } from '../integrations/energy-tariffs.js';
+import { CORPORATE_BENEFIT_SOURCES } from '../public/corporate-benefits-calculator.js';
 
 const field = (key, label, options = {}) => ({ key, label, type: 'number', ...options });
 
@@ -8,6 +9,7 @@ export const ADVICE_GROUPS = [
   { id: 'insurance', label: 'Versicherungen' },
   { id: 'property', label: 'Immobilien' },
   { id: 'health', label: 'Gesundheit' },
+  { id: 'corporate', label: 'Firmenvorsorge & Benefits' },
   { id: 'energy', label: 'Energie & Versorgung' },
 ];
 
@@ -40,6 +42,52 @@ export const ADVICE_MODULES = [
       { title: 'Organisation', fields: [field('legalForm', 'Rechtsform', { type: 'text' }), field('employees', 'Beschäftigte'), field('annualRevenue', 'Jahresumsatz', { unit: '€' }), field('liquidity', 'Liquide Mittel', { unit: '€' }), field('liabilities', 'Verbindlichkeiten', { unit: '€' })] },
       { title: 'Risiken', fields: [field('keyPersons', 'Schlüsselpersonen', { type: 'textarea', wide: true }), field('businessRisks', 'Haftungs-, Ausfall- und Substanzrisiken', { type: 'textarea', wide: true }), field('goals', 'Ziele / Handlungsfelder', { type: 'textarea', wide: true })] },
     ], calculator: 'business-summary',
+  },
+  {
+    id: 'corporate-benefits', group: 'corporate', icon: 'B+', title: 'Firmenvorsorge · bKV & bAV', short: 'Fehlzeiten und Fluktuation bewerten, bKV gegenrechnen und ein finanziertes bAV-Vorsorgewerk präsentieren.', status: 'ready', badge: 'Live-Rechner',
+    notice: 'IVA zeigt eine vertriebliche Szenariorechnung, keine garantierte Wirkung. Der 400-Euro-Planwert, vermiedene Krankheitstage und geringere Fluktuation bleiben sichtbar veränderbare Annahmen. Steuer-, Arbeits- und Versicherungsrecht werden vor Umsetzung fachlich geprüft.',
+    sections: [
+      { title: 'Unternehmen & Fehlzeiten', fields: [
+        field('employees', 'Mitarbeitende', { value: 50 }),
+        field('sickDaysMode', 'Krankheitstage', { type: 'select', value: 'tk2023', options: [{ value: 'tk2023', label: 'TK 2023 · 19,4 Tage' }, { value: 'company', label: 'Tatsächlicher Unternehmenswert' }] }),
+        field('companySickDays', 'Tatsächliche Krankheitstage je Mitarbeitendem', { unit: 'Tage / Jahr', value: 19.4 }),
+        field('sickDayCostMode', 'Kosten je Krankheitstag', { type: 'select', value: 'plan400', options: [{ value: 'plan400', label: 'Planwert · 400 €' }, { value: 'baua2024', label: 'BAuA 2024 · ca. 258 € Wertschöpfung' }, { value: 'company', label: 'Tatsächlicher Unternehmenswert' }] }),
+        field('companySickDayCost', 'Tatsächliche Kosten je Krankheitstag', { unit: '€', value: 400 }),
+        field('averageGrossSalary', 'Durchschnittliches Monatsbrutto', { unit: '€', value: 4000 }),
+      ] },
+      { title: 'Fluktuation & Wiederbesetzung', fields: [
+        field('turnoverMode', 'Fluktuationsquote', { type: 'select', value: 'plan15', options: [{ value: 'plan15', label: 'Planwert · 15 %' }, { value: 'company', label: 'Tatsächlicher Unternehmenswert' }] }),
+        field('companyTurnoverRate', 'Tatsächliche Fluktuation', { unit: '% / Jahr', value: 15 }),
+        field('replacementCostMonths', 'Kosten je Wiederbesetzung', { type: 'select', value: '12', options: [{ value: '12', label: '12 Monatsgehälter' }, { value: '18', label: '18 Monatsgehälter' }, { value: '24', label: '24 Monatsgehälter' }] }),
+      ] },
+      { title: 'Wirkungsszenario · frei einstellbar', fields: [
+        field('savedSickDaysPerEmployee', 'Angenommene vermiedene Krankheitstage', { unit: 'Tage je Person / Jahr', value: 2 }),
+        field('turnoverReductionPoints', 'Angenommene Senkung der Fluktuation', { unit: 'Prozentpunkte', value: 3 }),
+        field('bkvParticipationPercent', 'Teilnahme an der bKV', { unit: '% der Mitarbeitenden', value: 100 }),
+      ] },
+      { title: 'Konkrete betriebliche Krankenversicherung', fields: [
+        field('bkvProvider', 'Versicherer', { type: 'text', placeholder: 'z. B. Hallesche, Allianz, Barmenia' }),
+        field('bkvTariff', 'Tarif / Tarifkombination', { type: 'text', placeholder: 'Tarif und Tarifstand' }),
+        field('bkvMonthlyPremium', 'Beitrag Arbeitgeber', { unit: '€ je Person / Monat', value: 30 }),
+        field('bkvAnnualBudget', 'Gesundheitsbudget / Leistungen', { type: 'text', placeholder: 'z. B. 600 € Budget, Zahn, Sehhilfe, Vorsorge' }),
+        field('bkvTaxMode', 'Geplante lohnsteuerliche Behandlung', { type: 'select', value: 'benefit50', options: [{ value: 'benefit50', label: 'Sachbezug / 50-€-Freigrenze prüfen' }, { value: 'individual', label: 'Individuelle Versteuerung' }, { value: 'flat', label: 'Pauschalierung prüfen' }] }),
+      ] },
+      { title: 'Betriebliche Altersvorsorge & Musterabrechnung', fields: [
+        field('bavProvider', 'Versicherer / Versorgungsträger', { type: 'text' }),
+        field('bavTariff', 'Tarif / Durchführungsweg', { type: 'text', placeholder: 'z. B. Direktversicherung · Tarifstand' }),
+        field('bavParticipationPercent', 'Teilnahme an der bAV', { unit: '% der Mitarbeitenden', value: 60 }),
+        field('employeeDeferral', 'Entgeltumwandlung Mitarbeitender', { unit: '€ / Monat', value: 100 }),
+        field('employerSubsidyPercent', 'Arbeitgeberzuschuss auf Entgeltumwandlung', { unit: '%', value: 15 }),
+        field('extraEmployerBav', 'Zusätzlicher Arbeitgeberbeitrag', { unit: '€ je Teilnehmendem / Monat', value: 25 }),
+        field('estimatedNetImpactPercent', 'Geschätzter Nettoaufwand der Entgeltumwandlung', { unit: '% des Umwandlungsbetrags', value: 55 }),
+      ] },
+      { title: 'Vergleich mit anderen Benefits', fields: [
+        field('comparisonBudgetMonthly', 'Vergleichsbudget', { unit: '€ je Person / Monat', value: 30 }),
+        field('salaryOnCostsPercent', 'Arbeitgebernebenkosten bei Gehalt', { unit: '% Planwert', value: 20 }),
+      ] },
+    ],
+    calculator: 'corporate-benefits',
+    researchSources: CORPORATE_BENEFIT_SOURCES,
   },
   {
     id: 'topic-consultation', group: 'finance', icon: '◇', title: 'Einzelne Themenberatung', short: 'Nur das konkrete Kundenanliegen erfassen und dokumentieren.', status: 'ready', badge: 'Startklar',

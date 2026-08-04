@@ -1,3 +1,5 @@
+import { calculateCorporateBenefits } from './corporate-benefits-calculator.js';
+
 const MODES = {
   beratung: { label: 'Beratungsmodus', sub: 'Geführte Beratung mit zentraler Dokumentation.' },
   kunde: { label: 'Kundenmaske', sub: 'Alle Kundendaten und nächsten Schritte an einer Stelle.' },
@@ -270,6 +272,22 @@ function remainingLoan(principal, annualInterest, annualRepayment, years) {
 }
 
 function calculateAdvice(module, data) {
+  if (module.calculator === 'corporate-benefits') {
+    const corporate = calculateCorporateBenefits(data);
+    return {
+      title: 'Firmenvorsorge-Business-Case · Szenario',
+      items: [
+        { label: 'Heutige Kostenbasis', value: euro(corporate.baseline.totalAnnual) + ' / Jahr' },
+        { label: 'Modelliertes Einsparpotenzial', value: euro(corporate.scenario.potentialSavingsAnnual) + ' / Jahr' },
+        { label: 'bKV-Kosten', value: euro(corporate.scenario.bkvCostAnnual) + ' / Jahr' },
+        { label: 'bKV + bAV-Arbeitgeberkosten', value: euro(corporate.scenario.totalConceptCostAnnual) + ' / Jahr' },
+        { label: 'Szenario-Saldo nach Vorsorgewerk', value: euro(corporate.scenario.netAfterConcept) + ' / Jahr' },
+        { label: 'Reinvestierbar nach bKV', value: euro(corporate.scenario.reinvestmentCapacityMonthly) + ' je Person / Monat' },
+      ],
+      note: corporate.note,
+      corporate,
+    };
+  }
   if (module.calculator === 'financial-summary') {
     const income = numeric(data.monthlyIncome), expenses = numeric(data.monthlyExpenses || data.essentialExpenses);
     return { title: 'Finanzübersicht', items: [{ label: 'Freier Cashflow', value: euro(income - expenses) + ' / Monat' }, { label: 'Nettovermögen', value: euro(numeric(data.assets) - numeric(data.liabilities)) }, { label: 'Liquiditätsreichweite', value: expenses ? `${(numeric(data.liquidAssets || data.liquidityReserve) / expenses).toFixed(1)} Monate` : '–' }] };
@@ -321,8 +339,106 @@ function renderCalculation(root, module, data) {
     value.append(label, amount); grid.appendChild(value);
   }
   card.appendChild(grid);
+  if (result.corporate) renderCorporateBenefits(card, result.corporate);
   if (result.note) { const note = document.createElement('div'); note.className = 'hint'; note.textContent = result.note; card.appendChild(note); }
   root.appendChild(card);
+}
+
+function corporateHeading(text) {
+  const heading = document.createElement('h4');
+  heading.className = 'corporate-heading';
+  heading.textContent = text;
+  return heading;
+}
+
+function renderCorporateBenefits(card, result) {
+  const flow = document.createElement('div'); flow.className = 'corporate-block';
+  flow.appendChild(corporateHeading('Kosten, Hebel und Finanzierung'));
+  const max = Math.max(1, result.baseline.totalAnnual, result.scenario.potentialSavingsAnnual, result.scenario.totalConceptCostAnnual);
+  const bars = [
+    ['Fehlzeiten', result.baseline.absenceCostAnnual, 'loss'],
+    ['Fluktuation', result.baseline.turnoverCostAnnual, 'loss'],
+    ['Szenario-Einsparung', result.scenario.potentialSavingsAnnual, 'saving'],
+    ['bKV-Kosten', result.scenario.bkvCostAnnual, 'cost'],
+    ['bAV-Arbeitgeberkosten', result.scenario.bavEmployerCostAnnual, 'cost'],
+    ['Saldo nach Vorsorgewerk', result.scenario.netAfterConcept, result.scenario.netAfterConcept >= 0 ? 'saving' : 'loss'],
+  ];
+  for (const [labelText, amount, kind] of bars) {
+    const row = document.createElement('div'); row.className = 'impact-row';
+    const label = document.createElement('span'); label.textContent = labelText;
+    const track = document.createElement('div'); track.className = 'impact-track';
+    const fill = document.createElement('i'); fill.className = kind; fill.style.width = `${Math.min(100, Math.abs(amount) / max * 100)}%`; track.appendChild(fill);
+    const value = document.createElement('b'); value.textContent = euro(amount);
+    row.append(label, track, value); flow.appendChild(row);
+  }
+  const scenarioHint = document.createElement('div'); scenarioHint.className = 'scenario-strip';
+  scenarioHint.textContent = `Break-even der bKV allein über Fehlzeiten: ${new Intl.NumberFormat('de-DE', { maximumFractionDigits: 2 }).format(result.scenario.breakEvenSavedDays)} vermiedene Tage je Person · Modell-ROI des Gesamtpakets: ${percent(result.scenario.roiPercent)}`;
+  flow.appendChild(scenarioHint); card.appendChild(flow);
+
+  const pitch = document.createElement('div'); pitch.className = 'corporate-block'; pitch.appendChild(corporateHeading('Gesprächsleitfaden · vertrieblich, aber sauber'));
+  const list = document.createElement('ol'); list.className = 'pitch-list';
+  for (const text of result.narrative) { const item = document.createElement('li'); item.textContent = text; list.appendChild(item); }
+  pitch.appendChild(list); card.appendChild(pitch);
+
+  const payroll = document.createElement('div'); payroll.className = 'corporate-block'; payroll.appendChild(corporateHeading('Musterabrechnung bAV · vereinfachte Darstellung'));
+  const payrollTable = document.createElement('div'); payrollTable.className = 'benefit-table';
+  const payrollRows = [
+    ['Monatsbrutto Mitarbeitender', euro(result.payroll.grossSalary)],
+    ['Entgeltumwandlung', '− ' + euro(result.payroll.employeeDeferral)],
+    [`Arbeitgeberzuschuss (${new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1 }).format(result.payroll.employerSubsidyPercent)} %)`, '+ ' + euro(result.payroll.employerSubsidyMonthly)],
+    ['Zusätzlicher Arbeitgeberbeitrag', '+ ' + euro(result.payroll.extraEmployerBav)],
+    ['Gesamtbeitrag in die Versorgung', euro(result.payroll.insuranceContributionMonthly)],
+    [`Geschätzter Nettoaufwand (${new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1 }).format(result.payroll.estimatedNetImpactPercent)} % Planfaktor)`, 'ca. ' + euro(result.payroll.estimatedEmployeeNetImpact)],
+  ];
+  for (const [labelText, valueText] of payrollRows) {
+    const row = document.createElement('div'); row.className = 'benefit-row compact';
+    const label = document.createElement('span'); label.textContent = labelText;
+    const value = document.createElement('b'); value.textContent = valueText;
+    row.append(label, value); payrollTable.appendChild(row);
+  }
+  payroll.appendChild(payrollTable);
+  const payrollHint = document.createElement('div'); payrollHint.className = 'hint'; payrollHint.textContent = 'Keine echte Lohnabrechnung: Steuerklasse, Kirchensteuer, Beitragsbemessungsgrenzen, Krankenkasse, Tarifvertrag und individuelle Sozialversicherung fehlen. Der Nettofaktor bleibt deshalb editierbar.';
+  payroll.appendChild(payrollHint); card.appendChild(payroll);
+
+  const comparison = document.createElement('div'); comparison.className = 'corporate-block'; comparison.appendChild(corporateHeading('Benefit-Vergleich · Kosten, Steuer, Nutzen'));
+  const comparisonTable = document.createElement('div'); comparisonTable.className = 'benefit-table';
+  const head = document.createElement('div'); head.className = 'benefit-row head';
+  for (const text of ['Benefit', 'Kosten / Monat', 'Arbeitgeber / Jahr', 'Steuerlicher Aspekt', 'Nutzen']) { const cell = document.createElement('b'); cell.textContent = text; head.appendChild(cell); }
+  comparisonTable.appendChild(head);
+  for (const benefit of result.benefitComparison) {
+    const row = document.createElement('div'); row.className = 'benefit-row' + (benefit.featured ? ' featured' : '');
+    for (const text of [benefit.label, euro(benefit.monthlyPerEmployee), euro(benefit.annualEmployerCost), benefit.tax, benefit.use]) {
+      const cell = document.createElement('span'); cell.textContent = text; row.appendChild(cell);
+    }
+    comparisonTable.appendChild(row);
+  }
+  comparison.appendChild(comparisonTable); card.appendChild(comparison);
+
+  const ranking = document.createElement('div'); ranking.className = 'corporate-block'; ranking.appendChild(corporateHeading('Benefit-Ranking bei der Arbeitgeberwahl'));
+  const rankingCopy = document.createElement('p'); rankingCopy.className = 'hint'; rankingCopy.textContent = 'Anteil „extrem stark“, „sehr stark“ oder „ziemlich stark“ darauf achtend. ARAG-/YouGov-Studie 2024, Arbeitnehmer n=1.047.'; ranking.appendChild(rankingCopy);
+  for (const entry of result.preferenceRanking) {
+    const row = document.createElement('div'); row.className = 'ranking-row' + (entry.featured ? ' featured' : '');
+    const label = document.createElement('span'); label.textContent = entry.label;
+    const track = document.createElement('div'); track.className = 'ranking-track';
+    const fill = document.createElement('i'); fill.style.width = `${entry.value}%`; track.appendChild(fill);
+    const value = document.createElement('b'); value.textContent = `${entry.value} %`;
+    row.append(label, track, value); ranking.appendChild(row);
+  }
+  const stats = document.createElement('div'); stats.className = 'study-stats';
+  for (const [valueText, copy] of [['80 %', 'finden wichtig, dass der Arbeitgeber etwas für Gesundheit tut (ARAG/YouGov 2024).'], ['45 %', 'bewerten bKV höher als andere Firmen-Extras (PKV/Civey 2026).'], ['25 %', 'bewerten bKV höher als eine Gehaltserhöhung (PKV/Civey 2026).']]) {
+    const stat = document.createElement('div'); const value = document.createElement('b'); value.textContent = valueText; const text = document.createElement('span'); text.textContent = copy; stat.append(value, text); stats.appendChild(stat);
+  }
+  ranking.appendChild(stats); card.appendChild(ranking);
+
+  const sources = document.createElement('div'); sources.className = 'corporate-block'; sources.appendChild(corporateHeading('Quellen & Prüfbasis'));
+  const sourceList = document.createElement('div'); sourceList.className = 'source-list';
+  for (const source of result.sources) {
+    const link = document.createElement('a'); link.href = source.url; link.target = '_blank'; link.rel = 'noopener';
+    const title = document.createElement('b'); title.textContent = `${source.title} · ${source.year}`;
+    const detail = document.createElement('span'); detail.textContent = source.scope;
+    link.append(title, detail); sourceList.appendChild(link);
+  }
+  sources.appendChild(sourceList); card.appendChild(sources);
 }
 
 function refreshAdviceCalculation(moduleId) {
@@ -384,6 +500,7 @@ function createAdviceField(moduleId, spec, data, moduleRoot) {
     input = document.createElement('input'); input.type = spec.type === 'text' ? 'text' : 'text';
     if (spec.type !== 'text') input.inputMode = 'decimal';
   }
+  input.dataset.adviceKey = spec.key;
   input.value = data[spec.key] ?? spec.value ?? '';
   if (spec.placeholder) input.placeholder = spec.placeholder;
   input.addEventListener('input', () => { data[spec.key] = input.value; refreshAdviceCalculation(moduleId); });
@@ -1118,6 +1235,19 @@ function reportRow(parent, label, value) {
   parent.appendChild(row);
 }
 
+function reportBar(parent, label, value) {
+  const row = document.createElement('div'); row.className = 'print-bar-row';
+  const name = document.createElement('b'); name.textContent = label;
+  const track = document.createElement('div'); track.className = 'print-bar-track';
+  const fill = document.createElement('i'); fill.style.width = `${Math.min(100, Math.max(0, Number(value) || 0))}%`; track.appendChild(fill);
+  const amount = document.createElement('span'); amount.textContent = `${value} %`;
+  row.append(name, track, amount); parent.appendChild(row);
+}
+
+function reportSubheading(parent, text) {
+  const heading = document.createElement('h3'); heading.className = 'print-subheading'; heading.textContent = text; parent.appendChild(heading);
+}
+
 function reportSection(root, title, rows) {
   const section = document.createElement('section');
   section.className = 'print-section';
@@ -1161,6 +1291,26 @@ function buildSimpleReport() {
         for (const moduleSection of module.sections || []) for (const spec of moduleSection.fields || []) reportRow(section, spec.label, data[spec.key]);
         const calculation = calculateAdvice(module, data);
         for (const item of calculation?.items || []) reportRow(section, item.label, item.value);
+        if (calculation?.corporate) {
+          const corporate = calculation.corporate;
+          reportSubheading(section, 'Finanzierungslogik');
+          reportRow(section, 'Fehlzeitenkosten', euro(corporate.baseline.absenceCostAnnual));
+          reportRow(section, 'Fluktuationskosten', euro(corporate.baseline.turnoverCostAnnual));
+          reportRow(section, 'Modellierte Fehlzeitenersparnis', euro(corporate.scenario.absenceSavingsAnnual));
+          reportRow(section, 'Modellierte Fluktuationsersparnis', euro(corporate.scenario.turnoverSavingsAnnual));
+          reportRow(section, 'Break-even bKV', `${new Intl.NumberFormat('de-DE', { maximumFractionDigits: 2 }).format(corporate.scenario.breakEvenSavedDays)} vermiedene Krankheitstage je Person`);
+          reportSubheading(section, 'Musterabrechnung bAV');
+          reportRow(section, 'Monatsbrutto', euro(corporate.payroll.grossSalary));
+          reportRow(section, 'Entgeltumwandlung', euro(corporate.payroll.employeeDeferral));
+          reportRow(section, 'Arbeitgeberzuschuss', euro(corporate.payroll.employerSubsidyMonthly));
+          reportRow(section, 'Zusätzlicher Arbeitgeberbeitrag', euro(corporate.payroll.extraEmployerBav));
+          reportRow(section, 'Gesamtbeitrag Versorgung', euro(corporate.payroll.insuranceContributionMonthly));
+          reportRow(section, 'Geschätzter Nettoaufwand', euro(corporate.payroll.estimatedEmployeeNetImpact));
+          reportSubheading(section, 'Benefit-Ranking bei der Arbeitgeberwahl');
+          for (const entry of corporate.preferenceRanking) reportBar(section, entry.label, entry.value);
+          reportSubheading(section, 'Verwendete Quellen');
+          for (const source of corporate.sources) reportRow(section, `${source.publisher} · ${source.year}`, `${source.title} · ${source.url}`);
+        }
         if (calculation?.note) reportRow(section, 'Hinweis zur Modellrechnung', calculation.note);
         if (module.notice) reportRow(section, 'Fachlicher Hinweis', module.notice);
       });
