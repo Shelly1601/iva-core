@@ -2,6 +2,8 @@
 
 Backend („Gehirn") von IVA. Node.js + Express, deployt auf Railway. Bündelt Kalender, Mail, CRM-Leads, Qonekto/blau direkt, Todos, Calendly, Sprachnachrichten, Morning-Briefing — gesteuert über Telegram und eine kleine REST-API fürs Frontend. Das eigenständige Heat Hero CRM und der Heat-Hero-Bereich im Multi CRM sind bewusst getrennte Datenquellen.
 
+Die dauerhafte Einrichtungs- und Variablenliste liegt in [`INTEGRATIONS_CHECKLIST.md`](./INTEGRATIONS_CHECKLIST.md). Echte Tokens und Passwörter gehören ausschließlich in Railway, niemals in diese Datei oder in den Chat.
+
 ## Lokal starten
 1. `npm install`
 2. `.env.example` zu `.env` kopieren und Werte eintragen
