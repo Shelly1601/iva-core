@@ -11,11 +11,11 @@ export function marketingSkill({ campaigns, brands, analyzeReferences, generateI
       execute: async () => ({ campaigns: await campaigns.listCampaigns() }),
     }),
     createCampaign: tool({
-      description: 'Legt eine Marketing-Kampagne an. type: content|lead-gen|ads. autonomy: observe|suggest|auto.',
+      description: 'Legt eine Marketing-Kampagne an. type: content|lead-gen|ads|email. autonomy: observe|suggest|auto.',
       parameters: z.object({
         name: z.string(),
         brand: z.string().optional(),
-        type: z.enum(['content', 'lead-gen', 'ads']).optional(),
+        type: z.enum(['content', 'lead-gen', 'ads', 'email']).optional(),
         references: z.array(z.string()).optional(),
         tone: z.string().optional(),
         targetChannel: z.string().optional(),

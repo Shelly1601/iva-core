@@ -161,7 +161,7 @@
     <aside class="hud-col hud-right" id="colRight">
       <div class="card"><h3><span class="ic">🗓</span> Calendly <span class="cnt" id="c-cly">–</span></h3><div id="d-cly"><div class="muted">—</div></div></div>
       <div class="card"><h3><span class="ic">✓</span> Todos <span class="cnt" id="c-todo">–</span></h3><div id="d-todo"><div class="muted">—</div></div></div>
-      <div class="card"><h3><span class="ic">↗</span> Arbeitsbereiche</h3><div class="workspace-actions"><button data-open-workspace="beratung">Beratung</button><button data-open-workspace="kunde">Kunden</button><button data-open-workspace="energie">Energieplaner</button><button id="openWhatsApp">WhatsApp</button></div></div>
+      <div class="card"><h3><span class="ic">↗</span> Arbeitsbereiche</h3><div class="workspace-actions"><button data-open-workspace="beratung">Beratung</button><button data-open-workspace="kunde">Kunden</button><button data-open-workspace="energie">Energieplaner</button><button id="openMarketing">Marketing</button><button id="openWhatsApp">WhatsApp</button></div></div>
     </aside>
   </main>
   <section class="chat">
@@ -226,6 +226,7 @@
   function workspaceIntent(text){const s=String(text||'').toLowerCase();if(!/(öffne|oeffne|geh|gehe|wechsel|möchte|moechte|will)/.test(s))return null;if(/kunden|kundenmaske|kundenakte/.test(s))return'kunde';if(/beratungsmodus|beratung/.test(s))return'beratung';if(/energieplaner|energieplanung|wärmepumpenplaner|waermepumpenplaner/.test(s))return'energie';return null;}
   function openWorkspace(mode,prompt=''){const q=new URLSearchParams({mode});if(prompt)q.set('prompt',prompt);const url=mode==='kunde'?'/customers':mode==='beratung'?'/advice':'/workspace?'+q;const win=window.open(url,'_blank','noopener');if(!win)location.href=url;}
   $('openWhatsApp').addEventListener('click',()=>{const win=window.open('/whatsapp','_blank','noopener');if(!win)location.href='/whatsapp';});
+  $('openMarketing').addEventListener('click',()=>{const win=window.open('/marketing','_blank','noopener');if(!win)location.href='/marketing';});
   async function sendChat(viaVoice){const inp=$('chatIn');const t=inp.value.trim();if(!t)return;
     const target=workspaceIntent(t);if(target){bubble('user',t);inp.value='';openWorkspace(target,t);bubble('sys',({beratung:'Beratungsmodus',kunde:'Kundenbereich',energie:'Energieplaner'})[target]+' wurde in einem neuen Tab geöffnet.');return;}
     unlockAudio();

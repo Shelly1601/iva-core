@@ -25,6 +25,9 @@ import { qonektoSkill } from './skills/qonekto.js';
 import { adviceSkill } from './skills/advice.js';
 import { getAgent } from './agents/registry.js';
 import { marketAnalysis } from './marketing/market.js';
+import { fetchMetaAdsInsights, marketingConnectorStatus } from './marketing/connectors.js';
+import { listResearchRuns, listResearchedCompanies, runMarketIntelligence } from './marketing/intelligence.js';
+import { approveAdRecommendation, createContentPlan, createEmailCampaign, createMarketingReport, listMarketingCollection, recordAdSnapshot } from './marketing/planning.js';
 import { speak } from './voice.js';
 import { askArchitect } from './agents/architect.js';
 import * as workspaces from './workspaces/store.js';
@@ -531,6 +534,13 @@ async function sendBriefing() {
   await sendTelegram(mem.chatId, text);
 }
 
+async function sendMarketingMorningReport() {
+  if (String(process.env.MARKETING_MORNING_REPORT_ENABLED || '').toLowerCase() !== 'true') return;
+  const mem = await loadMemory(); if (!mem.chatId) return;
+  const report = await createMarketingReport({ period: 'morning' });
+  await sendTelegram(mem.chatId, report.text);
+}
+
 app.post('/telegram', async (req, res) => {
   const msg = req.body?.message; const chatId = msg?.chat?.id;
   res.sendStatus(200); if (!chatId) return;
@@ -832,6 +842,53 @@ app.post('/api/campaigns/:id/generate', async (req, res) => {
     res.json(await generateContent(c, brand, { briefing: req.body?.briefing || '', count: req.body?.count || 3, format: req.body?.format || 'reel' }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+app.get('/api/marketing/status', async (_req, res) => {
+  const connectors = marketingConnectorStatus();
+  const [researchRuns, companies, contentPlans, emailCampaigns, adSnapshots, reports] = await Promise.all([
+    listResearchRuns({ limit: 1000 }), listResearchedCompanies({ limit: 1000 }), listMarketingCollection('contentPlans', { limit: 1000 }),
+    listMarketingCollection('emailCampaigns', { limit: 1000 }), listMarketingCollection('adSnapshots', { limit: 1000 }), listMarketingCollection('reports', { limit: 1000 }),
+  ]);
+  res.json({ connectors, counts: { researchRuns: researchRuns.length, companies: companies.length, contentPlans: contentPlans.length, emailCampaigns: emailCampaigns.length, adSnapshots: adSnapshots.length, reports: reports.length } });
+});
+app.get('/api/marketing/research', async (req, res) => res.json(await listResearchRuns({ limit: req.query?.limit || 100 })));
+app.post('/api/marketing/research', async (req, res) => {
+  try { res.status(201).json(await runMarketIntelligence(req.body || {}, { analyzeReferences })); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/api/marketing/companies', async (req, res) => res.json(await listResearchedCompanies({ limit: req.query?.limit || 250, status: req.query?.status || '' })));
+app.get('/api/marketing/content-plans', async (req, res) => res.json(await listMarketingCollection('contentPlans', { limit: req.query?.limit || 100, campaignId: req.query?.campaignId || '' })));
+app.post('/api/marketing/content-plans', async (req, res) => {
+  try { res.status(201).json(await createContentPlan(req.body || {}, { campaigns, brands, generateContent })); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/api/marketing/email-campaigns', async (req, res) => res.json(await listMarketingCollection('emailCampaigns', { limit: req.query?.limit || 100, campaignId: req.query?.campaignId || '' })));
+app.post('/api/marketing/email-campaigns', async (req, res) => {
+  try { res.status(201).json(await createEmailCampaign(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/api/marketing/ads', async (req, res) => res.json(await listMarketingCollection('adSnapshots', { limit: req.query?.limit || 100, campaignId: req.query?.campaignId || '' })));
+app.post('/api/marketing/ads', async (req, res) => {
+  try { res.status(201).json(await recordAdSnapshot(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/marketing/ads/sync-meta', async (req, res) => {
+  try {
+    const synced = await fetchMetaAdsInsights({ datePreset: req.body?.datePreset || 'yesterday', level: req.body?.level || 'adset' });
+    if (!synced.ok) return res.status(400).json(synced);
+    const saved = [];
+    for (const snapshot of synced.snapshots) saved.push(await recordAdSnapshot({ ...snapshot, source: 'meta-insights', targets: req.body?.targets || {} }));
+    res.json({ ...synced, saved });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/marketing/ads/:id/approve', async (req, res) => {
+  try { const item = await approveAdRecommendation(req.params.id, req.body || {}); res.status(item ? 200 : 404).json(item || { error: 'not found' }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/api/marketing/reports', async (req, res) => res.json(await listMarketingCollection('reports', { limit: req.query?.limit || 100 })));
+app.post('/api/marketing/reports', async (req, res) => {
+  try { res.status(201).json(await createMarketingReport({ period: req.body?.period || 'manual' })); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
 
 // --- WhatsApp: mehrere Bot-Profile, sicherer Testchat und Schaden-Eingang ---
 app.get('/api/whatsapp/status', (_req, res) => res.json(whatsappStatus()));
@@ -892,6 +949,7 @@ async function setBotCommands() {
 }
 
 cron.schedule('0 7 * * *', sendBriefing, { timezone: 'Europe/Berlin' });
+cron.schedule('10 7 * * *', () => { void sendMarketingMorningReport().catch(error => console.error('Marketing-Morgenreport:', error.message)); }, { timezone: 'Europe/Berlin' });
 cron.schedule('*/5 * * * *', () => {
   void syncStrategyCustomersToQonekto().catch(error => console.error('CRM-Qonekto-Sync:', error.message));
 }, { timezone: 'Europe/Berlin' });
@@ -908,6 +966,7 @@ app.get('/workspace', (_req, res) => res.sendFile(path.join(__dirnameIva, 'publi
 app.get('/customers', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'customers.html')));
 app.get('/advice', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'advice.html')));
 app.get('/whatsapp', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'whatsapp.html')));
+app.get('/marketing', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'marketing.html')));
 app.get('/health/qonekto', async (_req, res) => {
   const status = await qonektoStatus();
   if (status.reachable) {

@@ -37,6 +37,7 @@ const TASK_DEFAULTS = {
   whatsapp:           'anthropic:claude-haiku-4-5-20251001',
   'marketing-assist': 'google:gemini-2.0-flash',
   'marketing-market': 'google:gemini-2.0-flash',
+  'marketing-intelligence': 'google:gemini-2.0-flash',
 };
 
 // Safety-Level pro Task-Profil (fuer Stufe 4 vorbereitet).
@@ -51,6 +52,7 @@ const TASK_SAFETY = {
   whatsapp:           'operational',
   'marketing-assist': 'creative',
   'marketing-market': 'creative',
+  'marketing-intelligence': 'creative',
 };
 
 // Provider-Instanzen einmal cachen (Gemini braucht expliziten Key).

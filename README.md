@@ -24,6 +24,8 @@ Backend („Gehirn") von IVA. Node.js + Express, deployt auf Railway. Bündelt K
 - `POST /api/workspaces/:id/energy/calculate` – speichert Heizlast-Vorplanung und KfW-458-Fördervorcheck in der Energie-Fallakte.
 - `GET/POST/PATCH /api/whatsapp/profiles` – getrennte Lead-, Service- und Hybridprofile; `/api/whatsapp/simulate` testet Antworten ohne Versand.
 - `GET/POST /webhooks/whatsapp` – signierter Meta-Webhook für eingehende WhatsApp-Nachrichten.
+- `GET /marketing` – Marketing-Zentrale für Marken, Marktanalysen, Firmenrecherche, Kampagnen, Content-/E-Mail-Pläne, Ads-Checks und Reports.
+- `GET /api/marketing/status` – Connector-Bereitschaft ohne Ausgabe von Secrets; `/api/marketing/*` verwaltet Research, Unternehmen, Pläne, Ads-Snapshots und Reports.
 
 ## Lokale Prüfungen
 - `npm run test:workspaces` – Fallakten, Dateien und Persistenz.
@@ -31,6 +33,7 @@ Backend („Gehirn") von IVA. Node.js + Express, deployt auf Railway. Bündelt K
 - `npm run test:qonekto` – Qonekto-Konfiguration und serverseitigen Leseschutz prüfen (ohne echten Token).
 - `npm run test:energy` – Heizlast-Rechenweg, Pflichtfelder und versionierte KfW-458-Regeln.
 - `npm run test:whatsapp` – Webhook-HMAC, Nachrichtenerkennung und Sicherheits-Intents.
+- `npm run test:marketing` – Marketing-Persistenz, öffentliche Kontakt-Schutzlogik, Ads-Auswertung, E-Mail-Sperre und Reporting.
 
 ## Qonekto / blau direkt
 - Railway-Variable `QONEKTO_MCP_TOKEN` enthält den Qonekto-MCP-Token.
@@ -48,6 +51,13 @@ Backend („Gehirn") von IVA. Node.js + Express, deployt auf Railway. Bündelt K
 - Die raumweise Heizlast-Vorplanung rechnet transparent mit Bauteilflächen, U-Werten, Lüftung, Wärmebrücken und Temperaturdifferenz.
 - Sie ist bewusst als Vorplanung gekennzeichnet und ersetzt keine normgerechte Heizlast nach DIN EN 12831-1 zusammen mit DIN/TS 12831-1.
 - Der Fördercheck speichert immer Regelstand, Rechenweg und offene Voraussetzungen. Die produktive Entscheidung erfolgt nach aktuellem KfW-Merkblatt und BzA.
+
+## Marketing-Zentrale
+- Verwaltung unter `/marketing`. Bestehende Brand-/Kampagnenmodule wurden erweitert, nicht ersetzt.
+- Die Branchen-/Firmensuche nutzt Google Places (New), sobald `GOOGLE_PLACES_API_KEY` gesetzt ist. Öffentliche Websites/Impressen werden quellenbezogen ergänzt; recherchierte Kontakte bleiben bis zur Prüfung von Rechtsgrundlage oder Opt-in im Status `research-only`.
+- Instagram-Referenzanalyse nutzt den vorhandenen Apify-Connector. LinkedIn- und Meta-Connectoren dienen für eigene Accounts; Konkurrenz-Ads werden über die öffentliche Meta Ad Library und verknüpfte Quellen geprüft.
+- Content-Pläne speichern einen sichtbaren Quality Gate. Veröffentlichung, E-Mail-Versand und Ads-Änderungen bleiben ohne separate Freigabe gesperrt.
+- `MARKETING_MORNING_REPORT_ENABLED=true` aktiviert den täglichen Telegram-Marketingreport um 07:10 Uhr.
 
 ## Befehle (Telegram)
 `/briefing` `/leads` `/termine` `/calendly` `/mails` `/todos`
