@@ -161,7 +161,7 @@
     <aside class="hud-col hud-right" id="colRight">
       <div class="card"><h3><span class="ic">🗓</span> Calendly <span class="cnt" id="c-cly">–</span></h3><div id="d-cly"><div class="muted">—</div></div></div>
       <div class="card"><h3><span class="ic">✓</span> Todos <span class="cnt" id="c-todo">–</span></h3><div id="d-todo"><div class="muted">—</div></div></div>
-      <div class="card"><h3><span class="ic">↗</span> Arbeitsbereiche</h3><div class="workspace-actions"><button id="openControl">Kontrollzentrum</button><button data-open-workspace="beratung">Beratung</button><button data-open-workspace="kunde">Kunden</button><button data-open-workspace="energie">Energieplaner</button><button id="openMarketing">Marketing</button><button id="openOpportunities">Chancenradar</button><button id="openWhatsApp">WhatsApp</button><button id="openAccounting">Buchhaltung</button><button id="openVoiceLab">Sprachlabor</button></div></div>
+      <div class="card"><h3><span class="ic">↗</span> Arbeitsbereiche</h3><div class="workspace-actions"><button id="openControl">Kontrollzentrum</button><button data-open-workspace="beratung">Beratung</button><button data-open-workspace="kunde">Kunden</button><button id="openMarketing">Marketing</button><button id="openOpportunities">Chancenradar</button><button id="openWhatsApp">WhatsApp</button><button id="openAccounting">Buchhaltung</button><button id="openVoiceLab">Sprachlabor</button></div></div>
     </aside>
   </main>
   <section class="chat">
@@ -230,16 +230,35 @@
     api('/api/voice-lab/evaluations',{method:'POST',body:JSON.stringify({source:'cockpit',transcript:turn.transcript,answer:turn.answer,timings:turn.timings})}).catch(()=>{});
   }
   function bubble(cls,text){const d=document.createElement('div');d.className='bubble '+cls;d.textContent=text;$('msgs').appendChild(d);$('msgs').scrollTop=$('msgs').scrollHeight;return d;}
-  function workspaceIntent(text){const s=String(text||'').toLowerCase();if(!/(öffne|oeffne|geh|gehe|wechsel|möchte|moechte|will)/.test(s))return null;if(/kontrollzentrum|agentenzentrale|freigaben|connector-status/.test(s))return'kontrolle';if(/sprachlabor|sprachtraining|voice lab/.test(s))return'sprache';if(/chancenradar|chancen-agent|chancen agent|businessideen|einkommensideen/.test(s))return'chancen';if(/buchhaltung|belege|rechnungen/.test(s))return'buchhaltung';if(/kunden|kundenmaske|kundenakte/.test(s))return'kunde';if(/beratungsmodus|beratung/.test(s))return'beratung';if(/energieplaner|energieplanung|wärmepumpenplaner|waermepumpenplaner/.test(s))return'energie';return null;}
-  function openWorkspace(mode,prompt=''){const q=new URLSearchParams({mode});if(prompt)q.set('prompt',prompt);const url=mode==='kunde'?'/customers':mode==='beratung'?'/advice':'/workspace?'+q;const win=window.open(url,'_blank','noopener');if(!win)location.href=url;}
-  $('openWhatsApp').addEventListener('click',()=>{const win=window.open('/whatsapp','_blank','noopener');if(!win)location.href='/whatsapp';});
-  $('openMarketing').addEventListener('click',()=>{const win=window.open('/marketing','_blank','noopener');if(!win)location.href='/marketing';});
-  $('openOpportunities').addEventListener('click',()=>{const win=window.open('/opportunities','_blank','noopener');if(!win)location.href='/opportunities';});
-  $('openAccounting').addEventListener('click',()=>{const win=window.open('/accounting','_blank','noopener');if(!win)location.href='/accounting';});
-  $('openVoiceLab').addEventListener('click',()=>{const win=window.open('/voice-lab','_blank','noopener');if(!win)location.href='/voice-lab';});
-  $('openControl').addEventListener('click',()=>{const win=window.open('/control','_blank','noopener');if(!win)location.href='/control';});
+  function workspaceIntent(text){const s=String(text||'').toLowerCase();if(!/(öffne|oeffne|geh|gehe|wechsel|möchte|moechte|will)/.test(s))return null;if(/kontrollzentrum|agentenzentrale|freigaben|connector-status/.test(s))return'kontrolle';if(/sprachlabor|sprachtraining|voice lab/.test(s))return'sprache';if(/chancenradar|chancen-agent|chancen agent|businessideen|einkommensideen/.test(s))return'chancen';if(/buchhaltung|belege|rechnungen/.test(s))return'buchhaltung';if(/kunden|kundenmaske|kundenakte/.test(s))return'kunde';if(/energieplaner|energieplanung|energieberatung|wärmepumpenplaner|waermepumpenplaner/.test(s))return'energie';if(/beratungsmodus|beratung/.test(s))return'beratung';return null;}
+  let toolWindowCounter=0;
+  function openToolWindow(url,label='Arbeitsbereich'){
+    const availableWidth=Math.max(360,Number(screen.availWidth)||innerWidth||1280);
+    const availableHeight=Math.max(540,Number(screen.availHeight)||innerHeight||900);
+    const width=Math.min(1480,Math.max(980,Math.round(availableWidth*.86)),availableWidth);
+    const height=Math.min(980,Math.max(720,Math.round(availableHeight*.9)),availableHeight);
+    const left=Math.max(0,Math.round((availableWidth-width)/2));
+    const top=Math.max(0,Math.round((availableHeight-height)/2));
+    const name='ivaToolWindow'+Date.now()+(toolWindowCounter++);
+    const features=`popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`;
+    const win=window.open(url,name,features);
+    if(!win){bubble('sys',`${label} konnte nicht geöffnet werden. Bitte Pop-ups für IVA erlauben – das Cockpit bleibt unverändert geöffnet.`);return false;}
+    try{win.opener=null;win.focus();}catch{}
+    return true;
+  }
+  function openWorkspace(mode,prompt=''){
+    let url=mode==='kunde'?'/customers':mode==='energie'?'/advice?group=energy':'/advice';
+    if(prompt){const separator=url.includes('?')?'&':'?';url+=separator+'prompt='+encodeURIComponent(prompt);}
+    return openToolWindow(url,mode==='kunde'?'Kundenbereich':mode==='energie'?'Energieberatung':'Beratung');
+  }
+  $('openWhatsApp').addEventListener('click',()=>openToolWindow('/whatsapp','WhatsApp'));
+  $('openMarketing').addEventListener('click',()=>openToolWindow('/marketing','Marketing'));
+  $('openOpportunities').addEventListener('click',()=>openToolWindow('/opportunities','Chancenradar'));
+  $('openAccounting').addEventListener('click',()=>openToolWindow('/accounting','Buchhaltung'));
+  $('openVoiceLab').addEventListener('click',()=>openToolWindow('/voice-lab','Sprachlabor'));
+  $('openControl').addEventListener('click',()=>openToolWindow('/control','Kontrollzentrum'));
   async function sendChat(viaVoice){const inp=$('chatIn');const t=inp.value.trim();if(!t)return;
-    const target=workspaceIntent(t);if(target){bubble('user',t);inp.value='';if(target==='buchhaltung'||target==='chancen'||target==='sprache'||target==='kontrolle'){const url=target==='buchhaltung'?'/accounting':target==='chancen'?'/opportunities':target==='kontrolle'?'/control':'/voice-lab';const win=window.open(url,'_blank','noopener');if(!win)location.href=url;}else openWorkspace(target,t);bubble('sys',({beratung:'Beratungsmodus',kunde:'Kundenbereich',energie:'Energieplaner',buchhaltung:'Buchhaltung',chancen:'Chancenradar',sprache:'Sprachlabor',kontrolle:'Kontrollzentrum'})[target]+' wurde in einem neuen Tab geöffnet.');return;}
+    const target=workspaceIntent(t);if(target){bubble('user',t);inp.value='';let opened=false;if(target==='buchhaltung'||target==='chancen'||target==='sprache'||target==='kontrolle'){const url=target==='buchhaltung'?'/accounting':target==='chancen'?'/opportunities':target==='kontrolle'?'/control':'/voice-lab';opened=openToolWindow(url,({buchhaltung:'Buchhaltung',chancen:'Chancenradar',sprache:'Sprachlabor',kontrolle:'Kontrollzentrum'})[target]);}else opened=openWorkspace(target,t);if(opened)bubble('sys',({beratung:'Beratungsmodus',kunde:'Kundenbereich',energie:'Beratung · Energie & Versorgung',buchhaltung:'Buchhaltung',chancen:'Chancenradar',sprache:'Sprachlabor',kontrolle:'Kontrollzentrum'})[target]+' wurde in einem neuen Fenster geöffnet. Das Cockpit bleibt hier geöffnet.');return;}
     unlockAudio();
     if(viaVoice===true){ beginVoiceTurn(t); clearVoiceDraft(); setState('thinking'); try{if(rec)rec.stop();}catch(e){} }   // Ohr aus, solange IVA denkt+spricht
     bubble('user',t);inp.value='';const b=bubble('iva','…');

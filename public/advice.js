@@ -106,6 +106,8 @@ function renderModules() {
 
 async function loadCatalog() {
   state.catalog = await api('/api/advice/catalog');
+  const requestedGroup = clean(params.get('group'));
+  if (state.catalog.groups.some(group => group.id === requestedGroup)) state.group = requestedGroup;
   renderFilters(); renderModules();
   const gkv = state.catalog.connectors?.gkv || {};
   $('gkvDot').classList.toggle('on', Boolean(gkv.configured));

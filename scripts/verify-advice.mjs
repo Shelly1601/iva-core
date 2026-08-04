@@ -21,6 +21,18 @@ try {
   assert.equal(publicCatalog.groups.find(group => group.id === 'corporate')?.label, 'Firmenvorsorge & Benefits');
   assert.equal(publicCatalog.groups.find(group => group.id === 'energy')?.label, 'Energie & Versorgung');
 
+  const cockpitSource = await fs.readFile(new URL('../public/cockpit.html', import.meta.url), 'utf8');
+  const adviceSource = await fs.readFile(new URL('../public/advice.js', import.meta.url), 'utf8');
+  const customersSource = await fs.readFile(new URL('../public/customers.html', import.meta.url), 'utf8');
+  assert.ok(!cockpitSource.includes('data-open-workspace="energie"'), 'Energie darf im Cockpit kein doppelter Arbeitsbereich sein');
+  assert.match(cockpitSource, /function openToolWindow\(/);
+  assert.match(cockpitSource, /popup=yes/);
+  assert.match(cockpitSource, /\/advice\?group=energy/);
+  assert.match(cockpitSource, /Das Cockpit bleibt hier geöffnet/);
+  assert.ok(!cockpitSource.includes("if(!win)location.href="), 'Ein blockiertes Fenster darf das Cockpit nicht ersetzen');
+  assert.match(adviceSource, /params\.get\('group'\)/);
+  assert.ok(!customersSource.includes('/workspace?mode=energie'), 'Energie muss aus der Kundenansicht über Beratung starten');
+
   const initial = await knowledge.listAdviceKnowledge();
   assert.equal(initial.referenceCount, 23);
   assert.equal(initial.productDocumentCount, 4);
@@ -35,7 +47,7 @@ try {
   assert.equal(found.sources[0].status, 'pending-review');
 
   await assert.rejects(() => knowledge.addAdviceKnowledgeSource({ title: 'Unsicher', url: 'javascript:alert(1)' }), /HTTP/);
-  console.log('PASS Beratung: 12 Module, Firmenvorsorge mit 23 Referenzen, Energie-Einstiege, DIN-Trennung, Quellenbibliothek und Connector-Basis');
+  console.log('PASS Beratung: 12 Module, Energie nur über Beratung, Cockpit bleibt bei Arbeitsfenstern erhalten, DIN-Trennung, Quellenbibliothek und Connector-Basis');
 } finally {
   await fs.rm(temp, { recursive: true, force: true });
 }
