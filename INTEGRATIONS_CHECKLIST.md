@@ -91,7 +91,31 @@ Zusätzlich ohne Railway-Variable nötig:
 - Meta Ad Library dient für öffentliche Konkurrenzanzeigen; fremde Account-Insights sind nicht über den eigenen Meta-Token verfügbar.
 - Firmenkontakte bleiben bis zur Prüfung von Rechtsgrundlage/Opt-in im Status `research-only`.
 
-## 5. WhatsApp-Kundenagent
+## 5. Multi-WhatsApp Hub und Kundenagent
+
+### Bevorzugter Weg: vorhandener Multi-WhatsApp Hub
+
+Der Hub wurde am 04.08.2026 geprüft. Er nutzt eine Evolution-Bridge per QR-Verknüpfung, enthält drei verbundene Accounts und synchronisiert Chatübersichten. Seine geschützte öffentliche API kann `me`, Accounts, Chats und Vorlagen lesen sowie Nachrichten senden. IVA bindet zunächst ausschließlich die Lesewege an; Versand bleibt gesperrt.
+
+| Status | Railway-Variable | Einrichtung |
+|---|---|---|
+| ✅ | `WHATSAPP_HUB_BASE_URL` | `https://whatapphub.lovable.app/api/public/v1` |
+| ⬜ | `WHATSAPP_HUB_API_KEY` | Im Hub unter **Einstellungen → API-Zugänge** als `IVA – Produktion` erstellen und den einmal sichtbaren Klartext ausschließlich in Railway speichern. |
+
+Vor dem Erstellen/Einsetzen des Keys zwingend:
+
+- Der öffentlich ausgelieferte Hub-Frontendcode enthält derzeit feste Anmeldedaten. Diese nicht weiterverwenden: Passwort ändern, Sitzungen widerrufen und die Werte vollständig aus dem Frontend entfernen.
+- Der vierstellige PIN wurde im Chat geteilt und muss ersetzt werden. Für echte Kundendaten auf richtige Anmeldung mit MFA sowie geprüfte Supabase-RLS-Regeln umstellen.
+- Bestehende Evolution-Sessions und hinterlegte Secrets nach dem Auth-Umbau prüfen; keine Zugangsdaten in Chatvorschauen versenden.
+
+Für vollständige IVA-Automation im Hub noch ergänzen:
+
+- `GET /v1/chats/:chat_id/messages?after=&limit=` für einen paginierten Nachrichtenverlauf.
+- Signierter Webhook `message.created` an IVA statt aggressivem Polling.
+- HMAC-Secret, Event-ID/Idempotenz, Account-ID und Absendernummer im Webhook.
+- In IVA: Account → Unternehmen/Projekt/Bot-Profil zuordnen und Versandvorschau mit ausdrücklicher Bestätigung bauen.
+
+### Optionaler zweiter Weg: offizielle Meta-Verbindung
 
 | Status | Railway-Variable | Einrichtung |
 |---|---|---|
@@ -104,7 +128,7 @@ Zusätzlich ohne Railway-Variable nötig:
 
 Meta-Webhook: `https://iva-core-production.up.railway.app/webhooks/whatsapp`
 
-Wichtig: Diese offizielle Verbindung liest und beantwortet Nachrichten der registrierten **WhatsApp-Business-Nummer**. Sie gibt IVA keinen Zugriff auf das vollständige private WhatsApp-Archiv deines iPhones. Vertragsauskünfte benötigen eine eindeutige Kundenzuordnung; Deckungsentscheidungen ohne Policen-/Bedingungsbeleg werden an dich übergeben. Senden, Schaden einreichen oder Daten ändern bleibt bestätigungspflichtig.
+Wichtig: Die Meta-Verbindung liest und beantwortet Nachrichten der registrierten **WhatsApp-Business-Nummer**. Der Hub kann über seine QR-Sessions auch bestehende persönliche oder geschäftliche Accounts spiegeln, ist als inoffizielle WhatsApp-Web-Brücke aber störungs- und sperranfälliger. Vertragsauskünfte benötigen immer eine eindeutige Kundenzuordnung; Deckungsentscheidungen ohne Policen-/Bedingungsbeleg werden an dich übergeben. Senden, Schaden einreichen oder Daten ändern bleibt bestätigungspflichtig.
 
 ## 6. Beratung und Fachwissen
 
@@ -150,6 +174,8 @@ Optional kann ein dediziertes Android-Arbeits-/Testgerät nach ausdrücklicher F
 
 1. `API_TOKEN` rotieren und App-Verbindung testen.
 2. Marketing-Pilot mit `APIFY_TOKEN`, `GOOGLE_PLACES_API_KEY`, `FAL_KEY`, `GEMINI_API_KEY`, einer Marke und Referenzkonten starten.
-3. Meta Business + WhatsApp Business Platform anbinden.
-4. Danach HeyGen und Brevo/Resend aktivieren.
-5. Als ersten Handy-Baustein den IVA-iPhone-Kurzbefehl und das Teilen-Menü bauen; die native App folgt danach.
+3. Multi-WhatsApp Hub absichern, danach `WHATSAPP_HUB_API_KEY` erstellen und in Railway hinterlegen.
+4. Nachrichtenverlauf + signierten Hub-Webhook ergänzen; erst danach automatische Bot-Profile aktivieren.
+5. Meta Business als optionalen stabilen Kanal für kritische Geschäftsnummern anbinden.
+6. Danach HeyGen und Brevo/Resend aktivieren.
+7. Als ersten Handy-Baustein den IVA-iPhone-Kurzbefehl und das Teilen-Menü bauen; die native App folgt danach.

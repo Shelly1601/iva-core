@@ -25,6 +25,7 @@ Die dauerhafte Einrichtungs- und Variablenliste liegt in [`INTEGRATIONS_CHECKLIS
 - `GET /api/workspaces/:id/tmb.pdf` – A4-TMB aus einer Energie-Fallakte mit Raum-/Heizkörpertabelle und zugeordnetem Fotoanhang.
 - `POST /api/workspaces/:id/energy/calculate` – speichert Heizlast-Vorplanung und KfW-458-Fördervorcheck in der Energie-Fallakte.
 - `GET/POST/PATCH /api/whatsapp/profiles` – getrennte Lead-, Service- und Hybridprofile; `/api/whatsapp/simulate` testet Antworten ohne Versand.
+- `GET /api/whatsapp/hub/accounts`, `/chats`, `/templates` – read-only Connector zum Multi-WhatsApp Hub; geschützt mit IVAs Bearer-Token und serverseitigem Hub-Key.
 - `GET/POST /webhooks/whatsapp` – signierter Meta-Webhook für eingehende WhatsApp-Nachrichten.
 - `GET /marketing` – Marketing-Zentrale für Marken, Marktanalysen, Firmenrecherche, Kampagnen, Content-/E-Mail-Pläne, Ads-Checks und Reports.
 - `GET /api/marketing/status` – Connector-Bereitschaft ohne Ausgabe von Secrets; `/api/marketing/*` verwaltet Research, Unternehmen, Pläne, Ads-Snapshots und Reports.
@@ -45,6 +46,8 @@ Die dauerhafte Einrichtungs- und Variablenliste liegt in [`INTEGRATIONS_CHECKLIS
 
 ## WhatsApp
 - Verwaltung unter `/whatsapp`; der Testchat funktioniert bereits ohne Meta-Verbindung.
+- Bevorzugte Mehrnummern-Brücke ist der vorhandene Multi-WhatsApp Hub. `WHATSAPP_HUB_API_KEY` schaltet zunächst nur Accounts, Chatübersichten und Vorlagen frei; IVA bietet absichtlich noch keinen Hub-Versand an.
+- Für vollständige Bot-Automation fehlen im Hub ein Nachrichtenverlauf-Endpunkt pro Chat und ein signierter Echtzeit-Webhook. Bis dahin wird nicht gepollt und nicht automatisch geantwortet.
 - Live benötigt `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` und eine explizite `WHATSAPP_GRAPH_VERSION` in Railway.
 - Vertragsstammdaten dürfen erklärt werden. Eine konkrete Deckungsentscheidung wird nur mit belastbarem Policen-/Bedingungsbeleg getroffen; fehlt er, erzwingt IVA die persönliche Prüfung.
 - Schadenmeldungen werden als eigener Eingang erfasst, aber weder als gedeckt bestätigt noch automatisch beim Versicherer eingereicht.

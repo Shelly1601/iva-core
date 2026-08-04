@@ -51,6 +51,13 @@ import {
 } from './integrations/qonekto-customers.js';
 import { crmQonektoSyncStatus, runCrmQonektoSync } from './integrations/crm-qonekto-sync.js';
 import { extractWhatsAppMessages, sendWhatsAppText, verifyWhatsAppChallenge, verifyWhatsAppSignature, whatsappStatus } from './integrations/whatsapp.js';
+import {
+  getWhatsAppHubMe,
+  listWhatsAppHubAccounts,
+  listWhatsAppHubChats,
+  listWhatsAppHubTemplates,
+  whatsappHubStatus,
+} from './integrations/whatsapp-hub.js';
 import { handleWhatsAppMessage } from './integrations/whatsapp-agent.js';
 import {
   createWhatsAppProfile,
@@ -891,7 +898,33 @@ app.post('/api/marketing/reports', async (req, res) => {
 });
 
 // --- WhatsApp: mehrere Bot-Profile, sicherer Testchat und Schaden-Eingang ---
-app.get('/api/whatsapp/status', (_req, res) => res.json(whatsappStatus()));
+app.get('/api/whatsapp/status', (_req, res) => {
+  const meta = whatsappStatus();
+  const hub = whatsappHubStatus();
+  res.json({
+    configured: meta.configured || hub.readReady,
+    liveReady: meta.configured,
+    provider: hub.readReady ? 'hub-read-only' : (meta.configured ? 'meta' : 'none'),
+    meta,
+    hub,
+  });
+});
+app.get('/api/whatsapp/hub/me', async (_req, res) => {
+  try { res.json(await getWhatsAppHubMe()); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.get('/api/whatsapp/hub/accounts', async (_req, res) => {
+  try { res.json(await listWhatsAppHubAccounts()); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.get('/api/whatsapp/hub/chats', async (req, res) => {
+  try { res.json(await listWhatsAppHubChats({ accountId: req.query?.account_id, search: req.query?.search, limit: req.query?.limit })); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.get('/api/whatsapp/hub/templates', async (_req, res) => {
+  try { res.json(await listWhatsAppHubTemplates()); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
 app.get('/api/whatsapp/profiles', async (_req, res) => res.json(await listWhatsAppProfiles()));
 app.post('/api/whatsapp/profiles', async (req, res) => {
   try { res.status(201).json(await createWhatsAppProfile(req.body || {})); }
