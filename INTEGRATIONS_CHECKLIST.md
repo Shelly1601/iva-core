@@ -167,13 +167,26 @@ Optional kann ein dediziertes Android-Arbeits-/Testgerät nach ausdrücklicher F
 | Status | Baustein | Nächster Schritt |
 |---|---|---|
 | ✅ | Zielbild | Spezifikation in `IVA_SALES_COACH_SPEZIFIKATION.md`: No-Bot-Overlay, Einwandampel, Redeanteil, nächste Frage und Nachbereitung. |
-| ⬜ | macOS-Begleit-App | Mikrofon und System-/Meetingaudio nach Berechtigung getrennt erfassen; PWA allein reicht für Zoom/Teams/Kopfhörer nicht zuverlässig. |
+| ⬜ | macOS-Begleit-App | Mikrofon und ausgewählten App-/Systemton nach Berechtigung getrennt erfassen; dadurch unabhängig von Zoom, Teams, Google Meet oder einem anderen Meetinganbieter. PWA allein reicht bei Kopfhörern nicht zuverlässig. |
 | ⬜ | Streaming-Transkription | Anbieter erst nach Latenz-/Deutsch-/Kostentest auswählen; bis dahin bewusst noch keinen Railway-Key festlegen. |
 | ⬜ | Einwilligungs-Gate | Aktives Ja vor jedem Start dokumentieren; Roh-Audio standardmäßig nicht dauerhaft speichern. |
 | ⬜ | Sales-Wissen | Nadines Leitfäden, Einwandbibliothek und freigegebene Formulierungen versioniert hinterlegen. |
 | ⬜ | CRM-Nachbereitung | Ergebnis nur als Vorschau in Kunden-/Beratungsakte schreiben; Versand und Änderungen bleiben bestätigungspflichtig. |
 
-## 10. Railway-Betrieb
+## 10. IVA Buchhaltungsagent
+
+| Status | Baustein | Nächster Schritt |
+|---|---|---|
+| ✅ | Zielbild | Sichere Beleg-, Klärungs- und Steuerberater-Vorbereitung in `IVA_BUCHHALTUNGSAGENT_SPEZIFIKATION.md`; keine autonome Steuerabgabe. |
+| ⬜ | Rechtsträger | Alle getrennt zu führenden Firmen, Gewinnermittlungsart und Umsatzsteuerstatus einmal erfassen. |
+| ⬜ | Zielsystem | Mit Steuerberater festlegen, ob DATEV, lexoffice, sevdesk oder ein anderes System die führende Buchführung hält. |
+| ⬜ | Beleg-Inbox | Upload/Kamera plus eigene Weiterleitungsadresse für PDF, Bild, ZUGFeRD und XRechnung einrichten. |
+| ⬜ | Bank-/Kartenimport | Im MVP zuerst CSV; später nur einen freigegebenen, eng begrenzten Banking-Connector anbinden. |
+| ⬜ | Steuerberater-Loop | Exportformat, Monatsrhythmus, Rückfragen und Freigabeprozess gemeinsam testen. |
+
+Noch **keine Railway-Variable** anlegen, bevor Zielsystem und Authentifizierungsweg feststehen. Zugangsdaten später nur serverseitig als Secrets hinterlegen; nie in Belegen, Browserfeldern oder Prompts.
+
+## 11. Railway-Betrieb
 
 - 🟡 Railway-Hobby-Plan aktiv und Zahlungsstatus prüfen.
 - ✅ Volume mit Mount-Pfad `/data` beibehalten; nicht durch flüchtige Speicherung ersetzen.
@@ -190,3 +203,4 @@ Optional kann ein dediziertes Android-Arbeits-/Testgerät nach ausdrücklicher F
 5. Meta Business als optionalen stabilen Kanal für kritische Geschäftsnummern anbinden.
 6. Danach HeyGen und Brevo/Resend aktivieren.
 7. Als ersten Handy-Baustein den IVA-iPhone-Kurzbefehl und das Teilen-Menü bauen; die native App folgt danach.
+8. Buchhaltungs-Zielsystem mit dem Steuerberater festlegen; danach den neutralen Beleg-Inbox-MVP bauen und erst im zweiten Schritt Bankdaten anbinden.

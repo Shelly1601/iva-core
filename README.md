@@ -6,6 +6,8 @@ Die dauerhafte Einrichtungs- und Variablenliste liegt in [`INTEGRATIONS_CHECKLIS
 
 Das Zielbild für den unsichtbaren Live-Meeting-Coach steht in [`IVA_SALES_COACH_SPEZIFIKATION.md`](./IVA_SALES_COACH_SPEZIFIKATION.md).
 
+Das Zielbild für die sichere Beleg- und Steuerberater-Vorbereitung steht in [`IVA_BUCHHALTUNGSAGENT_SPEZIFIKATION.md`](./IVA_BUCHHALTUNGSAGENT_SPEZIFIKATION.md).
+
 ## Lokal starten
 1. `npm install`
 2. `.env.example` zu `.env` kopieren und Werte eintragen

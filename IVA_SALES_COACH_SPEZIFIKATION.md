@@ -6,6 +6,8 @@ _Stand: 4. August 2026. Zielbild nach Benchmark-Recherche, noch nicht als Live-A
 
 Der **IVA Sales Coach** ist kein sichtbarer Meeting-Bot und kein autonomer Verkäufer. Er läuft als persönliche Desktop-Begleitung auf Nadines Rechner, hört nach einem bewussten Start beide Gesprächsseiten, zeigt nur Nadine kurze Live-Hinweise und schreibt das Ergebnis nach Freigabe in die gemeinsame Kunden-/Beratungsakte.
 
+Er ist bewusst **meetingplattform-unabhängig**: IVA klinkt sich nicht einzeln in Zoom, Microsoft Teams oder Google Meet ein, sondern erfasst den ausgewählten Systemton und das Mikrofon auf Betriebssystemebene. Dadurch funktioniert derselbe Coach grundsätzlich auch mit Webex, browserbasierten Videokonferenzen und künftigen Meeting-Tools, ohne für jeden Anbieter eine eigene Meeting-API zu benötigen.
+
 `SalesCloser.ai` ist nur ein Teilbenchmark: Das Produkt lässt einen autonomen KI-Agenten selbst Gespräche/Demos führen. Für IVAs Zielbild passen diese Referenzen besser:
 
 - [Convo](https://www.itsconvo.com/): lokale Audioaufnahme, kein Bot, Einwandantworten aus Dokumenten und vergangenen Gesprächen, CRM-Nachbereitung.
@@ -73,14 +75,25 @@ IVA zeigt die vermutete Phase. Nadine kann sie mit einem Klick korrigieren; die 
 Eine reine PWA kann Audio aus allen Meeting-Apps und Kopfhörern nicht zuverlässig erfassen. Der Zielweg ist deshalb eine kleine **macOS-Begleit-App**:
 
 1. Nadine öffnet in IVA die passende Kunden-/Beratungsakte und startet „Sales Coach“.
-2. Die App verlangt Aufnahme-/Systemaudio-Berechtigung und zeigt dauerhaft einen roten Live-Indikator.
-3. Mikrofon und Meeting-/Systemaudio werden als getrennte Audioströme erfasst. Auf dem Mac ist das mit Apples ScreenCaptureKit/Core-Audio-Berechtigungen möglich.
+2. Die App verlangt Aufnahme-/Systemaudio-Berechtigung, lässt die Audioquelle auswählen und zeigt dauerhaft einen roten Live-Indikator.
+3. Mikrofon und Meeting-/Systemaudio werden als getrennte Audioströme erfasst. Auf dem Mac ist das mit Apples ScreenCaptureKit/Core-Audio-Berechtigungen möglich. Erfasst wird vorzugsweise nur die ausgewählte Meeting-App beziehungsweise der ausgewählte Browser, nicht pauschal jeder Ton des Rechners.
 4. Streaming-Transkription trennt Nadine und Kunde bereits über die beiden Audiokanäle; Sprecher-Diarisierung ist nur Fallback.
 5. Ein schneller Signaldetektor aktualisiert Redeanteil, Phase, Einwände und offene Punkte.
 6. Nur bei einem relevanten Ereignis erzeugt IVA eine kurze Antwort aus Gesprächskontext, Kundenakte und freigegebenem Sales-/Produktwissen.
 7. Nach Gesprächsende erstellt IVA Zusammenfassung, Einwände, Bedarfe, nächste Schritte, Coaching-Score und einen CRM-Entwurf. Übernahme erst nach Freigabe.
 
 Zielwerte für den Pilot: Transkript unter einer Sekunde, verwertbarer Hinweis in höchstens zwei Sekunden, kein Speichern der Roh-Audiodatei im Standardmodus.
+
+### Unterstützte Gesprächswege
+
+| Gespräch | Zielweg |
+|---|---|
+| Zoom, Teams, Google Meet, Webex und andere Desktop-/Browser-Meetings | Mikrofon plus ausgewählter App-/Systemton; keine Bot-Teilnahme und keine plattformspezifische API nötig |
+| Vor-Ort-Gespräch | Mikrofonmodus mit sauberer Sprechererkennung; Einwilligungs-Gate bleibt identisch |
+| Telefonat über den Mac beziehungsweise eine Softphone-App | Mikrofon plus ausgewählter App-Ton |
+| Telefonat, das ausschließlich auf dem iPhone läuft | erst nach bewusster Audioübergabe an den Mac oder späterer nativer, technisch und rechtlich geprüfter Telefonintegration |
+
+Die erste Version wird für macOS gebaut. Eine spätere Windows-Version nutzt dieselbe Fachlogik, aber eine andere lokale Audioerfassung.
 
 ## Einwilligung und Datenschutz-Gate
 
@@ -111,7 +124,8 @@ Der genaue Hinweis muss zum Speichermodus passen, zum Beispiel:
 ### Phase 1 – Nadine-Pilot auf dem Mac
 
 - Manuelles Start/Stop mit Einwilligungs-Häkchen.
-- Meeting-/Systemaudio + Mikrofon, ohne Bot-Teilnehmer.
+- Ausgewählter App-/Systemton + Mikrofon, ohne Bot-Teilnehmer; damit unabhängig von Zoom, Teams, Google Meet oder einem anderen Meetinganbieter.
+- Umschaltbarer Vor-Ort-Modus nur über das Mikrofon.
 - Live-Transkript, Redeanteil und Gesprächsphase.
 - Einwandkarte mit Ampel, Belegstelle und maximal einer empfohlenen Reaktion.
 - Keine dauerhafte Audioablage und kein automatischer CRM-Schreibzugriff.
@@ -132,9 +146,8 @@ Der genaue Hinweis muss zum Speichermodus passen, zum Beispiel:
 
 ## Vor dem Bau noch festzulegen
 
-- Primärer Meetingweg: Zoom-Desktop, Google Meet oder Microsoft Teams.
-- Ob im Pilot nur Online-Meetings oder zusätzlich Vor-Ort-Gespräche unterstützt werden.
+- Mindestversion von macOS und welche Meeting-/Browser-Prozesse im Pilot als auswählbare Audioquelle getestet werden.
+- Ob reine iPhone-Telefonate zunächst bewusst ausgeschlossen oder per Audioübergabe an den Mac unterstützt werden.
 - Welche Verkaufs-/Einwandmethodik IVA zuerst verwendet und welche Formulierungen Nadine freigibt.
 - Ob nur das strukturierte Ergebnis oder zusätzlich ein vollständiges Transkript gespeichert werden soll.
 - Streaming-Transkriptionsanbieter nach einem echten Latenz-, Deutsch- und Kostentest auswählen.
-
