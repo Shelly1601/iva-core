@@ -30,6 +30,8 @@ import { fetchMetaAdsInsights, marketingConnectorStatus } from './marketing/conn
 import { listResearchRuns, listResearchedCompanies, runMarketIntelligence } from './marketing/intelligence.js';
 import { approveAdRecommendation, createContentPlan, createEmailCampaign, createMarketingReport, listMarketingCollection, recordAdSnapshot } from './marketing/planning.js';
 import { speak } from './voice.js';
+import { listVoiceEvaluations, recordVoiceEvaluation, voiceLabSummary } from './voice-lab/store.js';
+import { transcribeAudio } from './voice-lab/transcribe.js';
 import { askArchitect } from './agents/architect.js';
 import * as workspaces from './workspaces/store.js';
 import {
@@ -151,7 +153,9 @@ const CONV_FILE = DATA_DIR + '/conversations.json';
 const MAX_TURNS = 16; // letzte 16 Nachrichten (8 Paare) als Kontext je Session
 // Gemeinsamer Zusatz an den System-Prompt fuer sprach-getriggerte Anfragen.
 // Wird identisch von askIva (Telegram) und streamIva (Cockpit-Stream) angehaengt.
-const VOICE_SYSTEM_SUFFIX = '\n\nWICHTIG – diese Anfrage kam per SPRACHE: Deine Antwort wird von ElevenLabs auf Deutsch vorgelesen. Formuliere sie als natuerliche gesprochene Prosa, wie du sie einem intelligenten Menschen ins Gesicht sagen wuerdest. Nutze kurze, fluessige Saetze und vermeide Schachtelsaetze. KEINE Markdown-Formatierung – keine Sternchen, keine Fett-Ueberschriften, keine Backticks, keine Aufzaehlungszeichen, keine Bindestrich-Listen, keine nummerierten Listen, keine Tabellen, keine Emojis. KEINE URLs, Dateipfade oder E-Mail-Adressen vorlesen – wenn eine Quelle wichtig ist, nenne den Betreiber in Worten oder sag "eine offizielle Quelle". Zahlen und Abkuerzungen so schreiben, dass ElevenLabs sie auf Deutsch natuerlich ausspricht: Datum und Uhrzeit ausschreiben (also "einunddreissigster Dezember" statt "31.12.", "vierzehn Uhr" statt "14:00"), grosse Zahlen entweder in Worten oder als reine Ziffern OHNE Punkt-Tausender-Trennung (also "siebenundsiebzigtausendvierhundert Euro" oder notfalls "77400 Euro", aber NIEMALS "77.400 EUR"), Prozente ausformulieren (also "fuenfundzwanzig Prozent"), Paragraphen und gaengige Kuerzel ausschreiben (also "Paragraph zweiunddreissig a" statt Paragraphenzeichen plus Zahl, "zum Beispiel" statt "z.B.", "und so weiter" statt "usw."). Schwer aussprechbare deutsche Komposita und Fach-Abkuerzungen automatisch in gesprochene Alltagssprache uebersetzen — Beispiele: "Jahresarbeitsentgeltgrenze" wird zu "Einkommensgrenze fuer die gesetzliche Krankenversicherung", "PKV" wird zu "private Krankenversicherung", "GKV" wird zu "gesetzliche Krankenversicherung", "BBG" wird zu "Beitragsbemessungsgrenze", "bAV" wird zu "betriebliche Altersvorsorge", "bKV" wird zu "betriebliche Krankenversicherung". Der INHALT bleibt identisch, nur die Formulierung wird verstaendlicher. Fremdwoerter und englische Begriffe nur, wenn wirklich noetig – sonst verstaendlich deutsch formulieren. NIEMALS schaetzen. Wenn keine verlaessliche Information vorliegt (etwa weil askArchitect / web-research nichts Belastbares geliefert hat oder overallConfidence "unknown" bzw. unverifiedNotice gesetzt ist), sag exakt: "Ich konnte dazu gerade keine verlaessliche Information finden." — kein "vermutlich", kein "schaetze grob", kein "soweit ich weiss", kein "muesste". KEINE Einleitungsfloskeln wie "Gerne", "Natuerlich" oder "Selbstverstaendlich". KEINE Schlussfloskeln wie "Kann ich sonst noch helfen?". Der INHALT bleibt vollstaendig – es wird ausschliesslich die Formulierung fuer Sprache optimiert, nichts weglassen, nichts erfinden.';
+const VOICE_SYSTEM_SUFFIX = `
+
+DIESE ANFRAGE KOMMT PER SPRACHE. Sprich mit Nadine wie in einem echten, zügigen Gespräch – nicht wie in einem Bericht. Antworte direkt mit dem wichtigsten Gedanken. Standardmäßig höchstens vier kurze, flüssige Sätze und nur ein Gedanke pro Satz; ausführlicher nur, wenn Nadine das ausdrücklich verlangt. Wenn dir eine Angabe fehlt, stelle genau eine konkrete Rückfrage. Keine Einleitungs- oder Schlussfloskeln, kein Markdown, keine Listen, keine Tabellen, keine Emojis, keine URLs, E-Mail-Adressen oder Dateipfade zum Vorlesen. Schreibe Datum, Uhrzeit, Zahlen und Abkürzungen so, dass sie auf Deutsch natürlich gesprochen werden. Übersetze sperrige Fachkürzel in verständliche Alltagssprache. Sicherheits-, Quellen- und Bestätigungsregeln bleiben vollständig bestehen: Nichts erfinden, keine Änderung ohne die dafür vorgesehene Bestätigung und keine wichtige Warnung weglassen.`;
 async function loadConversations() {
   try { return JSON.parse(await fs.readFile(CONV_FILE, 'utf8')); } catch { return {}; }
 }
@@ -480,7 +484,7 @@ async function askIva(userText, sessionId = 'default', voice = false, agentId = 
   const messages = [...history, { role: 'user', content: userText }];
   const routed = chooseModel({ task: agent.modelProfile });
   await checkBudget(routed);
-  const { text, usage } = await generateText({ model: routed.model, system, messages, tools: agentTools, maxSteps: 6 });
+  const { text, usage } = await generateText({ model: routed.model, system, messages, tools: agentTools, maxSteps: 6, ...(voice ? { maxTokens: 420 } : {}) });
   await recordUsage(routed, usage);
   conv[sessionId] = [...messages, { role: 'assistant', content: text || '(ok)' }].slice(-MAX_TURNS);
   await saveConversations(conv);
@@ -508,6 +512,7 @@ async function streamIva(userText, sessionId = 'default', voice = false, agentId
   return streamText({
     model: routed.model,
     system, messages, tools: agentTools, maxSteps: 6,
+    ...(voice ? { maxTokens: 420 } : {}),
     abortSignal,
     onFinish: async ({ text, usage }) => {
       await recordUsage(routed, usage);
@@ -542,11 +547,7 @@ async function transcribeVoice(fileId) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const filePath = (await (await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`)).json()).result.file_path;
   const audioBuf = Buffer.from(await (await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`)).arrayBuffer());
-  const form = new FormData();
-  form.append('file', new Blob([audioBuf]), 'voice.ogg');
-  form.append('model', 'whisper-large-v3-turbo');
-  const r = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` }, body: form });
-  return (await r.json()).text;
+  return (await transcribeAudio(audioBuf, { mime: 'audio/ogg', fileName: 'telegram-voice.ogg' })).text;
 }
 
 async function sendBriefing() {
@@ -697,6 +698,28 @@ app.post('/api/speak', async (req, res) => {
   try { const audio = await speak(req.body?.text || '', { voiceId: req.body?.voiceId }); if (!audio) return res.status(204).end();
     res.set('Content-Type', audio.mime); res.send(audio.buffer);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Voice-Lab: Roh-Audio wird nur transkribiert und nie gespeichert. Gespeichert werden
+// ausschliesslich Transkript, Korrektur, Antwortbewertung und technische Messwerte.
+app.post('/api/voice/transcribe', express.raw({ type: ['audio/*', 'application/octet-stream'], limit: '15mb' }), async (req, res) => {
+  try {
+    const result = await transcribeAudio(Buffer.from(req.body || []), {
+      mime: String(req.headers['content-type'] || 'audio/webm'),
+      fileName: String(req.headers['x-file-name'] || ''),
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(/fehlt/.test(error.message) ? 503 : 400).json({ error: error.message });
+  }
+});
+app.get('/api/voice-lab/summary', async (_req, res) => res.json(await voiceLabSummary()));
+app.get('/api/voice-lab/evaluations', async (req, res) => {
+  res.json(await listVoiceEvaluations({ limit: req.query?.limit, source: String(req.query?.source || '') }));
+});
+app.post('/api/voice-lab/evaluations', async (req, res) => {
+  try { res.status(201).json(await recordVoiceEvaluation(req.body || {})); }
+  catch (error) { res.status(400).json({ error: error.message }); }
 });
 
 // Qonekto-Diagnose liefert nur Werkzeug-Schemas, niemals Kunden- oder Token-Daten.
@@ -1144,6 +1167,7 @@ app.get('/whatsapp', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public
 app.get('/marketing', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'marketing.html')));
 app.get('/accounting', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'accounting.html')));
 app.get('/opportunities', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'opportunities.html')));
+app.get('/voice-lab', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'voice-lab.html')));
 app.get('/health/qonekto', async (_req, res) => {
   const status = await qonektoStatus();
   if (status.reachable) {
@@ -1157,6 +1181,7 @@ app.get('/health/advice', async (_req, res) => {
   const catalog = publicAdviceCatalog();
   res.json({ ok: true, moduleCount: catalog.modules.length, groups: catalog.groups.length, connectors: adviceConnectorStatus(), knowledge: await adviceKnowledgeStatus() });
 });
+app.get('/health/voice', async (_req, res) => res.json(await voiceLabSummary()));
 app.get('/', (_req, res) => res.send('IVA laeuft.'));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => { console.log('IVA-Core auf Port ' + PORT); setupTelegramWebhook(); setBotCommands(); });

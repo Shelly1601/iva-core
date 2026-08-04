@@ -19,7 +19,8 @@
     "test:whatsapp": "node scripts/verify-whatsapp.mjs",
     "test:marketing": "node scripts/verify-marketing.mjs",
     "test:accounting": "node scripts/verify-accounting.mjs",
-    "test:opportunities": "node scripts/verify-opportunities.mjs"
+    "test:opportunities": "node scripts/verify-opportunities.mjs",
+    "test:voice": "node scripts/verify-voice-lab.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.0.0",
