@@ -3,7 +3,7 @@
 // gemeinsamen IVA-Core. Der Router waehlt deterministisch; unbekannte oder
 // deaktivierte Agenten fallen sicher auf IVA Standard zurueck.
 
-const STANDARD_SKILLS = ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'selfImprovement', 'qonekto'];
+const STANDARD_SKILLS = ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'qonekto'];
 
 export const AGENTS = {
   'iva-standard': {
@@ -39,7 +39,7 @@ export const AGENTS = {
     description: 'TMB, Foto-Checkliste, Gebaeudedaten, Heizlast-Vorplanung, Foerdercheck und Energie-Fallakten.',
     rolePrompt: 'Arbeite als Energie- und Vor-Ort-Agent. Verwende die deterministischen IVA-Rechenwege, erfinde keine Gebaeudedaten und nenne Vorplanung niemals Normnachweis oder Foerderzusage. Fehlende Pflichtangaben gezielt abfragen.',
     knowledgeSources: ['workspaces', 'energy-rules', 'customer-context'],
-    allowedSkills: ['workspaces', 'research', 'qonekto', 'selfImprovement'], modelProfile: 'chat', safetyDefault: 'liability', color: 'amber',
+    allowedSkills: ['workspaces', 'energyTariffs', 'research', 'qonekto', 'selfImprovement'], modelProfile: 'chat', safetyDefault: 'liability', color: 'amber',
   },
   'iva-accounting': {
     id: 'iva-accounting', name: 'Buchhaltung & Controlling', shortName: 'Buchhaltung', enabled: true,
@@ -69,7 +69,7 @@ export const AGENTS = {
 
 const ROUTES = [
   { agentId: 'iva-accounting', reason: 'Buchhaltung erkannt', pattern: /\b(buchhaltung|beleg|rechnung|eür|steuerberater|umsatzsteuer|vorsteuer|bewirtung)\b/i },
-  { agentId: 'iva-energy', reason: 'Energie/Vor-Ort erkannt', pattern: /\b(tmb|wärmepumpe|waermepumpe|heizlast|heizkörper|heizkoerper|photovoltaik|\bpv\b|förderrechner|foerderrechner|energieplan|grundriss)\b/i },
+  { agentId: 'iva-energy', reason: 'Energie/Vor-Ort erkannt', pattern: /\b(tmb|wärmepumpe|waermepumpe|heizlast|heizkörper|heizkoerper|photovoltaik|\bpv\b|förderrechner|foerderrechner|energieplan|grundriss|stromtarif|gasvertrag|gastarif|energypartner|tarifrechner)\b/i },
   { agentId: 'iva-marketing', reason: 'Marketing/Growth erkannt', pattern: /\b(marketing|content|instagram|facebook|linkedin|kampagne|werbeanzeige|\bads?\b|reel|hashtag|mitbewerber|marktanalyse|leadgen|chancenradar)\b/i },
   { agentId: 'iva-sales', reason: 'Sales-Coaching erkannt', pattern: /\b(sales|closing|closer|einwand|verkaufsgespräch|verkaufsgespraech|redeanteil|abschlussfrage|gesprächscoach|gespraechscoach)\b/i },
   { agentId: 'iva-finance', reason: 'Beratung/Fachvergleich erkannt', pattern: /\b(finanzberatung|altersvorsorge(?:beratung|planung)?|depot(?:vergleich)?|hausratvergleich|vertragsvergleich|din 7723|versicherung vergleichen|beratungsakte|rentenberechnung|gkv-vergleich)\b/i },

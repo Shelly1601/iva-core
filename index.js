@@ -26,6 +26,7 @@ import { adviceSkill } from './skills/advice.js';
 import { opportunitiesSkill } from './skills/opportunities.js';
 import { selfImprovementSkill } from './skills/self-improvement.js';
 import { accountingSkill } from './skills/accounting.js';
+import { energyTariffsSkill } from './skills/energy-tariffs.js';
 import { listAgents, routeAgent } from './agents/registry.js';
 import { marketAnalysis } from './marketing/market.js';
 import { fetchMetaAdsInsights, marketingConnectorStatus } from './marketing/connectors.js';
@@ -71,6 +72,11 @@ import {
 import { formatWeeklyPitch, scoreOpportunity } from './opportunities/score.js';
 import { opportunityRadarStatus, runOpportunityScout } from './opportunities/scout.js';
 import { calculateHeatLoad, calculateKfw458Funding, ENERGY_SOURCES } from './workspaces/energy-calculations.js';
+import {
+  energyTariffStatus,
+  prepareEnergyTariffRequest,
+  prepareWorkspaceEnergyTariffRequest,
+} from './integrations/energy-tariffs.js';
 import {
   qonektoStatus,
   listQonektoTools,
@@ -470,6 +476,7 @@ const ALL_SKILLS = {
   advice:    adviceSkill({ publicAdviceCatalog, listAdviceKnowledge }),
   opportunities: opportunitiesSkill({ listOpportunities, runOpportunityScout, prepareOpportunityHandoff }),
   accounting: accountingSkill({ listAccountingEntities, listAccountingDocuments, getAccountingDocument, accountingSummary }),
+  energyTariffs: energyTariffsSkill({ workspaces, energyTariffStatus, prepareWorkspaceEnergyTariffRequest }),
   selfImprovement: selfImprovementSkill({ savePronunciationCorrection, saveCommunicationPreference, captureImprovementRequest, listVoiceLearning }),
   qonekto:   null, // wird pro Anfrage mit der echten sessionId erzeugt
 };
@@ -757,6 +764,7 @@ async function controlSnapshot() {
   const metaWhatsApp = whatsappStatus();
   const hubWhatsApp = whatsappHubStatus();
   const adviceConnectors = adviceConnectorStatus();
+  const tariffConnector = energyTariffStatus();
   const projectIds = CRM_SOURCES.filter(source => source.mode === 'rest' && source.projectId).length;
   const connectors = [
     connector('core-api', 'IVA API-Schutz', envReady('API_TOKEN'), ['API_TOKEN'], 'Schuetzt Cockpit und App-Zugriffe.'),
@@ -783,6 +791,15 @@ async function controlSnapshot() {
     connector('whatsapp-meta', 'WhatsApp Business · Meta', metaWhatsApp.configured, ['WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID', 'WHATSAPP_VERIFY_TOKEN', 'WHATSAPP_APP_SECRET', 'WHATSAPP_GRAPH_VERSION'], metaWhatsApp.configured ? 'Ein- und Ausgang bereit.' : 'Live-Kanal noch nicht komplett.'),
     connector('whatsapp-hub', 'Multi-WhatsApp Hub', hubWhatsApp.configured, ['WHATSAPP_HUB_API_KEY'], hubWhatsApp.configured ? 'Konten und Chats lesbar.' : 'Hub-Key fehlt.'),
     connector('gkv', 'GKV-Vergleich', Boolean(adviceConnectors.gkv?.configured), ['GKV_COMPARE_PROVIDER', 'GKV_COMPARE_URL'], 'Sicherer Startlink/API des gewaehlten Portals.'),
+    connector(
+      'energy-tariffs',
+      'Strom & Gas · EnergyPartner24',
+      Boolean(tariffConnector.comparisonEnabled),
+      tariffConnector.portalLoginConfigured || tariffConnector.apiCredentialsConfigured
+        ? ['Provider-Freigabe und verifizierter Tarifadapter']
+        : ['ENERGY_TARIFF_PORTAL_USER/PASSWORD oder offizieller API-Zugang'],
+      tariffConnector.reason,
+    ),
     connector('opportunity-radar', 'Chancenradar', Boolean(opportunityResult.ready), opportunityResult.missing || ['APIFY_TOKEN'], opportunityResult.provider || ''),
   ];
   const uniqueConnectors = [...new Map(connectors.map(item => [item.id, item])).values()];
@@ -1072,6 +1089,19 @@ app.post('/api/workspaces/:id/energy/calculate', async (req, res) => {
       },
     });
     res.json({ calculation, funding: fundingResult, workspace: updated });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// --- Strom-/Gas-Tarife: sichere Anfragevorbereitung, Provider-Ergebnis bleibt belegpflichtig ---
+app.get('/api/energy/tariffs/status', (_req, res) => res.json(energyTariffStatus()));
+app.post('/api/energy/tariffs/prepare', (req, res) => {
+  try { res.status(201).json(prepareEnergyTariffRequest(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/workspaces/:id/energy/tariffs/prepare', async (req, res) => {
+  try {
+    const prepared = await prepareWorkspaceEnergyTariffRequest({ workspaces, workspaceId: req.params.id, input: req.body || {} });
+    res.status(prepared ? 201 : 404).json(prepared || { error: 'not found' });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 

@@ -72,14 +72,17 @@ function statusClass(module) {
   return module.status === 'ready' ? 'pill' : 'pill warn';
 }
 
-function startModule(moduleId) {
+function moduleUrl(moduleId) {
+  const module = state.catalog.modules.find(item => item.id === moduleId) || {};
   const customer = state.selectedCustomer;
-  const query = new URLSearchParams({ mode: 'beratung', adviceType: moduleId });
+  const launchMode = module.launchMode || 'beratung';
+  const query = new URLSearchParams({ mode: launchMode });
+  if (launchMode === 'beratung') query.set('adviceType', moduleId);
   if (customer) {
     query.set('customerId', customer.id || ''); query.set('customerName', customer.name || ''); query.set('customerEmail', customer.email || '');
     query.set('customerPhone', customer.mobile || customer.phone || ''); query.set('customerAddress', customer.address || '');
   }
-  window.open('/workspace?' + query, '_blank', 'noopener');
+  return '/workspace?' + query;
 }
 
 function renderModules() {
@@ -94,8 +97,7 @@ function renderModules() {
     for (const module of modules) {
       const article = document.createElement('article');
       article.className = 'module';
-      article.innerHTML = `<div class="module-icon">${escapeHtml(module.icon)}</div><h3>${escapeHtml(module.title)}</h3><p>${escapeHtml(module.short)}</p><div class="module-foot"><span class="${statusClass(module)}">${escapeHtml(module.badge)}</span><button type="button">Beratung starten →</button></div>`;
-      article.querySelector('button').addEventListener('click', () => startModule(module.id));
+      article.innerHTML = `<div class="module-icon">${escapeHtml(module.icon)}</div><h3>${escapeHtml(module.title)}</h3><p>${escapeHtml(module.short)}</p><div class="module-foot"><span class="${statusClass(module)}">${escapeHtml(module.badge)}</span><a class="module-start" href="${escapeHtml(moduleUrl(module.id))}" target="_blank" rel="noopener">Beratung starten →</a></div>`;
       moduleRoot.appendChild(article);
     }
     root.appendChild(section);
@@ -110,7 +112,13 @@ async function loadCatalog() {
   $('gkvTitle').textContent = gkv.configured ? `${gkv.provider || 'GKV-Portal'} verbunden` : 'Noch nicht verbunden';
   $('gkvCopy').textContent = gkv.configured ? 'Der Vergleichsrechner kann mit der Beratungsakte geöffnet werden.' : 'Benötigt später Anbieter und Start-/API-URL.';
   $('openGkv').hidden = !gkv.configured;
-  if (gkv.configured) $('openGkv').addEventListener('click', () => window.open(gkv.launchUrl, '_blank', 'noopener'));
+  if (gkv.configured) $('openGkv').href = gkv.launchUrl;
+  const energy = state.catalog.connectors?.energyTariffs || {};
+  $('energyDot').classList.toggle('on', Boolean(energy.comparisonEnabled));
+  $('energyTitle').textContent = energy.comparisonEnabled ? `${energy.provider || 'EnergyPartner'} verbunden` : 'Anbindung vorbereitet';
+  $('energyCopy').textContent = energy.reason || 'Tarifanfragen können bereits in der Beratungsakte vorbereitet werden.';
+  $('openEnergyPortal').hidden = !energy.launchUrl;
+  if (energy.launchUrl) $('openEnergyPortal').href = energy.launchUrl;
 }
 
 async function loadRecentCases() {
@@ -142,7 +150,7 @@ async function searchKnowledge() {
   catch (error) { $('knowledgeStatus').textContent = 'Wissensbibliothek nicht erreichbar: ' + error.message; }
 }
 
-$('customerSelect').addEventListener('change', () => { state.selectedCustomer = state.customers.find(customer => customer.id === $('customerSelect').value) || null; renderCustomerHint(); });
+$('customerSelect').addEventListener('change', () => { state.selectedCustomer = state.customers.find(customer => customer.id === $('customerSelect').value) || null; renderCustomerHint(); renderModules(); });
 $('refreshCustomers').addEventListener('click', () => loadCustomers(true));
 $('searchKnowledge').addEventListener('click', searchKnowledge);
 $('knowledgeSearch').addEventListener('keydown', event => { if (event.key === 'Enter') searchKnowledge(); });

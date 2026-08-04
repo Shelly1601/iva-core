@@ -139,6 +139,21 @@ Wichtig: Die Meta-Verbindung liest und beantwortet Nachrichten der registrierten
 | 🟡 | Produktinformationsblätter / Bedingungen | Nur offizielle, lizenzierte oder erlaubte Quellen versioniert hinterlegen. |
 | 🟡 | DIN 77230 / 77235 | Vollständiges lizenziertes Regelwerk plus fachliche Abnahme, bevor IVA „DIN-konform“ ausgibt. |
 
+### Strom- und Gas-Tarifvergleich · EnergyPartner24
+
+IVA kann eine Tarifvergleichsanfrage jetzt aus Kundenadresse/Fallakte, Verbrauch und Sparte vorbereiten. Ohne belegtes Provider-Ergebnis nennt IVA bewusst keine Preise, Boni oder Laufzeiten und reicht keinen Vertrag ein.
+
+| Status | Railway-Variable | Nächster Schritt |
+|---|---|---|
+| ✅ | `ENERGY_TARIFF_PROVIDER` | `EnergyPartner24` setzen. |
+| ✅ | `ENERGY_TARIFF_PORTAL_URL` | `https://portal-energypartner.de` setzen. |
+| ⬜ | `ENERGY_TARIFF_PORTAL_USER` | Möglichst eigener IVA-Testnutzer; nicht im Chat teilen. |
+| ⬜ | `ENERGY_TARIFF_PORTAL_PASSWORD` | Ausschließlich als Railway-Secret speichern. |
+| ➖ | `ENERGY_TARIFF_API_URL` | Nur setzen, wenn EnergyPartner einen offiziellen API-Endpunkt freigibt. |
+| ➖ | `ENERGY_TARIFF_API_TOKEN` | Nur mit passender offizieller Dokumentation/Sandbox setzen. |
+
+Vor dem Live-Betrieb EnergyPartner schriftlich fragen, ob automatisierte Tarifabfragen erlaubt sind und ob API, Sandbox, Deep-Link oder White-Label-Zugang vorhanden sind. Der erste authentifizierte Technik-Check bleibt rein lesend: Login, Tarifmaske, Pflichtfelder und Ergebnisstruktur prüfen; keine Antragseinreichung und keine Online-Signatur auslösen.
+
 ## 7. PLAUD Note, TMB und Vor-Ort-Agent
 
 | Status | Baustein | Nächster Schritt |
@@ -213,4 +228,5 @@ Für den internen Grundbetrieb ist **keine neue Railway-Variable** erforderlich;
 6. Meta Business als stabilen Kanal für kritische Geschäftsnummern anbinden; danach HeyGen und Brevo/Resend.
 7. Im Buchhaltungsbereich Rechtsträger anlegen und echte Testbelege prüfen; danach automatische Auslesung und erst im zweiten Schritt Bankdaten anbinden.
 8. Als ersten Handy-Baustein den IVA-iPhone-Kurzbefehl und das Teilen-Menü bauen; die native App folgt danach.
-9. Eine Woche lang im Kontrollzentrum Freigaben, Fehlversuche und Datenlücken beobachten. Erst dann weitere Autonomie freischalten.
+9. EnergyPartner mit einem dedizierten Testzugang prüfen; zuerst nur Tarifvergleich und Ergebnisübernahme, Vertragsabschluss erst später mit eigener Bestätigung.
+10. Eine Woche lang im Kontrollzentrum Freigaben, Fehlversuche und Datenlücken beobachten. Erst dann weitere Autonomie freischalten.

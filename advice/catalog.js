@@ -1,3 +1,5 @@
+import { energyTariffStatus } from '../integrations/energy-tariffs.js';
+
 const field = (key, label, options = {}) => ({ key, label, type: 'number', ...options });
 
 export const ADVICE_GROUPS = [
@@ -6,6 +8,7 @@ export const ADVICE_GROUPS = [
   { id: 'insurance', label: 'Versicherungen' },
   { id: 'property', label: 'Immobilien' },
   { id: 'health', label: 'Gesundheit' },
+  { id: 'energy', label: 'Energie & Versorgung' },
 ];
 
 export const ADVICE_MODULES = [
@@ -71,6 +74,26 @@ export const ADVICE_MODULES = [
     notice: 'Die Kunden- und Beratungsdaten können bereits erfasst werden. Tarifdaten und Ergebnisse werden erst angezeigt, wenn ein Vergleichsportal angebunden ist.',
     sections: [{ title: 'Vergleichsdaten', fields: [field('currentFund', 'Aktuelle Krankenkasse', { type: 'text' }), field('grossIncome', 'Bruttoeinkommen', { unit: '€ / Monat' }), field('employmentType', 'Status', { type: 'select', options: ['Angestellt', 'Selbstständig', 'Rentner/in', 'Studierend', 'Sonstiges'] }), field('state', 'Bundesland', { type: 'text' }), field('familyInsured', 'Familienversicherung relevant', { type: 'select', options: ['Nein', 'Ja', 'Prüfen'] }), field('priorities', 'Prioritäten', { type: 'textarea', wide: true, placeholder: 'z. B. Zusatzbeitrag, Bonus, Osteopathie, Zahnreinigung, Service' })] }],
   },
+  {
+    id: 'energy-planning', group: 'energy', icon: '⌁', title: 'PV- & Wärmepumpen-Energieplaner', short: 'TMB, Gebäudeaufnahme, Foto-Checkliste, Heizlast-Vorplanung, Förderung, PV und Wärmepumpenplanung.', status: 'ready', badge: 'Energie-Fallakte', launchMode: 'energie',
+    notice: 'Der Energieplaner öffnet eine vollständige Energie-Fallakte für den ausgewählten Kunden.',
+    sections: [],
+  },
+  {
+    id: 'energy-tariff-comparison', group: 'energy', icon: '⚡', title: 'Strom- & Gasvergleich', short: 'Verbrauch und Kundendaten erfassen, EnergyPartner-Anfrage vorbereiten und Ergebnisse später in der Beratungsakte dokumentieren.', status: 'connector-ready', badge: 'EnergyPartner',
+    notice: 'Ohne belegtes Ergebnis des Tarifportals zeigt IVA keine Preise, Boni oder Laufzeiten an und reicht keinen Vertrag ein.',
+    sections: [{ title: 'Tarifanfrage', fields: [
+      field('commodity', 'Sparte', { type: 'select', options: [{ value: 'electricity', label: 'Strom' }, { value: 'gas', label: 'Gas' }] }),
+      field('annualConsumptionKwh', 'Jahresverbrauch', { unit: 'kWh' }),
+      field('postalCode', 'Postleitzahl', { type: 'text' }),
+      field('city', 'Ort', { type: 'text' }),
+      field('meterType', 'Zählerart / Sondertarif', { type: 'text', placeholder: 'z. B. Haushaltsstrom, Wärmepumpe, HT/NT' }),
+      field('currentSupplier', 'Aktueller Versorger', { type: 'text' }),
+      field('currentTariff', 'Aktueller Tarif', { type: 'text' }),
+      field('desiredStartDate', 'Gewünschter Vertragsbeginn', { type: 'text', placeholder: 'z. B. nächstmöglich' }),
+      field('notes', 'Hinweise / gewünschte Kriterien', { type: 'textarea', wide: true, placeholder: 'z. B. Preisgarantie, Ökostrom, maximale Laufzeit' }),
+    ] }],
+  },
 ];
 
 export function publicAdviceCatalog() {
@@ -84,5 +107,16 @@ export function getAdviceModule(id) {
 export function adviceConnectorStatus() {
   const url = String(process.env.GKV_COMPARE_URL || '').trim();
   const provider = String(process.env.GKV_COMPARE_PROVIDER || '').trim();
-  return { gkv: { configured: Boolean(url), provider: provider || '', launchUrl: url || '' } };
+  const tariffs = energyTariffStatus();
+  return {
+    gkv: { configured: Boolean(url), provider: provider || '', launchUrl: url || '' },
+    energyTariffs: {
+      configured: tariffs.portalLoginConfigured || tariffs.apiCredentialsConfigured,
+      comparisonEnabled: tariffs.comparisonEnabled,
+      provider: tariffs.provider,
+      launchUrl: tariffs.portalUrl,
+      mode: tariffs.mode,
+      reason: tariffs.reason,
+    },
+  };
 }

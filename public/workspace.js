@@ -199,7 +199,7 @@ async function loadAdviceCatalog() {
     for (const group of adviceCatalog.groups || []) {
       const optionGroup = document.createElement('optgroup');
       optionGroup.label = group.label;
-      for (const module of (adviceCatalog.modules || []).filter(item => item.group === group.id)) {
+      for (const module of (adviceCatalog.modules || []).filter(item => item.group === group.id && (!item.launchMode || item.launchMode === 'beratung'))) {
         const option = document.createElement('option');
         option.value = module.id; option.textContent = module.title;
         optionGroup.appendChild(option);
@@ -374,7 +374,12 @@ function createAdviceField(moduleId, spec, data, moduleRoot) {
   else if (spec.type === 'select') {
     input = document.createElement('select');
     const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'bitte wählen'; input.appendChild(empty);
-    for (const value of spec.options || []) { const option = document.createElement('option'); option.value = value; option.textContent = value; input.appendChild(option); }
+    for (const entry of spec.options || []) {
+      const option = document.createElement('option');
+      option.value = typeof entry === 'object' ? entry.value : entry;
+      option.textContent = typeof entry === 'object' ? entry.label : entry;
+      input.appendChild(option);
+    }
   } else {
     input = document.createElement('input'); input.type = spec.type === 'text' ? 'text' : 'text';
     if (spec.type !== 'text') input.inputMode = 'decimal';
@@ -414,8 +419,52 @@ function renderAdviceActiveModule() {
     const gkv = adviceCatalog.connectors?.gkv || {};
     const card = document.createElement('section'); card.className = 'advice-section';
     card.innerHTML = `<h3>${gkv.configured ? (gkv.provider || 'GKV-Portal') + ' verbunden' : 'GKV-Portal noch nicht verbunden'}</h3><div class="hint">${gkv.configured ? 'Kundendaten bleiben in der Beratungsakte; der eigentliche Tarifvergleich öffnet sich im angebundenen Portal.' : 'Das Datenmodell ist vorbereitet. Später werden nur Anbieter und Start-/API-URL ergänzt.'}</div>`;
-    if (gkv.configured) { const button = document.createElement('button'); button.className = 'btn'; button.textContent = 'Vergleich öffnen'; button.addEventListener('click', () => window.open(gkv.launchUrl, '_blank', 'noopener')); card.appendChild(button); }
+    if (gkv.configured) { const link = document.createElement('a'); link.className = 'btn'; link.textContent = 'Vergleich öffnen'; link.href = gkv.launchUrl; link.target = '_blank'; link.rel = 'noopener'; card.appendChild(link); }
     root.appendChild(card);
+  }
+  if (module.id === 'energy-tariff-comparison') {
+    const connector = adviceCatalog.connectors?.energyTariffs || {};
+    const card = document.createElement('section'); card.className = 'advice-section';
+    const heading = document.createElement('h3'); heading.textContent = `${connector.provider || 'EnergyPartner24'} · Strom & Gas`;
+    const hint = document.createElement('div'); hint.className = 'hint'; hint.textContent = connector.reason || 'Die Tarifanfrage wird vorbereitet und in dieser Beratungsakte gespeichert.';
+    const result = document.createElement('div'); result.className = 'muted'; result.style.marginTop = '9px';
+    const lastRequest = Array.isArray(current?.data?.tariffRequests) ? current.data.tariffRequests.at(-1) : null;
+    if (lastRequest) result.textContent = lastRequest.missing?.length
+      ? `Letzte Anfrage unvollständig · offen: ${lastRequest.missing.join(', ')}`
+      : 'Letzte Tarifanfrage wurde vorbereitet und in dieser Akte gespeichert.';
+    const prepare = document.createElement('button'); prepare.className = 'btn primary'; prepare.type = 'button'; prepare.textContent = 'Tarifanfrage vorbereiten';
+    prepare.addEventListener('click', async () => {
+      try {
+        await save();
+        const response = await api(`/api/workspaces/${current.id}/energy/tariffs/prepare`, {
+          method: 'POST', body: JSON.stringify({
+            commodity: data.commodity,
+            annualConsumptionKwh: numeric(data.annualConsumptionKwh),
+            postalCode: data.postalCode,
+            city: data.city,
+            meterType: data.meterType,
+            currentSupplier: data.currentSupplier,
+            currentTariff: data.currentTariff,
+            desiredStartDate: data.desiredStartDate,
+            notes: data.notes,
+          }),
+        });
+        current = response.workspace;
+        const missing = response.request?.missing || [];
+        apply(current);
+        status(missing.length ? 'Tarifanfrage gespeichert · Angaben fehlen noch.' : 'Tarifanfrage vorbereitet.', missing.length ? '' : 'ok');
+      } catch (error) {
+        result.textContent = 'Vorbereitung fehlgeschlagen: ' + error.message;
+        status('Tarifanfrage fehlgeschlagen: ' + error.message, 'err');
+      }
+    });
+    card.append(heading, hint, prepare);
+    if (connector.launchUrl) {
+      const open = document.createElement('a'); open.className = 'btn'; open.textContent = 'EnergyPartner öffnen'; open.style.marginLeft = '8px';
+      open.href = connector.launchUrl; open.target = '_blank'; open.rel = 'noopener';
+      card.appendChild(open);
+    }
+    card.appendChild(result); root.appendChild(card);
   }
 }
 

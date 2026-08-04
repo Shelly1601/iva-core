@@ -36,6 +36,7 @@ Das Zielbild für die sichere Beleg- und Steuerberater-Vorbereitung steht in [`I
 - `GET/POST/PATCH /api/workspaces` – gemeinsame Fallakten für Beratung, Kunde und Energieplanung.
 - `GET /api/workspaces/:id/tmb.pdf` – A4-TMB aus einer Energie-Fallakte mit Raum-/Heizkörpertabelle und zugeordnetem Fotoanhang.
 - `POST /api/workspaces/:id/energy/calculate` – speichert Heizlast-Vorplanung und KfW-458-Fördervorcheck in der Energie-Fallakte.
+- `GET /api/energy/tariffs/status` und `POST /api/workspaces/:id/energy/tariffs/prepare` – EnergyPartner-Status und sichere Strom-/Gas-Anfragevorbereitung ohne erfundene Tarife oder automatische Einreichung.
 - `GET/POST/PATCH /api/whatsapp/profiles` – getrennte Lead-, Service- und Hybridprofile; `/api/whatsapp/simulate` testet Antworten ohne Versand.
 - `GET /api/whatsapp/hub/accounts`, `/chats`, `/templates` – read-only Connector zum Multi-WhatsApp Hub; geschützt mit IVAs Bearer-Token und serverseitigem Hub-Key.
 - `GET/POST /webhooks/whatsapp` – signierter Meta-Webhook für eingehende WhatsApp-Nachrichten.
@@ -50,6 +51,7 @@ Das Zielbild für die sichere Beleg- und Steuerberater-Vorbereitung steht in [`I
 - `npm run test:tmb` – versioniertes TMB-Schema und visuell prüfbares Muster-PDF unter `output/pdf/IVA-TMB-Muster.pdf`.
 - `npm run test:qonekto` – Qonekto-Konfiguration und serverseitigen Leseschutz prüfen (ohne echten Token).
 - `npm run test:energy` – Heizlast-Rechenweg, Pflichtfelder und versionierte KfW-458-Regeln.
+- `npm run test:energy-tariffs` – EnergyPartner-Handoff, Pflichtfelder und gesperrte Einreichung.
 - `npm run test:whatsapp` – Webhook-HMAC, Nachrichtenerkennung und Sicherheits-Intents.
 - `npm run test:marketing` – Marketing-Persistenz, öffentliche Kontakt-Schutzlogik, Ads-Auswertung, E-Mail-Sperre und Reporting.
 - `npm run test:accounting` – Originalbeleg, Hash, Ampel, Dublettenprüfung, Monatsstatus und neutralen Export prüfen.
@@ -73,6 +75,7 @@ Das Zielbild für die sichere Beleg- und Steuerberater-Vorbereitung steht in [`I
 - Die raumweise Heizlast-Vorplanung rechnet transparent mit Bauteilflächen, U-Werten, Lüftung, Wärmebrücken und Temperaturdifferenz.
 - Sie ist bewusst als Vorplanung gekennzeichnet und ersetzt keine normgerechte Heizlast nach DIN EN 12831-1 zusammen mit DIN/TS 12831-1.
 - Der Fördercheck speichert immer Regelstand, Rechenweg und offene Voraussetzungen. Die produktive Entscheidung erfolgt nach aktuellem KfW-Merkblatt und BzA.
+- Strom-/Gas-Anfragen können bereits aus einer Fallakte vorbereitet und per Sprache angestoßen werden. Live-Preise werden erst nach einem verifizierten offiziellen API- oder freigegebenen Portaladapter übernommen; Vertragsabschluss und Online-Signatur bleiben gesperrt.
 
 ## Marketing-Zentrale
 - Verwaltung unter `/marketing`. Bestehende Brand-/Kampagnenmodule wurden erweitert, nicht ersetzt.

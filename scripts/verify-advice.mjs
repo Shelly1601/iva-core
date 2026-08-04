@@ -10,11 +10,14 @@ try {
   const catalog = await import('../advice/catalog.js');
   const knowledge = await import('../advice/knowledge-store.js');
   const publicCatalog = catalog.publicAdviceCatalog();
-  assert.equal(publicCatalog.modules.length, 9);
+  assert.equal(publicCatalog.modules.length, 11);
   assert.ok(catalog.getAdviceModule('din-77230'));
   assert.ok(catalog.getAdviceModule('din-77235'));
   assert.ok(catalog.getAdviceModule('contract-comparison')?.knowledgeSearch);
   assert.ok(catalog.getAdviceModule('gkv-comparison'));
+  assert.equal(catalog.getAdviceModule('energy-planning')?.launchMode, 'energie');
+  assert.ok(catalog.getAdviceModule('energy-tariff-comparison'));
+  assert.equal(publicCatalog.groups.find(group => group.id === 'energy')?.label, 'Energie & Versorgung');
 
   const initial = await knowledge.listAdviceKnowledge();
   assert.equal(initial.referenceCount, 4);
@@ -30,7 +33,7 @@ try {
   assert.equal(found.sources[0].status, 'pending-review');
 
   await assert.rejects(() => knowledge.addAdviceKnowledgeSource({ title: 'Unsicher', url: 'javascript:alert(1)' }), /HTTP/);
-  console.log('PASS Beratung: 9 Module, DIN-Trennung, Quellenbibliothek und GKV-Connector-Basis');
+  console.log('PASS Beratung: 11 Module, Energie-Einstiege, DIN-Trennung, Quellenbibliothek und Connector-Basis');
 } finally {
   await fs.rm(temp, { recursive: true, force: true });
 }
