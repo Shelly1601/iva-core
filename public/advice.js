@@ -139,7 +139,14 @@ function renderKnowledge(result) {
   $('knowledgeResults').innerHTML = '';
   for (const source of (result.sources || []).slice(0, 8)) {
     const row = document.createElement('div'); row.className = 'source';
-    row.innerHTML = `<b>${escapeHtml(source.title)}</b><small>${escapeHtml([source.provider, source.tariff, source.year, source.scope].filter(Boolean).join(' · '))}</small><a href="${escapeHtml(source.url)}" target="_blank" rel="noopener">Quelle öffnen ↗</a>`;
+    const title = document.createElement('b'); title.textContent = source.title;
+    const detail = document.createElement('small'); detail.textContent = [source.provider, source.tariff, source.year, source.scope].filter(Boolean).join(' · ');
+    row.append(title, detail);
+    if (source.url) {
+      const link = document.createElement('a'); link.href = source.url; link.target = '_blank'; link.rel = 'noopener'; link.textContent = 'Quelle öffnen ↗'; row.appendChild(link);
+    } else if (source.providedFile) {
+      const file = document.createElement('small'); file.textContent = `Bereitgestellte PDF: ${source.providedFile}`; row.appendChild(file);
+    }
     $('knowledgeResults').appendChild(row);
   }
   if (!result.sources?.length) $('knowledgeResults').innerHTML = '<div class="muted">Noch keine passende Originalquelle hinterlegt. Dokument in der Beratungsakte hochladen oder Quelle ergänzen.</div>';

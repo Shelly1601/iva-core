@@ -14,11 +14,12 @@ const REFERENCE_SOURCES = [
   { id: 'ref-finanzportal24', kind: 'benchmark', category: 'beratung', provider: 'FinanzPortal24', title: 'etops FinanzPortal · DIN-Analyse und Dokumentation', url: 'https://finanzportal24.de/', verified: true, scope: 'Funktionsbenchmark' },
   ...CORPORATE_BENEFIT_SOURCES.map(source => ({
     id: `ref-${source.id}`,
-    kind: 'benchmark',
+    kind: source.sourceType === 'provided-pdf' ? 'provided-document-reference' : 'benchmark',
     category: 'firmenvorsorge',
     provider: source.publisher,
     title: source.title,
     url: source.url,
+    providedFile: source.providedFile || '',
     year: source.year,
     verified: true,
     scope: source.scope,

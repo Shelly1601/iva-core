@@ -32,13 +32,17 @@ try {
   assert.equal(file.kind, 'floorplan');
   const read = await store.readWorkspaceFile(created.id, file.id);
   assert.equal(read.buffer.toString(), '%PDF-test');
+  const payroll = await store.storeWorkspaceFile(created.id, {
+    name: 'musterabrechnung.pdf', mime: 'application/pdf', kind: 'payroll-sample', buffer: Buffer.from('%PDF-payroll'),
+  });
+  assert.equal(payroll.kind, 'payroll-sample');
 
   const list = await store.listWorkspaces({ mode: 'energie' });
   assert.equal(list.length, 1);
   assert.equal(list[0].notes.length, 1);
-  assert.equal(list[0].files.length, 1);
+  assert.equal(list[0].files.length, 2);
   assert.equal('storageName' in list[0].files[0], false);
-  console.log('PASS workspaces: CRUD, verschachtelte Daten, Notizen und Dateien');
+  console.log('PASS workspaces: CRUD, verschachtelte Daten, Notizen, Dateien und Musterabrechnungs-Upload');
 } finally {
   await fs.rm(testDir, { recursive: true, force: true });
 }

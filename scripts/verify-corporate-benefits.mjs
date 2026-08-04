@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { BENEFIT_PREFERENCE_RANKING, calculateCorporateBenefits, CORPORATE_BENEFIT_SOURCES } from '../public/corporate-benefits-calculator.js';
+import { applyBkvOfferSelection, BKV_OFFERS } from '../public/bkv-offer-catalog.js';
 
 const result = calculateCorporateBenefits({
   employees: 50,
@@ -35,7 +36,8 @@ assert.equal(result.scenario.breakEvenSavedDays, 0.9);
 assert.equal(result.payroll.insuranceContributionMonthly, 140);
 assert.equal(result.payroll.estimatedEmployeeNetImpact, 55);
 assert.equal(BENEFIT_PREFERENCE_RANKING.find(item => item.featured)?.value, 50);
-assert.ok(CORPORATE_BENEFIT_SOURCES.length >= 8);
+assert.ok(CORPORATE_BENEFIT_SOURCES.length >= 19);
+assert.ok(BKV_OFFERS.length >= 8);
 
 const companyValues = calculateCorporateBenefits({
   employees: 10,
@@ -53,4 +55,41 @@ assert.equal(companyValues.assumptions.sickDayCost, 550);
 assert.equal(companyValues.assumptions.turnoverRate, 8.5);
 assert.equal(companyValues.assumptions.replacementCostMonths, 18);
 
-console.log('PASS Firmenvorsorge: Fehlzeiten, Fluktuation, bKV, bAV, Musterabrechnung, Benefit-Ranking und Quellen');
+const widoValues = calculateCorporateBenefits({ employees: 10, sickDaysMode: 'wido2025' });
+assert.equal(widoValues.assumptions.sickDays, 23.3);
+assert.equal(widoValues.assumptions.sickDaysSource, 'WIdO/AOK 2025');
+
+const selectedOffer = applyBkvOfferSelection({ bkvOfferId: 'allianz-meinegesundheit', bkvBudgetLevel: '600' }, 'bkvOfferId');
+assert.equal(selectedOffer.bkvProvider, 'Allianz');
+assert.equal(selectedOffer.bkvTariff, 'MeineGesundheit');
+assert.equal(selectedOffer.bkvMonthlyPremium, '22,9');
+
+const extendedPayroll = calculateCorporateBenefits({
+  ...selectedOffer,
+  employees: 20,
+  averageGrossSalary: 4000,
+  employeeDeferral: 100,
+  employerSubsidyPercent: 15,
+  extraEmployerBav: 25,
+  nonCashBenefitMonthly: 50,
+  otherTaxableBenefitsMonthly: 20,
+  bkvTaxMode: 'individual',
+  payrollType: 'pkv',
+  payrollTaxClass: 'IV',
+  employeePkvContributionMonthly: 780,
+  employerPkvSubsidyMonthly: 350,
+  employerVlMonthly: 40,
+  employeeVlMonthly: 10,
+  referenceNetPay: 2650,
+});
+assert.equal(extendedPayroll.products.bkv.provider, 'Allianz');
+assert.equal(extendedPayroll.products.bkv.premium, 22.9);
+assert.equal(extendedPayroll.payroll.estimatedTaxableGross, 3992.9);
+assert.equal(extendedPayroll.payroll.payrollType, 'pkv');
+assert.equal(extendedPayroll.payroll.taxClass, 'IV');
+assert.equal(extendedPayroll.payroll.employerBenefitSpendMonthly, 452.9);
+assert.equal(extendedPayroll.payroll.referenceNetPay, 2650);
+assert.equal(extendedPayroll.implementationPlaybook.length, 4);
+assert.ok(extendedPayroll.documentBasisNote.includes('WIFO'));
+
+console.log('PASS Firmenvorsorge: Fehlzeiten, Fluktuation, bKV-Katalog, bAV, PKV/VL-Musterabrechnung, Benefit-Ranking und Quellen');

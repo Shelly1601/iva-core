@@ -1,4 +1,14 @@
+import { BKV_CATALOG_SOURCES, findBkvOffer } from './bkv-offer-catalog.js';
+
 export const CORPORATE_BENEFIT_SOURCES = [
+  {
+    id: 'wido-absence-2025',
+    title: 'Fehlzeiten-Bilanz 2025',
+    publisher: 'Wissenschaftliches Institut der AOK (WIdO)',
+    year: '2026',
+    url: 'https://wido.de/news-presse/pressemitteilungen/2026/fehlzeiten-bilanz-2025-leichter-rueckgang-der-krankheitstage-weiterhin-hohe-ausfallzeiten-wegen-langzeiterkrankungen/',
+    scope: '23,3 Fehltage bei AOK-versicherten Beschäftigten im Jahr 2025. Der Wert ist eine alternative Vergleichsgröße, kein allgemeiner Deutschland-Durchschnitt.',
+  },
   {
     id: 'tk-health-report-2024',
     title: 'TK-Gesundheitsreport 2024 · Arbeitsunfähigkeit 2023',
@@ -63,6 +73,25 @@ export const CORPORATE_BENEFIT_SOURCES = [
     url: 'https://www.gesetze-im-internet.de/estg/__3.html',
     scope: 'Steuerrechtlicher Rahmen für Beiträge an Pensionsfonds, Pensionskasse und Direktversicherung; aktuelle Grenzen separat prüfen.',
   },
+  ...BKV_CATALOG_SOURCES,
+  {
+    id: 'provided-smiling-heroes-whitepaper',
+    title: 'Privatpatientenstatus für Ihre Mitarbeiter · Gesundheitskonzept',
+    publisher: 'Smiling Heroes',
+    year: '2025',
+    sourceType: 'provided-pdf',
+    providedFile: 'ChRIYifY_-z4WpkrqwmtlEDougF73xAA.pdf',
+    scope: 'Von Nadine bereitgestellte Konzeptvorlage: Kostenstory, Branchenprofile, Versorgungselemente und ROI-Darstellung. Anbieter- und Wirkungsbehauptungen werden nicht als allgemeiner Nachweis übernommen.',
+  },
+  {
+    id: 'provided-wifo-digital-bav',
+    title: 'Die digitale bAV-Beratung',
+    publisher: 'WIFO',
+    year: '2023',
+    sourceType: 'provided-pdf',
+    providedFile: 'ChQxfzFFVLr35nRMgJSz9eqXJq6pNxAA.pdf',
+    scope: 'Von Nadine bereitgestellte Prozessvorlage: digitale Mitarbeiterberatung, Arbeitgeber-/Arbeitnehmer-/Vermittlersicht sowie der Ablauf Aufklären – Herausarbeiten – Umsetzen. Prozentversprechen bleiben Anbieterbehauptungen.',
+  },
 ];
 
 export const BENEFIT_PREFERENCE_RANKING = [
@@ -102,7 +131,9 @@ function euroText(value) {
 }
 
 function selectedSickDays(data) {
-  return data.sickDaysMode === 'company' ? bounded(data.companySickDays, 0, 365, 19.4) : 19.4;
+  if (data.sickDaysMode === 'company') return bounded(data.companySickDays, 0, 365, 19.4);
+  if (data.sickDaysMode === 'wido2025') return 23.3;
+  return 19.4;
 }
 
 function selectedSickDayCost(data) {
@@ -135,6 +166,13 @@ export function calculateCorporateBenefits(data = {}) {
   const estimatedNetImpactPercent = bounded(data.estimatedNetImpactPercent, 0, 100, 55);
   const comparisonBudget = bounded(data.comparisonBudgetMonthly, 0, 100000, bkvMonthlyPremium || 30);
   const salaryOnCostsPercent = bounded(data.salaryOnCostsPercent, 0, 100, 20);
+  const nonCashBenefit = bounded(data.nonCashBenefitMonthly, 0, 100000, 0);
+  const otherTaxableBenefits = bounded(data.otherTaxableBenefitsMonthly, 0, 100000, 0);
+  const employeePkvContribution = bounded(data.employeePkvContributionMonthly, 0, 100000, 0);
+  const employerPkvSubsidy = bounded(data.employerPkvSubsidyMonthly, 0, 100000, 0);
+  const employerVl = bounded(data.employerVlMonthly, 0, 100000, 0);
+  const employeeVl = bounded(data.employeeVlMonthly, 0, 100000, 0);
+  const referenceNetPay = bounded(data.referenceNetPay, 0, 1000000, 0);
 
   const absenceCostAnnual = employees * sickDays * sickDayCost;
   const replacementsAnnual = employees * turnoverRate / 100;
@@ -159,6 +197,10 @@ export function calculateCorporateBenefits(data = {}) {
 
   const employeeNetImpact = employeeDeferral * estimatedNetImpactPercent / 100;
   const insuranceContributionMonthly = employeeDeferral + employerSubsidyMonthly + extraEmployerBav;
+  const taxableBkv = data.bkvTaxMode === 'individual' ? bkvMonthlyPremium : 0;
+  const estimatedTaxableGross = Math.max(0, averageGrossSalary - employeeDeferral + nonCashBenefit + otherTaxableBenefits + taxableBkv);
+  const employerBenefitSpendMonthly = bkvMonthlyPremium + employerSubsidyMonthly + extraEmployerBav + employerPkvSubsidy + employerVl;
+  const selectedOffer = findBkvOffer(data.bkvOfferId);
 
   const benefitComparison = [
     {
@@ -201,7 +243,7 @@ export function calculateCorporateBenefits(data = {}) {
 
   return {
     assumptions: {
-      employees, sickDays: round(sickDays, 1), sickDaysSource: data.sickDaysMode === 'company' ? 'Unternehmenswert' : 'TK 2023',
+      employees, sickDays: round(sickDays, 1), sickDaysSource: data.sickDaysMode === 'company' ? 'Unternehmenswert' : data.sickDaysMode === 'wido2025' ? 'WIdO/AOK 2025' : 'TK 2023',
       sickDayCost: round(sickDayCost), sickDayCostSource: data.sickDayCostMode === 'company' ? 'Unternehmenswert' : data.sickDayCostMode === 'baua2024' ? 'BAuA 2024, abgeleitet' : 'Planwert',
       averageGrossSalary: round(averageGrossSalary), turnoverRate: round(turnoverRate, 1), turnoverSource: data.turnoverMode === 'company' ? 'Unternehmenswert' : 'Planwert',
       replacementCostMonths, savedSickDaysPerEmployee: round(savedSickDaysPerEmployee, 1), turnoverReductionPoints: round(turnoverReductionPoints, 1),
@@ -221,9 +263,17 @@ export function calculateCorporateBenefits(data = {}) {
       grossSalary: round(averageGrossSalary), employeeDeferral: round(employeeDeferral), employerSubsidyPercent: round(employerSubsidyPercent, 1),
       employerSubsidyMonthly: round(employerSubsidyMonthly), extraEmployerBav: round(extraEmployerBav), insuranceContributionMonthly: round(insuranceContributionMonthly),
       estimatedEmployeeNetImpact: round(employeeNetImpact), estimatedNetImpactPercent: round(estimatedNetImpactPercent, 1),
+      payrollType: String(data.payrollType || 'gkv'), taxClass: String(data.payrollTaxClass || ''),
+      nonCashBenefit: round(nonCashBenefit), otherTaxableBenefits: round(otherTaxableBenefits), taxableBkv: round(taxableBkv), estimatedTaxableGross: round(estimatedTaxableGross),
+      employeePkvContribution: round(employeePkvContribution), employerPkvSubsidy: round(employerPkvSubsidy),
+      employerVl: round(employerVl), employeeVl: round(employeeVl), referenceNetPay: round(referenceNetPay), employerBenefitSpendMonthly: round(employerBenefitSpendMonthly),
     },
     products: {
-      bkv: { provider: String(data.bkvProvider || '').trim(), tariff: String(data.bkvTariff || '').trim(), budget: String(data.bkvAnnualBudget || '').trim(), premium: round(bkvMonthlyPremium) },
+      bkv: {
+        offerId: String(data.bkvOfferId || '').trim(), provider: String(data.bkvProvider || '').trim(), tariff: String(data.bkvTariff || '').trim(),
+        budget: String(data.bkvAnnualBudget || '').trim(), premium: round(bkvMonthlyPremium), sourceUrl: selectedOffer?.sourceUrl || '',
+        priceDate: selectedOffer?.priceDate || '', highlights: [...(selectedOffer?.highlights || [])],
+      },
       bav: { provider: String(data.bavProvider || '').trim(), tariff: String(data.bavTariff || '').trim(), contribution: round(insuranceContributionMonthly) },
     },
     benefitComparison,
@@ -235,6 +285,13 @@ export function calculateCorporateBenefits(data = {}) {
       `Nach den eingegebenen bKV-Kosten verbleiben im Szenario ${euroText(netAfterBkv)}. Das entspricht rechnerisch bis zu ${euroText(reinvestmentCapacityMonthly)} je Mitarbeitendem und Monat für zusätzliche Arbeitgeberleistungen.`,
       `Mit bKV und der gewählten bAV-Finanzierung verbleibt ein modellierter Saldo von ${euroText(netAfterConcept)}. Das ist eine Szenariorechnung und weder Einspar- noch Wirkungszusage.`,
     ],
+    implementationPlaybook: [
+      'Aufklären: Kostenbasis, Mitarbeitendenstruktur, Branche und bestehende Benefits transparent erfassen.',
+      'Herausarbeiten: bKV-Leistung, Budget und bAV-Finanzierung passend zu Belegschaft und Arbeitgeberziel auswählen.',
+      'Umsetzen: Versorgungsordnung, steuerliche Behandlung, Mitarbeiterkommunikation, digitale Beratung und Dokumentation organisieren.',
+      'Nachhalten: Nutzung, Fehlzeiten und Fluktuation regelmäßig messen, ohne Kausalwirkung der bKV ungeprüft zu behaupten.',
+    ],
+    documentBasisNote: 'Die bereitgestellten Smiling-Heroes- und WIFO-Unterlagen wurden als Konzept- und Prozessvorlage einbezogen. Ihre Fallstudien, ROI-Angaben und Prozentversprechen sind Anbieterbehauptungen und werden nicht als garantierte oder allgemeingültige Wirkung in den Rechner übernommen.',
     note: 'Szenariorechnung, keine Wirkungs-, Steuer- oder Rechtszusage. Weniger Fehlzeiten und Fluktuation dürfen nicht allein der bKV zugerechnet werden. Vor Umsetzung Tarif, Arbeitsvertrag, Gleichbehandlung, Lohnsteuer, Sozialversicherung und bAV-Durchführungsweg fachlich prüfen.',
   };
 }

@@ -22,7 +22,7 @@ try {
   assert.equal(publicCatalog.groups.find(group => group.id === 'energy')?.label, 'Energie & Versorgung');
 
   const initial = await knowledge.listAdviceKnowledge();
-  assert.equal(initial.referenceCount, 12);
+  assert.equal(initial.referenceCount, 23);
   assert.equal(initial.productDocumentCount, 4);
 
   await knowledge.addAdviceKnowledgeSource({
@@ -35,7 +35,7 @@ try {
   assert.equal(found.sources[0].status, 'pending-review');
 
   await assert.rejects(() => knowledge.addAdviceKnowledgeSource({ title: 'Unsicher', url: 'javascript:alert(1)' }), /HTTP/);
-  console.log('PASS Beratung: 12 Module, Firmenvorsorge, Energie-Einstiege, DIN-Trennung, Quellenbibliothek und Connector-Basis');
+  console.log('PASS Beratung: 12 Module, Firmenvorsorge mit 23 Referenzen, Energie-Einstiege, DIN-Trennung, Quellenbibliothek und Connector-Basis');
 } finally {
   await fs.rm(temp, { recursive: true, force: true });
 }

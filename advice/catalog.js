@@ -1,5 +1,6 @@
 import { energyTariffStatus } from '../integrations/energy-tariffs.js';
 import { CORPORATE_BENEFIT_SOURCES } from '../public/corporate-benefits-calculator.js';
+import { BKV_BUDGET_OPTIONS, BKV_OFFER_OPTIONS } from '../public/bkv-offer-catalog.js';
 
 const field = (key, label, options = {}) => ({ key, label, type: 'number', ...options });
 
@@ -49,7 +50,9 @@ export const ADVICE_MODULES = [
     sections: [
       { title: 'Unternehmen & Fehlzeiten', fields: [
         field('employees', 'Mitarbeitende', { value: 50 }),
-        field('sickDaysMode', 'Krankheitstage', { type: 'select', value: 'tk2023', options: [{ value: 'tk2023', label: 'TK 2023 · 19,4 Tage' }, { value: 'company', label: 'Tatsächlicher Unternehmenswert' }] }),
+        field('industry', 'Branche', { type: 'select', options: ['Handwerk & Bau', 'Pflege & Soziales', 'IT & Verwaltung', 'Industrie & Produktion', 'Handel', 'Dienstleistung', 'Andere'] }),
+        field('companyBenefitGoal', 'Ziel des Vorsorgewerks', { type: 'textarea', wide: true, placeholder: 'z. B. Bindung, Recruiting, Fehlzeiten, Versorgung und digitale Administration' }),
+        field('sickDaysMode', 'Krankheitstage', { type: 'select', value: 'tk2023', options: [{ value: 'tk2023', label: 'TK 2023 · 19,4 Tage' }, { value: 'wido2025', label: 'WIdO/AOK 2025 · 23,3 Tage' }, { value: 'company', label: 'Tatsächlicher Unternehmenswert' }] }),
         field('companySickDays', 'Tatsächliche Krankheitstage je Mitarbeitendem', { unit: 'Tage / Jahr', value: 19.4 }),
         field('sickDayCostMode', 'Kosten je Krankheitstag', { type: 'select', value: 'plan400', options: [{ value: 'plan400', label: 'Planwert · 400 €' }, { value: 'baua2024', label: 'BAuA 2024 · ca. 258 € Wertschöpfung' }, { value: 'company', label: 'Tatsächlicher Unternehmenswert' }] }),
         field('companySickDayCost', 'Tatsächliche Kosten je Krankheitstag', { unit: '€', value: 400 }),
@@ -66,6 +69,8 @@ export const ADVICE_MODULES = [
         field('bkvParticipationPercent', 'Teilnahme an der bKV', { unit: '% der Mitarbeitenden', value: 100 }),
       ] },
       { title: 'Konkrete betriebliche Krankenversicherung', fields: [
+        field('bkvOfferId', 'Öffentlich recherchiertes Tarifmodell', { type: 'select', options: BKV_OFFER_OPTIONS }),
+        field('bkvBudgetLevel', 'Gewünschtes Jahresbudget', { type: 'select', options: BKV_BUDGET_OPTIONS }),
         field('bkvProvider', 'Versicherer', { type: 'text', placeholder: 'z. B. Hallesche, Allianz, Barmenia' }),
         field('bkvTariff', 'Tarif / Tarifkombination', { type: 'text', placeholder: 'Tarif und Tarifstand' }),
         field('bkvMonthlyPremium', 'Beitrag Arbeitgeber', { unit: '€ je Person / Monat', value: 30 }),
@@ -80,6 +85,18 @@ export const ADVICE_MODULES = [
         field('employerSubsidyPercent', 'Arbeitgeberzuschuss auf Entgeltumwandlung', { unit: '%', value: 15 }),
         field('extraEmployerBav', 'Zusätzlicher Arbeitgeberbeitrag', { unit: '€ je Teilnehmendem / Monat', value: 25 }),
         field('estimatedNetImpactPercent', 'Geschätzter Nettoaufwand der Entgeltumwandlung', { unit: '% des Umwandlungsbetrags', value: 55 }),
+      ] },
+      { title: 'Erweiterte Musterabrechnung · individuell ergänzbar', fields: [
+        field('payrollType', 'Krankenversicherung Mitarbeitender', { type: 'select', value: 'gkv', options: [{ value: 'gkv', label: 'Gesetzlich versichert' }, { value: 'pkv', label: 'Privat versichert' }] }),
+        field('payrollTaxClass', 'Steuerklasse', { type: 'select', options: ['I', 'II', 'III', 'IV', 'V', 'VI'] }),
+        field('nonCashBenefitMonthly', 'Geldwerter Vorteil / Sachbezug', { unit: '€ / Monat', value: 0 }),
+        field('otherTaxableBenefitsMonthly', 'Weitere steuerpflichtige Benefits', { unit: '€ / Monat', value: 0 }),
+        field('employeePkvContributionMonthly', 'PKV-/Pflegebeitrag Mitarbeitender', { unit: '€ / Monat', value: 0 }),
+        field('employerPkvSubsidyMonthly', 'Arbeitgeberzuschuss PKV/Pflege', { unit: '€ / Monat', value: 0 }),
+        field('employerVlMonthly', 'Vermögenswirksame Leistungen Arbeitgeber', { unit: '€ / Monat', value: 0 }),
+        field('employeeVlMonthly', 'Eigenanteil vermögenswirksame Leistungen', { unit: '€ / Monat', value: 0 }),
+        field('referenceNetPay', 'Netto laut Musterabrechnung', { unit: '€ / Monat', value: 0 }),
+        field('payrollNotes', 'Weitere Abrechnungspositionen / Hinweise', { type: 'textarea', wide: true, placeholder: 'z. B. Firmenwagen, Jobrad, Direktzusage, Pfändung, Kirchensteuer oder tarifvertragliche Besonderheiten' }),
       ] },
       { title: 'Vergleich mit anderen Benefits', fields: [
         field('comparisonBudgetMonthly', 'Vergleichsbudget', { unit: '€ je Person / Monat', value: 30 }),

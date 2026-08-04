@@ -1,4 +1,5 @@
 import { calculateCorporateBenefits } from './corporate-benefits-calculator.js';
+import { applyBkvOfferSelection, findBkvOffer } from './bkv-offer-catalog.js';
 
 const MODES = {
   beratung: { label: 'Beratungsmodus', sub: 'Geführte Beratung mit zentraler Dokumentation.' },
@@ -249,6 +250,10 @@ function euro(value) {
   return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(Number.isFinite(value) ? value : 0);
 }
 
+function euroExact(value) {
+  return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0);
+}
+
 function percent(value) {
   return new Intl.NumberFormat('de-DE', { maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0) + ' %';
 }
@@ -352,6 +357,40 @@ function corporateHeading(text) {
 }
 
 function renderCorporateBenefits(card, result) {
+  const selectedBkv = result.products?.bkv || {};
+  if (selectedBkv.provider || selectedBkv.tariff) {
+    const product = document.createElement('div'); product.className = 'corporate-block';
+    product.appendChild(corporateHeading('bKV-Tarifvorauswahl · öffentlich recherchiert'));
+    const offer = document.createElement('div'); offer.className = 'offer-card';
+    const offerHead = document.createElement('div'); offerHead.className = 'offer-head';
+    const offerTitle = document.createElement('div');
+    const provider = document.createElement('strong'); provider.textContent = selectedBkv.provider || 'Anbieter offen';
+    const tariff = document.createElement('span'); tariff.textContent = selectedBkv.tariff || 'Tarif offen';
+    offerTitle.append(provider, tariff);
+    const price = document.createElement('b');
+    price.textContent = selectedBkv.premium > 0 ? `${euroExact(selectedBkv.premium)} / Monat` : 'aktuelles Angebot erforderlich';
+    offerHead.append(offerTitle, price); offer.appendChild(offerHead);
+    const meta = document.createElement('div'); meta.className = 'offer-meta';
+    for (const text of [selectedBkv.budget, selectedBkv.priceDate ? `Preisstand: ${selectedBkv.priceDate}` : '']) {
+      if (!text) continue;
+      const item = document.createElement('span'); item.textContent = text; meta.appendChild(item);
+    }
+    offer.appendChild(meta);
+    if (selectedBkv.highlights?.length) {
+      const highlights = document.createElement('ul'); highlights.className = 'offer-highlights';
+      for (const text of selectedBkv.highlights) { const item = document.createElement('li'); item.textContent = text; highlights.appendChild(item); }
+      offer.appendChild(highlights);
+    }
+    if (selectedBkv.sourceUrl) {
+      const source = document.createElement('a'); source.className = 'offer-source'; source.href = selectedBkv.sourceUrl;
+      source.target = '_blank'; source.rel = 'noopener'; source.textContent = 'Offizielle Produktquelle öffnen ↗'; offer.appendChild(source);
+    }
+    product.appendChild(offer);
+    const disclaimer = document.createElement('div'); disclaimer.className = 'hint';
+    disclaimer.textContent = 'Nur Vorbelegung für die Beratung: Beitrag, Kollektivvoraussetzungen, Leistungsumfang und Steuerweg vor Abschluss mit einem aktuellen Angebot bestätigen.';
+    product.appendChild(disclaimer); card.appendChild(product);
+  }
+
   const flow = document.createElement('div'); flow.className = 'corporate-block';
   flow.appendChild(corporateHeading('Kosten, Hebel und Finanzierung'));
   const max = Math.max(1, result.baseline.totalAnnual, result.scenario.potentialSavingsAnnual, result.scenario.totalConceptCostAnnual);
@@ -380,14 +419,33 @@ function renderCorporateBenefits(card, result) {
   for (const text of result.narrative) { const item = document.createElement('li'); item.textContent = text; list.appendChild(item); }
   pitch.appendChild(list); card.appendChild(pitch);
 
-  const payroll = document.createElement('div'); payroll.className = 'corporate-block'; payroll.appendChild(corporateHeading('Musterabrechnung bAV · vereinfachte Darstellung'));
+  const rollout = document.createElement('div'); rollout.className = 'corporate-block'; rollout.appendChild(corporateHeading('Umsetzungsprozess · aus den Referenzunterlagen abgeleitet'));
+  const rolloutList = document.createElement('ol'); rolloutList.className = 'pitch-list rollout-list';
+  for (const text of result.implementationPlaybook || []) { const item = document.createElement('li'); item.textContent = text; rolloutList.appendChild(item); }
+  rollout.appendChild(rolloutList);
+  const basis = document.createElement('div'); basis.className = 'hint'; basis.textContent = result.documentBasisNote || '';
+  rollout.appendChild(basis); card.appendChild(rollout);
+
+  const payroll = document.createElement('div'); payroll.className = 'corporate-block'; payroll.appendChild(corporateHeading('Musterabrechnung · bAV, PKV, Sachbezüge und VL'));
   const payrollTable = document.createElement('div'); payrollTable.className = 'benefit-table';
   const payrollRows = [
+    ['Versicherungsstatus', result.payroll.payrollType === 'pkv' ? 'Privat versichert' : 'Gesetzlich versichert'],
+    ['Steuerklasse', result.payroll.taxClass || 'nicht erfasst'],
     ['Monatsbrutto Mitarbeitender', euro(result.payroll.grossSalary)],
+    ['Geldwerter Vorteil / Sachbezug', '+ ' + euro(result.payroll.nonCashBenefit)],
+    ['Weitere steuerpflichtige Bezüge', '+ ' + euro(result.payroll.otherTaxableBenefits)],
+    ['bKV als individuell versteuerter Bezug', '+ ' + euro(result.payroll.taxableBkv)],
     ['Entgeltumwandlung', '− ' + euro(result.payroll.employeeDeferral)],
+    ['Vereinfachtes Steuer-/SV-Brutto', euro(result.payroll.estimatedTaxableGross)],
+    ['PKV-/PV-Beitrag Mitarbeitender', '− ' + euro(result.payroll.employeePkvContribution)],
+    ['Arbeitgeberzuschuss PKV/PV', '+ ' + euro(result.payroll.employerPkvSubsidy)],
+    ['Vermögenswirksame Leistungen Arbeitgeber', '+ ' + euro(result.payroll.employerVl)],
+    ['Vermögenswirksame Leistungen Mitarbeitender', '− ' + euro(result.payroll.employeeVl)],
     [`Arbeitgeberzuschuss (${new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1 }).format(result.payroll.employerSubsidyPercent)} %)`, '+ ' + euro(result.payroll.employerSubsidyMonthly)],
     ['Zusätzlicher Arbeitgeberbeitrag', '+ ' + euro(result.payroll.extraEmployerBav)],
     ['Gesamtbeitrag in die Versorgung', euro(result.payroll.insuranceContributionMonthly)],
+    ['Gesamter Arbeitgeberaufwand Benefits / Monat', euro(result.payroll.employerBenefitSpendMonthly)],
+    ['Referenz-Netto laut Unternehmensabrechnung', result.payroll.referenceNetPay ? euro(result.payroll.referenceNetPay) : 'nicht hinterlegt'],
     [`Geschätzter Nettoaufwand (${new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1 }).format(result.payroll.estimatedNetImpactPercent)} % Planfaktor)`, 'ca. ' + euro(result.payroll.estimatedEmployeeNetImpact)],
   ];
   for (const [labelText, valueText] of payrollRows) {
@@ -397,7 +455,7 @@ function renderCorporateBenefits(card, result) {
     row.append(label, value); payrollTable.appendChild(row);
   }
   payroll.appendChild(payrollTable);
-  const payrollHint = document.createElement('div'); payrollHint.className = 'hint'; payrollHint.textContent = 'Keine echte Lohnabrechnung: Steuerklasse, Kirchensteuer, Beitragsbemessungsgrenzen, Krankenkasse, Tarifvertrag und individuelle Sozialversicherung fehlen. Der Nettofaktor bleibt deshalb editierbar.';
+  const payrollHint = document.createElement('div'); payrollHint.className = 'hint'; payrollHint.textContent = 'Keine echte Entgeltabrechnung: Steuerklasse und einzelne Lohnbestandteile können erfasst werden, die exakte Berechnung von Lohnsteuer, Kirchensteuer, Beitragsbemessungsgrenzen, Sozialversicherung und PKV-Zuschuss bleibt aber Sache der Lohnabrechnung. Eine Unternehmens-Musterabrechnung kann unten als PDF oder Bild zur Akte geladen werden.';
   payroll.appendChild(payrollHint); card.appendChild(payroll);
 
   const comparison = document.createElement('div'); comparison.className = 'corporate-block'; comparison.appendChild(corporateHeading('Benefit-Vergleich · Kosten, Steuer, Nutzen'));
@@ -433,10 +491,14 @@ function renderCorporateBenefits(card, result) {
   const sources = document.createElement('div'); sources.className = 'corporate-block'; sources.appendChild(corporateHeading('Quellen & Prüfbasis'));
   const sourceList = document.createElement('div'); sourceList.className = 'source-list';
   for (const source of result.sources) {
-    const link = document.createElement('a'); link.href = source.url; link.target = '_blank'; link.rel = 'noopener';
+    const link = document.createElement(source.url ? 'a' : 'div');
+    if (source.url) { link.href = source.url; link.target = '_blank'; link.rel = 'noopener'; }
+    else link.className = 'source-item';
     const title = document.createElement('b'); title.textContent = `${source.title} · ${source.year}`;
     const detail = document.createElement('span'); detail.textContent = source.scope;
-    link.append(title, detail); sourceList.appendChild(link);
+    link.append(title, detail);
+    if (source.providedFile) { const file = document.createElement('span'); file.className = 'source-file'; file.textContent = `Bereitgestellte Datei: ${source.providedFile}`; link.appendChild(file); }
+    sourceList.appendChild(link);
   }
   sources.appendChild(sourceList); card.appendChild(sources);
 }
@@ -490,7 +552,9 @@ function createAdviceField(moduleId, spec, data, moduleRoot) {
   else if (spec.type === 'select') {
     input = document.createElement('select');
     const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'bitte wählen'; input.appendChild(empty);
-    for (const entry of spec.options || []) {
+    const offer = spec.key === 'bkvBudgetLevel' ? findBkvOffer(data.bkvOfferId) : null;
+    const options = offer ? offer.budgets.map(item => ({ value: String(item.annual), label: `${new Intl.NumberFormat('de-DE').format(item.annual)} € Jahresbudget${Number.isFinite(item.monthly) ? ` · ${euroExact(item.monthly)} / Monat` : ' · Preis anfragen'}` })) : (spec.options || []);
+    for (const entry of options) {
       const option = document.createElement('option');
       option.value = typeof entry === 'object' ? entry.value : entry;
       option.textContent = typeof entry === 'object' ? entry.label : entry;
@@ -503,7 +567,15 @@ function createAdviceField(moduleId, spec, data, moduleRoot) {
   input.dataset.adviceKey = spec.key;
   input.value = data[spec.key] ?? spec.value ?? '';
   if (spec.placeholder) input.placeholder = spec.placeholder;
-  input.addEventListener('input', () => { data[spec.key] = input.value; refreshAdviceCalculation(moduleId); });
+  input.addEventListener('input', () => {
+    data[spec.key] = input.value;
+    if (moduleId === 'corporate-benefits' && ['bkvOfferId', 'bkvBudgetLevel'].includes(spec.key)) {
+      applyBkvOfferSelection(data, spec.key);
+      renderAdviceActiveModule();
+      return;
+    }
+    refreshAdviceCalculation(moduleId);
+  });
   wrap.append(label, input); return wrap;
 }
 
@@ -1039,7 +1111,7 @@ function addRoom() {
 }
 
 function kindLabel(kind) {
-  return ({ floorplan: 'Grundriss', elevation: 'Seitenansicht', photo: 'Foto', 'tmb-template': 'TMB-Referenz', document: 'Dokument', audio: 'Audio' })[kind] || kind;
+  return ({ floorplan: 'Grundriss', elevation: 'Seitenansicht', photo: 'Foto', 'tmb-template': 'TMB-Referenz', document: 'Dokument', 'payroll-sample': 'Musterabrechnung', audio: 'Audio' })[kind] || kind;
 }
 
 function renderFiles() {
@@ -1293,23 +1365,44 @@ function buildSimpleReport() {
         for (const item of calculation?.items || []) reportRow(section, item.label, item.value);
         if (calculation?.corporate) {
           const corporate = calculation.corporate;
+          reportSubheading(section, 'bKV-Tarifvorauswahl');
+          reportRow(section, 'Anbieter / Tarif', [corporate.products?.bkv?.provider, corporate.products?.bkv?.tariff].filter(Boolean).join(' · ') || 'nicht ausgewählt');
+          reportRow(section, 'Budget', corporate.products?.bkv?.budget);
+          reportRow(section, 'Öffentlicher Monatsbeitrag', corporate.products?.bkv?.premium ? euroExact(corporate.products.bkv.premium) : 'aktuelles Angebot erforderlich');
+          reportRow(section, 'Preisstand', corporate.products?.bkv?.priceDate);
+          reportRow(section, 'Offizielle Produktquelle', corporate.products?.bkv?.sourceUrl);
           reportSubheading(section, 'Finanzierungslogik');
           reportRow(section, 'Fehlzeitenkosten', euro(corporate.baseline.absenceCostAnnual));
           reportRow(section, 'Fluktuationskosten', euro(corporate.baseline.turnoverCostAnnual));
           reportRow(section, 'Modellierte Fehlzeitenersparnis', euro(corporate.scenario.absenceSavingsAnnual));
           reportRow(section, 'Modellierte Fluktuationsersparnis', euro(corporate.scenario.turnoverSavingsAnnual));
           reportRow(section, 'Break-even bKV', `${new Intl.NumberFormat('de-DE', { maximumFractionDigits: 2 }).format(corporate.scenario.breakEvenSavedDays)} vermiedene Krankheitstage je Person`);
-          reportSubheading(section, 'Musterabrechnung bAV');
+          reportSubheading(section, 'Musterabrechnung · bAV, PKV, Sachbezüge und VL');
+          reportRow(section, 'Versicherungsstatus', corporate.payroll.payrollType === 'pkv' ? 'PKV' : 'GKV');
+          reportRow(section, 'Steuerklasse', corporate.payroll.taxClass);
           reportRow(section, 'Monatsbrutto', euro(corporate.payroll.grossSalary));
+          reportRow(section, 'Geldwerter Vorteil / Sachbezug', euro(corporate.payroll.nonCashBenefit));
+          reportRow(section, 'Weitere steuerpflichtige Bezüge', euro(corporate.payroll.otherTaxableBenefits));
+          reportRow(section, 'Individuell versteuerte bKV', euro(corporate.payroll.taxableBkv));
           reportRow(section, 'Entgeltumwandlung', euro(corporate.payroll.employeeDeferral));
+          reportRow(section, 'Vereinfachtes Steuer-/SV-Brutto', euro(corporate.payroll.estimatedTaxableGross));
+          reportRow(section, 'PKV-/PV-Beitrag Mitarbeitender', euro(corporate.payroll.employeePkvContribution));
+          reportRow(section, 'Arbeitgeberzuschuss PKV/PV', euro(corporate.payroll.employerPkvSubsidy));
+          reportRow(section, 'VL Arbeitgeber', euro(corporate.payroll.employerVl));
+          reportRow(section, 'VL Mitarbeitender', euro(corporate.payroll.employeeVl));
           reportRow(section, 'Arbeitgeberzuschuss', euro(corporate.payroll.employerSubsidyMonthly));
           reportRow(section, 'Zusätzlicher Arbeitgeberbeitrag', euro(corporate.payroll.extraEmployerBav));
           reportRow(section, 'Gesamtbeitrag Versorgung', euro(corporate.payroll.insuranceContributionMonthly));
+          reportRow(section, 'Arbeitgeberaufwand Benefits / Monat', euro(corporate.payroll.employerBenefitSpendMonthly));
+          reportRow(section, 'Referenz-Netto Unternehmensabrechnung', corporate.payroll.referenceNetPay ? euro(corporate.payroll.referenceNetPay) : 'nicht hinterlegt');
           reportRow(section, 'Geschätzter Nettoaufwand', euro(corporate.payroll.estimatedEmployeeNetImpact));
+          reportSubheading(section, 'Umsetzungsprozess');
+          for (const [index, step] of (corporate.implementationPlaybook || []).entries()) reportRow(section, `Schritt ${index + 1}`, step);
+          reportRow(section, 'Einordnung der Referenzunterlagen', corporate.documentBasisNote);
           reportSubheading(section, 'Benefit-Ranking bei der Arbeitgeberwahl');
           for (const entry of corporate.preferenceRanking) reportBar(section, entry.label, entry.value);
           reportSubheading(section, 'Verwendete Quellen');
-          for (const source of corporate.sources) reportRow(section, `${source.publisher} · ${source.year}`, `${source.title} · ${source.url}`);
+          for (const source of corporate.sources) reportRow(section, `${source.publisher} · ${source.year}`, source.url ? `${source.title} · ${source.url}` : `${source.title} · bereitgestellte PDF: ${source.providedFile || 'lokale Datei'}`);
         }
         if (calculation?.note) reportRow(section, 'Hinweis zur Modellrechnung', calculation.note);
         if (module.notice) reportRow(section, 'Fachlicher Hinweis', module.notice);
