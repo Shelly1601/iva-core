@@ -122,11 +122,23 @@ async function saveEvaluation(){
 function renderHistory(items){
   $('history').innerHTML = items.length ? items.slice(0,20).map(item => `<div class="history-item"><span class="source">${esc(item.source)}</span><div><b>${esc(item.transcript || item.expectedText || 'Sprachtest')}</b><small>${esc((item.answer || 'Noch ohne Antwort').slice(0,180))}</small><small>${new Date(item.createdAt).toLocaleString('de-DE')} · erste Antwort ${ms(item.timings?.firstTextMs)} · Audio ${ms(item.timings?.firstAudioMs)}</small></div><div class="score">${item.rating ? '★ '.repeat(item.rating).trim() : item.response?.spokenReady ? '✓ sprechfertig' : 'noch offen'}</div></div>`).join('') : '<div class="empty">Noch keine Sprachtests. Der erste echte Test legt die Basis.</div>';
 }
+function renderLearning(learning = {}){
+  const empty = text => `<div class="empty">${esc(text)}</div>`;
+  $('pronunciations').innerHTML = learning.pronunciations?.length
+    ? learning.pronunciations.slice(0,20).map(item => `<div class="learning-item"><span class="state">sofort aktiv</span><b>${esc(item.term)} → ${esc(item.spokenAs)}</b>${item.example ? `<small>${esc(item.example)}</small>` : ''}</div>`).join('')
+    : empty('Noch keine Aussprachekorrektur.');
+  $('preferences').innerHTML = learning.communicationPreferences?.length
+    ? learning.communicationPreferences.slice(0,20).map(item => `<div class="learning-item"><span class="state">gelernt</span><b>${esc(item.preference)}</b><small>${esc(item.context || 'allgemein')}</small></div>`).join('')
+    : empty('Noch keine zusätzliche Kommunikationsregel.');
+  $('improvements').innerHTML = learning.improvementRequests?.length
+    ? learning.improvementRequests.slice(0,20).map(item => `<div class="learning-item"><span class="state">${esc(item.status || 'erfasst')}</span><b>${esc(item.title)}</b><small>${esc(item.desiredOutcome || item.description || '')}</small><small>Code und Deployment brauchen Bestätigung.</small></div>`).join('')
+    : empty('Noch kein offener Bauauftrag.');
+}
 async function loadDashboard(){
   if (!token()) { setStatus('err','API-Token fehlt'); return; }
   try {
-    const [summary,items] = await Promise.all([api('/api/voice-lab/summary'),api('/api/voice-lab/evaluations?limit=40')]);
-    state.summary = summary; state.phrases = summary.testPhrases || []; renderMetrics(); if (!$('phraseSelect').options.length) renderPhrases(); renderHistory(items);
+    const [summary,items,learning] = await Promise.all([api('/api/voice-lab/summary'),api('/api/voice-lab/evaluations?limit=40'),api('/api/voice-lab/learning')]);
+    state.summary = summary; state.phrases = summary.testPhrases || []; renderMetrics(); if (!$('phraseSelect').options.length) renderPhrases(); renderHistory(items); renderLearning(learning);
     setStatus(summary.configured?.groq && summary.configured?.elevenLabs ? 'on' : '', summary.configured?.groq && summary.configured?.elevenLabs ? 'bereit' : 'Anbindung unvollständig');
   } catch (error) { setStatus('err',error.message); }
 }

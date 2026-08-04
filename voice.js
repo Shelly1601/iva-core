@@ -1,5 +1,6 @@
 // voice.js — Text-to-Speech fuer IVA/Eva. Provider-flexibel (wie images.js).
 // Default: ElevenLabs (beste Qualitaet, ein API-Key). Spaeter: Piper (self-hosted, gratis).
+import { activePronunciationCorrections } from './voice-lab/store.js';
 
 // Deutsche Zahl-Ausgabe (0..999.999.999). ElevenLabs spricht ausgeschriebene
 // Zahlen deutlich zuverlaessiger als Ziffern mit Punkt-Tausendertrennung.
@@ -50,7 +51,15 @@ const TTS_TERMS = [
   ['GKV',  'gesetzliche Krankenversicherung'],
   ['BBG',  'Beitragsbemessungsgrenze'],
 ];
-function replaceTerms(s) {
+function replaceTerms(s, customTerms = []) {
+  for (const item of customTerms) {
+    const term = String(item?.term || '').trim();
+    const spokenAs = String(item?.spokenAs || '').trim();
+    if (!term || !spokenAs) continue;
+    const esc = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('(?<![\\p{L}\\d])' + esc + '(?![\\p{L}\\d])', 'giu');
+    s = s.replace(re, () => spokenAs);
+  }
   for (const [k, v] of TTS_TERMS) {
     const esc = k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const re = new RegExp('(?<![\\p{L}\\d])' + esc + '(?![\\p{L}\\d])', 'gu');
@@ -60,7 +69,7 @@ function replaceTerms(s) {
 }
 
 // Text fuer die Sprachausgabe saeubern: Markdown, Emojis, Listen-Bindestriche raus.
-function clean(text) {
+function clean(text, customTerms = []) {
   const MON = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
   const TAG = { Mo:'Montag', Di:'Dienstag', Mi:'Mittwoch', Do:'Donnerstag', Fr:'Freitag', Sa:'Samstag', So:'Sonntag' };
   const ABK = { 'z.B.':'zum Beispiel', 'z. B.':'zum Beispiel', 'u.a.':'unter anderem', 'd.h.':'das heißt', 'usw.':'und so weiter', 'ca.':'circa', 'inkl.':'inklusive', 'evtl.':'eventuell', 'bzw.':'beziehungsweise', 'Nr.':'Nummer', 'Tel.':'Telefon' };
@@ -71,7 +80,7 @@ function clean(text) {
        .replace(/[#*_`>|]/g, '')
        .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}]/gu, '');
   // Fach-Aussprache-Ersetzungen zuerst (Komposita + Kuerzel).
-  s = replaceTerms(s);
+  s = replaceTerms(s, customTerms);
   // Abkuerzungen ausschreiben
   for (const [k, v] of Object.entries(ABK)) s = s.split(k).join(v);
   // Einheiten & Symbole (Wortgrenzen, damit 'Wärmepumpe'/'CO2-Bilanz' korrekt bleiben).
@@ -160,8 +169,13 @@ async function piper(text) {
 }
 
 // speak(text) -> { buffer, mime, ext } | null
+export async function prepareSpeechText(text) {
+  const learnedPronunciations = await activePronunciationCorrections().catch(() => []);
+  return clean(text, learnedPronunciations);
+}
+
 export async function speak(text, { provider, voiceId } = {}) {
-  const t = clean(text);
+  const t = await prepareSpeechText(text);
   if (!t) return null;
   const prov = provider || process.env.TTS_PROVIDER || 'elevenlabs';
   const t0 = Date.now();

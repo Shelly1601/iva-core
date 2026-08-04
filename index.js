@@ -24,13 +24,23 @@ import { workspacesSkill } from './skills/workspaces.js';
 import { qonektoSkill } from './skills/qonekto.js';
 import { adviceSkill } from './skills/advice.js';
 import { opportunitiesSkill } from './skills/opportunities.js';
+import { selfImprovementSkill } from './skills/self-improvement.js';
 import { getAgent } from './agents/registry.js';
 import { marketAnalysis } from './marketing/market.js';
 import { fetchMetaAdsInsights, marketingConnectorStatus } from './marketing/connectors.js';
 import { listResearchRuns, listResearchedCompanies, runMarketIntelligence } from './marketing/intelligence.js';
 import { approveAdRecommendation, createContentPlan, createEmailCampaign, createMarketingReport, listMarketingCollection, recordAdSnapshot } from './marketing/planning.js';
 import { speak } from './voice.js';
-import { listVoiceEvaluations, recordVoiceEvaluation, voiceLabSummary } from './voice-lab/store.js';
+import {
+  captureImprovementRequest,
+  listVoiceEvaluations,
+  listVoiceLearning,
+  recordVoiceEvaluation,
+  saveCommunicationPreference,
+  savePronunciationCorrection,
+  voiceLabSummary,
+  voiceLearningPromptContext,
+} from './voice-lab/store.js';
 import { transcribeAudio } from './voice-lab/transcribe.js';
 import { askArchitect } from './agents/architect.js';
 import * as workspaces from './workspaces/store.js';
@@ -352,6 +362,7 @@ async function updateHeatHeroLeadStatus(id, status, reason) {
 
 async function buildSystemPrompt() {
   const mem = await loadMemory();
+  const learnedCommunication = await voiceLearningPromptContext().catch(() => 'Gespeicherte Kommunikationspräferenzen konnten gerade nicht geladen werden.');
   const notes = mem.notes?.length ? mem.notes.map(n => '- ' + n).join('\n') : '(noch nichts gemerkt)';
   const open = (mem.todos || []).filter(t => !t.done);
   const todoText = open.length ? open.map(t => '- ' + t.text).join('\n') : '(keine offenen)';
@@ -398,6 +409,14 @@ Tool-Nutzung:
 - Beratungsarten und vorhandene Fachmodule mit listAdviceModules ermitteln. Bei Tarif-, Altvertrags- oder Produktvergleichen zuerst searchAdviceKnowledge nutzen. Leistungsmerkmale ausschliesslich aus belegten Originalunterlagen nennen; fehlende Tarifstaende, Bedingungen oder Produktinformationsblaetter als Datenluecke markieren und niemals erfinden. DIN 77230 betrifft Privathaushalte, DIN 77235 Selbststaendige und KMU. Ohne vollstaendig hinterlegtes lizenziertes Regelwerk nur "DIN-orientierte Vorbereitung" sagen, niemals "DIN-konform".
 - Nach Toolaufruf: Ergebnis im passenden Antwort-Format (siehe oben), nicht die Rohdaten.
 
+Direktes Lernen und Selbstverbesserung:
+
+- Wenn Nadine ausdrücklich sagt, dass ein Begriff, Name oder Kürzel anders ausgesprochen wird, sofort savePronunciationCorrection verwenden und die genaue Zuordnung bestätigen. Die Korrektur gilt ab der nächsten Sprachausgabe.
+- Wenn Nadine ausdrücklich eine dauerhafte Kommunikationsregel nennt, zum Beispiel kürzer antworten, zuerst das Ergebnis sagen oder einen Ausdruck nicht mehr verwenden, saveCommunicationPreference verwenden. Aus bloßem Ärger oder einer mehrdeutigen Bemerkung keine dauerhafte Regel ableiten; dann genau eine Rückfrage stellen.
+- Wenn Nadine eine neue Funktion oder Systemänderung wünscht, captureImprovementRequest verwenden. Danach ehrlich sagen: Der Bauauftrag ist erfasst, aber noch nicht programmiert oder deployt.
+- Eine beiläufige Sprachäußerung darf niemals selbstständig Code ändern oder produktiv deployen. Codeänderung, Tests und Produktionsdeployment bleiben getrennte Schritte mit ausdrücklicher Bestätigung.
+- Niemals behaupten, IVA habe sich bereits repariert, gebaut oder weiterentwickelt, wenn nur eine Korrektur oder ein Bauauftrag gespeichert wurde.
+
 Voice-Modus überschreibt die Format-Regeln oben, wenn Sprache aktiviert ist:
 
 - Natürliche Prosa, kurze Sätze, gute Betonung durch sinnvolle Satzlängen.
@@ -419,7 +438,10 @@ Das hast du dir gemerkt:
 ${notes}
 
 Offene Todos:
-${todoText}`;
+${todoText}
+
+Zusätzlich gelernte Kommunikationspräferenzen:
+${learnedCommunication}`;
 }
 
 // Stufe 2: Skill-Registrierung via Dependency Injection. Alle Tool-Namen,
@@ -435,6 +457,7 @@ const ALL_SKILLS = {
   workspaces: workspacesSkill({ workspaces }),
   advice:    adviceSkill({ publicAdviceCatalog, listAdviceKnowledge }),
   opportunities: opportunitiesSkill({ listOpportunities, runOpportunityScout, prepareOpportunityHandoff }),
+  selfImprovement: selfImprovementSkill({ savePronunciationCorrection, saveCommunicationPreference, captureImprovementRequest, listVoiceLearning }),
   qonekto:   null, // wird pro Anfrage mit der echten sessionId erzeugt
 };
 
@@ -719,6 +742,19 @@ app.get('/api/voice-lab/evaluations', async (req, res) => {
 });
 app.post('/api/voice-lab/evaluations', async (req, res) => {
   try { res.status(201).json(await recordVoiceEvaluation(req.body || {})); }
+  catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.get('/api/voice-lab/learning', async (_req, res) => res.json(await listVoiceLearning()));
+app.post('/api/voice-lab/pronunciations', async (req, res) => {
+  try { res.status(201).json(await savePronunciationCorrection({ ...(req.body || {}), source: 'voice-lab' })); }
+  catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.post('/api/voice-lab/preferences', async (req, res) => {
+  try { res.status(201).json(await saveCommunicationPreference(req.body || {})); }
+  catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.post('/api/voice-lab/improvements', async (req, res) => {
+  try { res.status(201).json(await captureImprovementRequest(req.body || {})); }
   catch (error) { res.status(400).json({ error: error.message }); }
 });
 

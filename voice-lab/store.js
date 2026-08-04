@@ -25,6 +25,9 @@ function emptyStore() {
       targets: { wordErrorRate: 0.12, firstTextMs: 1500, firstAudioMs: 2400, totalMs: 6500, maxAnswerWords: 80 },
     },
     evaluations: [],
+    pronunciations: [],
+    communicationPreferences: [],
+    improvementRequests: [],
   };
 }
 
@@ -40,6 +43,9 @@ async function load() {
       ...parsed,
       settings: { ...base.settings, ...(parsed.settings || {}), targets: { ...base.settings.targets, ...(parsed.settings?.targets || {}) } },
       evaluations: Array.isArray(parsed.evaluations) ? parsed.evaluations : [],
+      pronunciations: Array.isArray(parsed.pronunciations) ? parsed.pronunciations : [],
+      communicationPreferences: Array.isArray(parsed.communicationPreferences) ? parsed.communicationPreferences : [],
+      improvementRequests: Array.isArray(parsed.improvementRequests) ? parsed.improvementRequests : [],
     };
   } catch {
     return emptyStore();
@@ -196,5 +202,101 @@ export async function voiceLabSummary() {
     topIssues,
     targets: store.settings.targets,
     testPhrases: VOICE_TEST_PHRASES,
+    learned: {
+      pronunciations: store.pronunciations.filter(item => item.active !== false).length,
+      communicationPreferences: store.communicationPreferences.filter(item => item.active !== false).length,
+      improvementRequests: store.improvementRequests.filter(item => item.status !== 'rejected').length,
+    },
   };
+}
+
+export async function savePronunciationCorrection(input = {}) {
+  const term = clean(input.term, 120);
+  const spokenAs = clean(input.spokenAs, 180);
+  if (!term || !spokenAs) throw new Error('Begriff und gewünschte Aussprache werden benötigt.');
+  if (term.length < 2 || spokenAs.length < 2) throw new Error('Aussprachekorrektur ist zu kurz.');
+  return mutate(store => {
+    const now = new Date().toISOString();
+    const existing = store.pronunciations.find(item => item.term.toLocaleLowerCase('de-DE') === term.toLocaleLowerCase('de-DE'));
+    const correction = {
+      id: existing?.id || crypto.randomUUID(),
+      term,
+      spokenAs,
+      example: clean(input.example, 500),
+      source: clean(input.source || 'nadine', 80),
+      active: true,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    };
+    if (existing) Object.assign(existing, correction);
+    else store.pronunciations.push(correction);
+    store.pronunciations = store.pronunciations.slice(-250);
+    return structuredClone(correction);
+  });
+}
+
+export async function saveCommunicationPreference(input = {}) {
+  const preference = clean(input.preference, 500);
+  if (!preference) throw new Error('Kommunikationsregel fehlt.');
+  return mutate(store => {
+    const now = new Date().toISOString();
+    const key = preference.toLocaleLowerCase('de-DE');
+    const existing = store.communicationPreferences.find(item => item.preference.toLocaleLowerCase('de-DE') === key);
+    if (existing) { existing.active = true; existing.updatedAt = now; return structuredClone(existing); }
+    const item = { id: crypto.randomUUID(), preference, context: clean(input.context || 'allgemein', 100), active: true, createdAt: now, updatedAt: now };
+    store.communicationPreferences.push(item);
+    store.communicationPreferences = store.communicationPreferences.slice(-150);
+    return structuredClone(item);
+  });
+}
+
+export async function captureImprovementRequest(input = {}) {
+  const title = clean(input.title, 180);
+  const desiredOutcome = clean(input.desiredOutcome || input.description, 3000);
+  if (!title || !desiredOutcome) throw new Error('Titel und gewünschtes Ergebnis fehlen.');
+  return mutate(store => {
+    const now = new Date().toISOString();
+    const item = {
+      id: crypto.randomUUID(),
+      title,
+      description: clean(input.description, 4000),
+      desiredOutcome,
+      acceptanceCriteria: (Array.isArray(input.acceptanceCriteria) ? input.acceptanceCriteria : []).map(value => clean(value, 500)).filter(Boolean).slice(0, 12),
+      area: clean(input.area || 'iva-core', 100),
+      priority: ['low', 'normal', 'high'].includes(input.priority) ? input.priority : 'normal',
+      status: 'captured',
+      buildMode: 'proposal-first',
+      requiresConfirmationBeforeCode: true,
+      requiresConfirmationBeforeDeploy: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    store.improvementRequests.push(item);
+    store.improvementRequests = store.improvementRequests.slice(-500);
+    return structuredClone(item);
+  });
+}
+
+export async function listVoiceLearning() {
+  const store = await load();
+  return {
+    pronunciations: store.pronunciations.filter(item => item.active !== false).slice().sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))),
+    communicationPreferences: store.communicationPreferences.filter(item => item.active !== false).slice().sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))),
+    improvementRequests: store.improvementRequests.slice().sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))),
+  };
+}
+
+export async function activePronunciationCorrections() {
+  return (await load()).pronunciations
+    .filter(item => item.active !== false && item.term && item.spokenAs)
+    .sort((a, b) => b.term.length - a.term.length)
+    .slice(0, 250)
+    .map(item => ({ term: item.term, spokenAs: item.spokenAs }));
+}
+
+export async function voiceLearningPromptContext() {
+  const store = await load();
+  const preferences = store.communicationPreferences.filter(item => item.active !== false).slice(-30);
+  if (!preferences.length) return 'Noch keine zusätzlichen Kommunikationspräferenzen gespeichert.';
+  return preferences.map(item => `- ${item.preference}${item.context && item.context !== 'allgemein' ? ` (Kontext: ${item.context})` : ''}`).join('\n');
 }
