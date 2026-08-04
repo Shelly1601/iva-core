@@ -33,6 +33,8 @@ Das Zielbild für die sichere Beleg- und Steuerberater-Vorbereitung steht in [`I
 - `GET/POST /webhooks/whatsapp` – signierter Meta-Webhook für eingehende WhatsApp-Nachrichten.
 - `GET /marketing` – Marketing-Zentrale für Marken, Marktanalysen, Firmenrecherche, Kampagnen, Content-/E-Mail-Pläne, Ads-Checks und Reports.
 - `GET /api/marketing/status` – Connector-Bereitschaft ohne Ausgabe von Secrets; `/api/marketing/*` verwaltet Research, Unternehmen, Pläne, Ads-Snapshots und Reports.
+- `GET /accounting` – eigener interner IVA-Buchhaltungsbereich mit Beleg-Inbox, Firmen, Ampel und Monatsübersicht.
+- `GET/POST/PATCH /api/accounting/*` – geschützte Beleg-, Firmen-, Prüf- und Export-API; Originalbelege werden nicht überschrieben oder gelöscht.
 
 ## Lokale Prüfungen
 - `npm run test:workspaces` – Fallakten, Dateien und Persistenz.
@@ -41,6 +43,7 @@ Das Zielbild für die sichere Beleg- und Steuerberater-Vorbereitung steht in [`I
 - `npm run test:energy` – Heizlast-Rechenweg, Pflichtfelder und versionierte KfW-458-Regeln.
 - `npm run test:whatsapp` – Webhook-HMAC, Nachrichtenerkennung und Sicherheits-Intents.
 - `npm run test:marketing` – Marketing-Persistenz, öffentliche Kontakt-Schutzlogik, Ads-Auswertung, E-Mail-Sperre und Reporting.
+- `npm run test:accounting` – Originalbeleg, Hash, Ampel, Dublettenprüfung, Monatsstatus und neutralen Export prüfen.
 
 ## Qonekto / blau direkt
 - Railway-Variable `QONEKTO_MCP_TOKEN` enthält den Qonekto-MCP-Token.
@@ -67,6 +70,12 @@ Das Zielbild für die sichere Beleg- und Steuerberater-Vorbereitung steht in [`I
 - Instagram-Referenzanalyse nutzt den vorhandenen Apify-Connector. LinkedIn- und Meta-Connectoren dienen für eigene Accounts; Konkurrenz-Ads werden über die öffentliche Meta Ad Library und verknüpfte Quellen geprüft.
 - Content-Pläne speichern einen sichtbaren Quality Gate. Veröffentlichung, E-Mail-Versand und Ads-Änderungen bleiben ohne separate Freigabe gesperrt.
 - `MARKETING_MORNING_REPORT_ENABLED=true` aktiviert den täglichen Telegram-Marketingreport um 07:10 Uhr.
+
+## IVA Buchhaltung
+- Verwaltung unter `/accounting`; IVA ist die eigene zentrale Beleg- und Arbeitsoberfläche, kein Fremdtool ist vorausgesetzt.
+- PDF, Bild und strukturierte E-Rechnung werden als unverändertes Original mit SHA-256-Hash abgelegt.
+- Firmenzuordnung, Kategorie, Beträge, geschäftlicher Zweck und Bewirtungsangaben erzeugen eine nachvollziehbare Grün-/Gelb-/Rot-Vorprüfung.
+- Es gibt absichtlich keinen Lösch-, ELSTER- oder automatischen Steuerzahlungs-Endpunkt. Der Monatsdownload ist ein neutrales Arbeitspaket; ein eigenes Steuerberaterportal folgt.
 
 ## Befehle (Telegram)
 `/briefing` `/leads` `/termine` `/calendly` `/mails` `/todos`

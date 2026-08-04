@@ -4,7 +4,9 @@ _Stand: 4. August 2026. Zielbild und sicherer MVP-Rahmen; noch keine automatisch
 
 ## Produktentscheidung
 
-Der **IVA Buchhaltungsagent** ist Nadines laufender Beleg-, Ordnungs- und Vorbereitungspartner. Er sammelt Belege, liest sie aus, ordnet sie der richtigen Firma und Zahlung zu, fragt fehlende Angaben sofort ab und bereitet eine nachvollziehbare Übergabe an Buchhaltungssoftware und Steuerberatung vor.
+Der **IVA Buchhaltungsagent** ist Nadines eigenes internes Buchhaltungssystem und laufender Beleg-, Ordnungs- und Vorbereitungspartner. Er sammelt Belege, liest sie aus, ordnet sie der richtigen Firma und Zahlung zu, fragt fehlende Angaben sofort ab und hält alles in IVA für Nadine und später ihren Steuerberater vollständig nachvollziehbar bereit.
+
+**Verbindliche Produktentscheidung:** DATEV, Lexware, lexoffice, sevdesk oder ein anderes Fremdprodukt wird nicht zum führenden System vorausgesetzt. IVA baut den eigenen Belegbestand, die interne Buchhaltungsansicht, das Prüfprotokoll und später ein Steuerberaterportal selbst. Standardisierte Exporte oder Schnittstellen dürfen später zusätzlich angeboten werden, aber sie ersetzen IVA nicht als zentrale Arbeitsoberfläche.
 
 Er soll die Frage „Kann das betrieblich relevant sein und was fehlt noch?“ früh beantworten. Er gibt aber keine unbelegte Zusage „Das kannst du sicher absetzen“ und reicht nichts ungeprüft beim Finanzamt ein.
 
@@ -15,7 +17,7 @@ Er soll die Frage „Kann das betrieblich relevant sein und was fehlt noch?“ f
 3. IVA fragt nur das nach, was wirklich fehlt: „Für welche Firma?“, „Was war der geschäftliche Anlass?“, „Wer war dabei?“, „Wie hoch ist der private Anteil?“ oder „Bitte fordere eine korrigierte Rechnung an.“
 4. Der Beleg erhält eine Ampel, Begründung, Quelle und Confidence.
 5. IVA gleicht ihn später mit Bank-/Kartenumsätzen ab, erkennt Dubletten und zeigt fehlende Belege.
-6. Nach Nadines Review entsteht ein sauberer Monatsordner beziehungsweise Export für Steuerberater, DATEV oder eine gewählte Buchhaltungssoftware.
+6. Nach Nadines Review ist der Monat in IVA als geprüftes Paket verfügbar. Ein Steuerberater kann später über einen begrenzten IVA-Zugang genau diese freigegebenen Belege, Zuordnungen und Rückfragen sehen oder herunterladen.
 
 Der kleine IVA-Bildschirmagent bleibt auch in diesem Bereich sichtbar und zeigt zum Beispiel „3 Belege brauchen noch eine Angabe“.
 
@@ -83,7 +85,8 @@ Beleg-Inbox
   → fehlende Angaben nachfragen
   → Bank-/Kartenumsatz abgleichen
   → Nadines Review
-  → Steuerberater-/Software-Export
+  → interner IVA-Monatsabschluss
+  → freigegebener Steuerberater-Zugang/Download
   → Monatsstatus + offene Punkte
 ```
 
@@ -93,7 +96,7 @@ Das Monatscockpit zeigt:
 - Umsätze ohne Beleg und Belege ohne Zahlung,
 - mögliche Dubletten,
 - Umsatzsteuer-/Vorsteuer-Vorschau mit Datenlücken,
-- EÜR-/Ergebnisvorschau oder später BWA-Daten aus dem führenden System,
+- interne EÜR-/Ergebnis- und später BWA-Vorschau aus dem IVA-Datenbestand,
 - Liquidität, wiederkehrende Kosten und ungewöhnliche Preissteigerungen,
 - Fristen als Erinnerung, nicht als autonome Einreichung.
 
@@ -109,19 +112,23 @@ Das Monatscockpit zeigt:
 
 ## Technische Architektur
 
-### Führende Systeme
+### Eigenes führendes System
 
-IVA ist zunächst die Arbeits- und Klärungsoberfläche, nicht automatisch das steuerliche Hauptbuch. Nach Auswahl des Zielsystems wird festgelegt, ob DATEV, lexoffice, sevdesk oder ein anderes System die führende Buchführung hält. IVA speichert dann Quell-ID, Sync-Zeitpunkt und Freigabestatus statt eine widersprüchliche zweite Buchhaltung zu erzeugen.
+IVA ist die zentrale Arbeits-, Beleg- und Klärungsoberfläche. Originalbelege, Zuordnungen, Zahlungen, Regeln, Freigaben und Monatsstände liegen im eigenen IVA-Datenbestand. Ein steuerlich verwendbarer Abschluss- beziehungsweise Übergabestatus wird erst freigeschaltet, wenn Datenmodell, Aufbewahrung, Verfahrensdokumentation und Rechenregeln fachlich geprüft sind. Bis dahin ist der sichtbare Status ausdrücklich eine interne Vorprüfung.
+
+Ein späterer Steuerberater arbeitet über ein eigenes IVA-Portal mit zeitlich und sachlich begrenzter Berechtigung. Er kann freigegebene Zeiträume prüfen, Rückfragen am Beleg stellen, Korrekturen anfordern und ein vollständiges Paket herunterladen. Externe Buchhaltungssoftware ist dafür nicht erforderlich.
 
 ### Datenbausteine
 
-- `entities`: Rechtsträger/Firma, Steuermerkmale, Konten und Exportziel.
+- `entities`: Rechtsträger/Firma, Steuermerkmale und Konten.
 - `documents`: unverändertes Original, Hash, Typ, Extraktion und Aufbewahrungsstatus.
 - `expenses`: Zuordnung, Kategorie, betrieblicher Zweck, Privatanteil, Steuerstatus und Confidence.
 - `transactions`: Bank-/Kartenumsätze mit Importquelle und Matchingstatus.
 - `clarifications`: offene Rückfragen, Antworten und Belege.
 - `rules`: versionierte, freigegebene Regeln mit offizieller Quelle.
-- `exports`: Zielsystem, Zeitraum, Prüfer, Ergebnis und unveränderliches Protokoll.
+- `periods`: Zeitraum, Abschlussstatus, Prüfer, Freigabe und unveränderliches Protokoll.
+- `advisor-access`: freigegebene Firmen/Zeiträume, Rolle, Ablaufdatum und Zugriffsprotokoll.
+- `exports`: optionales neutrales Downloadpaket mit Belegen, CSV/JSON und Prüfprotokoll.
 
 Bank- und Buchhaltungszugänge gehören ausschließlich als Secrets in Railway beziehungsweise in einen geeigneten Secret Store. Keine Zugangsdaten im Browser, Prompt oder Belegtext.
 
@@ -134,17 +141,18 @@ Bank- und Buchhaltungszugänge gehören ausschließlich als Secrets in Railway b
 - Firma, Kategorie, Zweck und Ampel mit gezielten Rückfragen.
 - Monatsansicht, Dublettenprüfung und neutraler CSV-/Belegexport.
 
-### Phase 2 – Zahlungen und Buchhaltungsziel
+### Phase 2 – Eigene Zahlungen und interne Buchungsansicht
 
 - Bank-/Kartenimport zunächst per CSV, später über einen freigegebenen Banking-Connector.
 - Beleg-Umsatz-Matching und Liste fehlender Nachweise.
-- Zielsystem anbinden; zuerst lesend/testweise exportieren, erst danach bestätigte Schreibvorgänge.
+- Eigenes IVA-Konten-/Kategorienmodell, Einnahmen-/Ausgabenansicht und Monatsabstimmung.
+- Korrekturen bleiben versioniert; Originalbelege werden nie überschrieben.
 
-### Phase 3 – Steuerberater-Loop
+### Phase 3 – Eigenes Steuerberaterportal
 
-- Steuerberaterzugang oder DATEV-kompatibler Übergabekanal.
+- Zeitlich begrenzter Steuerberaterzugang direkt in IVA, standardmäßig nur lesend.
 - Rückfragen, Korrekturen und Freigaben direkt am Beleg.
-- Monatsabschluss-Checkliste und exportierbares Prüfprotokoll.
+- Monatsabschluss-Checkliste, Belegpaket und exportierbares Prüfprotokoll.
 
 ### Phase 4 – Assistenz und Controlling
 
@@ -157,12 +165,11 @@ Bank- und Buchhaltungszugänge gehören ausschließlich als Secrets in Railway b
 - alle getrennt zu führenden Rechtsträger/Firmen,
 - Gewinnermittlungsart je Rechtsträger (zum Beispiel EÜR oder Bilanz),
 - Umsatzsteuerstatus und Voranmeldungsrhythmus,
-- aktuelle Buchhaltungssoftware beziehungsweise bevorzugtes Zielsystem des Steuerberaters,
 - gewünschter Eingang: Upload, eigene Beleg-E-Mail und/oder bestehende Postfächer,
 - Bank-/Kartenquellen und gewünschter Startzeitraum,
 - Freigabe, ob vollständige Transaktionen oder zunächst nur CSV-Dateien verarbeitet werden.
 
-Diese Angaben sind für das Zielsystem wichtig, blockieren aber nicht den Bau des neutralen Beleg-Inbox-MVP.
+Diese Angaben schärfen die internen Regeln, blockieren aber nicht den Bau des eigenen Beleg-Inbox-MVP.
 
 ## Verbindliche offizielle Grundlagen für die Regelbibliothek
 
@@ -175,4 +182,3 @@ Diese Angaben sind für das Zielsystem wichtig, blockieren aber nicht den Bau de
 - [BMF – Einführung der obligatorischen E-Rechnung](https://www.bundesfinanzministerium.de/Content/DE/Downloads/BMF_Schreiben/Steuerarten/Umsatzsteuer/2024-10-15-einfuehrung-e-rechnung.pdf?__blob=publicationFile&v=4)
 - [§ 2 StBerG – Grenze geschäftsmäßiger Hilfeleistung in Steuersachen](https://www.gesetze-im-internet.de/stberg/__2.html)
 - [§ 33 StBerG – Aufgaben des Steuerberaters](https://www.gesetze-im-internet.de/stberg/__33.html)
-

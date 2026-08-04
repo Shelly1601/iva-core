@@ -177,14 +177,15 @@ Optional kann ein dediziertes Android-Arbeits-/Testgerät nach ausdrücklicher F
 
 | Status | Baustein | Nächster Schritt |
 |---|---|---|
-| ✅ | Zielbild | Sichere Beleg-, Klärungs- und Steuerberater-Vorbereitung in `IVA_BUCHHALTUNGSAGENT_SPEZIFIKATION.md`; keine autonome Steuerabgabe. |
+| ✅ | Zielbild | Eigenes internes IVA-Buchhaltungssystem in `IVA_BUCHHALTUNGSAGENT_SPEZIFIKATION.md`; Fremdprodukte sind weder Pflicht noch führendes System. Keine autonome Steuerabgabe. |
+| ✅ | Interner MVP | `/accounting` mit eigener Belegablage, unverändertem Original/Hash, Firmenzuordnung, Ampel, Monatsübersicht und neutralem Download ist gebaut. |
 | ⬜ | Rechtsträger | Alle getrennt zu führenden Firmen, Gewinnermittlungsart und Umsatzsteuerstatus einmal erfassen. |
-| ⬜ | Zielsystem | Mit Steuerberater festlegen, ob DATEV, lexoffice, sevdesk oder ein anderes System die führende Buchführung hält. |
-| ⬜ | Beleg-Inbox | Upload/Kamera plus eigene Weiterleitungsadresse für PDF, Bild, ZUGFeRD und XRechnung einrichten. |
+| 🟡 | Beleg-Inbox | Upload für PDF, Bild, ZUGFeRD und XRechnung ist gebaut; automatische Auslesung, Kamera-Flow und eigene Weiterleitungsadresse folgen. |
 | ⬜ | Bank-/Kartenimport | Im MVP zuerst CSV; später nur einen freigegebenen, eng begrenzten Banking-Connector anbinden. |
-| ⬜ | Steuerberater-Loop | Exportformat, Monatsrhythmus, Rückfragen und Freigabeprozess gemeinsam testen. |
+| ⬜ | Eigene Buchungsansicht | IVA-Konten/Kategorien, Einnahmen, Ausgaben, Abstimmung und versionierte Monatsfreigabe fachlich abnehmen. |
+| ⬜ | Steuerberaterportal | Eigener zeitlich begrenzter IVA-Zugang für freigegebene Firmen/Zeiträume, Rückfragen, Kommentare und Downloadpakete. |
 
-Noch **keine Railway-Variable** anlegen, bevor Zielsystem und Authentifizierungsweg feststehen. Zugangsdaten später nur serverseitig als Secrets hinterlegen; nie in Belegen, Browserfeldern oder Prompts.
+Für den internen Grundbetrieb ist **keine neue Railway-Variable** erforderlich; die Daten liegen im bestehenden `/data`-Volume. Spätere Mail-, Bank- oder Steuerberater-Zugänge nur serverseitig als Secrets hinterlegen, nie in Belegen, Browserfeldern oder Prompts.
 
 ## 11. Railway-Betrieb
 
@@ -203,4 +204,4 @@ Noch **keine Railway-Variable** anlegen, bevor Zielsystem und Authentifizierungs
 5. Meta Business als optionalen stabilen Kanal für kritische Geschäftsnummern anbinden.
 6. Danach HeyGen und Brevo/Resend aktivieren.
 7. Als ersten Handy-Baustein den IVA-iPhone-Kurzbefehl und das Teilen-Menü bauen; die native App folgt danach.
-8. Buchhaltungs-Zielsystem mit dem Steuerberater festlegen; danach den neutralen Beleg-Inbox-MVP bauen und erst im zweiten Schritt Bankdaten anbinden.
+8. Im internen Buchhaltungs-MVP Rechtsträger anlegen und echte Testbelege prüfen; danach automatische Auslesung und erst im zweiten Schritt Bankdaten anbinden.

@@ -31,6 +31,18 @@ import { approveAdRecommendation, createContentPlan, createEmailCampaign, create
 import { speak } from './voice.js';
 import { askArchitect } from './agents/architect.js';
 import * as workspaces from './workspaces/store.js';
+import {
+  ACCOUNTING_CATEGORIES,
+  accountingSummary,
+  createAccountingEntity,
+  exportAccountingCsv,
+  getAccountingDocument,
+  listAccountingDocuments,
+  listAccountingEntities,
+  readAccountingFile,
+  storeAccountingDocument,
+  updateAccountingDocument,
+} from './accounting/store.js';
 import { createTmbPdf } from './workspaces/tmb-pdf.js';
 import { calculateHeatLoad, calculateKfw458Funding, ENERGY_SOURCES } from './workspaces/energy-calculations.js';
 import {
@@ -818,6 +830,66 @@ app.post('/api/workspaces/:id/energy/calculate', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// --- IVA Buchhaltung: eigene Belegablage, Vorprüfung und Steuerberater-Übergabe ---
+app.get('/api/accounting/summary', async (req, res) => {
+  try { res.json(await accountingSummary({ month: String(req.query?.month || '').slice(0, 7) })); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/accounting/categories', (_req, res) => res.json(ACCOUNTING_CATEGORIES));
+app.get('/api/accounting/entities', async (_req, res) => res.json(await listAccountingEntities()));
+app.post('/api/accounting/entities', async (req, res) => {
+  try { res.status(201).json(await createAccountingEntity(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/api/accounting/documents', async (req, res) => {
+  try {
+    res.json(await listAccountingDocuments({
+      month: String(req.query?.month || '').slice(0, 7),
+      status: String(req.query?.status || '').slice(0, 20),
+      entityId: String(req.query?.entityId || '').slice(0, 100),
+      search: String(req.query?.search || '').slice(0, 200),
+    }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/accounting/documents/:id', async (req, res) => {
+  const document = await getAccountingDocument(req.params.id);
+  res.status(document ? 200 : 404).json(document || { error: 'not found' });
+});
+app.post('/api/accounting/documents', express.raw({ type: '*/*', limit: '25mb' }), async (req, res) => {
+  try {
+    const document = await storeAccountingDocument({
+      name: req.query?.name,
+      mime: req.query?.mime || req.headers['content-type'],
+      entityId: String(req.query?.entityId || ''),
+      buffer: req.body,
+    });
+    res.status(201).json(document);
+  } catch (e) { res.status(e?.type === 'entity.too.large' ? 413 : 400).json({ error: e.message }); }
+});
+app.patch('/api/accounting/documents/:id', async (req, res) => {
+  try {
+    const document = await updateAccountingDocument(req.params.id, req.body || {});
+    res.status(document ? 200 : 404).json(document || { error: 'not found' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/api/accounting/documents/:id/file', async (req, res) => {
+  try {
+    const file = await readAccountingFile(req.params.id);
+    if (!file) return res.status(404).json({ error: 'not found' });
+    res.set('Content-Type', file.meta.mime || 'application/octet-stream');
+    res.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(file.meta.name)}`);
+    res.send(file.buffer);
+  } catch { res.status(404).json({ error: 'not found' }); }
+});
+app.get('/api/accounting/export.csv', async (req, res) => {
+  try {
+    const month = String(req.query?.month || '').slice(0, 7);
+    res.set('Content-Type', 'text/csv; charset=utf-8');
+    res.set('Content-Disposition', `attachment; filename="IVA-Buchhaltung-${month || 'gesamt'}.csv"`);
+    res.send(await exportAccountingCsv({ month }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // --- Marketing-Maschine: Kampagnen + Analyse-Engine ---
 app.get('/api/campaigns', async (_req, res) => res.json(await campaigns.listCampaigns()));
 app.get('/api/campaigns/:id', async (req, res) => { const c = await campaigns.getCampaign(req.params.id); res.status(c ? 200 : 404).json(c || { error: 'not found' }); });
@@ -1000,6 +1072,7 @@ app.get('/customers', (_req, res) => res.sendFile(path.join(__dirnameIva, 'publi
 app.get('/advice', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'advice.html')));
 app.get('/whatsapp', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'whatsapp.html')));
 app.get('/marketing', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'marketing.html')));
+app.get('/accounting', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'accounting.html')));
 app.get('/health/qonekto', async (_req, res) => {
   const status = await qonektoStatus();
   if (status.reachable) {
