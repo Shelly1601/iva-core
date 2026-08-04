@@ -1,5 +1,6 @@
 import { calculateCorporateBenefits } from './corporate-benefits-calculator.js';
 import { applyBkvOfferSelection, findBkvOffer } from './bkv-offer-catalog.js';
+import { normalizePresentationProfile, presentationConcept, presentationCopy, presentationDesign, presentationEvidence } from './presentation-concepts.js';
 
 const MODES = {
   beratung: { label: 'Beratungsmodus', sub: 'Geführte Beratung mit zentraler Dokumentation.' },
@@ -681,6 +682,46 @@ function showMode() {
   document.title = 'IVA · ' + MODES[mode].label;
 }
 
+function presentationInputProfile() {
+  return normalizePresentationProfile({
+    conceptId: val('presentationConcept'),
+    conceptName: val('presentationConceptName'),
+    audience: val('presentationAudience'),
+    tone: val('presentationTone'),
+    designId: val('presentationDesign'),
+    maxPages: Number(val('presentationMaxPages')),
+    headline: val('presentationHeadline'),
+    promise: val('presentationPromise'),
+    uspNotes: val('presentationUspNotes'),
+    cta: val('presentationCta'),
+  });
+}
+
+function applyPresentationProfile(input = {}) {
+  const profile = normalizePresentationProfile(input);
+  setVal('presentationConcept', profile.conceptId);
+  setVal('presentationConceptName', profile.conceptName);
+  setVal('presentationAudience', profile.audience);
+  setVal('presentationTone', profile.tone);
+  setVal('presentationDesign', profile.designId);
+  setVal('presentationMaxPages', profile.maxPages);
+  setVal('presentationHeadline', profile.headline);
+  setVal('presentationPromise', profile.promise);
+  setVal('presentationUspNotes', profile.uspNotes);
+  setVal('presentationCta', profile.cta);
+  updatePresentationHint();
+}
+
+function updatePresentationHint() {
+  const hint = $('presentationConceptHint');
+  if (!hint) return;
+  const concept = presentationConcept(val('presentationConcept'));
+  hint.classList.toggle('warn', !concept.ready);
+  hint.textContent = concept.ready
+    ? concept.description
+    : `${concept.description} Bis die Unterlagen hinterlegt sind, nutzt die PDF die neutrale IVA-Value-Story und bezeichnet sie gegenüber dem Kunden nicht fälschlich als vollständige GO-TO-Methodik.`;
+}
+
 function fresh(nextMode = mode) {
   if (nextMode === 'kunde') {
     location.href = '/customers';
@@ -702,6 +743,7 @@ function fresh(nextMode = mode) {
   setVal('consumptionUnit', 'kWh');
   setVal('upgradeNeeded', 'unknown');
   setVal('fundingApplicantType', 'private-owner');
+  applyPresentationProfile();
   renderHeatLoadResult(null);
   renderFundingResult(null);
   $('pageTitle').textContent = ({ beratung: 'Neue Beratung', kunde: 'Neue Kundenakte', energie: 'Neue Energieplanung' })[mode];
@@ -797,7 +839,7 @@ function collect() {
   const data = mode === 'energie'
     ? collectEnergyData()
     : mode === 'beratung'
-      ? { schemaVersion: 'iva-advice-1.0', appointmentAt: val('appointmentAt'), topic: val('topic'), goal: val('goal'), facts: val('facts'), recommendation: val('recommendation'), adviceModules: selectedAdviceModules, activeAdviceModule: activeAdviceModuleId, moduleData: adviceModuleData }
+      ? { schemaVersion: 'iva-advice-1.1', appointmentAt: val('appointmentAt'), topic: val('topic'), goal: val('goal'), facts: val('facts'), recommendation: val('recommendation'), adviceModules: selectedAdviceModules, activeAdviceModule: activeAdviceModuleId, moduleData: adviceModuleData, presentation: presentationInputProfile() }
       : { project: val('project'), company: val('company'), relationship: val('relationship'), nextStep: val('nextStep') };
   return {
     mode,
@@ -969,6 +1011,7 @@ function apply(workspace) {
     activeAdviceModuleId = adviceModule(workspace.data?.activeAdviceModule) ? workspace.data.activeAdviceModule : (selectedAdviceModules[0] || '');
     setVal('appointmentAt', workspace.data?.appointmentAt); setVal('topic', workspace.data?.topic); setVal('goal', workspace.data?.goal);
     setVal('facts', workspace.data?.facts); setVal('recommendation', workspace.data?.recommendation);
+    applyPresentationProfile(workspace.data?.presentation || {});
     renderAdviceModules();
   }
   if (mode === 'kunde') {
@@ -1328,12 +1371,231 @@ function reportSection(root, title, rows) {
   section.appendChild(heading);
   rows(section);
   root.appendChild(section);
+  return section;
+}
+
+function reportText(parent, text, className = '') {
+  if (!text) return null;
+  const paragraph = document.createElement('p');
+  paragraph.className = className;
+  paragraph.textContent = String(text);
+  parent.appendChild(paragraph);
+  return paragraph;
+}
+
+function reportKpis(parent, items = []) {
+  const values = items.filter(item => item?.value !== undefined && item?.value !== null && item?.value !== '').slice(0, 6);
+  if (!values.length) return;
+  const grid = document.createElement('div'); grid.className = 'print-kpi-grid';
+  for (const item of values) {
+    const card = document.createElement('div'); card.className = 'print-kpi';
+    const value = document.createElement('b'); value.textContent = String(item.value);
+    const label = document.createElement('span'); label.textContent = item.label;
+    card.append(value, label); grid.appendChild(card);
+  }
+  parent.appendChild(grid);
+}
+
+function reportUsps(parent, items = []) {
+  const grid = document.createElement('div'); grid.className = 'print-usp-grid';
+  for (const item of items.filter(Boolean).slice(0, 6)) {
+    const card = document.createElement('div'); card.className = 'print-usp'; card.textContent = item; grid.appendChild(card);
+  }
+  if (grid.childElementCount) parent.appendChild(grid);
+}
+
+function reportEvidence(parent, items = []) {
+  const grid = document.createElement('div'); grid.className = 'print-evidence-grid';
+  for (const item of items.slice(0, 4)) {
+    const card = document.createElement('div'); card.className = 'print-evidence';
+    const value = document.createElement('b'); value.textContent = item.value;
+    const label = document.createElement('span'); label.textContent = item.label;
+    const scope = document.createElement('small'); scope.textContent = `${item.publisher} · ${item.year}. ${item.scope}`;
+    card.append(value, label, scope); grid.appendChild(card);
+  }
+  if (grid.childElementCount) parent.appendChild(grid);
+}
+
+function reportObjections(parent, items = []) {
+  const grid = document.createElement('div'); grid.className = 'print-objection-grid';
+  for (const [question, answer] of items.slice(0, 3)) {
+    const card = document.createElement('div'); card.className = 'print-objection';
+    const strong = document.createElement('strong'); strong.textContent = question;
+    const text = document.createElement('span'); text.textContent = answer;
+    card.append(strong, text); grid.appendChild(card);
+  }
+  if (grid.childElementCount) parent.appendChild(grid);
+}
+
+function reportJourney(parent, items = []) {
+  const journey = document.createElement('div'); journey.className = 'print-journey';
+  for (const [label, text] of items.slice(0, 4)) {
+    const step = document.createElement('div'); const title = document.createElement('b'); const detail = document.createElement('span');
+    title.textContent = label; detail.textContent = text; step.append(title, detail); journey.appendChild(step);
+  }
+  parent.appendChild(journey);
+}
+
+function moduleInputRows(module, data, limit = 6) {
+  const rows = [];
+  for (const moduleSection of module.sections || []) {
+    for (const spec of moduleSection.fields || []) {
+      const value = data?.[spec.key];
+      if (value === undefined || value === null || value === '' || value === false) continue;
+      rows.push({ label: spec.label, value: value === true ? 'Ja' : value });
+      if (rows.length >= limit) return rows;
+    }
+  }
+  return rows;
+}
+
+function reportSourceList(parent, sources = []) {
+  const unique = [];
+  const seen = new Set();
+  for (const source of sources) {
+    const key = source.url || source.providedFile || `${source.publisher}-${source.title}`;
+    if (!key || seen.has(key)) continue;
+    seen.add(key); unique.push(source);
+    if (unique.length >= 12) break;
+  }
+  if (!unique.length) return;
+  const list = document.createElement('ol'); list.className = 'print-sources';
+  for (const source of unique) {
+    const item = document.createElement('li');
+    const label = `${source.publisher || 'Quelle'} · ${source.year || 'ohne Jahr'} · ${source.title || source.label || 'Unterlage'}`;
+    if (source.url) {
+      const link = document.createElement('a'); link.href = source.url; link.textContent = label; item.appendChild(link);
+    } else item.textContent = `${label}${source.providedFile ? ` · bereitgestellte Datei: ${source.providedFile}` : ''}`;
+    list.appendChild(item);
+  }
+  parent.appendChild(list);
+}
+
+function buildAdvicePresentationReport(collected, root) {
+  const profile = normalizePresentationProfile(collected.data.presentation || {});
+  const concept = presentationConcept(profile.conceptId);
+  const design = presentationDesign(profile.designId);
+  root.style.setProperty('--report-accent', design.accent);
+  root.style.setProperty('--report-accent2', design.accent2);
+  root.style.setProperty('--report-dark', design.dark);
+  root.style.setProperty('--report-soft', design.soft);
+
+  const moduleIds = (collected.data.adviceModules || []).filter(id => adviceModule(id));
+  const firstCopy = presentationCopy(moduleIds[0], profile);
+  const publicConcept = profile.conceptId === 'custom' && profile.conceptName ? profile.conceptName : concept.publicLabel;
+  const audience = ({ private: 'Privatkundin / Privatkunde', management: 'Geschäftsführung', hr: 'HR / Personal', employees: 'Mitarbeitende' })[profile.audience];
+  const cover = document.createElement('section'); cover.className = 'print-cover';
+  const mark = document.createElement('div'); mark.className = 'print-cover-mark'; mark.textContent = 'IVA';
+  const kicker = document.createElement('div'); kicker.className = 'print-kicker'; kicker.textContent = publicConcept;
+  const title = document.createElement('h1'); title.textContent = collected.title || collected.data.topic || 'Persönliches Beratungskonzept';
+  const lead = document.createElement('div'); lead.className = 'print-cover-lead'; lead.textContent = profile.promise || firstCopy.headline;
+  const meta = document.createElement('div'); meta.className = 'print-cover-meta';
+  const customer = document.createElement('div'); const customerLabel = document.createElement('span'); const customerName = document.createElement('b');
+  customerLabel.textContent = 'Erstellt für'; customerName.textContent = collected.customer.name || 'Persönliche Beratung'; customer.append(customerLabel, customerName);
+  const documentMeta = document.createElement('div'); const documentLabel = document.createElement('span'); const documentValue = document.createElement('b');
+  documentLabel.textContent = 'Zielgruppe · Stand'; documentValue.textContent = `${audience} · ${new Date().toLocaleDateString('de-DE')}`; documentMeta.append(documentLabel, documentValue);
+  meta.append(customer, documentMeta); cover.append(mark, kicker, title, lead, meta); root.appendChild(cover);
+
+  const executive = document.createElement('section'); executive.className = 'print-section';
+  const hero = document.createElement('div'); hero.className = 'print-hero';
+  const heroKicker = document.createElement('div'); heroKicker.className = 'print-kicker'; heroKicker.textContent = 'Ihre Entscheidung auf einen Blick';
+  const heroTitle = document.createElement('h2'); heroTitle.textContent = firstCopy.headline;
+  const heroLead = document.createElement('p'); heroLead.textContent = profile.promise || collected.data.goal || 'Aus Ihrer Ausgangslage entsteht ein nachvollziehbarer, priorisierter und umsetzbarer Handlungsplan.';
+  hero.append(heroKicker, heroTitle, heroLead); executive.appendChild(hero);
+  reportJourney(executive, [
+    ['Ausgangslage', collected.data.facts || 'Ihre relevanten Daten und Ziele werden gemeinsam betrachtet.'],
+    ['Priorität', collected.data.goal || 'Wirkung, Dringlichkeit und finanzielle Tragfähigkeit werden geordnet.'],
+    ['Lösung', collected.data.recommendation || 'Die passende Lösung wird transparent begründet und mit Alternativen verglichen.'],
+    ['Umsetzung', profile.cta || 'Nächsten Schritt festlegen, Unterlagen prüfen und Entscheidung umsetzen.'],
+  ]);
+  reportSubheading(executive, 'Was Sie konkret davon haben');
+  reportUsps(executive, firstCopy.usps);
+  const allEvidence = presentationEvidence(moduleIds, 8);
+  if (allEvidence.length) {
+    reportSubheading(executive, 'Marktdaten zur Einordnung');
+    reportEvidence(executive, allEvidence.slice(0, 4));
+  }
+  root.appendChild(executive);
+
+  const detailLimit = profile.maxPages <= 4 ? 1 : profile.maxPages <= 6 ? 2 : 3;
+  const detailedModules = moduleIds.slice(0, detailLimit);
+  const reportSources = [...allEvidence];
+  for (const [index, moduleId] of detailedModules.entries()) {
+    const module = adviceModule(moduleId); const data = collected.data.moduleData?.[moduleId] || {};
+    const calculation = calculateAdvice(module, data); const copy = presentationCopy(moduleId, profile);
+    const section = reportSection(root, module.title, body => {
+      const summary = document.createElement('div'); summary.className = 'print-page-summary'; reportText(summary, copy.headline); body.appendChild(summary);
+      const inputRows = moduleInputRows(module, data, 6);
+      if (inputRows.length) {
+        reportSubheading(body, 'Ihre Ausgangslage');
+        for (const row of inputRows) reportRow(body, row.label, row.value);
+      }
+      if (calculation?.items?.length) {
+        reportSubheading(body, 'Ergebnis der Modellrechnung');
+        reportKpis(body, calculation.items.slice(0, 6));
+      }
+      if (calculation?.corporate) {
+        const corporate = calculation.corporate;
+        reportSubheading(body, 'Wirtschaftlicher Hebel');
+        reportKpis(body, [
+          { label: 'Kostenbasis Fehlzeiten und Fluktuation', value: euro(corporate.baseline.absenceCostAnnual + corporate.baseline.turnoverCostAnnual) },
+          { label: 'Modelliertes Einsparpotenzial pro Jahr', value: euro(corporate.scenario.absenceSavingsAnnual + corporate.scenario.turnoverSavingsAnnual) },
+          { label: 'Arbeitgeberaufwand Benefits pro Monat', value: euro(corporate.payroll.employerBenefitSpendMonthly) },
+          { label: 'Break-even bKV je Person', value: `${new Intl.NumberFormat('de-DE', { maximumFractionDigits: 2 }).format(corporate.scenario.breakEvenSavedDays)} Tage` },
+        ]);
+        reportSubheading(body, 'Vorgesehene Lösung');
+        reportRow(body, 'bKV-Anbieter / Tarif', [corporate.products?.bkv?.provider, corporate.products?.bkv?.tariff].filter(Boolean).join(' · ') || 'wird nach finalem Angebot festgelegt');
+        reportRow(body, 'Budget / Preisstand', [corporate.products?.bkv?.budget, corporate.products?.bkv?.priceDate].filter(Boolean).join(' · '));
+        reportRow(body, 'Versorgungsbeitrag', corporate.payroll.insuranceContributionMonthly ? euro(corporate.payroll.insuranceContributionMonthly) + ' monatlich' : 'wird im Versorgungskonzept festgelegt');
+        reportSubheading(body, 'Benefit-Präferenz zur Gesprächseinordnung');
+        for (const entry of (corporate.preferenceRanking || []).slice(0, 5)) reportBar(body, entry.label, entry.value);
+        reportSubheading(body, 'Einführung in vier klaren Schritten');
+        (corporate.implementationPlaybook || []).slice(0, 4).forEach((step, stepIndex) => reportRow(body, `Schritt ${stepIndex + 1}`, step));
+        reportSources.push(...(corporate.sources || []));
+      }
+      reportSubheading(body, 'Warum dieses Vorgehen sinnvoll ist');
+      reportUsps(body, copy.usps);
+      const moduleEvidence = presentationEvidence([moduleId], 3);
+      if (moduleEvidence.length) { reportSubheading(body, 'Belastbare Einordnung'); reportEvidence(body, moduleEvidence); }
+      reportSubheading(body, 'Typische Fragen - klar beantwortet');
+      reportObjections(body, copy.objections);
+      if (calculation?.note || module.notice) {
+        const note = document.createElement('div'); note.className = 'print-disclaimer'; note.textContent = [calculation?.note, module.notice].filter(Boolean).join(' '); body.appendChild(note);
+      }
+    });
+    if (index > 0 || detailedModules.length > 1) section.classList.add('page-break');
+  }
+
+  const overflow = moduleIds.slice(detailLimit).map(id => adviceModule(id)).filter(Boolean);
+  const closing = reportSection(root, 'Ihre nächsten Schritte', section => {
+    if (overflow.length) {
+      const text = document.createElement('div'); text.className = 'print-page-summary';
+      reportText(text, `Weitere Bestandteile der Beratungsakte wurden bewusst kompakt zusammengefasst, damit die Präsentation im gewählten Seitenbudget bleibt.`);
+      const list = document.createElement('ul'); list.className = 'print-module-overflow';
+      for (const module of overflow) { const item = document.createElement('li'); item.textContent = module.title; list.appendChild(item); }
+      text.appendChild(list); section.appendChild(text);
+    }
+    const cta = document.createElement('div'); cta.className = 'print-cta';
+    const ctaTitle = document.createElement('h2'); ctaTitle.textContent = 'Vom Konzept zur Umsetzung';
+    const ctaText = document.createElement('p'); ctaText.textContent = profile.cta || collected.data.recommendation || 'Offene Fragen klären, Entscheidung bestätigen und den Umsetzungstermin gemeinsam festlegen.';
+    cta.append(ctaTitle, ctaText); section.appendChild(cta);
+    reportSubheading(section, 'Quellen und Transparenz');
+    reportSourceList(section, reportSources);
+    const disclaimer = document.createElement('div'); disclaimer.className = 'print-disclaimer';
+    disclaimer.textContent = 'Diese Unterlage verbindet Beratung, Modellrechnung und verständliche Nutzenkommunikation. Statistiken sind allgemeine Marktdaten und keine persönliche Ergebniszusage. Modellannahmen, Tarifstände, Leistungsbedingungen, steuerliche und rechtliche Voraussetzungen müssen vor Abschluss fachlich geprüft werden. Verkaufspsychologische Klarheit ersetzt weder individuelle Geeignetheitsprüfung noch Produkt- oder Förderzusage.';
+    section.appendChild(disclaimer);
+  });
+  closing.classList.add('page-break');
 }
 
 function buildSimpleReport() {
   const collected = collect();
   const root = $('printReport');
   root.innerHTML = '';
+  if (mode === 'beratung') {
+    buildAdvicePresentationReport(collected, root);
+    return;
+  }
   const head = document.createElement('div');
   head.className = 'print-head';
   const left = document.createElement('div');
@@ -1350,65 +1612,6 @@ function buildSimpleReport() {
     reportRow(section, 'Name', collected.customer.name); reportRow(section, 'Adresse', collected.customer.address);
     reportRow(section, 'E-Mail', collected.customer.email); reportRow(section, 'Telefon', collected.customer.phone);
   });
-  if (mode === 'beratung') reportSection(root, 'Beratung', section => {
-    reportRow(section, 'Termin', collected.data.appointmentAt); reportRow(section, 'Thema', collected.data.topic);
-    reportRow(section, 'Ziel', collected.data.goal); reportRow(section, 'Fakten', collected.data.facts);
-    reportRow(section, 'Empfehlung', collected.data.recommendation);
-  });
-  if (mode === 'beratung') {
-    for (const moduleId of collected.data.adviceModules || []) {
-      const module = adviceModule(moduleId); const data = collected.data.moduleData?.[moduleId] || {};
-      if (!module) continue;
-      reportSection(root, module.title, section => {
-        for (const moduleSection of module.sections || []) for (const spec of moduleSection.fields || []) reportRow(section, spec.label, data[spec.key]);
-        const calculation = calculateAdvice(module, data);
-        for (const item of calculation?.items || []) reportRow(section, item.label, item.value);
-        if (calculation?.corporate) {
-          const corporate = calculation.corporate;
-          reportSubheading(section, 'bKV-Tarifvorauswahl');
-          reportRow(section, 'Anbieter / Tarif', [corporate.products?.bkv?.provider, corporate.products?.bkv?.tariff].filter(Boolean).join(' · ') || 'nicht ausgewählt');
-          reportRow(section, 'Budget', corporate.products?.bkv?.budget);
-          reportRow(section, 'Öffentlicher Monatsbeitrag', corporate.products?.bkv?.premium ? euroExact(corporate.products.bkv.premium) : 'aktuelles Angebot erforderlich');
-          reportRow(section, 'Preisstand', corporate.products?.bkv?.priceDate);
-          reportRow(section, 'Offizielle Produktquelle', corporate.products?.bkv?.sourceUrl);
-          reportSubheading(section, 'Finanzierungslogik');
-          reportRow(section, 'Fehlzeitenkosten', euro(corporate.baseline.absenceCostAnnual));
-          reportRow(section, 'Fluktuationskosten', euro(corporate.baseline.turnoverCostAnnual));
-          reportRow(section, 'Modellierte Fehlzeitenersparnis', euro(corporate.scenario.absenceSavingsAnnual));
-          reportRow(section, 'Modellierte Fluktuationsersparnis', euro(corporate.scenario.turnoverSavingsAnnual));
-          reportRow(section, 'Break-even bKV', `${new Intl.NumberFormat('de-DE', { maximumFractionDigits: 2 }).format(corporate.scenario.breakEvenSavedDays)} vermiedene Krankheitstage je Person`);
-          reportSubheading(section, 'Musterabrechnung · bAV, PKV, Sachbezüge und VL');
-          reportRow(section, 'Versicherungsstatus', corporate.payroll.payrollType === 'pkv' ? 'PKV' : 'GKV');
-          reportRow(section, 'Steuerklasse', corporate.payroll.taxClass);
-          reportRow(section, 'Monatsbrutto', euro(corporate.payroll.grossSalary));
-          reportRow(section, 'Geldwerter Vorteil / Sachbezug', euro(corporate.payroll.nonCashBenefit));
-          reportRow(section, 'Weitere steuerpflichtige Bezüge', euro(corporate.payroll.otherTaxableBenefits));
-          reportRow(section, 'Individuell versteuerte bKV', euro(corporate.payroll.taxableBkv));
-          reportRow(section, 'Entgeltumwandlung', euro(corporate.payroll.employeeDeferral));
-          reportRow(section, 'Vereinfachtes Steuer-/SV-Brutto', euro(corporate.payroll.estimatedTaxableGross));
-          reportRow(section, 'PKV-/PV-Beitrag Mitarbeitender', euro(corporate.payroll.employeePkvContribution));
-          reportRow(section, 'Arbeitgeberzuschuss PKV/PV', euro(corporate.payroll.employerPkvSubsidy));
-          reportRow(section, 'VL Arbeitgeber', euro(corporate.payroll.employerVl));
-          reportRow(section, 'VL Mitarbeitender', euro(corporate.payroll.employeeVl));
-          reportRow(section, 'Arbeitgeberzuschuss', euro(corporate.payroll.employerSubsidyMonthly));
-          reportRow(section, 'Zusätzlicher Arbeitgeberbeitrag', euro(corporate.payroll.extraEmployerBav));
-          reportRow(section, 'Gesamtbeitrag Versorgung', euro(corporate.payroll.insuranceContributionMonthly));
-          reportRow(section, 'Arbeitgeberaufwand Benefits / Monat', euro(corporate.payroll.employerBenefitSpendMonthly));
-          reportRow(section, 'Referenz-Netto Unternehmensabrechnung', corporate.payroll.referenceNetPay ? euro(corporate.payroll.referenceNetPay) : 'nicht hinterlegt');
-          reportRow(section, 'Geschätzter Nettoaufwand', euro(corporate.payroll.estimatedEmployeeNetImpact));
-          reportSubheading(section, 'Umsetzungsprozess');
-          for (const [index, step] of (corporate.implementationPlaybook || []).entries()) reportRow(section, `Schritt ${index + 1}`, step);
-          reportRow(section, 'Einordnung der Referenzunterlagen', corporate.documentBasisNote);
-          reportSubheading(section, 'Benefit-Ranking bei der Arbeitgeberwahl');
-          for (const entry of corporate.preferenceRanking) reportBar(section, entry.label, entry.value);
-          reportSubheading(section, 'Verwendete Quellen');
-          for (const source of corporate.sources) reportRow(section, `${source.publisher} · ${source.year}`, source.url ? `${source.title} · ${source.url}` : `${source.title} · bereitgestellte PDF: ${source.providedFile || 'lokale Datei'}`);
-        }
-        if (calculation?.note) reportRow(section, 'Hinweis zur Modellrechnung', calculation.note);
-        if (module.notice) reportRow(section, 'Fachlicher Hinweis', module.notice);
-      });
-    }
-  }
   if (mode === 'kunde') reportSection(root, 'Kundenakte', section => {
     reportRow(section, 'Projekt', collected.data.project); reportRow(section, 'Firma', collected.data.company);
     reportRow(section, 'Ausgangslage', collected.data.relationship); reportRow(section, 'Nächster Schritt', collected.data.nextStep);
@@ -1419,7 +1622,8 @@ async function downloadTmbPdf() {
   try {
     if (mode !== 'energie') {
       buildSimpleReport();
-      window.print();
+      document.body.classList.add('print-preview-mode');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
     await save();
@@ -1449,6 +1653,8 @@ async function downloadTmbPdf() {
 $('saveBtn').addEventListener('click', save);
 $('pdfBtn').addEventListener('click', downloadTmbPdf);
 $('pdfBtn2').addEventListener('click', downloadTmbPdf);
+$('closePrintPreview').addEventListener('click', () => document.body.classList.remove('print-preview-mode'));
+$('printPreviewPrint').addEventListener('click', () => window.print());
 $('calculateEnergyBtn').addEventListener('click', calculateEnergy);
 $('addRoomBtn').addEventListener('click', addRoom);
 $('addNoteBtn').addEventListener('click', addNote);
@@ -1464,6 +1670,7 @@ document.querySelectorAll('[data-new]').forEach(button => button.addEventListene
 document.querySelectorAll('input[type=file][data-kind]').forEach(input => input.addEventListener('change', () => upload(input)));
 document.querySelectorAll('[data-trigger]').forEach(button => button.addEventListener('click', () => $(button.dataset.trigger).click()));
 document.querySelectorAll('input:not([type=file]),select,textarea').forEach(input => input.addEventListener('input', () => { updateCompletion(); renderPhotoChecklist(); }));
+$('presentationConcept')?.addEventListener('change', updatePresentationHint);
 window.addEventListener('beforeprint', () => { if (mode !== 'energie') buildSimpleReport(); });
 $('ivaHelper').addEventListener('click', () => window.open('/cockpit', '_blank', 'noopener'));
 
