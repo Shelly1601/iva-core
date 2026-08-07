@@ -72,6 +72,7 @@ import {
 import { formatWeeklyPitch, scoreOpportunity } from './opportunities/score.js';
 import { opportunityRadarStatus, runOpportunityScout } from './opportunities/scout.js';
 import { calculateHeatLoad, calculateKfw458Funding, ENERGY_SOURCES } from './workspaces/energy-calculations.js';
+import { calculateHeatPumpElectricity, calculatePvPrice, pvPriceCatalog } from './workspaces/pv-price-calculator.js';
 import {
   energyTariffStatus,
   prepareEnergyTariffRequest,
@@ -1072,6 +1073,38 @@ app.post('/api/energy/funding', (req, res) => {
   try { res.json(calculateKfw458Funding(req.body || {})); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
+app.get('/api/energy/pv-price/catalog', (_req, res) => res.json(pvPriceCatalog()));
+app.post('/api/energy/pv-price/calculate', (req, res) => {
+  try { res.json(calculatePvPrice(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/energy/heat-pump-electricity/calculate', (req, res) => {
+  try { res.json(calculateHeatPumpElectricity(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/workspaces/:id/energy/pv-price/calculate', async (req, res) => {
+  try {
+    const workspace = await workspaces.getWorkspace(req.params.id);
+    if (!workspace) return res.status(404).json({ error: 'not found' });
+    if (workspace.mode !== 'energie') return res.status(400).json({ error: 'PV-Preisplanungen sind nur für Energie-Fallakten verfügbar.' });
+    const quote = calculatePvPrice(req.body || {});
+    const pv = workspace.data?.pv || {};
+    const updated = await workspaces.updateWorkspace(workspace.id, {
+      data: {
+        pv: {
+          ...pv,
+          status: 'price-planned',
+          present: true,
+          power: quote.sizing.systemKwp,
+          batteryPresent: quote.sizing.storageCapacityKwh > 0,
+          batteryCapacity: quote.sizing.storageCapacityKwh,
+          pricePlanning: quote,
+        },
+      },
+    });
+    res.json({ quote, workspace: updated });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 app.post('/api/workspaces/:id/energy/calculate', async (req, res) => {
   try {
     const workspace = await workspaces.getWorkspace(req.params.id);
@@ -1385,6 +1418,8 @@ const __dirnameIva = path.dirname(fileURLToPath(import.meta.url));
 app.use(express.static(path.join(__dirnameIva, 'public')));
 app.get('/cockpit', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'cockpit.html')));
 app.get('/workspace', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'workspace.html')));
+app.get('/pv-calculator', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'pv-calculator.html')));
+app.get('/pv-schnellrechner', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'pv-calculator.html')));
 app.get('/customers', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'customers.html')));
 app.get('/advice', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'advice.html')));
 app.get('/whatsapp', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'whatsapp.html')));

@@ -953,6 +953,15 @@ async function calculateEnergy() {
   } catch (error) { status('Rechenfehler: ' + error.message, 'err'); }
 }
 
+async function openPvCalculator() {
+  try {
+    if (mode !== 'energie') return;
+    if (!current) await save();
+    window.open(`/pv-schnellrechner?workspaceId=${encodeURIComponent(current.id)}`, '_blank', 'noopener');
+    status('PV-Schnellrechner wurde mit dieser Fallakte geöffnet.', 'ok');
+  } catch (error) { status('PV-Schnellrechner konnte nicht geöffnet werden: ' + error.message, 'err'); }
+}
+
 async function save() {
   status('speichert ...');
   try {
@@ -1711,6 +1720,7 @@ $('pdfBtn2').addEventListener('click', downloadTmbPdf);
 $('closePrintPreview').addEventListener('click', () => document.body.classList.remove('print-preview-mode'));
 $('printPreviewPrint').addEventListener('click', () => window.print());
 $('calculateEnergyBtn').addEventListener('click', calculateEnergy);
+$('openPvCalculatorBtn')?.addEventListener('click', openPvCalculator);
 $('addRoomBtn').addEventListener('click', addRoom);
 $('addNoteBtn').addEventListener('click', addNote);
 $('addAdviceModule').addEventListener('click', () => {
