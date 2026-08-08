@@ -2,13 +2,18 @@ import assert from 'node:assert/strict';
 import {
   FUNDING_DOCUMENTS,
   FUNDING_SENDER_EMAIL,
+  FUNDING_SIGNATURE,
   renderFundingMissingDocumentsEmail,
+  renderFundingSignatureHtml,
+  renderFundingSignaturePlain,
   withFundingSender,
 } from '../local-mac-helper/funding.mjs';
 import { buildDraftAppleScript, normalizeDraftPayload } from '../local-mac-helper/outlook.mjs';
 
 assert.equal(Object.keys(FUNDING_DOCUMENTS).length, 7);
 assert.equal(FUNDING_SENDER_EMAIL, 'foerderung@heat-hero.com');
+assert.equal(FUNDING_SIGNATURE.email, 'n.sell@heat-hero.com');
+assert.equal(FUNDING_SIGNATURE.website, 'https://www.heat-hero.com');
 assert.equal(withFundingSender({}).from, FUNDING_SENDER_EMAIL);
 assert.throws(() => withFundingSender({ from: 'privat@example.com' }), /ausschließlich/);
 const rendered = renderFundingMissingDocumentsEmail({
@@ -18,7 +23,8 @@ const rendered = renderFundingMissingDocumentsEmail({
   missingDocumentIds: ['signed_offer', 'identity_card'],
 });
 assert.equal(rendered.subject, 'Max Mustermann - A-4711 - fehlende Unterlagen');
-assert.match(rendered.body, /Hallo Patrick, hallo Maria,/);
+assert.match(rendered.body, /^Hallo Patrick,/);
+assert.doesNotMatch(rendered.body, /hallo Maria/);
 assert.match(rendered.body, /Unterschriebenes Angebot/);
 assert.match(rendered.body, /Personalausweis/);
 assert.deepEqual(rendered.missingDocuments.map(item => item.id), ['signed_offer', 'identity_card']);
@@ -26,6 +32,12 @@ assert.doesNotMatch(rendered.body, /Zugangsdaten/);
 assert.match(rendered.html, /<p>/);
 assert.match(rendered.html, /<ul>/);
 assert.match(rendered.html, /<li>Unterschriebenes Angebot<\/li>/);
+assert.match(renderFundingSignaturePlain(), /Nadine Sell - Sales Operations Manager/);
+assert.match(renderFundingSignatureHtml(), /data:image\/png;base64,/);
+assert.match(rendered.html, /https:\/\/www\.heat-hero\.com/);
+assert.doesNotMatch(rendered.html, /hornetsecurity|trendmicro/i);
+assert.equal((rendered.body.match(/Nadine Sell - Sales Operations Manager/g) || []).length, 1);
+assert.equal((rendered.html.match(/Nadine Sell - Sales Operations Manager/g) || []).length, 1);
 
 const draft = normalizeDraftPayload({
   subject: rendered.subject,
@@ -46,4 +58,4 @@ assert.doesNotMatch(built.script, /send draftMessage/);
 assert.throws(() => renderFundingMissingDocumentsEmail({ customerName: 'Test', orderNumber: '1', missingDocumentIds: [] }), /keine Unterlagen/);
 assert.throws(() => normalizeDraftPayload({ subject: 'Test', body: 'Text', to: ['falsch'] }), /ungültige E-Mail/);
 
-console.log('PASS IVA Mac Helper: Fördervorlage, Validierung, Empfänger-Deduplizierung und Entwurfsgrenze.');
+console.log('PASS IVA Mac Helper: Fördervorlage, feste Patrick-Anrede, HEAT-HERO-Signatur und Entwurfsgrenze.');

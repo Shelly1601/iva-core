@@ -1,12 +1,14 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdir, stat } from 'node:fs/promises';
+import { mkdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const SOURCE = fileURLToPath(new URL('./macos/iva-ax.swift', import.meta.url));
 const BIN_DIR = path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper', 'bin');
 const BINARY = path.join(BIN_DIR, 'iva-ax');
+const TEMP_DIR = path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper', 'tmp');
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 
 function run(command, args, { timeoutMs = 15000 } = {}) {
@@ -87,18 +89,31 @@ export async function assertOutlookComposeSender(expectedFrom) {
   return inspection;
 }
 
-export async function fillVerifiedOutlookCompose({ from, subject, body, allowExistingSubject = false }) {
+async function pasteHtmlIntoOutlook(html) {
+  await mkdir(TEMP_DIR, { recursive: true, mode: 0o700 });
+  const htmlFile = path.join(TEMP_DIR, `${randomUUID()}.html`);
+  try {
+    await writeFile(htmlFile, String(html), { mode: 0o600 });
+    return await runMacUiBridge(['paste-html-file', 'AXTextArea', '', htmlFile], { timeoutMs: 30000 });
+  } finally {
+    await unlink(htmlFile).catch(() => {});
+  }
+}
+
+export async function fillVerifiedOutlookCompose({ from, subject, body, html = '', allowExistingSubject = false }) {
   const before = await assertOutlookComposeSender(from);
   const currentSubject = await runMacUiBridge(['value', 'AXTextField', 'subjectTextField']);
-  if (!allowExistingSubject && String(currentSubject.value || '').trim()) {
+  const existingSubject = String(currentSubject.value || '').trim();
+  if (!allowExistingSubject && existingSubject) {
     throw new Error('Outlook-Abbruch: Der geöffnete Entwurf enthält bereits einen Betreff. Er wurde nicht überschrieben.');
   }
-  const currentBody = await runMacUiBridge(['value', 'AXTextArea', '']);
-  const signature = String(currentBody.value || '').trim();
-  const composedBody = signature ? `${String(body).trim()}\n\n${signature}\n` : `${String(body).trim()}\n`;
+  if (allowExistingSubject && existingSubject && existingSubject !== String(subject).trim()) {
+    throw new Error('Outlook-Abbruch: Der vorhandene Betreff stimmt nicht exakt mit dem zu aktualisierenden Entwurf überein.');
+  }
 
   await runMacUiBridge(['set-value', 'AXTextField', 'subjectTextField', subject]);
-  await runMacUiBridge(['set-value', 'AXTextArea', '', composedBody]);
+  if (String(html).trim()) await pasteHtmlIntoOutlook(html);
+  else await runMacUiBridge(['set-value', 'AXTextArea', '', `${String(body).trim()}\n`]);
   const after = await assertOutlookComposeSender(from);
   const verifiedSubject = await runMacUiBridge(['value', 'AXTextField', 'subjectTextField']);
   if (String(verifiedSubject.value || '') !== String(subject)) {
@@ -109,8 +124,8 @@ export async function fillVerifiedOutlookCompose({ from, subject, body, allowExi
     created: true,
     storedInSelectedAccount: after.selectedFrom,
     subject,
-    bodyFormat: 'plain-text-with-paragraphs',
-    signaturePreserved: Boolean(signature),
+    bodyFormat: String(html).trim() ? 'html-rich-text' : 'plain-text-with-paragraphs',
+    existingOutlookSignaturePreserved: false,
     sent: false,
     context: before.focusedWindowTitle,
   };

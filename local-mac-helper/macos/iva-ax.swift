@@ -140,9 +140,9 @@ func click(_ element: AXUIElement) throws {
     up.post(tap: .cghidEventTap)
 }
 
-func saveShortcut() throws {
-    guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 1, keyDown: true),
-          let up = CGEvent(keyboardEventSource: nil, virtualKey: 1, keyDown: false) else {
+func commandShortcut(_ virtualKey: CGKeyCode) throws {
+    guard let down = CGEvent(keyboardEventSource: nil, virtualKey: virtualKey, keyDown: true),
+          let up = CGEvent(keyboardEventSource: nil, virtualKey: virtualKey, keyDown: false) else {
         throw HelperError.message("Tastaturereignis konnte nicht erstellt werden.")
     }
     down.flags = .maskCommand
@@ -150,6 +150,69 @@ func saveShortcut() throws {
     down.post(tap: .cghidEventTap)
     usleep(70_000)
     up.post(tap: .cghidEventTap)
+}
+
+func snapshotPasteboard(_ pasteboard: NSPasteboard) -> [[String: Data]] {
+    return (pasteboard.pasteboardItems ?? []).map { item in
+        var stored: [String: Data] = [:]
+        for type in item.types {
+            if let data = item.data(forType: type) { stored[type.rawValue] = data }
+        }
+        return stored
+    }
+}
+
+func restorePasteboard(_ pasteboard: NSPasteboard, snapshot: [[String: Data]]) {
+    pasteboard.clearContents()
+    let items = snapshot.map { stored -> NSPasteboardItem in
+        let item = NSPasteboardItem()
+        for (rawType, data) in stored {
+            item.setData(data, forType: NSPasteboard.PasteboardType(rawType))
+        }
+        return item
+    }
+    if !items.isEmpty { pasteboard.writeObjects(items) }
+}
+
+func pasteHTMLFile(_ filePath: String, into element: AXUIElement) throws -> Int {
+    let fileURL = URL(fileURLWithPath: filePath)
+    let htmlData = try Data(contentsOf: fileURL)
+    guard let attributed = try? NSAttributedString(
+        data: htmlData,
+        options: [
+            .documentType: NSAttributedString.DocumentType.html,
+            .characterEncoding: String.Encoding.utf8.rawValue,
+            .baseURL: fileURL.deletingLastPathComponent(),
+        ],
+        documentAttributes: nil
+    ) else {
+        throw HelperError.message("HTML konnte nicht als formatierter Mailtext gelesen werden.")
+    }
+    let rtfData = try attributed.data(
+        from: NSRange(location: 0, length: attributed.length),
+        documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
+    )
+    let pasteboard = NSPasteboard.general
+    let previous = snapshotPasteboard(pasteboard)
+    pasteboard.clearContents()
+    let item = NSPasteboardItem()
+    item.setData(htmlData, forType: .html)
+    item.setData(rtfData, forType: .rtf)
+    item.setString(attributed.string, forType: .string)
+    guard pasteboard.writeObjects([item]) else {
+        restorePasteboard(pasteboard, snapshot: previous)
+        throw HelperError.message("Formatierter Mailtext konnte nicht in die Zwischenablage gelegt werden.")
+    }
+
+    let focusResult = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    if focusResult != .success { try click(element) }
+    usleep(100_000)
+    try commandShortcut(0) // Befehl+A
+    usleep(100_000)
+    try commandShortcut(9) // Befehl+V
+    usleep(700_000)
+    restorePasteboard(pasteboard, snapshot: previous)
+    return attributed.length
 }
 
 do {
@@ -207,8 +270,21 @@ do {
     }
 
     if command == "save" {
-        try saveShortcut()
+        try commandShortcut(1) // Befehl+S
         try writeJSON(["saved": true, "focusedWindowTitle": focusedWindowTitle(appElement)])
+        exit(0)
+    }
+
+    if command == "paste-html-file" {
+        guard arguments.count >= 4 else { throw HelperError.message("paste-html-file benötigt AX-Rolle, exakte Beschriftung und Dateipfad.") }
+        let found = nodes.filter { matches($0, role: arguments[1], description: arguments[2]) }
+        guard found.count == 1 else { throw HelperError.message("Bedienelement ist nicht eindeutig: \(found.count) Treffer.") }
+        let characterCount = try pasteHTMLFile(arguments[3], into: found[0].element)
+        try writeJSON([
+            "pasted": true,
+            "characterCount": characterCount,
+            "element": dictionary(found[0]),
+        ])
         exit(0)
     }
 

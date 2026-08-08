@@ -12,6 +12,7 @@ Der lokale Helper bedient Programme, die nur auf Nadines Mac angemeldet sind. Ph
 - ohne eindeutig aufgelöstes `from`-Konto wird kein Entwurf mehr erzeugt; ein lokaler oder privater Fallback ist gesperrt
 - Förderentwürfe sind fest auf `foerderung@heat-hero.com` begrenzt; eine abweichende Eingabe wird verworfen
 - die Mailvorlage wird als HTML mit echten Absätzen und Aufzählungen angelegt
+- jede Fördermail enthält die feste HEAT-HERO-Signatur von Nadine Sell inklusive Logo, Funktionsbezeichnung, Kontaktdaten und direktem Link auf `https://www.heat-hero.com`
 - für das neue Outlook kann der sichtbare Konto-Wähler zusätzlich geprüft werden; akzeptiert wird nur der exakte Wert `Förderung | HEAT HERO (foerderung@heat-hero.com)`
 - Versand bleibt deaktiviert
 
@@ -33,9 +34,8 @@ Beispielstruktur für `fall.json`:
 {
   "customerName": "Max Mustermann",
   "orderNumber": "A-4711",
-  "vpName": "Maria",
-  "to": ["vertriebspartner@example.com"],
-  "cc": [],
+  "to": ["patrick@example.com"],
+  "cc": ["vertriebspartner@example.com"],
   "missingDocumentIds": [
     "signed_offer",
     "identity_card",
@@ -46,6 +46,8 @@ Beispielstruktur für `fall.json`:
 ```
 
 Der Absender muss in Falldateien nicht mehr eingetragen werden. Er wird für diesen Workflow immer fest als `foerderung@heat-hero.com` gesetzt. Ein abweichender übergebener Absender führt zum Abbruch.
+
+Die Anrede lautet unabhängig von den verfügbaren VP-Daten immer `Hallo Patrick,`. Patrick steht im Feld **An**. Die eindeutig zugeordnete E-Mail-Adresse des Vertriebspartners wird optional ins **CC** gesetzt. Ist sie nicht vorhanden oder nicht eindeutig, wird keine Adresse geraten.
 
 Nur ansehen:
 

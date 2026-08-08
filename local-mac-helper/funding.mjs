@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 export const FUNDING_DOCUMENTS = Object.freeze({
   signed_offer: 'Unterschriebenes Angebot',
   identity_card: 'Personalausweis (Vorder- und Rückseite gemeinsam in einer PDF)',
@@ -9,6 +11,18 @@ export const FUNDING_DOCUMENTS = Object.freeze({
 });
 
 export const FUNDING_SENDER_EMAIL = 'foerderung@heat-hero.com';
+export const FUNDING_SIGNATURE = Object.freeze({
+  name: 'Nadine Sell',
+  title: 'Sales Operations Manager',
+  company: 'HEAT HERO GmbH',
+  email: 'n.sell@heat-hero.com',
+  phone: '0421 40885189',
+  street: 'Fritz-Thiele-Str. 3',
+  postalCity: '28279 Bremen',
+  website: 'https://www.heat-hero.com',
+});
+
+const signatureLogoDataUri = `data:image/png;base64,${readFileSync(new URL('./assets/heat-hero-logo.png', import.meta.url)).toString('base64')}`;
 
 export function withFundingSender(input = {}) {
   const supplied = String(input.from || '').trim().toLowerCase();
@@ -26,6 +40,41 @@ const html = value => String(value || '')
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#39;');
 
+export function renderFundingSignaturePlain() {
+  return `Bei weiteren Fragen stehe ich gerne zur Verfügung.
+
+Beste Grüße
+${FUNDING_SIGNATURE.name} - ${FUNDING_SIGNATURE.title}
+
+${FUNDING_SIGNATURE.company}
+E-Mail: ${FUNDING_SIGNATURE.email}
+Tel.: ${FUNDING_SIGNATURE.phone}
+Adresse: ${FUNDING_SIGNATURE.street},
+${FUNDING_SIGNATURE.postalCity}
+
+www.heat-hero.com`;
+}
+
+export function renderFundingSignatureHtml() {
+  return `<div style="margin-top: 24px; font-family: Aptos, Arial, sans-serif; font-size: 11pt; line-height: 1.45; color: #1f1f1f;">
+  <p style="margin: 0 0 12px;">Bei weiteren Fragen stehe ich gerne zur Verfügung.</p>
+  <p style="margin: 0 0 14px;">Beste Grüße</p>
+  <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse: collapse;">
+    <tr>
+      <td style="padding: 0 18px 0 0; vertical-align: top;"><img src="${signatureLogoDataUri}" width="155" alt="HEAT HERO Wärmepumpen" style="display: block; width: 155px; height: auto; border: 0;"></td>
+      <td style="padding: 2px 0 0; vertical-align: top; border-left: 3px solid #29ef69; padding-left: 16px;">
+        <div style="font-weight: 700;">${html(FUNDING_SIGNATURE.name)} - ${html(FUNDING_SIGNATURE.title)}</div>
+        <div style="margin-top: 8px; font-weight: 700;">${html(FUNDING_SIGNATURE.company)}</div>
+        <div>E-Mail: <a href="mailto:${html(FUNDING_SIGNATURE.email)}" style="color: #1f1f1f; text-decoration: none;">${html(FUNDING_SIGNATURE.email)}</a></div>
+        <div>Tel.: <a href="tel:+4942140885189" style="color: #1f1f1f; text-decoration: none;">${html(FUNDING_SIGNATURE.phone)}</a></div>
+        <div>Adresse: ${html(FUNDING_SIGNATURE.street)},<br>${html(FUNDING_SIGNATURE.postalCity)}</div>
+        <div style="margin-top: 8px;"><a href="${FUNDING_SIGNATURE.website}" style="color: #138c41; font-weight: 700;">www.heat-hero.com</a></div>
+      </td>
+    </tr>
+  </table>
+</div>`;
+}
+
 export function renderFundingMissingDocumentsEmail(input = {}) {
   const customerName = clean(input.customerName);
   const orderNumber = clean(input.orderNumber);
@@ -39,7 +88,7 @@ export function renderFundingMissingDocumentsEmail(input = {}) {
   if (!missingDocumentIds.length) throw new Error('Es fehlen keine Unterlagen; deshalb wird kein Entwurf erzeugt.');
 
   const missingDocuments = missingDocumentIds.map(id => ({ id, label: FUNDING_DOCUMENTS[id] }));
-  const greeting = vpName ? `Hallo Patrick, hallo ${vpName},` : 'Hallo Patrick,';
+  const greeting = 'Hallo Patrick,';
   const list = missingDocuments.map(item => `- ${item.label}`).join('\n');
   const subject = `${customerName} - ${orderNumber} - fehlende Unterlagen`;
   const body = `${greeting}
@@ -64,7 +113,9 @@ Wichtig:
 
 So können wir die Unterlagen schnell zuordnen, beim Kunden hinterlegen und den Förderprozess ohne zusätzliche Verzögerungen weiterbearbeiten.
 
-Vielen Dank!`;
+Vielen Dank!
+
+${renderFundingSignaturePlain()}`;
   const htmlBody = `<div style="font-family: Aptos, Arial, sans-serif; font-size: 11pt; line-height: 1.5; color: #1f1f1f;">
   <p>${html(greeting)}</p>
   <p>bei der Überprüfung der Förderunterlagen ist uns aufgefallen, dass für den folgenden Kunden noch Unterlagen fehlen:</p>
@@ -82,6 +133,7 @@ Vielen Dank!`;
   </ul>
   <p>So können wir die Unterlagen schnell zuordnen, beim Kunden hinterlegen und den Förderprozess ohne zusätzliche Verzögerungen weiterbearbeiten.</p>
   <p>Vielen Dank!</p>
+  ${renderFundingSignatureHtml()}
 </div>`;
 
   return {
