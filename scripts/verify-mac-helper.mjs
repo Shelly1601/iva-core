@@ -1,8 +1,16 @@
 import assert from 'node:assert/strict';
-import { FUNDING_DOCUMENTS, renderFundingMissingDocumentsEmail } from '../local-mac-helper/funding.mjs';
+import {
+  FUNDING_DOCUMENTS,
+  FUNDING_SENDER_EMAIL,
+  renderFundingMissingDocumentsEmail,
+  withFundingSender,
+} from '../local-mac-helper/funding.mjs';
 import { buildDraftAppleScript, normalizeDraftPayload } from '../local-mac-helper/outlook.mjs';
 
 assert.equal(Object.keys(FUNDING_DOCUMENTS).length, 7);
+assert.equal(FUNDING_SENDER_EMAIL, 'foerderung@heat-hero.com');
+assert.equal(withFundingSender({}).from, FUNDING_SENDER_EMAIL);
+assert.throws(() => withFundingSender({ from: 'privat@example.com' }), /ausschließlich/);
 const rendered = renderFundingMissingDocumentsEmail({
   customerName: 'Max Mustermann',
   orderNumber: 'A-4711',

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
-import { renderFundingMissingDocumentsEmail } from './funding.mjs';
+import { renderFundingMissingDocumentsEmail, withFundingSender } from './funding.mjs';
 import { createOutlookDraft, diagnoseOutlook, normalizeDraftPayload } from './outlook.mjs';
 import { startMacHelperServer } from './server.mjs';
 
@@ -10,8 +10,9 @@ async function readJson(filePath) {
 }
 
 function compose(input) {
-  const rendered = renderFundingMissingDocumentsEmail(input);
-  return normalizeDraftPayload({ ...input, subject: rendered.subject, body: rendered.body, html: rendered.html });
+  const fundingInput = withFundingSender(input);
+  const rendered = renderFundingMissingDocumentsEmail(fundingInput);
+  return normalizeDraftPayload({ ...fundingInput, subject: rendered.subject, body: rendered.body, html: rendered.html });
 }
 
 async function main() {

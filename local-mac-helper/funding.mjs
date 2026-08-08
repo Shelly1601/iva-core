@@ -8,6 +8,16 @@ export const FUNDING_DOCUMENTS = Object.freeze({
   kfw_account_confirmation: 'Bestätigung, dass das KfW-Konto angelegt und der Aktivierungslink bestätigt wurde',
 });
 
+export const FUNDING_SENDER_EMAIL = 'foerderung@heat-hero.com';
+
+export function withFundingSender(input = {}) {
+  const supplied = String(input.from || '').trim().toLowerCase();
+  if (supplied && supplied !== FUNDING_SENDER_EMAIL) {
+    throw new Error(`Förderentwürfe dürfen ausschließlich über ${FUNDING_SENDER_EMAIL} angelegt werden.`);
+  }
+  return { ...input, from: FUNDING_SENDER_EMAIL };
+}
+
 const clean = (value, max = 220) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
 const html = value => String(value || '')
   .replace(/&/g, '&amp;')

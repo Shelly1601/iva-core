@@ -10,7 +10,9 @@ Der lokale Helper bedient Programme, die nur auf Nadines Mac angemeldet sind. Ph
 - Entwürfe erhalten einen Fingerprint; identische Entwürfe werden nicht doppelt erzeugt
 - Aktionen und Fehler werden lokal unter `~/Library/Application Support/IVA Mac Helper/` protokolliert
 - ohne eindeutig aufgelöstes `from`-Konto wird kein Entwurf mehr erzeugt; ein lokaler oder privater Fallback ist gesperrt
+- Förderentwürfe sind fest auf `foerderung@heat-hero.com` begrenzt; eine abweichende Eingabe wird verworfen
 - die Mailvorlage wird als HTML mit echten Absätzen und Aufzählungen angelegt
+- für das neue Outlook kann der sichtbare Konto-Wähler zusätzlich geprüft werden; akzeptiert wird nur der exakte Wert `Förderung | HEAT HERO (foerderung@heat-hero.com)`
 - Versand bleibt deaktiviert
 
 ## Diagnose
@@ -20,6 +22,8 @@ node local-mac-helper/cli.mjs doctor
 ```
 
 Wenn `accessibility.enabled` noch `false` ist, muss der später verpackte Helper einmal unter **Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen** erlaubt werden. Die native Outlook-Schnittstelle wird bevorzugt; die Bedienungshilfe ist der Fallback für die neue Outlook-Oberfläche und geteilte Absender.
+
+Der Oberflächen-Fallback arbeitet absichtlich nach dem Prinzip „im Zweifel abbrechen“: Er prüft den sichtbaren Absender vor und nach dem Befüllen und überschreibt keinen Entwurf, der bereits einen Betreff enthält. Die Swift-Bridge wird lokal nach `~/Library/Application Support/IVA Mac Helper/bin/iva-ax` kompiliert.
 
 ## Förderentwurf vorbereiten
 
@@ -32,7 +36,6 @@ Beispielstruktur für `fall.json`:
   "vpName": "Maria",
   "to": ["vertriebspartner@example.com"],
   "cc": [],
-  "from": "foerderung@heat-hero.com",
   "missingDocumentIds": [
     "signed_offer",
     "identity_card",
@@ -41,6 +44,8 @@ Beispielstruktur für `fall.json`:
   "attachments": []
 }
 ```
+
+Der Absender muss in Falldateien nicht mehr eingetragen werden. Er wird für diesen Workflow immer fest als `foerderung@heat-hero.com` gesetzt. Ein abweichender übergebener Absender führt zum Abbruch.
 
 Nur ansehen:
 

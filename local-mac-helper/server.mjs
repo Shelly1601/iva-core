@@ -4,7 +4,7 @@ import path from 'node:path';
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { renderFundingMissingDocumentsEmail } from './funding.mjs';
+import { renderFundingMissingDocumentsEmail, withFundingSender } from './funding.mjs';
 import { createOutlookDraft, diagnoseOutlook, normalizeDraftPayload } from './outlook.mjs';
 
 const HOST = '127.0.0.1';
@@ -65,16 +65,17 @@ function fingerprint(draft) {
 }
 
 function fundingDraft(input) {
-  const rendered = renderFundingMissingDocumentsEmail(input);
+  const fundingInput = withFundingSender(input);
+  const rendered = renderFundingMissingDocumentsEmail(fundingInput);
   return normalizeDraftPayload({
     subject: rendered.subject,
     body: rendered.body,
     html: rendered.html,
-    to: input.to,
-    cc: input.cc,
-    bcc: input.bcc,
-    from: input.from,
-    attachments: input.attachments,
+    to: fundingInput.to,
+    cc: fundingInput.cc,
+    bcc: fundingInput.bcc,
+    from: fundingInput.from,
+    attachments: fundingInput.attachments,
   });
 }
 
