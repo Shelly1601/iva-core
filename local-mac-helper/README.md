@@ -60,6 +60,17 @@ Eine nur in Outlook gefundene Datei zählt nicht als vollständig. Reihenfolge: 
 
 Der Kontakt hinter dem Pipedrive-Feld **Vertriebspartner** liefert Anzeigenamen und E-Mail-Adresse für Anrede und CC. Zum strukturierten, rein lokalen Auslesen der bereits angemeldeten Chrome-Sitzung muss einmal **Chrome → Ansicht → Entwickler → JavaScript von Apple Events erlauben** aktiviert werden. Zugangsdaten werden nicht in IVA-Dateien geschrieben.
 
+## Übergabe an Viktoria per WhatsApp
+
+Für diesen internen Abschluss-Hinweis nutzt IVA zunächst die lokal installierte WhatsApp-Mac-App. Der WhatsApp-Hub bleibt für diesen Schritt ungeeignet, solange dessen Versand in IVA noch gesperrt ist.
+
+1. WhatsApp Business auf dem iPhone unter **Einstellungen → Verknüpfte Geräte → Gerät hinzufügen** öffnen.
+2. `/Applications/WhatsApp.app` auf dem Mac starten und den dort angezeigten QR-Code scannen.
+3. Viktoria Lambels exakte Mobilnummer einmalig verifizieren und einen kontrollierten Test durchführen.
+4. Erst nach vollständig verifizierten Pipedrive-Unterlagen und gegebenenfalls erfolgreich bestätigter Verschiebung nach **Förderung beantragt** wird die feste Nachricht vorbereitet: `Kundenname - Auftragsnummer ist fertig`.
+
+Bei einem Deal, der bereits in **Förderung beantragt** steht, ist keine weitere Stufenänderung erforderlich. Die Nachricht bleibt trotzdem gesperrt, bis alle Pflichtunterlagen tatsächlich in Pipedrive vorhanden sind. Doppelte Übergaben werden beim späteren Live-Versand über Deal-ID und Abschlussstand verhindert.
+
 Nur ansehen:
 
 ```bash

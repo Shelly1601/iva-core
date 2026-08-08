@@ -8,6 +8,7 @@ import { renderFundingMissingDocumentsEmail, withFundingSender } from './funding
 import { createOutlookDraft, diagnoseOutlook, normalizeDraftPayload } from './outlook.mjs';
 import { diagnosePipedriveChrome } from './chrome-pipedrive.mjs';
 import { decideFundingDealAction, validatePipedriveFundingSnapshot } from './pipedrive-funding.mjs';
+import { diagnoseWhatsAppMac } from './whatsapp-mac.mjs';
 
 const HOST = '127.0.0.1';
 const PORT = Math.min(65535, Math.max(1024, Number(process.env.IVA_MAC_HELPER_PORT) || 4317));
@@ -91,6 +92,7 @@ export function createMacHelperServer() {
       if (req.method === 'GET' && url.pathname === '/v1/doctor') return json(res, 200, {
         outlook: await diagnoseOutlook(),
         pipedrive: await diagnosePipedriveChrome(),
+        whatsapp: await diagnoseWhatsAppMac(),
       });
       if (req.method === 'POST' && url.pathname === '/v1/funding/pipedrive/decision') {
         const input = await body(req);

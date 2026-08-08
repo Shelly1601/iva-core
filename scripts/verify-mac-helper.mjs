@@ -21,6 +21,11 @@ import {
   resolveFundingStage,
   validatePipedriveFundingSnapshot,
 } from '../local-mac-helper/pipedrive-funding.mjs';
+import {
+  FUNDING_HANDOFF_RECIPIENT,
+  buildFundingHandoffWhatsApp,
+  normalizeWhatsAppPhone,
+} from '../local-mac-helper/whatsapp-mac.mjs';
 
 assert.equal(Object.keys(FUNDING_DOCUMENTS).length, 7);
 assert.equal(FUNDING_SENDER_EMAIL, 'foerderung@heat-hero.com');
@@ -97,6 +102,29 @@ const lockedDecision = decideFundingDealAction('Förderung beantragt', {
 assert.equal(lockedDecision.action, 'keep_in_funding_requested');
 assert.equal(lockedDecision.moveAllowed, false);
 assert.equal(lockedDecision.stageLocked, true);
+assert.equal(FUNDING_HANDOFF_RECIPIENT, 'Viktoria Lambel');
+assert.equal(normalizeWhatsAppPhone('0151 23456789'), '+4915123456789');
+assert.throws(() => buildFundingHandoffWhatsApp({
+  customerName: 'Max Mustermann', orderNumber: 'A-4711', phone: '0151 23456789', decision: moveDecision,
+}), /Verschiebung/);
+const handoff = buildFundingHandoffWhatsApp({
+  customerName: 'Max Mustermann',
+  orderNumber: 'A-4711',
+  phone: '0151 23456789',
+  decision: moveDecision,
+  stageTransitionVerified: true,
+});
+assert.equal(handoff.recipientName, 'Viktoria Lambel');
+assert.equal(handoff.text, 'Max Mustermann - A-4711 ist fertig');
+assert.match(handoff.url, /^whatsapp:\/\/send\?phone=4915123456789&text=/);
+assert.equal(handoff.sent, false);
+const lockedHandoff = buildFundingHandoffWhatsApp({
+  customerName: 'Max Mustermann', orderNumber: 'A-4711', phone: '0151 23456789', decision: lockedDecision,
+});
+assert.equal(lockedHandoff.ready, true);
+assert.throws(() => buildFundingHandoffWhatsApp({
+  customerName: 'Max Mustermann', orderNumber: 'A-4711', phone: '0151 23456789', decision: uploadDecision,
+}), /noch nicht vollständig/);
 assert.throws(() => validatePipedriveFundingSnapshot({ pipeline: 'Falsch', stage: 'Förderung beantragt' }), /Falsche/);
 assert.equal(validatePipedriveFundingSnapshot({
   pipeline: 'Auftragsmachbarkeit',
@@ -124,4 +152,4 @@ assert.doesNotMatch(built.script, /send draftMessage/);
 assert.throws(() => renderFundingMissingDocumentsEmail({ customerName: 'Test', orderNumber: '1', missingDocumentIds: [] }), /keine Unterlagen/);
 assert.throws(() => normalizeDraftPayload({ subject: 'Test', body: 'Text', to: ['falsch'] }), /ungültige E-Mail/);
 
-console.log('PASS IVA Mac Helper: Pipedrive-Stufen, Patrick/VP-Empfängerlogik, HEAT-HERO-Signatur und Entwurfsgrenze.');
+console.log('PASS IVA Mac Helper: Pipedrive-Stufen, E-Mail-Empfänger, HEAT-HERO-Signatur und gesperrte WhatsApp-Übergabe.');

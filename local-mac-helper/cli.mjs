@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { renderFundingMissingDocumentsEmail, withFundingSender } from './funding.mjs';
 import { createOutlookDraft, diagnoseOutlook, normalizeDraftPayload } from './outlook.mjs';
 import { diagnosePipedriveChrome } from './chrome-pipedrive.mjs';
+import { diagnoseWhatsAppMac } from './whatsapp-mac.mjs';
 import { startMacHelperServer } from './server.mjs';
 
 async function readJson(filePath) {
@@ -28,6 +29,7 @@ async function main() {
   if (command === 'doctor') return console.log(JSON.stringify({
     outlook: await diagnoseOutlook(),
     pipedrive: await diagnosePipedriveChrome(),
+    whatsapp: await diagnoseWhatsAppMac(),
   }, null, 2));
   if (command === 'serve') return startMacHelperServer();
   if (command === 'preview-funding') return console.log(JSON.stringify(compose(await readJson(filePath)), null, 2));
