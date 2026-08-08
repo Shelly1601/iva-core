@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import path from 'node:path';
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import {
   FUNDING_DOCUMENTS,
   FUNDING_PRIMARY_RECIPIENT_EMAIL,
@@ -32,7 +35,12 @@ import {
   classifyFundingDocumentName,
   parseFundingDocumentPages,
 } from '../local-mac-helper/funding-document-extractor.mjs';
-import { applyPipedriveFundingFieldUpdates } from '../local-mac-helper/chrome-pipedrive.mjs';
+import {
+  PIPEDRIVE_FILE_POLICY,
+  applyPipedriveFundingFieldUpdates,
+  assertPipedriveFileActionAllowed,
+} from '../local-mac-helper/chrome-pipedrive.mjs';
+import { cleanupFundingWorkingCopy, stageFundingWorkingCopy } from '../local-mac-helper/local-working-files.mjs';
 
 assert.equal(Object.keys(FUNDING_DOCUMENTS).length, 7);
 assert.equal(FUNDING_SENDER_EMAIL, 'foerderung@heat-hero.com');
@@ -164,6 +172,42 @@ assert.equal(validatePipedriveFundingSnapshot({
   stage: 'Förderung beantragt',
   customerName: 'Erika Musterfrau',
 }).customerName, 'Erika Musterfrau');
+assert.equal(PIPEDRIVE_FILE_POLICY.delete, false);
+assert.equal(assertPipedriveFileActionAllowed('download'), true);
+assert.throws(() => assertPipedriveFileActionAllowed('delete'), /unter keinen Umständen gelöscht/);
+
+const localCleanupTestRoot = await mkdtemp(path.join(os.tmpdir(), 'iva-funding-local-cleanup-'));
+try {
+  const downloadsRoot = path.join(localCleanupTestRoot, 'Downloads');
+  const workingRoot = path.join(localCleanupTestRoot, 'managed');
+  await mkdir(downloadsRoot, { recursive: true });
+  const downloadedPdf = path.join(downloadsRoot, 'Angebot_unterschrieben.pdf');
+  await writeFile(downloadedPdf, '%PDF-1.4\nTestkopie');
+  const workingCopy = await stageFundingWorkingCopy(downloadedPdf, {
+    dealId: '8153',
+    consumeDownloadedCopy: true,
+    downloadsRoot,
+    workingRoot,
+  });
+  await assert.rejects(access(downloadedPdf));
+  await access(workingCopy.workingPath);
+  const cleanupResult = await cleanupFundingWorkingCopy(workingCopy, { workingRoot });
+  assert.equal(cleanupResult.localWorkingCopyDeleted, true);
+  assert.equal(cleanupResult.pipedriveFileDeleted, false);
+  await assert.rejects(access(workingCopy.jobDirectory));
+  const outsidePdf = path.join(localCleanupTestRoot, 'nicht-download.pdf');
+  await writeFile(outsidePdf, '%PDF-1.4\nKein Download');
+  await assert.rejects(
+    stageFundingWorkingCopy(outsidePdf, {
+      consumeDownloadedCopy: true,
+      downloadsRoot,
+      workingRoot,
+    }),
+    /ausschließlich.*Downloads-Ordner/,
+  );
+} finally {
+  await rm(localCleanupTestRoot, { recursive: true, force: true });
+}
 
 const documentAnalysis = parseFundingDocumentPages([
   `Kundendaten\nAuftragsnummer: HH-AN-7-26-10926\nKundennummer: KD-8821\nTelefonnummer: +49 174 1234567\nSol-HEAT Wärmepumpenpaket 16kW - PANASONIC M-Serie T-CAP WH-WXG16ME8`,

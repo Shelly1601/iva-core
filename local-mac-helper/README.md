@@ -7,6 +7,8 @@ Der lokale Helper bedient Programme, die nur auf Nadines Mac angemeldet sind. Er
 - hört nur auf `127.0.0.1`
 - jede fachliche Route verlangt `IVA_MAC_HELPER_TOKEN` mit mindestens 32 Zeichen
 - Originaldateien werden weder verändert noch gelöscht
+- **Harte Pipedrive-Regel:** In Pipedrive wird keine Datei gelöscht. Der lokale Dienst lehnt jede Pipedrive-`DELETE`-Route ausdrücklich ab.
+- Für die Verarbeitung heruntergeladene Kopien werden in einen abgeschotteten IVA-Arbeitsordner verschoben und nach Auswertung beziehungsweise verifiziertem Upload vollständig lokal entfernt. Die Bereinigung darf ausschließlich diesen Arbeitsordner treffen.
 - Entwürfe erhalten einen Fingerprint; identische Entwürfe werden nicht doppelt erzeugt
 - Aktionen und Fehler werden lokal unter `~/Library/Application Support/IVA Mac Helper/` protokolliert
 - ohne eindeutig aufgelöstes `from`-Konto wird kein Entwurf mehr erzeugt; ein lokaler oder privater Fallback ist gesperrt
@@ -60,6 +62,8 @@ IVA prüft ausschließlich die Pipeline **Auftragsmachbarkeit** und darin diese 
 
 Eine nur in Outlook gefundene Datei zählt nicht als vollständig. Reihenfolge: richtigen Deal und Dokumenttyp bestätigen → gegebenenfalls Bilder je Unterlage zu einer PDF zusammenfügen → eindeutig benennen → in Pipedrive hochladen → Upload verifizieren → gesamte Checkliste erneut prüfen → erst dann gegebenenfalls die erlaubte Stufenänderung ausführen.
 
+Nach der Verarbeitung gilt: Lokale Download-, OCR-, Bild- und PDF-Zwischenkopien werden erst nach abgeschlossener Auswertung beziehungsweise verifiziertem Upload entfernt. Diese lokale Bereinigung verändert niemals die Originaldatei im Pipedrive-Verlauf. Auch bei Fehlern wird der IVA-Arbeitsordner aufgeräumt. Dateien außerhalb des IVA-Arbeitsordners werden nicht pauschal gelöscht; nur ein ausdrücklich als temporärer Pipedrive-Download markierter Pfad aus `~/Downloads` darf beim Einstellen in den Arbeitsordner konsumiert werden.
+
 Der Kontakt hinter dem Pipedrive-Feld **Vertriebspartner** liefert Anzeigenamen und E-Mail-Adresse für Anrede und CC. Zum strukturierten, rein lokalen Auslesen der bereits angemeldeten Chrome-Sitzung muss einmal **Chrome → Ansicht → Entwickler → JavaScript von Apple Events erlauben** aktiviert werden. Zugangsdaten werden nicht in IVA-Dateien geschrieben.
 
 Die Belegsuche läuft immer über **Verlauf → Alle**. Der separate Reiter **Dokumente** ist für diesen Workflow nicht die Quelle. Dadurch werden auch Belege berücksichtigt, die im Gesamtverlauf stehen, aber im reinen Dateien- oder Dokumente-Filter fehlen.
@@ -109,8 +113,9 @@ Routen:
 - `GET /v1/doctor`
 - `GET /v1/pipedrive/deals/:id/funding-snapshot` liest Pipeline, aktive Stufe, Kunde, Ort, Auftrags-/Kunden-/Telefonnummer, VP-Kontakt und sichtbare Dateinamen ohne Änderung aus dem geöffneten Chrome-Deal
 - `POST /v1/funding/pipedrive/decision` für eine rein lesende Workflow-Entscheidung ohne Pipedrive-Änderung
-- `POST /v1/funding/documents/analyze` wertet eine lokale PDF aus und liefert optional konfliktgeprüfte Pipedrive-Feldvorschläge; die Route schreibt nichts
-- `POST /v1/funding/pipedrive/fields/apply` liest Deal und PDF erneut, befüllt mit `confirmApply: true` ausschließlich leere, sichtbare Felder und verifiziert jeden gespeicherten Wert; vorhandene Werte werden nie überschrieben
+- `POST /v1/funding/documents/analyze` wertet eine lokale PDF aus und liefert optional konfliktgeprüfte Pipedrive-Feldvorschläge; mit `deleteLocalCopyAfterUse: true` wird ein ausdrücklich markierter Download nach der Auswertung lokal entfernt
+- `POST /v1/funding/pipedrive/fields/apply` liest Deal und PDF erneut, befüllt mit `confirmApply: true` ausschließlich leere, sichtbare Felder und verifiziert jeden gespeicherten Wert; vorhandene Werte werden nie überschrieben; mit `deleteLocalCopyAfterUse: true` wird die lokale Downloadkopie anschließend entfernt
+- jede `DELETE /v1/pipedrive/...`-Anfrage ist hart gesperrt
 - `POST /v1/funding/drafts/preview`
 - `POST /v1/funding/drafts` mit `confirmCreateDraft: true`
 

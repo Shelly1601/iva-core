@@ -10,6 +10,7 @@ import { applyPipedriveFundingFieldUpdates, diagnosePipedriveChrome, readPipedri
 import { decideFundingDealAction, validatePipedriveFundingSnapshot } from './pipedrive-funding.mjs';
 import { diagnoseWhatsAppMac } from './whatsapp-mac.mjs';
 import { analyzeFundingPdf, buildPipedriveFieldProposals } from './funding-document-extractor.mjs';
+import { cleanupFundingWorkingCopy, stageFundingWorkingCopy } from './local-working-files.mjs';
 
 const HOST = '127.0.0.1';
 const PORT = Math.min(65535, Math.max(1024, Number(process.env.IVA_MAC_HELPER_PORT) || 4317));
@@ -90,6 +91,14 @@ export function createMacHelperServer() {
       const url = new URL(req.url || '/', `http://${HOST}:${PORT}`);
       if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { ok: true, service: 'iva-mac-helper', sendEnabled: false });
       if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+      if (req.method === 'DELETE' && url.pathname.startsWith('/v1/pipedrive/')) {
+        return json(res, 405, {
+          error: 'Pipedrive-Dateien dürfen unter keinen Umständen gelöscht werden.',
+          localCleanupOnly: true,
+          mutated: false,
+          sent: false,
+        });
+      }
       if (req.method === 'GET' && url.pathname === '/v1/doctor') return json(res, 200, {
         outlook: await diagnoseOutlook(),
         pipedrive: await diagnosePipedriveChrome(),
@@ -110,29 +119,56 @@ export function createMacHelperServer() {
       }
       if (req.method === 'POST' && url.pathname === '/v1/funding/documents/analyze') {
         const input = await body(req);
-        const analysis = await analyzeFundingPdf(input.pdfPath);
-        const fieldProposals = input.snapshot ? buildPipedriveFieldProposals(input.snapshot, analysis) : null;
-        return json(res, 200, { analysis, fieldProposals, action: 'analysis-only', mutated: false, sent: false });
+        let workingCopy = null;
+        let cleanup = { localWorkingCopyDeleted: false, pipedriveFileDeleted: false };
+        try {
+          workingCopy = await stageFundingWorkingCopy(input.pdfPath, {
+            dealId: input.dealId || input.snapshot?.dealId,
+            consumeDownloadedCopy: input.deleteLocalCopyAfterUse === true,
+          });
+          const analysis = await analyzeFundingPdf(workingCopy.workingPath);
+          const fieldProposals = input.snapshot ? buildPipedriveFieldProposals(input.snapshot, analysis) : null;
+          cleanup = await cleanupFundingWorkingCopy(workingCopy);
+          analysis.absolutePath = null;
+          return json(res, 200, { analysis, fieldProposals, cleanup, action: 'analysis-only', mutated: false, sent: false });
+        } finally {
+          if (workingCopy && cleanup.localWorkingCopyDeleted !== true) await cleanupFundingWorkingCopy(workingCopy).catch(() => {});
+        }
       }
       if (req.method === 'POST' && url.pathname === '/v1/funding/pipedrive/fields/apply') {
         const input = await body(req);
         if (input.confirmApply !== true) return json(res, 409, { error: 'confirmApply=true fehlt.', mutated: false, sent: false });
         const snapshot = await readPipedriveFundingDeal({ dealId: input.dealId });
         validatePipedriveFundingSnapshot(snapshot);
-        const analysis = await analyzeFundingPdf(input.pdfPath);
-        const fieldProposals = buildPipedriveFieldProposals(snapshot, analysis);
-        const result = await applyPipedriveFundingFieldUpdates({
-          dealId: input.dealId,
-          fieldProposals,
-          confirmApply: true,
-        });
+        let workingCopy = null;
+        let cleanup = { localWorkingCopyDeleted: false, pipedriveFileDeleted: false };
+        let analysis;
+        let fieldProposals;
+        let result;
+        try {
+          workingCopy = await stageFundingWorkingCopy(input.pdfPath, {
+            dealId: input.dealId,
+            consumeDownloadedCopy: input.deleteLocalCopyAfterUse === true,
+          });
+          analysis = await analyzeFundingPdf(workingCopy.workingPath);
+          fieldProposals = buildPipedriveFieldProposals(snapshot, analysis);
+          result = await applyPipedriveFundingFieldUpdates({
+            dealId: input.dealId,
+            fieldProposals,
+            confirmApply: true,
+          });
+          cleanup = await cleanupFundingWorkingCopy(workingCopy);
+          analysis.absolutePath = null;
+        } finally {
+          if (workingCopy && cleanup.localWorkingCopyDeleted !== true) await cleanupFundingWorkingCopy(workingCopy).catch(() => {});
+        }
         await audit({
           category: 'pipedrive-field-maintenance',
           action: 'apply-empty-fields',
           dealId: String(input.dealId),
           results: result.results.map(item => ({ targetField: item.targetField, status: item.status, verified: Boolean(item.verified) })),
         });
-        return json(res, result.fullyVerified ? 200 : 207, { result, fieldProposals, sent: false });
+        return json(res, result.fullyVerified ? 200 : 207, { result, fieldProposals, cleanup, sent: false });
       }
       if (req.method === 'POST' && url.pathname === '/v1/funding/drafts/preview') {
         const input = await body(req);

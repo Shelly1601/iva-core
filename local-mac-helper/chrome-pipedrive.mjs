@@ -4,6 +4,20 @@ import { classifyFundingDocumentName } from './funding-document-extractor.mjs';
 const PIPEDRIVE_HOST = 'simplegategmbh.pipedrive.com';
 const MAX_OUTPUT_BYTES = 256 * 1024;
 
+export const PIPEDRIVE_FILE_POLICY = Object.freeze({
+  read: true,
+  downloadTemporaryCopy: true,
+  uploadAfterVerification: true,
+  delete: false,
+});
+
+export function assertPipedriveFileActionAllowed(action) {
+  if (String(action || '').trim().toLowerCase() === 'delete') {
+    throw new Error('Pipedrive-Dateien dürfen unter keinen Umständen gelöscht werden.');
+  }
+  return true;
+}
+
 function runAppleScript(script, { timeoutMs = 10000 } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn('/usr/bin/osascript', ['-'], { stdio: ['pipe', 'pipe', 'pipe'] });
