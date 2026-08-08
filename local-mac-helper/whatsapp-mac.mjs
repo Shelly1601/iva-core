@@ -3,6 +3,7 @@ import path from 'node:path';
 import { access, mkdir, stat } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { buildFundingCaseReference } from './funding.mjs';
 
 const WHATSAPP_APP = '/Applications/WhatsApp.app';
 const KEYCHAIN_SERVICE = 'de.iva.funding.whatsapp';
@@ -40,11 +41,8 @@ export function normalizeWhatsAppPhone(value) {
   return digits;
 }
 
-export function buildFundingHandoffWhatsApp({ customerName, orderNumber, phone, decision, stageTransitionVerified = false } = {}) {
-  const customer = String(customerName || '').replace(/\s+/g, ' ').trim();
-  const order = String(orderNumber || '').replace(/\s+/g, ' ').trim();
-  if (!customer) throw new Error('Für die WhatsApp-Übergabe fehlt der Kundenname.');
-  if (!order) throw new Error('Für die WhatsApp-Übergabe fehlt die Auftragsnummer.');
+export function buildFundingHandoffWhatsApp({ customerName, orderNumber, location, city, phone, decision, stageTransitionVerified = false } = {}) {
+  const reference = buildFundingCaseReference({ customerName, orderNumber, location, city });
   if (!decision?.documentsCompleteInPipedrive) {
     throw new Error('WhatsApp-Übergabe gesperrt: Die Pflichtunterlagen sind noch nicht vollständig in Pipedrive verifiziert.');
   }
@@ -55,11 +53,12 @@ export function buildFundingHandoffWhatsApp({ customerName, orderNumber, phone, 
     throw new Error('WhatsApp-Übergabe gesperrt: unbekannte Pipedrive-Stufe.');
   }
   const normalizedPhone = normalizeWhatsAppPhone(phone);
-  const text = `${customer} - ${order} ist fertig`;
+  const text = `${reference.text} ist fertig`;
   return {
     recipientName: FUNDING_HANDOFF_RECIPIENT,
     phone: normalizedPhone,
     text,
+    reference,
     url: `whatsapp://send?phone=${normalizedPhone.slice(1)}&text=${encodeURIComponent(text)}`,
     ready: true,
     sent: false,

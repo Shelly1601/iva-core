@@ -1,6 +1,6 @@
 # IVA Mac Helper
 
-Der lokale Helper bedient Programme, die nur auf Nadines Mac angemeldet sind. Phase 1 erstellt ausschließlich Outlook-Entwürfe. Es existiert bewusst kein Versand-Endpunkt.
+Der lokale Helper bedient Programme, die nur auf Nadines Mac angemeldet sind. Er liest Förderfälle aus Pipedrive, wertet lokale Förder-PDFs aus und erstellt Outlook-Entwürfe. Es existiert bewusst kein Versand-Endpunkt.
 
 ## Sicherheitsgrenzen
 
@@ -49,6 +49,8 @@ Der Absender muss in Falldateien nicht mehr eingetragen werden. Er wird für die
 
 Patrick steht fest mit `p.germer@heat-hero.com` im Feld **An**. Die eindeutig zugeordnete E-Mail-Adresse des Vertriebspartners wird ins **CC** gesetzt. Ist zusätzlich ein belastbarer Personenname vorhanden, lautet die Anrede beispielsweise `Hallo Patrick, hallo Holger,`. Ist nur die VP-E-Mail vorhanden, bleibt es bei `Hallo Patrick,`. Fehlende oder uneindeutige Adressen werden nicht geraten.
 
+Die Fallreferenz wird in dieser Reihenfolge gebildet: **Kundenname + Auftragsnummer**, ersatzweise **Kundenname + Ort**, ansonsten nur **Kundenname**. Eine fehlende Auftragsnummer verhindert damit weder den Förderentwurf noch die spätere interne Fertigmeldung.
+
 ## Pipedrive-Förderprüfung
 
 IVA prüft ausschließlich die Pipeline **Auftragsmachbarkeit** und darin diese beiden Stufen:
@@ -60,6 +62,12 @@ Eine nur in Outlook gefundene Datei zählt nicht als vollständig. Reihenfolge: 
 
 Der Kontakt hinter dem Pipedrive-Feld **Vertriebspartner** liefert Anzeigenamen und E-Mail-Adresse für Anrede und CC. Zum strukturierten, rein lokalen Auslesen der bereits angemeldeten Chrome-Sitzung muss einmal **Chrome → Ansicht → Entwickler → JavaScript von Apple Events erlauben** aktiviert werden. Zugangsdaten werden nicht in IVA-Dateien geschrieben.
 
+Unterschriebene Angebote und TMB-PDFs können seitenweise auf eindeutig beschriftete Auftrags-, Kunden- und Telefonnummern geprüft werden. Jeder Treffer enthält Quelldatei, Seitenzahl, Textausschnitt und Confidence. IVA schlägt nur die Befüllung leerer Pipedrive-Felder vor. Ein vorhandener abweichender Wert, mehrere Treffer oder eine Scan-Seite ohne lesbare Textschicht führen zur manuellen Prüfung; bestehende Werte werden nicht still überschrieben.
+
+```bash
+node local-mac-helper/cli.mjs analyze-funding-pdf /pfad/dokument.pdf
+```
+
 ## Übergabe an Viktoria per WhatsApp
 
 Für diesen internen Abschluss-Hinweis nutzt IVA zunächst die lokal installierte WhatsApp-Mac-App. Der WhatsApp-Hub bleibt für diesen Schritt ungeeignet, solange dessen Versand in IVA noch gesperrt ist.
@@ -67,7 +75,7 @@ Für diesen internen Abschluss-Hinweis nutzt IVA zunächst die lokal installiert
 1. WhatsApp Business auf dem iPhone unter **Einstellungen → Verknüpfte Geräte → Gerät hinzufügen** öffnen.
 2. `/Applications/WhatsApp.app` auf dem Mac starten und den dort angezeigten QR-Code scannen.
 3. Viktoria Lambels exakte Mobilnummer einmalig verifizieren und einen kontrollierten Test durchführen.
-4. Erst nach vollständig verifizierten Pipedrive-Unterlagen und gegebenenfalls erfolgreich bestätigter Verschiebung nach **Förderung beantragt** wird die feste Nachricht vorbereitet: `Kundenname - Auftragsnummer ist fertig`.
+4. Erst nach vollständig verifizierten Pipedrive-Unterlagen und gegebenenfalls erfolgreich bestätigter Verschiebung nach **Förderung beantragt** wird die feste Nachricht vorbereitet. Referenz: Auftragsnummer, sonst Ort, sonst Kundenname.
 
 Bei einem Deal, der bereits in **Förderung beantragt** steht, ist keine weitere Stufenänderung erforderlich. Die Nachricht bleibt trotzdem gesperrt, bis alle Pflichtunterlagen tatsächlich in Pipedrive vorhanden sind. Doppelte Übergaben werden beim späteren Live-Versand über Deal-ID und Abschlussstand verhindert.
 
@@ -95,8 +103,10 @@ Routen:
 
 - `GET /health`
 - `GET /v1/doctor`
-- `GET /v1/pipedrive/deals/:id/funding-snapshot` liest Pipeline, aktive Stufe, Kunde, Auftragsnummer, VP-Kontakt und sichtbare Dateinamen ohne Änderung aus dem geöffneten Chrome-Deal
+- `GET /v1/pipedrive/deals/:id/funding-snapshot` liest Pipeline, aktive Stufe, Kunde, Ort, Auftrags-/Kunden-/Telefonnummer, VP-Kontakt und sichtbare Dateinamen ohne Änderung aus dem geöffneten Chrome-Deal
 - `POST /v1/funding/pipedrive/decision` für eine rein lesende Workflow-Entscheidung ohne Pipedrive-Änderung
+- `POST /v1/funding/documents/analyze` wertet eine lokale PDF aus und liefert optional konfliktgeprüfte Pipedrive-Feldvorschläge; die Route schreibt nichts
+- `POST /v1/funding/pipedrive/fields/apply` liest Deal und PDF erneut, befüllt mit `confirmApply: true` ausschließlich leere, sichtbare Felder und verifiziert jeden gespeicherten Wert; vorhandene Werte werden nie überschrieben
 - `POST /v1/funding/drafts/preview`
 - `POST /v1/funding/drafts` mit `confirmCreateDraft: true`
 

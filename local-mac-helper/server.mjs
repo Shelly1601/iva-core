@@ -6,9 +6,10 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { renderFundingMissingDocumentsEmail, withFundingSender } from './funding.mjs';
 import { createOutlookDraft, diagnoseOutlook, normalizeDraftPayload } from './outlook.mjs';
-import { diagnosePipedriveChrome, readPipedriveFundingDeal } from './chrome-pipedrive.mjs';
+import { applyPipedriveFundingFieldUpdates, diagnosePipedriveChrome, readPipedriveFundingDeal } from './chrome-pipedrive.mjs';
 import { decideFundingDealAction, validatePipedriveFundingSnapshot } from './pipedrive-funding.mjs';
 import { diagnoseWhatsAppMac } from './whatsapp-mac.mjs';
+import { analyzeFundingPdf, buildPipedriveFieldProposals } from './funding-document-extractor.mjs';
 
 const HOST = '127.0.0.1';
 const PORT = Math.min(65535, Math.max(1024, Number(process.env.IVA_MAC_HELPER_PORT) || 4317));
@@ -106,6 +107,32 @@ export function createMacHelperServer() {
           documentEvidence: input.documentEvidence,
         });
         return json(res, 200, { snapshot, decision, action: 'decision-only', mutated: false, sent: false });
+      }
+      if (req.method === 'POST' && url.pathname === '/v1/funding/documents/analyze') {
+        const input = await body(req);
+        const analysis = await analyzeFundingPdf(input.pdfPath);
+        const fieldProposals = input.snapshot ? buildPipedriveFieldProposals(input.snapshot, analysis) : null;
+        return json(res, 200, { analysis, fieldProposals, action: 'analysis-only', mutated: false, sent: false });
+      }
+      if (req.method === 'POST' && url.pathname === '/v1/funding/pipedrive/fields/apply') {
+        const input = await body(req);
+        if (input.confirmApply !== true) return json(res, 409, { error: 'confirmApply=true fehlt.', mutated: false, sent: false });
+        const snapshot = await readPipedriveFundingDeal({ dealId: input.dealId });
+        validatePipedriveFundingSnapshot(snapshot);
+        const analysis = await analyzeFundingPdf(input.pdfPath);
+        const fieldProposals = buildPipedriveFieldProposals(snapshot, analysis);
+        const result = await applyPipedriveFundingFieldUpdates({
+          dealId: input.dealId,
+          fieldProposals,
+          confirmApply: true,
+        });
+        await audit({
+          category: 'pipedrive-field-maintenance',
+          action: 'apply-empty-fields',
+          dealId: String(input.dealId),
+          results: result.results.map(item => ({ targetField: item.targetField, status: item.status, verified: Boolean(item.verified) })),
+        });
+        return json(res, result.fullyVerified ? 200 : 207, { result, fieldProposals, sent: false });
       }
       if (req.method === 'POST' && url.pathname === '/v1/funding/drafts/preview') {
         const input = await body(req);

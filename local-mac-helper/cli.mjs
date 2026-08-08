@@ -5,6 +5,7 @@ import { createOutlookDraft, diagnoseOutlook, normalizeDraftPayload } from './ou
 import { diagnosePipedriveChrome, readPipedriveFundingDeal } from './chrome-pipedrive.mjs';
 import { diagnoseWhatsAppMac } from './whatsapp-mac.mjs';
 import { startMacHelperServer } from './server.mjs';
+import { analyzeFundingPdf } from './funding-document-extractor.mjs';
 
 async function readJson(filePath) {
   if (!filePath) throw new Error('Pfad zu einer JSON-Datei fehlt.');
@@ -33,6 +34,7 @@ async function main() {
   }, null, 2));
   if (command === 'serve') return startMacHelperServer();
   if (command === 'read-pipedrive-deal') return console.log(JSON.stringify(await readPipedriveFundingDeal({ dealId: filePath }), null, 2));
+  if (command === 'analyze-funding-pdf') return console.log(JSON.stringify(await analyzeFundingPdf(filePath), null, 2));
   if (command === 'preview-funding') return console.log(JSON.stringify(compose(await readJson(filePath)), null, 2));
   if (command === 'create-funding-draft') {
     if (confirmation !== '--commit') throw new Error('Entwurf wurde nicht erstellt. Zum Bestätigen --commit anhängen.');
@@ -42,6 +44,7 @@ async function main() {
 
   node local-mac-helper/cli.mjs doctor
   node local-mac-helper/cli.mjs read-pipedrive-deal <deal-id>
+  node local-mac-helper/cli.mjs analyze-funding-pdf /pfad/dokument.pdf
   node local-mac-helper/cli.mjs preview-funding /pfad/fall.json
   node local-mac-helper/cli.mjs create-funding-draft /pfad/fall.json --commit
   IVA_MAC_HELPER_TOKEN=<mindestens-32-zeichen> node local-mac-helper/cli.mjs serve`);

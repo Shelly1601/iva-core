@@ -5,6 +5,9 @@ export const PIPEDRIVE_FUNDING_CONFIG = Object.freeze({
   pipeline: 'Auftragsmachbarkeit',
   partnerField: 'Vertriebspartner',
   orderNumberFields: ['Auftragsnummer', 'Angebotsnummer'],
+  customerNumberFields: ['Kundennummer', 'Kunden-Nr.'],
+  phoneNumberFields: ['Telefonnummer', 'Telefon', 'Mobilnummer'],
+  locationFields: ['Ort', 'Stadt', 'Kundenort'],
   stages: Object.freeze({
     documents: Object.freeze({
       label: 'Antrag eingereicht / Förderunterlagen einreichen',
@@ -126,6 +129,5 @@ export function validatePipedriveFundingSnapshot(snapshot = {}) {
   }
   const stage = resolveFundingStage(snapshot.stage);
   if (!String(snapshot.customerName || '').trim()) throw new Error('Im Pipedrive-Snapshot fehlt der Kundenname.');
-  if (!String(snapshot.orderNumber || '').trim()) throw new Error('Im Pipedrive-Snapshot fehlt die Angebots-/Auftragsnummer.');
   return { ...snapshot, pipeline: PIPEDRIVE_FUNDING_CONFIG.pipeline, stage: stage.label };
 }

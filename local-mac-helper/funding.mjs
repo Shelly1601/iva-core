@@ -57,6 +57,21 @@ export function firstNameFromContactName(value) {
   return candidate.length >= 2 ? candidate : '';
 }
 
+export function buildFundingCaseReference(input = {}) {
+  const customerName = clean(input.customerName);
+  const orderNumber = clean(input.orderNumber || input.offerNumber);
+  const location = clean(input.location || input.city || input.customerCity);
+  if (!customerName) throw new Error('Kundenname fehlt.');
+  const suffix = orderNumber || location;
+  return {
+    text: suffix ? `${customerName} - ${suffix}` : customerName,
+    customerName,
+    orderNumber: orderNumber || null,
+    location: location || null,
+    identifierSource: orderNumber ? 'order_number' : location ? 'location' : 'customer_name',
+  };
+}
+
 export function resolveFundingRecipients(input = {}) {
   const suppliedTo = Array.isArray(input.to) ? input.to.map(extractEmailAddress).filter(Boolean) : [];
   if (suppliedTo.length && (suppliedTo.length !== 1 || suppliedTo[0] !== FUNDING_PRIMARY_RECIPIENT_EMAIL)) {
@@ -123,12 +138,10 @@ export function renderFundingSignatureHtml() {
 }
 
 export function renderFundingMissingDocumentsEmail(input = {}) {
-  const customerName = clean(input.customerName);
-  const orderNumber = clean(input.orderNumber);
+  const reference = buildFundingCaseReference(input);
+  const { customerName, orderNumber, location } = reference;
   const recipients = resolveFundingRecipients(input);
   const vpName = recipients.vpName;
-  if (!customerName) throw new Error('Kundenname fehlt.');
-  if (!orderNumber) throw new Error('Angebots-/Auftragsnummer fehlt.');
 
   const missingDocumentIds = [...new Set(Array.isArray(input.missingDocumentIds) ? input.missingDocumentIds.map(String) : [])];
   const unknown = missingDocumentIds.filter(id => !FUNDING_DOCUMENTS[id]);
@@ -138,13 +151,22 @@ export function renderFundingMissingDocumentsEmail(input = {}) {
   const missingDocuments = missingDocumentIds.map(id => ({ id, label: FUNDING_DOCUMENTS[id] }));
   const greeting = recipients.greeting;
   const list = missingDocuments.map(item => `- ${item.label}`).join('\n');
-  const subject = `${customerName} - ${orderNumber} - fehlende Unterlagen`;
+  const identityLines = [
+    `Kunde: ${customerName}`,
+    ...(orderNumber ? [`Angebots-/Auftragsnummer: ${orderNumber}`] : []),
+    ...(!orderNumber && location ? [`Ort: ${location}`] : []),
+  ];
+  const identityHtml = [
+    `<strong>Kunde:</strong> ${html(customerName)}`,
+    ...(orderNumber ? [`<strong>Angebots-/Auftragsnummer:</strong> ${html(orderNumber)}`] : []),
+    ...(!orderNumber && location ? [`<strong>Ort:</strong> ${html(location)}`] : []),
+  ].join('<br>');
+  const subject = `${reference.text} - fehlende Unterlagen`;
   const body = `${greeting}
 
 bei der Überprüfung der Förderunterlagen ist uns aufgefallen, dass für den folgenden Kunden noch Unterlagen fehlen:
 
-Kunde: ${customerName}
-Angebots-/Auftragsnummer: ${orderNumber}
+${identityLines.join('\n')}
 
 Noch benötigte Unterlagen:
 
@@ -167,7 +189,7 @@ ${renderFundingSignaturePlain()}`;
   const htmlBody = `<div style="font-family: Aptos, Arial, sans-serif; font-size: 11pt; line-height: 1.5; color: #1f1f1f;">
   <p>${html(greeting)}</p>
   <p>bei der Überprüfung der Förderunterlagen ist uns aufgefallen, dass für den folgenden Kunden noch Unterlagen fehlen:</p>
-  <p><strong>Kunde:</strong> ${html(customerName)}<br><strong>Angebots-/Auftragsnummer:</strong> ${html(orderNumber)}</p>
+  <p>${identityHtml}</p>
   <p><strong>Noch benötigte Unterlagen:</strong></p>
   <ul>${missingDocuments.map(item => `<li>${html(item.label)}</li>`).join('')}</ul>
   <p>Bitte sende alle Unterlagen gesammelt in einer E-Mail an <strong>foerderung@heat-hero.com</strong>.</p>
@@ -190,6 +212,8 @@ ${renderFundingSignaturePlain()}`;
     html: htmlBody,
     customerName,
     orderNumber,
+    location,
+    reference,
     vpName,
     recipients,
     missingDocuments,
