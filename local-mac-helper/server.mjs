@@ -6,6 +6,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { renderFundingMissingDocumentsEmail, withFundingSender } from './funding.mjs';
 import { createOutlookDraft, diagnoseOutlook, normalizeDraftPayload } from './outlook.mjs';
+import { diagnosePipedriveChrome } from './chrome-pipedrive.mjs';
 
 const HOST = '127.0.0.1';
 const PORT = Math.min(65535, Math.max(1024, Number(process.env.IVA_MAC_HELPER_PORT) || 4317));
@@ -71,8 +72,8 @@ function fundingDraft(input) {
     subject: rendered.subject,
     body: rendered.body,
     html: rendered.html,
-    to: fundingInput.to,
-    cc: fundingInput.cc,
+    to: rendered.recipients.to,
+    cc: rendered.recipients.cc,
     bcc: fundingInput.bcc,
     from: fundingInput.from,
     attachments: fundingInput.attachments,
@@ -86,7 +87,10 @@ export function createMacHelperServer() {
       const url = new URL(req.url || '/', `http://${HOST}:${PORT}`);
       if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { ok: true, service: 'iva-mac-helper', sendEnabled: false });
       if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
-      if (req.method === 'GET' && url.pathname === '/v1/doctor') return json(res, 200, await diagnoseOutlook());
+      if (req.method === 'GET' && url.pathname === '/v1/doctor') return json(res, 200, {
+        outlook: await diagnoseOutlook(),
+        pipedrive: await diagnosePipedriveChrome(),
+      });
       if (req.method === 'POST' && url.pathname === '/v1/funding/drafts/preview') {
         const input = await body(req);
         const draft = fundingDraft(input);

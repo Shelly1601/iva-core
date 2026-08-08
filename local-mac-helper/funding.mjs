@@ -11,6 +11,7 @@ export const FUNDING_DOCUMENTS = Object.freeze({
 });
 
 export const FUNDING_SENDER_EMAIL = 'foerderung@heat-hero.com';
+export const FUNDING_PRIMARY_RECIPIENT_EMAIL = 'p.germer@heat-hero.com';
 export const FUNDING_SIGNATURE = Object.freeze({
   name: 'Nadine Sell',
   title: 'Sales Operations Manager',
@@ -33,12 +34,58 @@ export function withFundingSender(input = {}) {
 }
 
 const clean = (value, max = 220) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
+const normalizeEmail = value => String(value || '').trim().toLowerCase();
+const emailPattern = /[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+/i;
 const html = value => String(value || '')
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
   .replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#39;');
+
+export function extractEmailAddress(value) {
+  return normalizeEmail(String(value || '').match(emailPattern)?.[0]);
+}
+
+export function firstNameFromContactName(value) {
+  const contactName = clean(value);
+  if (!contactName || contactName.includes('@')) return '';
+  const ignored = new Set(['herr', 'frau', 'dr', 'dr.', 'prof', 'prof.', 'professor']);
+  const tokens = contactName.split(/\s+/).filter(Boolean);
+  while (tokens.length && ignored.has(tokens[0].toLowerCase())) tokens.shift();
+  const candidate = String(tokens[0] || '').replace(/[^\p{L}\p{M}'’\-]/gu, '');
+  return candidate.length >= 2 ? candidate : '';
+}
+
+export function resolveFundingRecipients(input = {}) {
+  const suppliedTo = Array.isArray(input.to) ? input.to.map(extractEmailAddress).filter(Boolean) : [];
+  if (suppliedTo.length && (suppliedTo.length !== 1 || suppliedTo[0] !== FUNDING_PRIMARY_RECIPIENT_EMAIL)) {
+    throw new Error(`Förderentwürfe dürfen im An-Feld ausschließlich an ${FUNDING_PRIMARY_RECIPIENT_EMAIL} adressiert werden.`);
+  }
+
+  const suppliedCc = Array.isArray(input.cc) ? input.cc.map(extractEmailAddress).filter(Boolean) : [];
+  if (suppliedCc.length > 1) throw new Error('Für einen Förderentwurf darf höchstens ein eindeutig zugeordneter Vertriebspartner im CC stehen.');
+  const vpName = clean(input.vpName || input.vertriebspartnerName);
+  const rawVpEmail = input.vpEmail || input.vertriebspartnerEmail || suppliedCc[0] || extractEmailAddress(vpName);
+  const vpEmail = extractEmailAddress(rawVpEmail);
+  if (suppliedCc.length && vpEmail && suppliedCc[0] !== vpEmail) {
+    throw new Error('Die übergebene CC-Adresse stimmt nicht mit der erkannten Vertriebspartner-E-Mail überein.');
+  }
+  const vpFirstName = firstNameFromContactName(input.vpFirstName || vpName);
+  const warnings = [];
+  if (rawVpEmail && !vpEmail) warnings.push('Die Vertriebspartner-E-Mail ist nicht eindeutig gültig und wurde nicht ins CC übernommen.');
+  if (!vpEmail) warnings.push('Keine eindeutige Vertriebspartner-E-Mail vorhanden; der Entwurf geht nur an Patrick.');
+
+  return {
+    to: [FUNDING_PRIMARY_RECIPIENT_EMAIL],
+    cc: vpEmail && vpEmail !== FUNDING_PRIMARY_RECIPIENT_EMAIL ? [vpEmail] : [],
+    vpName,
+    vpFirstName,
+    vpEmail: vpEmail || null,
+    greeting: vpFirstName ? `Hallo Patrick, hallo ${vpFirstName},` : 'Hallo Patrick,',
+    warnings,
+  };
+}
 
 export function renderFundingSignaturePlain() {
   return `Bei weiteren Fragen stehe ich gerne zur Verfügung.
@@ -78,7 +125,8 @@ export function renderFundingSignatureHtml() {
 export function renderFundingMissingDocumentsEmail(input = {}) {
   const customerName = clean(input.customerName);
   const orderNumber = clean(input.orderNumber);
-  const vpName = clean(input.vpName);
+  const recipients = resolveFundingRecipients(input);
+  const vpName = recipients.vpName;
   if (!customerName) throw new Error('Kundenname fehlt.');
   if (!orderNumber) throw new Error('Angebots-/Auftragsnummer fehlt.');
 
@@ -88,7 +136,7 @@ export function renderFundingMissingDocumentsEmail(input = {}) {
   if (!missingDocumentIds.length) throw new Error('Es fehlen keine Unterlagen; deshalb wird kein Entwurf erzeugt.');
 
   const missingDocuments = missingDocumentIds.map(id => ({ id, label: FUNDING_DOCUMENTS[id] }));
-  const greeting = 'Hallo Patrick,';
+  const greeting = recipients.greeting;
   const list = missingDocuments.map(item => `- ${item.label}`).join('\n');
   const subject = `${customerName} - ${orderNumber} - fehlende Unterlagen`;
   const body = `${greeting}
@@ -143,6 +191,7 @@ ${renderFundingSignaturePlain()}`;
     customerName,
     orderNumber,
     vpName,
+    recipients,
     missingDocuments,
   };
 }

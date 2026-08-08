@@ -2,6 +2,7 @@
 import { readFile } from 'node:fs/promises';
 import { renderFundingMissingDocumentsEmail, withFundingSender } from './funding.mjs';
 import { createOutlookDraft, diagnoseOutlook, normalizeDraftPayload } from './outlook.mjs';
+import { diagnosePipedriveChrome } from './chrome-pipedrive.mjs';
 import { startMacHelperServer } from './server.mjs';
 
 async function readJson(filePath) {
@@ -12,12 +13,22 @@ async function readJson(filePath) {
 function compose(input) {
   const fundingInput = withFundingSender(input);
   const rendered = renderFundingMissingDocumentsEmail(fundingInput);
-  return normalizeDraftPayload({ ...fundingInput, subject: rendered.subject, body: rendered.body, html: rendered.html });
+  return normalizeDraftPayload({
+    ...fundingInput,
+    subject: rendered.subject,
+    body: rendered.body,
+    html: rendered.html,
+    to: rendered.recipients.to,
+    cc: rendered.recipients.cc,
+  });
 }
 
 async function main() {
   const [command, filePath, confirmation] = process.argv.slice(2);
-  if (command === 'doctor') return console.log(JSON.stringify(await diagnoseOutlook(), null, 2));
+  if (command === 'doctor') return console.log(JSON.stringify({
+    outlook: await diagnoseOutlook(),
+    pipedrive: await diagnosePipedriveChrome(),
+  }, null, 2));
   if (command === 'serve') return startMacHelperServer();
   if (command === 'preview-funding') return console.log(JSON.stringify(compose(await readJson(filePath)), null, 2));
   if (command === 'create-funding-draft') {

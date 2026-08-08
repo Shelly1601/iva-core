@@ -34,8 +34,8 @@ Beispielstruktur für `fall.json`:
 {
   "customerName": "Max Mustermann",
   "orderNumber": "A-4711",
-  "to": ["patrick@example.com"],
-  "cc": ["vertriebspartner@example.com"],
+  "vpName": "Maria Muster",
+  "vpEmail": "maria.muster@example.com",
   "missingDocumentIds": [
     "signed_offer",
     "identity_card",
@@ -47,7 +47,16 @@ Beispielstruktur für `fall.json`:
 
 Der Absender muss in Falldateien nicht mehr eingetragen werden. Er wird für diesen Workflow immer fest als `foerderung@heat-hero.com` gesetzt. Ein abweichender übergebener Absender führt zum Abbruch.
 
-Die Anrede lautet unabhängig von den verfügbaren VP-Daten immer `Hallo Patrick,`. Patrick steht im Feld **An**. Die eindeutig zugeordnete E-Mail-Adresse des Vertriebspartners wird optional ins **CC** gesetzt. Ist sie nicht vorhanden oder nicht eindeutig, wird keine Adresse geraten.
+Patrick steht fest mit `p.germer@heat-hero.com` im Feld **An**. Die eindeutig zugeordnete E-Mail-Adresse des Vertriebspartners wird ins **CC** gesetzt. Ist zusätzlich ein belastbarer Personenname vorhanden, lautet die Anrede beispielsweise `Hallo Patrick, hallo Holger,`. Ist nur die VP-E-Mail vorhanden, bleibt es bei `Hallo Patrick,`. Fehlende oder uneindeutige Adressen werden nicht geraten.
+
+## Pipedrive-Förderprüfung
+
+IVA prüft ausschließlich die Pipeline **Auftragsmachbarkeit** und darin diese beiden Stufen:
+
+- **Antrag eingereicht / Förderunterlagen einreichen:** vollständige Prüfung aller benötigten Unterlagen in Pipedrive und in den zugeordneten Förder-E-Mails
+- **Förderung beantragt:** dieselbe vollständige Prüfung plus ein zusätzlicher letzter Kontrollpunkt; dessen exakte Pipedrive-Bezeichnung muss noch an einem echten Deal bestätigt werden und blockiert bis dahin die vollautomatische Entwurfserstellung
+
+Der Kontakt hinter dem Pipedrive-Feld **Vertriebspartner** liefert Anzeigenamen und E-Mail-Adresse für Anrede und CC. Zum strukturierten, rein lokalen Auslesen der bereits angemeldeten Chrome-Sitzung muss einmal **Chrome → Ansicht → Entwickler → JavaScript von Apple Events erlauben** aktiviert werden. Zugangsdaten werden nicht in IVA-Dateien geschrieben.
 
 Nur ansehen:
 
