@@ -53,8 +53,10 @@ Patrick steht fest mit `p.germer@heat-hero.com` im Feld **An**. Die eindeutig zu
 
 IVA prüft ausschließlich die Pipeline **Auftragsmachbarkeit** und darin diese beiden Stufen:
 
-- **Antrag eingereicht / Förderunterlagen einreichen:** vollständige Prüfung aller benötigten Unterlagen in Pipedrive und in den zugeordneten Förder-E-Mails
-- **Förderung beantragt:** dieselbe vollständige Prüfung plus ein zusätzlicher letzter Kontrollpunkt; dessen exakte Pipedrive-Bezeichnung muss noch an einem echten Deal bestätigt werden und blockiert bis dahin die vollautomatische Entwurfserstellung
+- **Antrag eingereicht / Förderunterlagen einreichen:** vollständige Prüfung aller benötigten Unterlagen in Pipedrive und in den zugeordneten Förder-E-Mails. Fehlende, eindeutig zugeordnete Mail-Anlagen werden zuerst korrekt benannt und in den Deal hochgeladen. Erst wenn anschließend jede Pflichtunterlage in Pipedrive als vollständig bestätigt ist, darf der Deal nach **Förderung beantragt** verschoben werden.
+- **Förderung beantragt:** dieselbe vollständige Prüfung und gegebenenfalls Nachpflege aus den Förder-E-Mails. Der Deal bleibt aber immer in dieser Stufe und wird von IVA nicht weitergeschoben.
+
+Eine nur in Outlook gefundene Datei zählt nicht als vollständig. Reihenfolge: richtigen Deal und Dokumenttyp bestätigen → gegebenenfalls Bilder je Unterlage zu einer PDF zusammenfügen → eindeutig benennen → in Pipedrive hochladen → Upload verifizieren → gesamte Checkliste erneut prüfen → erst dann gegebenenfalls die erlaubte Stufenänderung ausführen.
 
 Der Kontakt hinter dem Pipedrive-Feld **Vertriebspartner** liefert Anzeigenamen und E-Mail-Adresse für Anrede und CC. Zum strukturierten, rein lokalen Auslesen der bereits angemeldeten Chrome-Sitzung muss einmal **Chrome → Ansicht → Entwickler → JavaScript von Apple Events erlauben** aktiviert werden. Zugangsdaten werden nicht in IVA-Dateien geschrieben.
 
@@ -80,6 +82,7 @@ Routen:
 
 - `GET /health`
 - `GET /v1/doctor`
+- `POST /v1/funding/pipedrive/decision` für eine rein lesende Workflow-Entscheidung ohne Pipedrive-Änderung
 - `POST /v1/funding/drafts/preview`
 - `POST /v1/funding/drafts` mit `confirmCreateDraft: true`
 

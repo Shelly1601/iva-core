@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { renderFundingMissingDocumentsEmail, withFundingSender } from './funding.mjs';
 import { createOutlookDraft, diagnoseOutlook, normalizeDraftPayload } from './outlook.mjs';
 import { diagnosePipedriveChrome } from './chrome-pipedrive.mjs';
+import { decideFundingDealAction, validatePipedriveFundingSnapshot } from './pipedrive-funding.mjs';
 
 const HOST = '127.0.0.1';
 const PORT = Math.min(65535, Math.max(1024, Number(process.env.IVA_MAC_HELPER_PORT) || 4317));
@@ -91,6 +92,15 @@ export function createMacHelperServer() {
         outlook: await diagnoseOutlook(),
         pipedrive: await diagnosePipedriveChrome(),
       });
+      if (req.method === 'POST' && url.pathname === '/v1/funding/pipedrive/decision') {
+        const input = await body(req);
+        const snapshot = validatePipedriveFundingSnapshot(input);
+        const decision = decideFundingDealAction(snapshot.stage, {
+          incomeBonusRequested: input.incomeBonusRequested,
+          documentEvidence: input.documentEvidence,
+        });
+        return json(res, 200, { snapshot, decision, action: 'decision-only', mutated: false, sent: false });
+      }
       if (req.method === 'POST' && url.pathname === '/v1/funding/drafts/preview') {
         const input = await body(req);
         const draft = fundingDraft(input);

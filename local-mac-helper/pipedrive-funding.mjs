@@ -10,13 +10,25 @@ export const PIPEDRIVE_FUNDING_CONFIG = Object.freeze({
       label: 'Antrag eingereicht / Förderunterlagen einreichen',
       aliases: ['Antrag eingereicht / Förderunterlagen', 'Antrag eingereicht / Förderunterlagen einreichen'],
       checkMode: 'complete-document-review',
+      moveWhenCompleteTo: 'Förderung beantragt',
+      stayInStage: false,
     }),
     fundingRequested: Object.freeze({
       label: 'Förderung beantragt',
       aliases: ['Förderung beantragt', 'Förderung beantragen'],
-      checkMode: 'complete-document-review-plus-final-step',
+      checkMode: 'complete-document-review',
+      moveWhenCompleteTo: null,
+      stayInStage: true,
     }),
   }),
+});
+
+export const FUNDING_DOCUMENT_STATE = Object.freeze({
+  presentInPipedrive: 'present_in_pipedrive',
+  availableInEmail: 'available_in_email',
+  missing: 'missing',
+  invalid: 'invalid',
+  ambiguous: 'ambiguous',
 });
 
 const normalize = value => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -44,19 +56,66 @@ export function buildFundingStageChecklist(stageValue, { incomeBonusRequested } 
     openQuestions.push('Ist für diesen Deal der Einkommensbonus beantragt?');
   }
 
-  const unresolvedFinalCheck = stage.key === 'fundingRequested';
-  if (unresolvedFinalCheck) {
-    openQuestions.push('Bezeichnung und Nachweis des letzten Kontrollpunkts in „Förderung beantragt“ am echten Deal verifizieren.');
-  }
   return {
     pipeline: PIPEDRIVE_FUNDING_CONFIG.pipeline,
     stage,
     requiredDocuments: requiredDocumentIds.map(id => ({ id, label: FUNDING_DOCUMENTS[id] })),
     scanSources: ['Pipedrive-Dateien', 'zugeordnete Förder-E-Mails'],
     requireCompleteReview: true,
-    unresolvedFinalCheck,
+    movementRule: stage.stayInStage
+      ? 'Der Deal bleibt unabhängig vom Dokumentenstatus in „Förderung beantragt“. '
+      : 'Der Deal darf erst nach bestätigter Vollständigkeit nach „Förderung beantragt“ verschoben werden.',
+    stayInStage: stage.stayInStage,
+    moveWhenCompleteTo: stage.moveWhenCompleteTo,
     canCreateFinalDraftAutomatically: openQuestions.length === 0,
     openQuestions,
+  };
+}
+
+function normalizeDocumentEvidence(value) {
+  const raw = typeof value === 'string' ? value : value?.status;
+  return Object.values(FUNDING_DOCUMENT_STATE).includes(raw) ? raw : FUNDING_DOCUMENT_STATE.missing;
+}
+
+export function decideFundingDealAction(stageValue, { incomeBonusRequested, documentEvidence = {} } = {}) {
+  const checklist = buildFundingStageChecklist(stageValue, { incomeBonusRequested });
+  const documents = checklist.requiredDocuments.map(document => ({
+    ...document,
+    status: normalizeDocumentEvidence(documentEvidence[document.id]),
+  }));
+  const completeInPipedrive = documents.filter(document => document.status === FUNDING_DOCUMENT_STATE.presentInPipedrive);
+  const uploadFromEmail = documents.filter(document => document.status === FUNDING_DOCUMENT_STATE.availableInEmail);
+  const blockingDocuments = documents.filter(document => ![
+    FUNDING_DOCUMENT_STATE.presentInPipedrive,
+    FUNDING_DOCUMENT_STATE.availableInEmail,
+  ].includes(document.status));
+  const hasOpenQuestions = checklist.openQuestions.length > 0;
+  const documentsCompleteInPipedrive = completeInPipedrive.length === documents.length && !hasOpenQuestions;
+
+  let action = 'prepare_missing_documents_draft';
+  if (hasOpenQuestions) action = 'resolve_open_questions';
+  else if (uploadFromEmail.length) action = 'upload_email_documents_then_recheck';
+  else if (!blockingDocuments.length && documentsCompleteInPipedrive) {
+    action = checklist.stage.stayInStage ? 'keep_in_funding_requested' : 'move_to_funding_requested';
+  }
+
+  return {
+    action,
+    stage: checklist.stage,
+    requiredDocuments: documents,
+    completeInPipedrive,
+    uploadFromEmail,
+    blockingDocuments,
+    openQuestions: checklist.openQuestions,
+    documentsCompleteInPipedrive,
+    moveAllowed: action === 'move_to_funding_requested',
+    targetStage: action === 'move_to_funding_requested' ? checklist.stage.moveWhenCompleteTo : null,
+    stageLocked: checklist.stage.stayInStage,
+    rules: [
+      'Ein Dokument aus einer E-Mail gilt erst nach erfolgreichem Upload in den richtigen Pipedrive-Deal als vollständig.',
+      'Nach jedem Upload wird die vollständige Checkliste erneut geprüft.',
+      checklist.movementRule,
+    ],
   };
 }
 

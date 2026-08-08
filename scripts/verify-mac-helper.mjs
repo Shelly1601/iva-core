@@ -15,7 +15,9 @@ import {
 import { buildDraftAppleScript, normalizeDraftPayload } from '../local-mac-helper/outlook.mjs';
 import {
   PIPEDRIVE_FUNDING_CONFIG,
+  FUNDING_DOCUMENT_STATE,
   buildFundingStageChecklist,
+  decideFundingDealAction,
   resolveFundingStage,
   validatePipedriveFundingSnapshot,
 } from '../local-mac-helper/pipedrive-funding.mjs';
@@ -66,8 +68,35 @@ const documentsChecklist = buildFundingStageChecklist('Antrag eingereicht / För
 assert.equal(documentsChecklist.requiredDocuments.length, 7);
 assert.equal(documentsChecklist.canCreateFinalDraftAutomatically, true);
 const requestedChecklist = buildFundingStageChecklist('Förderung beantragt', { incomeBonusRequested: false });
-assert.equal(requestedChecklist.unresolvedFinalCheck, true);
-assert.equal(requestedChecklist.canCreateFinalDraftAutomatically, false);
+assert.equal(requestedChecklist.stayInStage, true);
+assert.equal(requestedChecklist.canCreateFinalDraftAutomatically, true);
+const allBaseDocuments = Object.fromEntries([
+  'signed_offer',
+  'identity_card',
+  'registration_certificate',
+  'land_register',
+  'kfw_account_confirmation',
+].map(id => [id, FUNDING_DOCUMENT_STATE.presentInPipedrive]));
+const moveDecision = decideFundingDealAction('Antrag eingereicht / Förderunterlagen einreichen', {
+  incomeBonusRequested: false,
+  documentEvidence: allBaseDocuments,
+});
+assert.equal(moveDecision.action, 'move_to_funding_requested');
+assert.equal(moveDecision.moveAllowed, true);
+assert.equal(moveDecision.targetStage, 'Förderung beantragt');
+const uploadDecision = decideFundingDealAction('Antrag eingereicht / Förderunterlagen einreichen', {
+  incomeBonusRequested: false,
+  documentEvidence: { ...allBaseDocuments, identity_card: FUNDING_DOCUMENT_STATE.availableInEmail },
+});
+assert.equal(uploadDecision.action, 'upload_email_documents_then_recheck');
+assert.equal(uploadDecision.moveAllowed, false);
+const lockedDecision = decideFundingDealAction('Förderung beantragt', {
+  incomeBonusRequested: false,
+  documentEvidence: allBaseDocuments,
+});
+assert.equal(lockedDecision.action, 'keep_in_funding_requested');
+assert.equal(lockedDecision.moveAllowed, false);
+assert.equal(lockedDecision.stageLocked, true);
 assert.throws(() => validatePipedriveFundingSnapshot({ pipeline: 'Falsch', stage: 'Förderung beantragt' }), /Falsche/);
 assert.equal(validatePipedriveFundingSnapshot({
   pipeline: 'Auftragsmachbarkeit',
