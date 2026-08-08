@@ -71,6 +71,8 @@ Für diesen internen Abschluss-Hinweis nutzt IVA zunächst die lokal installiert
 
 Bei einem Deal, der bereits in **Förderung beantragt** steht, ist keine weitere Stufenänderung erforderlich. Die Nachricht bleibt trotzdem gesperrt, bis alle Pflichtunterlagen tatsächlich in Pipedrive vorhanden sind. Doppelte Übergaben werden beim späteren Live-Versand über Deal-ID und Abschlussstand verhindert.
 
+Viktorias verifizierte Nummer liegt ausschließlich im macOS-Schlüsselbund unter dem Dienst `de.iva.funding.whatsapp`; sie wird nicht in Git, Railway oder Falldateien gespeichert. Das Vorhandensein des Eintrags darf diagnostiziert werden, die Nummer selbst wird in Statusausgaben nicht angezeigt.
+
 Nur ansehen:
 
 ```bash

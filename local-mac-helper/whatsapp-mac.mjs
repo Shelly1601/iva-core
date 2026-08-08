@@ -2,6 +2,8 @@ import { access } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 
 const WHATSAPP_APP = '/Applications/WhatsApp.app';
+const KEYCHAIN_SERVICE = 'de.iva.funding.whatsapp';
+const KEYCHAIN_ACCOUNT = 'viktoria-lambel';
 export const FUNDING_HANDOFF_RECIPIENT = 'Viktoria Lambel';
 
 function commandSucceeds(command, args) {
@@ -9,6 +11,18 @@ function commandSucceeds(command, args) {
     const child = spawn(command, args, { stdio: 'ignore' });
     child.on('error', () => resolve(false));
     child.on('close', code => resolve(code === 0));
+  });
+}
+
+function commandOutput(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', code => code === 0 ? resolve(stdout.trim()) : reject(new Error((stderr || 'Schlüsselbund-Eintrag nicht verfügbar.').trim())));
   });
 }
 
@@ -47,19 +61,35 @@ export function buildFundingHandoffWhatsApp({ customerName, orderNumber, phone, 
   };
 }
 
+export async function readFundingHandoffPhoneFromKeychain() {
+  const phone = await commandOutput('/usr/bin/security', [
+    'find-generic-password', '-a', KEYCHAIN_ACCOUNT, '-s', KEYCHAIN_SERVICE, '-w',
+  ]);
+  return normalizeWhatsAppPhone(phone);
+}
+
 export async function diagnoseWhatsAppMac() {
   let installed = true;
   try { await access(WHATSAPP_APP); }
   catch { installed = false; }
   const running = installed && await commandSucceeds('/usr/bin/pgrep', ['-x', 'WhatsApp']);
+  const recipientConfigured = await commandSucceeds('/usr/bin/security', [
+    'find-generic-password', '-a', KEYCHAIN_ACCOUNT, '-s', KEYCHAIN_SERVICE,
+  ]);
   return {
     installed,
     running,
     bundleId: 'net.whatsapp.WhatsApp',
+    recipientName: FUNDING_HANDOFF_RECIPIENT,
+    recipientConfigured,
     linkedAccountVerified: false,
     outboundReady: false,
     required: installed
-      ? ['WhatsApp Business mit der Mac-App verknüpfen', 'Viktorias exakte Mobilnummer einmalig verifizieren', 'Testnachricht kontrollieren']
+      ? [
+          'WhatsApp Business mit der Mac-App verknüpfen',
+          ...(recipientConfigured ? [] : ['Viktorias exakte Mobilnummer einmalig verifizieren']),
+          'Testnachricht kontrollieren',
+        ]
       : ['WhatsApp aus dem Mac App Store installieren'],
   };
 }
