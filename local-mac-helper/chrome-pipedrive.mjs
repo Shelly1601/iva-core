@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { classifyFundingDocumentName } from './funding-document-extractor.mjs';
 
 const PIPEDRIVE_HOST = 'simplegategmbh.pipedrive.com';
 const MAX_OUTPUT_BYTES = 256 * 1024;
@@ -78,9 +79,8 @@ export async function readPipedriveFundingDeal({ dealId } = {}) {
       const candidate = clean(tail.split(/\s+-\s+/)[0]);
       return candidate && candidate !== '-' ? candidate : null;
     })();
-    const fileButton = document.querySelector('[data-testid="filter-button-files"]');
-    const fileButtonActive = fileButton?.getAttribute('aria-pressed') === 'true' || /active|selected/i.test(String(fileButton?.className || ''));
-    if (fileButton && !fileButtonActive) fileButton.click();
+    const allButton = document.querySelector('[data-testid="filter-button-all"]');
+    if (allButton) allButton.click();
     return JSON.stringify({
       url: location.href,
       dealId: location.pathname.match(/\/deal\/(\d+)/)?.[1] || null,
@@ -92,6 +92,7 @@ export async function readPipedriveFundingDeal({ dealId } = {}) {
       orderNumber: fieldValue('Auftragsnummer') || fieldValue('Angebotsnummer') || fieldValue('Angebotsnummer (sevdesk)'),
       customerNumber: fieldValue('Kundennummer') || fieldValue('Kunden-Nr.'),
       phoneNumber: fieldValue('Telefonnummer') || fieldValue('Telefon') || fieldValue('Mobilnummer'),
+      plant: fieldValue('Anlage'),
       location: fieldValue('Ort') || fieldValue('Stadt') || fieldValue('Kundenort') || titleLocation,
       vpName: partnerName || null,
       vpPersonId: partnerHref.match(/\/person\/(\d+)/)?.[1] || null,
@@ -118,10 +119,17 @@ export async function readPipedriveFundingDeal({ dealId } = {}) {
       .filter(value => value && value.length <= 300 && filePattern.test(value)))];
     return JSON.stringify({ vpEmail: vpEmail ? vpEmail.toLowerCase() : null, files: files.slice(0, 200) });
   })()`, { dealId });
-  return { ...core, ...JSON.parse(secondPass), readOnly: true, mutated: false };
+  const detail = JSON.parse(secondPass);
+  return {
+    ...core,
+    ...detail,
+    documents: detail.files.map(fileName => classifyFundingDocumentName(fileName)),
+    readOnly: true,
+    mutated: false,
+  };
 }
 
-const WRITABLE_FUNDING_FIELDS = new Set(['Auftragsnummer', 'Kundennummer', 'Telefonnummer']);
+const WRITABLE_FUNDING_FIELDS = new Set(['Auftragsnummer', 'Kundennummer', 'Telefonnummer', 'Anlage']);
 
 export async function applyPipedriveFundingFieldUpdates({ dealId, fieldProposals, confirmApply = false } = {}) {
   if (confirmApply !== true) throw new Error('Pipedrive-Felder wurden nicht geändert: confirmApply=true fehlt.');
@@ -180,23 +188,53 @@ export async function applyPipedriveFundingFieldUpdates({ dealId, fieldProposals
       continue;
     }
     await wait(350);
-    const saved = await executePipedriveJavaScript(String.raw`(() => {
-      const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
-      const name = [...document.querySelectorAll('[data-testid="field-name"]')].find(element => clean(element.innerText) === ${JSON.stringify(item.targetField)});
-      const row = name?.parentElement;
-      const input = row?.querySelector('input[type="text"]');
-      if (!input) return 'missing_input';
-      if (clean(input.value)) return 'input_not_empty';
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-      if (!setter) return 'missing_value_setter';
-      setter.call(input, ${JSON.stringify(item.value)});
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-      const save = [...row.querySelectorAll('button')].find(button => clean(button.innerText) === 'Speichern');
-      if (!save || save.disabled) return 'save_unavailable';
-      save.click();
-      return 'save_clicked';
-    })()`, { dealId });
+    let saved;
+    if (item.targetField === 'Anlage') {
+      const menu = await executePipedriveJavaScript(String.raw`(() => {
+        const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
+        const name = [...document.querySelectorAll('[data-testid="field-name"]')].find(element => clean(element.innerText) === 'Anlage');
+        const row = name?.parentElement;
+        const open = row?.querySelector('[role="combobox"] [aria-label="open menu"]');
+        if (!open) return 'missing_select_menu';
+        open.click();
+        return 'menu_opened';
+      })()`, { dealId });
+      if (menu !== 'menu_opened') saved = menu;
+      else {
+        await wait(250);
+        saved = await executePipedriveJavaScript(String.raw`(() => {
+          const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
+          const name = [...document.querySelectorAll('[data-testid="field-name"]')].find(element => clean(element.innerText) === 'Anlage');
+          const row = name?.parentElement;
+          const options = [...document.querySelectorAll('[role="listbox"] .cui5-option')]
+            .filter(option => clean(option.innerText || option.textContent).toLowerCase() === ${JSON.stringify(item.value.toLowerCase())});
+          if (options.length !== 1) return options.length ? 'ambiguous_select_option' : 'select_option_not_found';
+          options[0].click();
+          const save = [...row.querySelectorAll('button')].find(button => clean(button.innerText) === 'Speichern');
+          if (!save || save.disabled) return 'save_unavailable';
+          save.click();
+          return 'save_clicked';
+        })()`, { dealId });
+      }
+    } else {
+      saved = await executePipedriveJavaScript(String.raw`(() => {
+        const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
+        const name = [...document.querySelectorAll('[data-testid="field-name"]')].find(element => clean(element.innerText) === ${JSON.stringify(item.targetField)});
+        const row = name?.parentElement;
+        const input = row?.querySelector('input[type="text"]');
+        if (!input) return 'missing_input';
+        if (clean(input.value)) return 'input_not_empty';
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+        if (!setter) return 'missing_value_setter';
+        setter.call(input, ${JSON.stringify(item.value)});
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        const save = [...row.querySelectorAll('button')].find(button => clean(button.innerText) === 'Speichern');
+        if (!save || save.disabled) return 'save_unavailable';
+        save.click();
+        return 'save_clicked';
+      })()`, { dealId });
+    }
     if (saved !== 'save_clicked') {
       await executePipedriveJavaScript(String.raw`(() => {
         const clean = value => String(value || '').replace(/\s+/g, ' ').trim();

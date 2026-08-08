@@ -62,7 +62,11 @@ Eine nur in Outlook gefundene Datei zählt nicht als vollständig. Reihenfolge: 
 
 Der Kontakt hinter dem Pipedrive-Feld **Vertriebspartner** liefert Anzeigenamen und E-Mail-Adresse für Anrede und CC. Zum strukturierten, rein lokalen Auslesen der bereits angemeldeten Chrome-Sitzung muss einmal **Chrome → Ansicht → Entwickler → JavaScript von Apple Events erlauben** aktiviert werden. Zugangsdaten werden nicht in IVA-Dateien geschrieben.
 
-Unterschriebene Angebote und TMB-PDFs können seitenweise auf eindeutig beschriftete Auftrags-, Kunden- und Telefonnummern geprüft werden. Jeder Treffer enthält Quelldatei, Seitenzahl, Textausschnitt und Confidence. IVA schlägt nur die Befüllung leerer Pipedrive-Felder vor. Ein vorhandener abweichender Wert, mehrere Treffer oder eine Scan-Seite ohne lesbare Textschicht führen zur manuellen Prüfung; bestehende Werte werden nicht still überschrieben.
+Die Belegsuche läuft immer über **Verlauf → Alle**. Der separate Reiter **Dokumente** ist für diesen Workflow nicht die Quelle. Dadurch werden auch Belege berücksichtigt, die im Gesamtverlauf stehen, aber im reinen Dateien- oder Dokumente-Filter fehlen.
+
+Unterschriebene Angebote und TMB-PDFs können seitenweise auf eindeutig beschriftete Auftrags-, Kunden- und Telefonnummern sowie Hersteller und Leistung der Anlage geprüft werden. Als TMB werden auch Dateinamen mit `THB`, `MoA`, `MoreApp` oder `Registration` erkannt. Reine Scan-PDFs werden lokal per Tesseract-OCR erschlossen, sofern Tesseract auf dem Mac verfügbar ist. Jeder Treffer enthält Quelldatei, Seitenzahl, Textausschnitt und Confidence.
+
+Für das Pipedrive-Feld **Anlage** bildet IVA beispielsweise `PANASONIC` plus `16 kW` aus dem unterschriebenen Angebot exakt auf den vorhandenen Dropdown-Wert `Panasonic 16 kW` ab. Gespeichert wird nur bei genau einem passenden Dropdown-Eintrag, leerem Zielfeld und `confirmApply: true`. IVA schlägt grundsätzlich nur die Befüllung leerer Pipedrive-Felder vor. Ein vorhandener abweichender Wert, mehrere Treffer oder ein nicht sicher lesbarer Scan führen zur manuellen Prüfung; bestehende Werte werden nicht still überschrieben.
 
 ```bash
 node local-mac-helper/cli.mjs analyze-funding-pdf /pfad/dokument.pdf

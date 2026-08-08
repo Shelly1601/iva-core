@@ -29,6 +29,7 @@ import {
 } from '../local-mac-helper/whatsapp-mac.mjs';
 import {
   buildPipedriveFieldProposals,
+  classifyFundingDocumentName,
   parseFundingDocumentPages,
 } from '../local-mac-helper/funding-document-extractor.mjs';
 import { applyPipedriveFundingFieldUpdates } from '../local-mac-helper/chrome-pipedrive.mjs';
@@ -165,11 +166,13 @@ assert.equal(validatePipedriveFundingSnapshot({
 }).customerName, 'Erika Musterfrau');
 
 const documentAnalysis = parseFundingDocumentPages([
-  `Kundendaten\nAuftragsnummer: HH-AN-7-26-10926\nKundennummer: KD-8821\nTelefonnummer: +49 174 1234567`,
+  `Kundendaten\nAuftragsnummer: HH-AN-7-26-10926\nKundennummer: KD-8821\nTelefonnummer: +49 174 1234567\nSol-HEAT Wärmepumpenpaket 16kW - PANASONIC M-Serie T-CAP WH-WXG16ME8`,
 ], { sourceFile: 'Unterschriebenes Angebot.pdf' });
 assert.equal(documentAnalysis.fields.orderNumber.value, 'HH-AN-7-26-10926');
 assert.equal(documentAnalysis.fields.customerNumber.value, 'KD-8821');
 assert.equal(documentAnalysis.fields.phoneNumber.value, '+49 174 1234567');
+assert.equal(documentAnalysis.fields.plant.value, 'Panasonic 16 kW');
+assert.equal(documentAnalysis.fields.plant.model, 'WH-WXG16ME8');
 assert.equal(documentAnalysis.fields.orderNumber.page, 1);
 const fieldProposals = buildPipedriveFieldProposals({
   dealId: '399', customerName: 'Erika Musterfrau', orderNumber: null, customerNumber: 'KD-8821', phoneNumber: '0421 123456',
@@ -177,6 +180,7 @@ const fieldProposals = buildPipedriveFieldProposals({
 assert.equal(fieldProposals.proposals.find(item => item.field === 'orderNumber').action, 'propose_fill');
 assert.equal(fieldProposals.proposals.find(item => item.field === 'customerNumber').action, 'already_equal');
 assert.equal(fieldProposals.proposals.find(item => item.field === 'phoneNumber').action, 'conflict');
+assert.equal(fieldProposals.proposals.find(item => item.field === 'plant').action, 'propose_fill');
 assert.equal(fieldProposals.mutated, false);
 const ambiguousAnalysis = parseFundingDocumentPages([
   'Auftragsnummer: HH-AN-7-26-10926\nAuftragsnummer: HH-AN-7-26-10927',
@@ -185,6 +189,16 @@ assert.equal(ambiguousAnalysis.fields.orderNumber.status, 'ambiguous');
 const scannedAnalysis = parseFundingDocumentPages([''], { sourceFile: 'Scan.pdf' });
 assert.equal(scannedAnalysis.textLayer, 'ocr_required');
 assert.equal(scannedAnalysis.fields.orderNumber.status, 'ocr_required');
+const ocrColumnAnalysis = parseFundingDocumentPages([
+  'HH- Angebots-Nr. Michael Toleikis AN-7-26-11047 Ihre Kundennummer 17813 Telefonnummer +49 176 65393009 Tel. +49 421 40885180 Warmepumpenpaket 16kW - PANASONIC WH-WXG16ME8',
+], { sourceFile: 'Angebot_unterschrieben.pdf' });
+assert.equal(ocrColumnAnalysis.fields.orderNumber.value, 'HH-AN-7-26-11047');
+assert.notEqual(ocrColumnAnalysis.fields.orderNumber.value, 'Michael');
+assert.equal(ocrColumnAnalysis.fields.phoneNumber.value, '+49 176 65393009');
+assert.equal(classifyFundingDocumentName('Angebot_unterschrieben.pdf').type, 'signed_offer');
+assert.equal(classifyFundingDocumentName('THBMoreApp.pdf').type, 'technical_feasibility');
+assert.equal(classifyFundingDocumentName('TMB Michael.pdf').type, 'technical_feasibility');
+assert.equal(classifyFundingDocumentName('Registration.pdf').type, 'technical_feasibility');
 await assert.rejects(
   applyPipedriveFundingFieldUpdates({ dealId: '399', fieldProposals, confirmApply: false }),
   /confirmApply=true/,
