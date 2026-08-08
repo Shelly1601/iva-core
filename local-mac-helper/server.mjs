@@ -6,7 +6,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { renderFundingMissingDocumentsEmail, withFundingSender } from './funding.mjs';
 import { createOutlookDraft, diagnoseOutlook, normalizeDraftPayload } from './outlook.mjs';
-import { diagnosePipedriveChrome } from './chrome-pipedrive.mjs';
+import { diagnosePipedriveChrome, readPipedriveFundingDeal } from './chrome-pipedrive.mjs';
 import { decideFundingDealAction, validatePipedriveFundingSnapshot } from './pipedrive-funding.mjs';
 import { diagnoseWhatsAppMac } from './whatsapp-mac.mjs';
 
@@ -94,6 +94,10 @@ export function createMacHelperServer() {
         pipedrive: await diagnosePipedriveChrome(),
         whatsapp: await diagnoseWhatsAppMac(),
       });
+      const pipedriveDealMatch = url.pathname.match(/^\/v1\/pipedrive\/deals\/(\d+)\/funding-snapshot$/);
+      if (req.method === 'GET' && pipedriveDealMatch) {
+        return json(res, 200, await readPipedriveFundingDeal({ dealId: pipedriveDealMatch[1] }));
+      }
       if (req.method === 'POST' && url.pathname === '/v1/funding/pipedrive/decision') {
         const input = await body(req);
         const snapshot = validatePipedriveFundingSnapshot(input);

@@ -1,9 +1,14 @@
-import { access } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { access, mkdir, stat } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const WHATSAPP_APP = '/Applications/WhatsApp.app';
 const KEYCHAIN_SERVICE = 'de.iva.funding.whatsapp';
 const KEYCHAIN_ACCOUNT = 'viktoria-lambel';
+const PROBE_SOURCE = fileURLToPath(new URL('./macos/iva-whatsapp-probe.swift', import.meta.url));
+const PROBE_BINARY = path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper', 'bin', 'iva-whatsapp-probe');
 export const FUNDING_HANDOFF_RECIPIENT = 'Viktoria Lambel';
 
 function commandSucceeds(command, args) {
@@ -68,6 +73,24 @@ export async function readFundingHandoffPhoneFromKeychain() {
   return normalizeWhatsAppPhone(phone);
 }
 
+async function ensureWhatsAppProbe() {
+  let compile = true;
+  try {
+    const [source, binary] = await Promise.all([stat(PROBE_SOURCE), stat(PROBE_BINARY)]);
+    compile = source.mtimeMs > binary.mtimeMs;
+  } catch {}
+  if (compile) {
+    await mkdir(path.dirname(PROBE_BINARY), { recursive: true, mode: 0o700 });
+    await commandOutput('/usr/bin/swiftc', [PROBE_SOURCE, '-o', PROBE_BINARY]);
+  }
+  return PROBE_BINARY;
+}
+
+export async function probeWhatsAppMacLink() {
+  const binary = await ensureWhatsAppProbe();
+  return JSON.parse(await commandOutput(binary, []));
+}
+
 export async function diagnoseWhatsAppMac() {
   let installed = true;
   try { await access(WHATSAPP_APP); }
@@ -76,17 +99,28 @@ export async function diagnoseWhatsAppMac() {
   const recipientConfigured = await commandSucceeds('/usr/bin/security', [
     'find-generic-password', '-a', KEYCHAIN_ACCOUNT, '-s', KEYCHAIN_SERVICE,
   ]);
+  let uiProbe = { linkedLikely: false, hasQrIndicator: false, hasLoginIndicator: false };
+  if (running) {
+    try { uiProbe = await probeWhatsAppMacLink(); }
+    catch {}
+  }
+  const linkedAccountVerified = Boolean(uiProbe.linkedLikely);
   return {
     installed,
     running,
     bundleId: 'net.whatsapp.WhatsApp',
     recipientName: FUNDING_HANDOFF_RECIPIENT,
     recipientConfigured,
-    linkedAccountVerified: false,
+    linkedAccountVerified,
     outboundReady: false,
+    uiState: {
+      chatInterfaceVisible: linkedAccountVerified,
+      qrVisible: Boolean(uiProbe.hasQrIndicator),
+      loginVisible: Boolean(uiProbe.hasLoginIndicator),
+    },
     required: installed
       ? [
-          'WhatsApp Business mit der Mac-App verknüpfen',
+          ...(linkedAccountVerified ? [] : ['WhatsApp Business mit der Mac-App verknüpfen']),
           ...(recipientConfigured ? [] : ['Viktorias exakte Mobilnummer einmalig verifizieren']),
           'Testnachricht kontrollieren',
         ]

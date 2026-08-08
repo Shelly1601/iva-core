@@ -95,6 +95,7 @@ Routen:
 
 - `GET /health`
 - `GET /v1/doctor`
+- `GET /v1/pipedrive/deals/:id/funding-snapshot` liest Pipeline, aktive Stufe, Kunde, Auftragsnummer, VP-Kontakt und sichtbare Dateinamen ohne Änderung aus dem geöffneten Chrome-Deal
 - `POST /v1/funding/pipedrive/decision` für eine rein lesende Workflow-Entscheidung ohne Pipedrive-Änderung
 - `POST /v1/funding/drafts/preview`
 - `POST /v1/funding/drafts` mit `confirmCreateDraft: true`
