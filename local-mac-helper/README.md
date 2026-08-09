@@ -9,7 +9,11 @@ Der lokale Helper bedient Programme, die nur auf Nadines Mac angemeldet sind. Er
 - Originaldateien werden weder verändert noch gelöscht
 - **Harte Pipedrive-Regel:** In Pipedrive wird keine Datei gelöscht. Der lokale Dienst lehnt jede Pipedrive-`DELETE`-Route ausdrücklich ab.
 - Für die Verarbeitung heruntergeladene Kopien werden in einen abgeschotteten IVA-Arbeitsordner verschoben und nach Auswertung beziehungsweise verifiziertem Upload vollständig lokal entfernt. Die Bereinigung darf ausschließlich diesen Arbeitsordner treffen.
-- Entwürfe erhalten einen Fingerprint; identische Entwürfe werden nicht doppelt erzeugt
+- jeder Prüflauf erhält eine eigene Batch-ID; jeder darin erstellte Entwurf wird einzeln protokolliert
+- Entwürfe erhalten Fingerprint und interne Rückgängig-Kennung; identische Entwürfe werden nicht doppelt erzeugt
+- innerhalb eines Prüflaufs muss jeder Betreff eindeutig sein. Das verhindert, dass die Rückgängig-Funktion einen falschen Outlook-Entwurf treffen kann
+- `Alles rückgängig machen` verschiebt ausschließlich die von diesem Batch erstellten Entwürfe des Kontos `foerderung@heat-hero.com` nach **Gelöschte Elemente**. Bestehende Entwürfe, Mails und Pipedrive-Inhalte bleiben unberührt
+- ein fehlgeschlagener Teillauf bleibt mit seinen bereits erzeugten Entwürfen vollständig rückgängig machbar
 - Aktionen und Fehler werden lokal unter `~/Library/Application Support/IVA Mac Helper/` protokolliert
 - ohne eindeutig aufgelöstes `from`-Konto wird kein Entwurf mehr erzeugt; ein lokaler oder privater Fallback ist gesperrt
 - Förderentwürfe sind fest auf `foerderung@heat-hero.com` begrenzt; eine abweichende Eingabe wird verworfen
@@ -101,6 +105,27 @@ Nach ausdrücklicher Bestätigung als Outlook-Entwurf anlegen:
 node local-mac-helper/cli.mjs create-funding-draft /pfad/fall.json --commit
 ```
 
+Mehrere Fälle werden als zusammengehöriger Prüflauf in einer Datei mit `{ "cases": [...] }` vorbereitet:
+
+```bash
+node local-mac-helper/cli.mjs preview-funding-batch /pfad/faelle.json
+node local-mac-helper/cli.mjs create-funding-batch /pfad/faelle.json --commit
+```
+
+Den letzten Prüflauf vollständig rückgängig machen:
+
+```bash
+node local-mac-helper/cli.mjs rollback-last-funding-batch --confirm-rollback
+```
+
+Oder gezielt einen bekannten Lauf:
+
+```bash
+node local-mac-helper/cli.mjs rollback-funding-batch <batch-id> --confirm-rollback
+```
+
+Rückgängig entfernt niemals Pipedrive-Dateien oder Deal-Daten und macht keine Stufenänderung. Outlook verschiebt nur die eindeutig zugeordneten IVA-Entwürfe in **Gelöschte Elemente**, sodass auch dieser Schritt in Outlook noch wiederherstellbar bleibt.
+
 ## Lokaler Dienst
 
 ```bash
@@ -118,5 +143,9 @@ Routen:
 - jede `DELETE /v1/pipedrive/...`-Anfrage ist hart gesperrt
 - `POST /v1/funding/drafts/preview`
 - `POST /v1/funding/drafts` mit `confirmCreateDraft: true`
+- `POST /v1/funding/batches/preview` mit `cases` für eine rein lesende Vorschau
+- `POST /v1/funding/batches` mit `cases` und `confirmCreateDraftBatch: true`; Versand und Pipedrive-Änderungen bleiben ausgeschaltet
+- `GET /v1/funding/batches` und `GET /v1/funding/batches/:id` für Prüfprotokolle
+- `POST /v1/funding/batches/:id/rollback` beziehungsweise `/v1/funding/batches/last/rollback` mit `{ "confirmation": "Alles rückgängig machen" }`
 
 Als nächster Schritt kommt ein ausgehender, gepaarter Jobkanal zu IVA-Core hinzu. Dadurch muss Railway niemals eine eingehende Verbindung zum MacBook öffnen.

@@ -1,11 +1,18 @@
 #!/usr/bin/env node
+import os from 'node:os';
+import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { renderFundingMissingDocumentsEmail, withFundingSender } from './funding.mjs';
-import { createOutlookDraft, diagnoseOutlook, normalizeDraftPayload } from './outlook.mjs';
+import { createOutlookDraft, deleteOutlookDrafts, diagnoseOutlook, normalizeDraftPayload } from './outlook.mjs';
 import { diagnosePipedriveChrome, readPipedriveFundingDeal } from './chrome-pipedrive.mjs';
 import { diagnoseWhatsAppMac } from './whatsapp-mac.mjs';
 import { startMacHelperServer } from './server.mjs';
 import { analyzeFundingPdf } from './funding-document-extractor.mjs';
+import {
+  FUNDING_ROLLBACK_CONFIRMATION,
+  FundingBatchService,
+  createJsonFundingStateStore,
+} from './funding-batches.mjs';
 
 async function readJson(filePath) {
   if (!filePath) throw new Error('Pfad zu einer JSON-Datei fehlt.');
@@ -25,6 +32,17 @@ function compose(input) {
   });
 }
 
+const stateFile = path.join(
+  process.env.IVA_MAC_HELPER_DATA_DIR || path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper'),
+  'state.json',
+);
+const batchService = new FundingBatchService({
+  store: createJsonFundingStateStore(stateFile),
+  renderDraft: compose,
+  createDraft: createOutlookDraft,
+  deleteDrafts: deleteOutlookDrafts,
+});
+
 async function main() {
   const [command, filePath, confirmation] = process.argv.slice(2);
   if (command === 'doctor') return console.log(JSON.stringify({
@@ -38,7 +56,24 @@ async function main() {
   if (command === 'preview-funding') return console.log(JSON.stringify(compose(await readJson(filePath)), null, 2));
   if (command === 'create-funding-draft') {
     if (confirmation !== '--commit') throw new Error('Entwurf wurde nicht erstellt. Zum Bestätigen --commit anhängen.');
-    return console.log(JSON.stringify(await createOutlookDraft(compose(await readJson(filePath))), null, 2));
+    return console.log(JSON.stringify(await batchService.create([await readJson(filePath)]), null, 2));
+  }
+  if (command === 'preview-funding-batch') {
+    const input = await readJson(filePath);
+    return console.log(JSON.stringify(batchService.preview(input.cases || input), null, 2));
+  }
+  if (command === 'create-funding-batch') {
+    if (confirmation !== '--commit') throw new Error('Prüflauf wurde nicht erstellt. Zum Bestätigen --commit anhängen.');
+    const input = await readJson(filePath);
+    return console.log(JSON.stringify(await batchService.create(input.cases || input), null, 2));
+  }
+  if (command === 'rollback-funding-batch') {
+    if (confirmation !== '--confirm-rollback') throw new Error('Rückgängig wurde nicht ausgeführt. Zum Bestätigen --confirm-rollback anhängen.');
+    return console.log(JSON.stringify(await batchService.rollback(filePath, FUNDING_ROLLBACK_CONFIRMATION), null, 2));
+  }
+  if (command === 'rollback-last-funding-batch') {
+    if (filePath !== '--confirm-rollback') throw new Error('Rückgängig wurde nicht ausgeführt. Zum Bestätigen --confirm-rollback anhängen.');
+    return console.log(JSON.stringify(await batchService.rollback('last', FUNDING_ROLLBACK_CONFIRMATION), null, 2));
   }
   console.log(`IVA Mac Helper
 
@@ -47,6 +82,10 @@ async function main() {
   node local-mac-helper/cli.mjs analyze-funding-pdf /pfad/dokument.pdf
   node local-mac-helper/cli.mjs preview-funding /pfad/fall.json
   node local-mac-helper/cli.mjs create-funding-draft /pfad/fall.json --commit
+  node local-mac-helper/cli.mjs preview-funding-batch /pfad/faelle.json
+  node local-mac-helper/cli.mjs create-funding-batch /pfad/faelle.json --commit
+  node local-mac-helper/cli.mjs rollback-funding-batch <batch-id> --confirm-rollback
+  node local-mac-helper/cli.mjs rollback-last-funding-batch --confirm-rollback
   IVA_MAC_HELPER_TOKEN=<mindestens-32-zeichen> node local-mac-helper/cli.mjs serve`);
 }
 

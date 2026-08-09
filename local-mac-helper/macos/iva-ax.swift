@@ -75,6 +75,23 @@ func focusedRoot(_ appElement: AXUIElement) -> AXUIElement {
     return appElement
 }
 
+func focusedWindow(_ appElement: AXUIElement) throws -> AXUIElement {
+    guard let window = attribute(appElement, kAXFocusedWindowAttribute), CFGetTypeID(window) == AXUIElementGetTypeID() else {
+        throw HelperError.message("Kein fokussiertes Outlook-Fenster gefunden.")
+    }
+    return unsafeBitCast(window, to: AXUIElement.self)
+}
+
+func closeFocusedWindow(_ appElement: AXUIElement) throws {
+    let window = try focusedWindow(appElement)
+    guard let button = attribute(window, kAXCloseButtonAttribute), CFGetTypeID(button) == AXUIElementGetTypeID() else {
+        throw HelperError.message("Das fokussierte Outlook-Fenster besitzt keinen nutzbaren Schließen-Button.")
+    }
+    let closeButton = unsafeBitCast(button, to: AXUIElement.self)
+    let result = AXUIElementPerformAction(closeButton, kAXPressAction as CFString)
+    guard result == .success else { throw HelperError.message("Outlook-Fenster konnte nicht geschlossen werden: AX-Fehler \(result.rawValue).") }
+}
+
 func dictionary(_ node: AXNode) -> [String: Any] {
     var actionValues: CFArray?
     let actionResult = AXUIElementCopyActionNames(node.element, &actionValues)
@@ -152,6 +169,32 @@ func commandShortcut(_ virtualKey: CGKeyCode) throws {
     up.post(tap: .cghidEventTap)
 }
 
+func keyboardEvent(_ virtualKey: CGKeyCode, flags: CGEventFlags = []) throws {
+    guard let down = CGEvent(keyboardEventSource: nil, virtualKey: virtualKey, keyDown: true),
+          let up = CGEvent(keyboardEventSource: nil, virtualKey: virtualKey, keyDown: false) else {
+        throw HelperError.message("Tastaturereignis konnte nicht erstellt werden.")
+    }
+    down.flags = flags
+    up.flags = flags
+    down.post(tap: .cghidEventTap)
+    usleep(70_000)
+    up.post(tap: .cghidEventTap)
+}
+
+func typeText(_ text: String) throws {
+    for scalar in text.unicodeScalars {
+        let characters = Array(String(scalar).utf16)
+        guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+              let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else {
+            throw HelperError.message("Texteingabe konnte nicht erstellt werden.")
+        }
+        down.keyboardSetUnicodeString(stringLength: characters.count, unicodeString: characters)
+        up.keyboardSetUnicodeString(stringLength: characters.count, unicodeString: characters)
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+    }
+}
+
 func snapshotPasteboard(_ pasteboard: NSPasteboard) -> [[String: Data]] {
     return (pasteboard.pasteboardItems ?? []).map { item in
         var stored: [String: Data] = [:]
@@ -215,10 +258,27 @@ func pasteHTMLFile(_ filePath: String, into element: AXUIElement) throws -> Int 
     return attributed.length
 }
 
+func pasteText(_ text: String, into element: AXUIElement) throws {
+    let pasteboard = NSPasteboard.general
+    let previous = snapshotPasteboard(pasteboard)
+    pasteboard.clearContents()
+    guard pasteboard.setString(text, forType: .string) else {
+        restorePasteboard(pasteboard, snapshot: previous)
+        throw HelperError.message("Text konnte nicht in die Zwischenablage gelegt werden.")
+    }
+    _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    try click(element)
+    usleep(120_000)
+    try commandShortcut(0) // Befehl+A
+    try commandShortcut(9) // Befehl+V
+    usleep(250_000)
+    restorePasteboard(pasteboard, snapshot: previous)
+}
+
 do {
     let arguments = Array(CommandLine.arguments.dropFirst())
     let command = arguments.first ?? "doctor"
-    let (_, appElement) = try outlookApplication()
+    let (app, appElement) = try outlookApplication()
 
     if command == "doctor" {
         let windowCount = (attribute(appElement, kAXWindowsAttribute) as? [AXUIElement])?.count ?? 0
@@ -228,6 +288,13 @@ do {
             "windowCount": windowCount,
             "focusedWindowTitle": focusedWindowTitle(appElement),
         ])
+        exit(0)
+    }
+
+    if command == "activate" {
+        app.activate(options: [.activateIgnoringOtherApps])
+        usleep(250_000)
+        try writeJSON(["activated": true, "focusedWindowTitle": focusedWindowTitle(appElement)])
         exit(0)
     }
 
@@ -269,9 +336,174 @@ do {
         exit(0)
     }
 
+    if command == "set-value-and-confirm" {
+        guard arguments.count >= 4 else { throw HelperError.message("set-value-and-confirm benötigt AX-Rolle, exakte Beschriftung und Wert.") }
+        let found = nodes.filter { matches($0, role: arguments[1], description: arguments[2]) }
+        guard found.count == 1 else { throw HelperError.message("Bedienelement ist nicht eindeutig: \(found.count) Treffer.") }
+        let result = AXUIElementSetAttributeValue(found[0].element, kAXValueAttribute as CFString, arguments[3] as CFTypeRef)
+        guard result == .success else { throw HelperError.message("Wert konnte nicht gesetzt werden: AX-Fehler \(result.rawValue).") }
+        let focusResult = AXUIElementSetAttributeValue(found[0].element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        if focusResult != .success { try click(found[0].element) }
+        usleep(120_000)
+        try keyboardEvent(36) // Eingabetaste
+        usleep(300_000)
+        try writeJSON(["updated": true, "confirmed": true, "element": dictionary(found[0]), "valueLength": arguments[3].count])
+        exit(0)
+    }
+
+    if command == "set-value-shallowest-and-confirm" {
+        guard arguments.count >= 4 else { throw HelperError.message("set-value-shallowest-and-confirm benötigt AX-Rolle, exakte Beschriftung und Wert.") }
+        let found = nodes.filter { matches($0, role: arguments[1], description: arguments[2]) }.sorted { $0.path.count < $1.path.count }
+        guard let selected = found.first else { throw HelperError.message("Bedienelement wurde nicht gefunden.") }
+        let result = AXUIElementSetAttributeValue(selected.element, kAXValueAttribute as CFString, arguments[3] as CFTypeRef)
+        guard result == .success else { throw HelperError.message("Wert konnte nicht gesetzt werden: AX-Fehler \(result.rawValue).") }
+        _ = AXUIElementSetAttributeValue(selected.element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        try click(selected.element)
+        usleep(120_000)
+        if AXUIElementPerformAction(selected.element, kAXConfirmAction as CFString) != .success {
+            try keyboardEvent(36) // Eingabetaste
+        }
+        usleep(500_000)
+        try writeJSON(["updated": true, "confirmed": true, "matchCount": found.count, "element": dictionary(selected), "valueLength": arguments[3].count])
+        exit(0)
+    }
+
+    if command == "replace-text-shallowest-and-confirm" {
+        guard arguments.count >= 4 else { throw HelperError.message("replace-text-shallowest-and-confirm benötigt AX-Rolle, exakte Beschriftung und Wert.") }
+        let found = nodes.filter { matches($0, role: arguments[1], description: arguments[2]) }.sorted { $0.path.count < $1.path.count }
+        guard let selected = found.first else { throw HelperError.message("Bedienelement wurde nicht gefunden.") }
+        let focusResult = AXUIElementSetAttributeValue(selected.element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        if focusResult != .success { try click(selected.element) }
+        usleep(100_000)
+        try commandShortcut(0) // Befehl+A
+        try typeText(arguments[3])
+        usleep(150_000)
+        try keyboardEvent(36) // Eingabetaste
+        usleep(500_000)
+        try writeJSON(["updated": true, "confirmed": true, "matchCount": found.count, "element": dictionary(selected), "valueLength": arguments[3].count])
+        exit(0)
+    }
+
+    if command == "replace-text-and-confirm" {
+        guard arguments.count >= 4 else { throw HelperError.message("replace-text-and-confirm benötigt AX-Rolle, exakte Beschriftung und Wert.") }
+        let found = nodes.filter { matches($0, role: arguments[1], description: arguments[2]) }
+        guard found.count == 1 else { throw HelperError.message("Bedienelement ist nicht eindeutig: \(found.count) Treffer.") }
+        _ = AXUIElementSetAttributeValue(found[0].element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        try click(found[0].element)
+        usleep(100_000)
+        try commandShortcut(0) // Befehl+A
+        try typeText(arguments[3])
+        usleep(150_000)
+        try keyboardEvent(36) // Eingabetaste
+        usleep(250_000)
+        try writeJSON(["updated": true, "confirmed": true, "element": dictionary(found[0]), "valueLength": arguments[3].count])
+        exit(0)
+    }
+
     if command == "save" {
         try commandShortcut(1) // Befehl+S
         try writeJSON(["saved": true, "focusedWindowTitle": focusedWindowTitle(appElement)])
+        exit(0)
+    }
+
+    if command == "save-and-close" {
+        let windowCountBefore = (attribute(appElement, kAXWindowsAttribute) as? [AXUIElement])?.count ?? 0
+        try commandShortcut(1) // Befehl+S
+        usleep(500_000)
+        try closeFocusedWindow(appElement)
+        usleep(500_000)
+        let windowCountAfter = (attribute(appElement, kAXWindowsAttribute) as? [AXUIElement])?.count ?? 0
+        guard windowCountAfter < windowCountBefore else { throw HelperError.message("Der gespeicherte Outlook-Entwurf konnte nicht eindeutig geschlossen werden.") }
+        try writeJSON(["saved": true, "closed": true, "focusedWindowTitle": focusedWindowTitle(appElement), "windowCountBefore": windowCountBefore, "windowCountAfter": windowCountAfter])
+        exit(0)
+    }
+
+    if command == "close-window" {
+        let windowCountBefore = (attribute(appElement, kAXWindowsAttribute) as? [AXUIElement])?.count ?? 0
+        try closeFocusedWindow(appElement)
+        usleep(400_000)
+        let windowCountAfter = (attribute(appElement, kAXWindowsAttribute) as? [AXUIElement])?.count ?? 0
+        try writeJSON(["closeRequested": true, "windowCountBefore": windowCountBefore, "windowCountAfter": windowCountAfter, "focusedWindowTitle": focusedWindowTitle(appElement)])
+        exit(0)
+    }
+
+    if command == "new-message" {
+        app.activate(options: [.activateIgnoringOtherApps])
+        usleep(200_000)
+        try commandShortcut(45) // Befehl+N
+        usleep(700_000)
+        let composeNodes = collect(focusedRoot(appElement))
+        let accountPickers = composeNodes.filter { matches($0, role: "AXPopUpButton", description: "accountPicker") }
+        let subjectFields = composeNodes.filter { matches($0, role: "AXTextField", description: "subjectTextField") }
+        guard accountPickers.count == 1 && subjectFields.count == 1 else {
+            throw HelperError.message("Outlook hat kein eindeutig prüfbares Verfassen-Fenster geöffnet.")
+        }
+        try writeJSON(["opened": true, "focusedWindowTitle": focusedWindowTitle(appElement)])
+        exit(0)
+    }
+
+    if command == "select-popup-option" {
+        guard arguments.count >= 4 else { throw HelperError.message("select-popup-option benötigt AX-Rolle, exakte Beschriftung und Suchtext.") }
+        let found = nodes.filter { matches($0, role: arguments[1], description: arguments[2]) }
+        guard found.count == 1 else { throw HelperError.message("Bedienelement ist nicht eindeutig: \(found.count) Treffer.") }
+        try click(found[0].element)
+        usleep(250_000)
+        let needle = arguments[3].lowercased()
+        let popupNodes = collect(appElement, maxDepth: 22, maxNodes: 9000)
+        let matchingOptions = popupNodes.filter { node in
+            let searchable = "\(node.title) \(node.description) \(safeValue(node.element))".lowercased()
+            return searchable.contains(needle) && ["AXMenuItem", "AXRow", "AXCell", "AXStaticText"].contains(node.role)
+        }
+        let exactAccountCells = matchingOptions.filter {
+            $0.role == "AXCell" && $0.description.lowercased().contains("(\(needle))")
+        }
+        let actionableCells = matchingOptions.filter { $0.role == "AXCell" }
+        let options = exactAccountCells.count == 1 ? exactAccountCells : (actionableCells.count == 1 ? actionableCells : matchingOptions)
+        guard options.count == 1 else {
+            throw HelperError.message("Outlook-Absenderoption ist nicht eindeutig auffindbar: \(options.count) Treffer für \(arguments[3]).")
+        }
+        var picked = false
+        for action in [kAXPickAction as String, kAXPressAction as String] {
+            if AXUIElementPerformAction(options[0].element, action as CFString) == .success {
+                picked = true
+                break
+            }
+        }
+        if !picked { try click(options[0].element) }
+        usleep(500_000)
+        try writeJSON(["selected": true, "value": safeValue(found[0].element), "option": dictionary(options[0]), "element": dictionary(found[0])])
+        exit(0)
+    }
+
+    if command == "popup-items" {
+        guard arguments.count >= 3 else { throw HelperError.message("popup-items benötigt AX-Rolle und exakte Beschriftung.") }
+        let found = nodes.filter { matches($0, role: arguments[1], description: arguments[2]) }
+        guard found.count == 1 else { throw HelperError.message("Bedienelement ist nicht eindeutig: \(found.count) Treffer.") }
+        try click(found[0].element)
+        usleep(250_000)
+        let popupNodes = collect(appElement, maxDepth: 22, maxNodes: 9000)
+        let options = popupNodes.filter { ["AXMenuItem", "AXRow", "AXCell", "AXStaticText"].contains($0.role) }
+        try writeJSON(["count": options.count, "options": options.map(dictionary)])
+        exit(0)
+    }
+
+    if command == "shortcut" {
+        guard arguments.count >= 2, let key = UInt16(arguments[1]) else { throw HelperError.message("shortcut benötigt einen virtuellen Tastencode.") }
+        let modifiers = arguments.count >= 3 ? arguments[2].lowercased() : ""
+        var flags: CGEventFlags = []
+        if modifiers.contains("command") { flags.insert(.maskCommand) }
+        if modifiers.contains("shift") { flags.insert(.maskShift) }
+        if modifiers.contains("option") { flags.insert(.maskAlternate) }
+        if modifiers.contains("control") { flags.insert(.maskControl) }
+        try keyboardEvent(CGKeyCode(key), flags: flags)
+        try writeJSON(["pressed": true, "key": key, "modifiers": modifiers])
+        exit(0)
+    }
+
+    if command == "type-text" {
+        guard arguments.count >= 2 else { throw HelperError.message("type-text benötigt Text.") }
+        try typeText(arguments[1])
+        try writeJSON(["typed": true, "characterCount": arguments[1].count])
         exit(0)
     }
 
@@ -288,6 +520,21 @@ do {
         exit(0)
     }
 
+    if command == "paste-text" {
+        guard arguments.count >= 4 else { throw HelperError.message("paste-text benötigt AX-Rolle, exakte Beschriftung und Text.") }
+        let found = nodes.filter { matches($0, role: arguments[1], description: arguments[2]) }
+        guard found.count == 1 else { throw HelperError.message("Bedienelement ist nicht eindeutig: \(found.count) Treffer.") }
+        app.activate(options: [.activateIgnoringOtherApps])
+        usleep(150_000)
+        try pasteText(arguments[3], into: found[0].element)
+        if AXUIElementPerformAction(found[0].element, kAXConfirmAction as CFString) != .success {
+            try keyboardEvent(36) // Eingabetaste
+        }
+        usleep(250_000)
+        try writeJSON(["pasted": true, "characterCount": arguments[3].count, "element": dictionary(found[0])])
+        exit(0)
+    }
+
     if command == "press" {
         guard arguments.count >= 3 else { throw HelperError.message("press benötigt AX-Rolle und exakte Beschriftung.") }
         let found = nodes.filter { matches($0, role: arguments[1], description: arguments[2]) }
@@ -295,6 +542,106 @@ do {
         let result = AXUIElementPerformAction(found[0].element, kAXPressAction as CFString)
         guard result == .success else { throw HelperError.message("Bedienelement konnte nicht ausgelöst werden: AX-Fehler \(result.rawValue).") }
         try writeJSON(["pressed": true, "element": dictionary(found[0])])
+        exit(0)
+    }
+
+    if command == "press-shallowest" {
+        guard arguments.count >= 3 else { throw HelperError.message("press-shallowest benötigt AX-Rolle und exakte Beschriftung.") }
+        let found = nodes.filter { matches($0, role: arguments[1], description: arguments[2]) }.sorted { $0.path.count < $1.path.count }
+        guard let selected = found.first else { throw HelperError.message("Bedienelement wurde nicht gefunden.") }
+        let result = AXUIElementPerformAction(selected.element, kAXPressAction as CFString)
+        guard result == .success else { throw HelperError.message("Bedienelement konnte nicht ausgelöst werden: AX-Fehler \(result.rawValue).") }
+        try writeJSON(["pressed": true, "matchCount": found.count, "element": dictionary(selected)])
+        exit(0)
+    }
+
+    if command == "delete-draft-search-result" {
+        guard arguments.count >= 2 else { throw HelperError.message("delete-draft-search-result benötigt den exakten Betreff.") }
+        let expectedSubject = arguments[1]
+        let subjectNeedle = "Betreff: \(expectedSubject),"
+        let candidates = nodes.filter { node in
+            guard node.role == "AXCell", node.description.contains(subjectNeedle), node.description.contains("Ordner: Entwürfe") else { return false }
+            var actionValues: CFArray?
+            guard AXUIElementCopyActionNames(node.element, &actionValues) == .success,
+                  let actions = actionValues as? [String] else { return false }
+            return actions.contains { $0.contains("Name:Löschen") }
+        }
+        guard candidates.count == 1 else {
+            throw HelperError.message("Rückgängig-Abbruch: Erwartet wurde genau ein markierter Entwurf mit diesem Betreff, gefunden wurden \(candidates.count).")
+        }
+        var actionValues: CFArray?
+        _ = AXUIElementCopyActionNames(candidates[0].element, &actionValues)
+        let actions = actionValues as? [String] ?? []
+        guard let deleteAction = actions.first(where: { $0.contains("Name:Löschen") }) else {
+            throw HelperError.message("Rückgängig-Abbruch: Der gefundene Entwurf besitzt keine sichere Löschaktion.")
+        }
+        let result = AXUIElementPerformAction(candidates[0].element, deleteAction as CFString)
+        usleep(600_000)
+        if result != .success {
+            let remaining = collect(focusedRoot(appElement)).filter { $0.role == "AXCell" && $0.description.contains(subjectNeedle) && $0.description.contains("Ordner: Entwürfe") }
+            guard remaining.isEmpty else { throw HelperError.message("Der markierte Entwurf konnte nicht in Gelöschte Elemente verschoben werden: AX-Fehler \(result.rawValue).") }
+        }
+        try writeJSON(["deleted": true, "recoverableFromDeletedItems": true, "subject": expectedSubject, "element": dictionary(candidates[0])])
+        exit(0)
+    }
+
+    if command == "delete-account-draft" {
+        guard arguments.count >= 2 else { throw HelperError.message("delete-account-draft benötigt den exakten Betreff.") }
+        let expectedSubject = arguments[1]
+        let subjectNeedle = "Betreff: \(expectedSubject),"
+        let candidates = nodes.filter { node in
+            guard node.role == "AXCell", node.description.contains(subjectNeedle) else { return false }
+            var actionValues: CFArray?
+            guard AXUIElementCopyActionNames(node.element, &actionValues) == .success,
+                  let actions = actionValues as? [String] else { return false }
+            return actions.contains { $0.contains("Name:Löschen") }
+        }
+        guard candidates.count == 1 else {
+            throw HelperError.message("Rückgängig-Abbruch: Im ausgewählten Entwürfe-Ordner wurden \(candidates.count) Entwürfe mit dem exakten Betreff gefunden.")
+        }
+        var actionValues: CFArray?
+        _ = AXUIElementCopyActionNames(candidates[0].element, &actionValues)
+        let actions = actionValues as? [String] ?? []
+        guard let deleteAction = actions.first(where: { $0.contains("Name:Löschen") }) else {
+            throw HelperError.message("Rückgängig-Abbruch: Der gefundene Entwurf besitzt keine sichere Löschaktion.")
+        }
+        let result = AXUIElementPerformAction(candidates[0].element, deleteAction as CFString)
+        usleep(600_000)
+        if result != .success {
+            let remaining = collect(focusedRoot(appElement)).filter { $0.role == "AXCell" && $0.description.contains(subjectNeedle) }
+            guard remaining.isEmpty else { throw HelperError.message("Der IVA-Entwurf konnte nicht in Gelöschte Elemente verschoben werden: AX-Fehler \(result.rawValue).") }
+        }
+        try writeJSON(["deleted": true, "recoverableFromDeletedItems": true, "subject": expectedSubject, "element": dictionary(candidates[0])])
+        exit(0)
+    }
+
+    if command == "open-account-drafts" {
+        guard arguments.count >= 2 else { throw HelperError.message("open-account-drafts benötigt den exakten Kontonamen.") }
+        let accountName = arguments[1]
+        let accountCells = nodes.filter { $0.role == "AXCell" && $0.description == accountName }
+        guard accountCells.count == 1, accountCells[0].path.count >= 2 else {
+            throw HelperError.message("Das Outlook-Konto ist in der Ordnerleiste nicht eindeutig sichtbar.")
+        }
+        let accountPath = accountCells[0].path
+        let siblingPrefix = Array(accountPath.dropLast(2))
+        let accountIndex = accountPath[accountPath.count - 2]
+        let draftCells = nodes.filter { node in
+            guard node.role == "AXCell", node.description.hasPrefix("Entwürfe"), node.path.count == accountPath.count else { return false }
+            return Array(node.path.dropLast(2)) == siblingPrefix && node.path[node.path.count - 2] > accountIndex
+        }.sorted { $0.path[$0.path.count - 2] < $1.path[$1.path.count - 2] }
+        guard let draftCell = draftCells.first else {
+            throw HelperError.message("Der Entwürfe-Ordner des Outlook-Kontos ist nicht sichtbar.")
+        }
+        let rowPath = Array(draftCell.path.dropLast())
+        let row = nodes.first { $0.role == "AXRow" && $0.path == rowPath }
+        if let row {
+            let selected = AXUIElementSetAttributeValue(row.element, kAXSelectedAttribute as CFString, kCFBooleanTrue)
+            if selected != .success { try click(row.element) }
+        } else {
+            try click(draftCell.element)
+        }
+        usleep(900_000)
+        try writeJSON(["opened": true, "account": accountName, "folder": draftCell.description, "element": dictionary(draftCell)])
         exit(0)
     }
 

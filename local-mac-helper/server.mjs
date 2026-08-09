@@ -1,16 +1,22 @@
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { appendFile, mkdir } from 'node:fs/promises';
+import { timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { renderFundingMissingDocumentsEmail, withFundingSender } from './funding.mjs';
-import { createOutlookDraft, diagnoseOutlook, normalizeDraftPayload } from './outlook.mjs';
+import { createOutlookDraft, deleteOutlookDrafts, diagnoseOutlook, normalizeDraftPayload } from './outlook.mjs';
 import { applyPipedriveFundingFieldUpdates, diagnosePipedriveChrome, readPipedriveFundingDeal } from './chrome-pipedrive.mjs';
 import { decideFundingDealAction, validatePipedriveFundingSnapshot } from './pipedrive-funding.mjs';
 import { diagnoseWhatsAppMac } from './whatsapp-mac.mjs';
 import { analyzeFundingPdf, buildPipedriveFieldProposals } from './funding-document-extractor.mjs';
 import { cleanupFundingWorkingCopy, stageFundingWorkingCopy } from './local-working-files.mjs';
+import {
+  FUNDING_ROLLBACK_CONFIRMATION,
+  FundingBatchService,
+  createJsonFundingStateStore,
+  fundingDraftFingerprint,
+} from './funding-batches.mjs';
 
 const HOST = '127.0.0.1';
 const PORT = Math.min(65535, Math.max(1024, Number(process.env.IVA_MAC_HELPER_PORT) || 4317));
@@ -40,33 +46,12 @@ async function body(req) {
   return raw ? JSON.parse(raw) : {};
 }
 
-async function loadState() {
-  try { return JSON.parse(await readFile(STATE_FILE, 'utf8')); }
-  catch { return { version: 1, drafts: {} }; }
-}
-
-async function saveState(state) {
-  await mkdir(DATA_DIR, { recursive: true, mode: 0o700 });
-  await writeFile(STATE_FILE, JSON.stringify(state, null, 2), { mode: 0o600 });
-}
+const stateStore = createJsonFundingStateStore(STATE_FILE);
 
 async function audit(event) {
   await mkdir(DATA_DIR, { recursive: true, mode: 0o700 });
   const safe = { ts: new Date().toISOString(), ...event };
   await appendFile(AUDIT_FILE, JSON.stringify(safe) + '\n', { mode: 0o600 });
-}
-
-function fingerprint(draft) {
-  return createHash('sha256').update(JSON.stringify({
-    subject: draft.subject,
-    body: draft.body,
-    html: draft.html,
-    to: draft.to,
-    cc: draft.cc,
-    bcc: draft.bcc,
-    attachments: draft.attachments,
-    from: draft.from,
-  })).digest('hex');
 }
 
 function fundingDraft(input) {
@@ -84,12 +69,29 @@ function fundingDraft(input) {
   });
 }
 
+const fundingBatchService = new FundingBatchService({
+  store: stateStore,
+  renderDraft: fundingDraft,
+  createDraft: createOutlookDraft,
+  deleteDrafts: deleteOutlookDrafts,
+  audit,
+});
+
 export function createMacHelperServer() {
   if (TOKEN.length < 32) throw new Error('IVA_MAC_HELPER_TOKEN fehlt oder ist kürzer als 32 Zeichen.');
   return http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url || '/', `http://${HOST}:${PORT}`);
-      if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { ok: true, service: 'iva-mac-helper', sendEnabled: false });
+      if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, {
+        ok: true,
+        service: 'iva-mac-helper',
+        mode: 'outlook-drafts-only',
+        sendEnabled: false,
+        pipedriveDeleteEnabled: false,
+        pipedriveStageMoveEnabled: false,
+        batchRollbackEnabled: true,
+        rollbackConfirmation: FUNDING_ROLLBACK_CONFIRMATION,
+      });
       if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
       if (req.method === 'DELETE' && url.pathname.startsWith('/v1/pipedrive/')) {
         return json(res, 405, {
@@ -173,21 +175,39 @@ export function createMacHelperServer() {
       if (req.method === 'POST' && url.pathname === '/v1/funding/drafts/preview') {
         const input = await body(req);
         const draft = fundingDraft(input);
-        return json(res, 200, { draft, fingerprint: fingerprint(draft), action: 'preview-only', sent: false });
+        return json(res, 200, { draft, fingerprint: fundingDraftFingerprint(draft), action: 'preview-only', sent: false });
       }
       if (req.method === 'POST' && url.pathname === '/v1/funding/drafts') {
         const input = await body(req);
         if (input.confirmCreateDraft !== true) return json(res, 409, { error: 'confirmCreateDraft=true fehlt.', sent: false });
-        const draft = fundingDraft(input);
-        const id = fingerprint(draft);
-        const state = await loadState();
-        if (state.drafts?.[id]?.created) return json(res, 200, { duplicate: true, id, previous: state.drafts[id], sent: false });
-        const result = await createOutlookDraft(draft);
-        state.drafts ||= {};
-        state.drafts[id] = { created: true, createdAt: new Date().toISOString(), subject: draft.subject, sent: false };
-        await saveState(state);
-        await audit({ category: 'outlook-draft', action: 'created', id, subject: draft.subject, attachmentCount: draft.attachments.length, sent: false });
-        return json(res, 201, { id, duplicate: false, result });
+        const result = await fundingBatchService.create([input]);
+        return json(res, result.complete ? 201 : 207, result);
+      }
+      if (req.method === 'POST' && url.pathname === '/v1/funding/batches/preview') {
+        const input = await body(req);
+        return json(res, 200, { batch: fundingBatchService.preview(input.cases), action: 'preview-only', sent: false, pipedriveMutated: false });
+      }
+      if (req.method === 'POST' && url.pathname === '/v1/funding/batches') {
+        const input = await body(req);
+        if (input.confirmCreateDraftBatch !== true) {
+          return json(res, 409, { error: 'confirmCreateDraftBatch=true fehlt.', sent: false, pipedriveMutated: false });
+        }
+        const result = await fundingBatchService.create(input.cases);
+        return json(res, result.complete ? 201 : 207, result);
+      }
+      if (req.method === 'GET' && url.pathname === '/v1/funding/batches') {
+        return json(res, 200, { batches: await fundingBatchService.list(), sent: false, pipedriveMutated: false });
+      }
+      const fundingBatchGetMatch = url.pathname.match(/^\/v1\/funding\/batches\/([0-9a-f-]{36})$/i);
+      if (req.method === 'GET' && fundingBatchGetMatch) {
+        const batch = await fundingBatchService.get(fundingBatchGetMatch[1]);
+        return batch ? json(res, 200, { batch, sent: false, pipedriveMutated: false }) : json(res, 404, { error: 'Förder-Prüflauf nicht gefunden.' });
+      }
+      const fundingRollbackMatch = url.pathname.match(/^\/v1\/funding\/batches\/(last|[0-9a-f-]{36})\/rollback$/i);
+      if (req.method === 'POST' && fundingRollbackMatch) {
+        const input = await body(req);
+        const result = await fundingBatchService.rollback(fundingRollbackMatch[1].toLowerCase(), input.confirmation);
+        return json(res, result.batch.status === 'partial_rollback' ? 207 : 200, result);
       }
       return json(res, 404, { error: 'not found' });
     } catch (error) {

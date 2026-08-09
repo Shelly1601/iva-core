@@ -18,6 +18,7 @@
     "test:customer-files": "node scripts/verify-customer-files.mjs",
     "test:crm-name-matching": "node scripts/verify-crm-name-matching.mjs",
     "test:crm-qonekto": "node scripts/verify-crm-qonekto-sync.mjs",
+    "test:mac-helper": "node scripts/verify-mac-helper.mjs",
     "test:advice": "node scripts/verify-advice.mjs",
     "test:corporate-benefits": "node scripts/verify-corporate-benefits.mjs",
     "test:presentations": "node scripts/verify-presentations.mjs",
@@ -33,7 +34,7 @@
     "test:lumit": "node scripts/verify-lumit.mjs",
     "test:capability-knowledge-recruiting": "node scripts/verify-capability-knowledge-recruiting.mjs",
     "sample:lumit-package": "node scripts/generate-lumit-package-sample.mjs",
-    "test:all": "npm run test:agents && npm run test:operations && npm run test:qonekto && npm run test:qonekto-customers && npm run test:address-autocomplete && npm run test:customer-files && npm run test:crm-name-matching && npm run test:crm-qonekto && npm run test:lumit && npm run test:marketing && npm run test:whatsapp && npm run test:tmb && npm run test:workspaces && npm run test:advice && npm run test:corporate-benefits && npm run test:presentations && npm run test:energy && npm run test:pv-price && npm run test:energy-tariffs && npm run test:accounting && npm run test:opportunities && npm run test:voice && npm run test:capability-knowledge-recruiting"
+    "test:all": "npm run test:agents && npm run test:operations && npm run test:qonekto && npm run test:qonekto-customers && npm run test:address-autocomplete && npm run test:customer-files && npm run test:crm-name-matching && npm run test:crm-qonekto && npm run test:mac-helper && npm run test:lumit && npm run test:marketing && npm run test:whatsapp && npm run test:tmb && npm run test:workspaces && npm run test:advice && npm run test:corporate-benefits && npm run test:presentations && npm run test:energy && npm run test:pv-price && npm run test:energy-tariffs && npm run test:accounting && npm run test:opportunities && npm run test:voice && npm run test:capability-knowledge-recruiting"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.0.0",

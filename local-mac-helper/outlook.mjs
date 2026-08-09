@@ -1,5 +1,6 @@
 import { access, stat } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { createOutlookDraftViaUi, deleteOutlookDraftsViaUi } from './macos-ui.mjs';
 
 const OUTLOOK_APP = '/Applications/Microsoft Outlook.app';
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -84,6 +85,69 @@ export function buildDraftAppleScript(input = {}) {
   return { script: lines.join('\n'), draft };
 }
 
+function normalizeDeleteEntries(entries = []) {
+  if (!Array.isArray(entries) || !entries.length) return [];
+  if (entries.length > 100) throw new Error('Rückgängig-Abbruch: Es dürfen höchstens 100 Entwürfe in einem Lauf entfernt werden.');
+  return entries.map(entry => {
+    const marker = String(entry?.marker || '').trim();
+    const subject = String(entry?.subject || '').trim();
+    if (!/^IVA-FUNDING-DRAFT:[0-9a-f-]{36}:[0-9a-f-]{36}$/i.test(marker)) throw new Error('Rückgängig-Abbruch: Ungültige IVA-Entwurfkennung.');
+    if (!subject) throw new Error('Rückgängig-Abbruch: Entwurf ohne Betreff kann nicht sicher entfernt werden.');
+    return { marker, subject };
+  });
+}
+
+export function buildDeleteDraftsAppleScript({ from, entries = [] } = {}) {
+  const requestedFrom = email(from, 'Absender');
+  const normalizedEntries = normalizeDeleteEntries(entries);
+  const markerList = normalizedEntries.map(entry => appleScriptString(entry.marker)).join(', ');
+  const lines = [
+    'tell application id "com.microsoft.Outlook"',
+    `set requestedSender to ${appleScriptString(requestedFrom)}`,
+    'set senderAccount to missing value',
+    'repeat with accountCandidate in exchange accounts',
+    'ignoring case',
+    'if (email address of accountCandidate as text) is requestedSender then set senderAccount to accountCandidate',
+    'end ignoring',
+    'end repeat',
+    'if senderAccount is missing value then',
+    'repeat with accountCandidate in imap accounts',
+    'ignoring case',
+    'if (email address of accountCandidate as text) is requestedSender then set senderAccount to accountCandidate',
+    'end ignoring',
+    'end repeat',
+    'end if',
+    'if senderAccount is missing value then',
+    'repeat with accountCandidate in pop accounts',
+    'ignoring case',
+    'if (email address of accountCandidate as text) is requestedSender then set senderAccount to accountCandidate',
+    'end ignoring',
+    'end repeat',
+    'end if',
+    'if senderAccount is missing value then error "Das gewünschte Outlook-Absenderkonto ist über die native Schnittstelle nicht verfügbar." number 550',
+    'set targetDrafts to drafts of senderAccount',
+    `set markerList to {${markerList}}`,
+    'set deletedMarkers to {}',
+    'repeat with markerText in markerList',
+    'set matchesForMarker to {}',
+    'repeat with draftMessage in (every outgoing message of targetDrafts)',
+    'if ((content of draftMessage as text) contains (markerText as text)) then set end of matchesForMarker to draftMessage',
+    'end repeat',
+    'if (count of matchesForMarker) > 1 then error "Rückgängig-Abbruch: IVA-Kennung ist in mehreren Entwürfen vorhanden." number 551',
+    'if (count of matchesForMarker) is 1 then',
+    'delete item 1 of matchesForMarker',
+    'set end of deletedMarkers to (markerText as text)',
+    'end if',
+    'end repeat',
+    'set AppleScript\'s text item delimiters to linefeed',
+    'set resultText to deletedMarkers as text',
+    'set AppleScript\'s text item delimiters to ""',
+    'return resultText',
+    'end tell',
+  ];
+  return { script: lines.join('\n'), entries: normalizedEntries, from: requestedFrom };
+}
+
 export function runAppleScript(script, { timeoutMs = 15000 } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn('/usr/bin/osascript', ['-'], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -108,6 +172,24 @@ export function runAppleScript(script, { timeoutMs = 15000 } = {}) {
 export async function createOutlookDraft(input = {}) {
   const { script, draft } = buildDraftAppleScript(input);
   await validateAttachmentPaths(draft.attachments);
+  const diagnosis = await diagnoseOutlook();
+  if (!diagnosis.outlook.installed || !diagnosis.outlook.running) {
+    throw new Error('Microsoft Outlook ist nicht geöffnet. Es wurde kein Entwurf erstellt.');
+  }
+  if (!diagnosis.capabilities.createAccountDraft && diagnosis.capabilities.sharedSenderUiPrerequisitesReady) {
+    const result = await createOutlookDraftViaUi(draft);
+    return {
+      ...result,
+      recipients: { to: draft.to, cc: draft.cc, bcc: draft.bcc },
+      attachmentCount: draft.attachments.length,
+      requestedFrom: draft.from || null,
+      senderSelectionRequired: false,
+      sent: false,
+    };
+  }
+  if (!diagnosis.capabilities.createAccountDraft) {
+    throw new Error('Outlook kann das gewünschte Absenderkonto weder nativ noch über die freigegebene macOS-Oberfläche sicher ansprechen. Es wurde nichts erstellt.');
+  }
   const result = await runAppleScript(script, { timeoutMs: 30000 });
   return {
     created: result.startsWith('created|'),
@@ -116,6 +198,31 @@ export async function createOutlookDraft(input = {}) {
     attachmentCount: draft.attachments.length,
     requestedFrom: draft.from || null,
     senderSelectionRequired: false,
+    sent: false,
+    channel: 'outlook-applescript',
+  };
+}
+
+export async function deleteOutlookDrafts(input = {}) {
+  const { script, entries, from } = buildDeleteDraftsAppleScript(input);
+  if (!entries.length) return { deletedMarkers: [], missingMarkers: [], recoverableFromDeletedItems: true, sent: false };
+  const diagnosis = await diagnoseOutlook();
+  if (!diagnosis.outlook.installed || !diagnosis.outlook.running) {
+    throw new Error('Rückgängig-Abbruch: Microsoft Outlook ist nicht geöffnet.');
+  }
+  if (!diagnosis.capabilities.createAccountDraft && diagnosis.capabilities.sharedSenderUiPrerequisitesReady) {
+    return deleteOutlookDraftsViaUi({ from, entries });
+  }
+  if (!diagnosis.capabilities.createAccountDraft) {
+    throw new Error('Rückgängig-Abbruch: Das Outlook-Entwurfskonto kann nicht sicher angesprochen werden.');
+  }
+  const output = await runAppleScript(script, { timeoutMs: 30000 });
+  const deletedMarkers = output.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  return {
+    deletedMarkers,
+    missingMarkers: entries.filter(entry => !deletedMarkers.includes(entry.marker)).map(entry => entry.marker),
+    channel: 'outlook-applescript',
+    recoverableFromDeletedItems: true,
     sent: false,
   };
 }
@@ -157,9 +264,9 @@ end tell`;
       settingsPath: 'Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen',
     },
     capabilities: {
-      createLocalDraft: false,
+      createLocalDraft: accessibilityEnabled,
       createAccountDraft: installed && running && appleScript.available && appleScript.accountCount > 0,
-      chooseSharedSenderAutomatically: appleScript.defaultAccountAvailable,
+      chooseSharedSenderAutomatically: appleScript.defaultAccountAvailable || accessibilityEnabled,
       sharedSenderUiPrerequisitesReady: accessibilityEnabled,
       readVisibleOutlookUi: accessibilityEnabled,
       sendMail: false,

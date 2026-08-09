@@ -16,7 +16,15 @@ import {
   resolveFundingRecipients,
   withFundingSender,
 } from '../local-mac-helper/funding.mjs';
-import { buildDraftAppleScript, normalizeDraftPayload } from '../local-mac-helper/outlook.mjs';
+import { buildDeleteDraftsAppleScript, buildDraftAppleScript, normalizeDraftPayload } from '../local-mac-helper/outlook.mjs';
+import {
+  FUNDING_BATCH_MODE,
+  FUNDING_ROLLBACK_CONFIRMATION,
+  FundingBatchService,
+  attachFundingDraftMarker,
+  buildFundingDraftMarker,
+  createMemoryFundingStateStore,
+} from '../local-mac-helper/funding-batches.mjs';
 import {
   PIPEDRIVE_FUNDING_CONFIG,
   FUNDING_DOCUMENT_STATE,
@@ -270,4 +278,108 @@ assert.doesNotMatch(built.script, /send draftMessage/);
 assert.throws(() => renderFundingMissingDocumentsEmail({ customerName: 'Test', orderNumber: '1', missingDocumentIds: [] }), /keine Unterlagen/);
 assert.throws(() => normalizeDraftPayload({ subject: 'Test', body: 'Text', to: ['falsch'] }), /ungültige E-Mail/);
 
-console.log('PASS IVA Mac Helper: Pipedrive-Stufen, E-Mail-Empfänger, HEAT-HERO-Signatur und gesperrte WhatsApp-Übergabe.');
+const marker = buildFundingDraftMarker('11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222');
+const markedDraft = attachFundingDraftMarker(draft, marker);
+assert.match(markedDraft.html, /IVA-FUNDING-DRAFT:11111111/);
+assert.match(markedDraft.html, /display:none!important/);
+const deleteScript = buildDeleteDraftsAppleScript({
+  from: FUNDING_SENDER_EMAIL,
+  entries: [{ marker, subject: draft.subject }],
+});
+assert.match(deleteScript.script, /targetDrafts to drafts of senderAccount/);
+assert.match(deleteScript.script, /every outgoing message of targetDrafts/);
+assert.match(deleteScript.script, /delete item 1 of matchesForMarker/);
+assert.doesNotMatch(deleteScript.script, /sent items|inbox/i);
+
+function fundingDraftForBatch(input) {
+  const renderedEmail = renderFundingMissingDocumentsEmail(withFundingSender(input));
+  return normalizeDraftPayload({
+    subject: renderedEmail.subject,
+    body: renderedEmail.body,
+    html: renderedEmail.html,
+    to: renderedEmail.recipients.to,
+    cc: renderedEmail.recipients.cc,
+    from: FUNDING_SENDER_EMAIL,
+  });
+}
+
+const batchStore = createMemoryFundingStateStore();
+const createdDrafts = [];
+const deleteCalls = [];
+const batchService = new FundingBatchService({
+  store: batchStore,
+  renderDraft: fundingDraftForBatch,
+  createDraft: async createdDraft => {
+    createdDrafts.push(createdDraft);
+    return { created: true, channel: 'test', sent: false };
+  },
+  deleteDrafts: async input => {
+    deleteCalls.push(input);
+    return {
+      deletedMarkers: input.entries.map(entry => entry.marker),
+      missingMarkers: [],
+      recoverableFromDeletedItems: true,
+    };
+  },
+});
+const batchCases = [
+  { customerName: 'Fall Eins', orderNumber: 'HH-1', missingDocumentIds: ['signed_offer'] },
+  { customerName: 'Fall Zwei', orderNumber: 'HH-2', missingDocumentIds: ['identity_card'] },
+];
+const previewBatch = batchService.preview(batchCases);
+assert.equal(previewBatch.mode, FUNDING_BATCH_MODE);
+assert.equal(previewBatch.sendEnabled, false);
+assert.equal(previewBatch.pipedriveMutationEnabled, false);
+assert.equal(createdDrafts.length, 0);
+const createdBatchResult = await batchService.create(batchCases);
+assert.equal(createdBatchResult.complete, true);
+assert.equal(createdBatchResult.batch.status, 'created');
+assert.equal(createdBatchResult.batch.summary.created, 2);
+assert.equal(createdDrafts.length, 2);
+assert.ok(createdDrafts.every(createdDraft => createdDraft.html.includes('IVA-FUNDING-DRAFT:')));
+assert.ok(createdDrafts.every(createdDraft => createdDraft.from === FUNDING_SENDER_EMAIL));
+await assert.rejects(batchService.rollback(createdBatchResult.batch.id, 'ja, bitte'), /exakt/);
+assert.equal(deleteCalls.length, 0);
+const rollbackResult = await batchService.rollback(createdBatchResult.batch.id, FUNDING_ROLLBACK_CONFIRMATION);
+assert.equal(rollbackResult.batch.status, 'rolled_back');
+assert.equal(rollbackResult.batch.rollback.deleted, 2);
+assert.equal(deleteCalls.length, 1);
+assert.equal(deleteCalls[0].from, FUNDING_SENDER_EMAIL);
+assert.deepEqual(deleteCalls[0].entries.map(entry => entry.subject), [
+  'Fall Eins - HH-1 - fehlende Unterlagen',
+  'Fall Zwei - HH-2 - fehlende Unterlagen',
+]);
+const idempotentRollback = await batchService.rollback(createdBatchResult.batch.id, FUNDING_ROLLBACK_CONFIRMATION);
+assert.equal(idempotentRollback.idempotent, true);
+assert.equal(deleteCalls.length, 1);
+
+const partialStore = createMemoryFundingStateStore();
+let partialCreateCount = 0;
+const partialDeleteCalls = [];
+const partialService = new FundingBatchService({
+  store: partialStore,
+  renderDraft: fundingDraftForBatch,
+  createDraft: async () => {
+    partialCreateCount += 1;
+    if (partialCreateCount === 2) throw new Error('Testfehler in Outlook');
+    return { created: true, channel: 'test' };
+  },
+  deleteDrafts: async input => {
+    partialDeleteCalls.push(input);
+    return { deletedMarkers: input.entries.map(entry => entry.marker), recoverableFromDeletedItems: true };
+  },
+});
+const partial = await partialService.create(batchCases);
+assert.equal(partial.complete, false);
+assert.equal(partial.batch.status, 'partial');
+assert.equal(partial.batch.summary.created, 1);
+assert.equal(partial.batch.summary.failed, 1);
+const partialRollback = await partialService.rollback('last', FUNDING_ROLLBACK_CONFIRMATION);
+assert.equal(partialRollback.batch.status, 'rolled_back');
+assert.equal(partialDeleteCalls[0].entries.length, 1);
+assert.throws(() => batchService.preview([
+  { customerName: 'Doppelt', orderNumber: 'HH-3', missingDocumentIds: ['signed_offer'] },
+  { customerName: 'Doppelt', orderNumber: 'HH-3', missingDocumentIds: ['identity_card'] },
+]), /Betreff.*mehrfach/);
+
+console.log('PASS IVA Mac Helper: sichere Förder-Prüfläufe, Outlook-Entwürfe, Batch-Rückgängig und gesperrte Versand-/Pipedrive-Aktionen.');
