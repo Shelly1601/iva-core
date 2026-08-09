@@ -102,6 +102,7 @@ import {
   upsertQonektoCustomerAutomatically,
 } from './integrations/qonekto-customers.js';
 import { crmQonektoSyncStatus, runCrmQonektoSync } from './integrations/crm-qonekto-sync.js';
+import { suggestGermanAddresses } from './integrations/address-autocomplete.js';
 import {
   attachLumitCustomerPackage,
   calculateLumitPriceQuote,
@@ -1124,6 +1125,13 @@ app.patch('/api/lumit/applications/:id/steps/:step', async (req, res) => {
 });
 
 // --- Kundenportal: Qonekto/Blau direkt ist Stammdatenquelle, IVA die Arbeitsakte. ---
+app.get('/api/address-suggestions', async (req, res) => {
+  try {
+    res.json(await suggestGermanAddresses(req.query?.q, {
+      limit: Math.min(Math.max(Number(req.query?.limit) || 6, 1), 8),
+    }));
+  } catch (e) { res.status(502).json({ error: `Adressvorschläge konnten nicht geladen werden: ${e.message}` }); }
+});
 app.get('/api/customers/capabilities', async (_req, res) => {
   try { res.json(await qonektoCustomerCapabilityStatus()); }
   catch (e) { res.status(502).json({ error: e.message }); }

@@ -13,6 +13,8 @@ const state = {
   lumitApplication: null,
   prepared: null,
   preparedContext: null,
+  addressSearchTimer: null,
+  addressSearchSerial: 0,
   sessionId: localStorage.getItem(LS_SESSION) || (globalThis.crypto?.randomUUID?.() || `customers-${Date.now()}`),
 };
 localStorage.setItem(LS_SESSION, state.sessionId);
@@ -716,6 +718,7 @@ function populateCustomerReferences() {
 
 async function openNewCustomer() {
   $('newCustomerForm').reset();
+  hideAddressSuggestions();
   $('newTransferToQonekto').checked = false;
   if ($('newBroker').querySelector(`option[value="${DEFAULT_BROKER_ID}"]`)) $('newBroker').value = DEFAULT_BROKER_ID;
   $('newCustomerDialog').showModal();
@@ -724,8 +727,75 @@ async function openNewCustomer() {
 }
 
 function closeNewCustomerDialog() {
+  clearTimeout(state.addressSearchTimer);
+  hideAddressSuggestions();
   $('newCustomerForm').reset();
   if ($('newCustomerDialog').open) $('newCustomerDialog').close();
+}
+
+function hideAddressSuggestions() {
+  const root = $('addressSuggestions');
+  root.hidden = true;
+  root.innerHTML = '';
+  $('newStreet').setAttribute('aria-expanded', 'false');
+}
+
+function renderAddressSuggestions(suggestions = [], { loading = false } = {}) {
+  const root = $('addressSuggestions');
+  root.innerHTML = '';
+  if (loading) {
+    root.innerHTML = '<div class="address-empty">Passende Adressen werden gesucht …</div>';
+  } else if (!suggestions.length) {
+    root.innerHTML = '<div class="address-empty">Keine eindeutige Adresse gefunden. Du kannst die Felder weiterhin manuell ausfüllen.</div>';
+  } else {
+    for (const suggestion of suggestions) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'address-suggestion';
+      button.setAttribute('role', 'option');
+      const title = document.createElement('b');
+      title.textContent = suggestion.label;
+      const detail = document.createElement('small');
+      detail.textContent = [suggestion.district, suggestion.state].filter(Boolean).join(' · ');
+      button.append(title, detail);
+      button.addEventListener('click', () => applyAddressSuggestion(suggestion));
+      root.appendChild(button);
+    }
+  }
+  root.hidden = false;
+  $('newStreet').setAttribute('aria-expanded', 'true');
+}
+
+function addressSearchQuery() {
+  return [clean($('newStreet').value), clean($('newZip').value), clean($('newCity').value)].filter(Boolean).join(' ');
+}
+
+function queueAddressSuggestions() {
+  clearTimeout(state.addressSearchTimer);
+  const query = addressSearchQuery();
+  if (!$('newCustomerDialog').open || query.length < 4) return hideAddressSuggestions();
+  state.addressSearchTimer = setTimeout(() => loadAddressSuggestions(query), 350);
+}
+
+async function loadAddressSuggestions(query) {
+  const serial = ++state.addressSearchSerial;
+  renderAddressSuggestions([], { loading: true });
+  try {
+    const result = await api(`/api/address-suggestions?q=${encodeURIComponent(query)}&limit=6`);
+    if (serial !== state.addressSearchSerial || query !== addressSearchQuery()) return;
+    renderAddressSuggestions(result.suggestions || []);
+  } catch {
+    if (serial !== state.addressSearchSerial) return;
+    hideAddressSuggestions();
+  }
+}
+
+function applyAddressSuggestion(suggestion) {
+  $('newStreet').value = suggestion.streetLine || [suggestion.street, suggestion.houseNumber].filter(Boolean).join(' ');
+  $('newZip').value = suggestion.postcode || '';
+  $('newCity').value = suggestion.city || '';
+  hideAddressSuggestions();
+  $('newEmail').focus();
 }
 
 function newCustomerValues() {
@@ -924,6 +994,20 @@ $('newCustomerForm').addEventListener('submit', event => { event.preventDefault(
 $('closeNewCustomer').addEventListener('click', closeNewCustomerDialog);
 $('cancelNewCustomer').addEventListener('click', closeNewCustomerDialog);
 $('newCustomerDialog').addEventListener('cancel', event => { event.preventDefault(); closeNewCustomerDialog(); });
+['newStreet', 'newZip', 'newCity'].forEach(id => $(id).addEventListener('input', queueAddressSuggestions));
+$('newStreet').addEventListener('keydown', event => {
+  if (event.key === 'Escape') hideAddressSuggestions();
+  if (event.key === 'ArrowDown') {
+    const first = $('addressSuggestions').querySelector('.address-suggestion');
+    if (first) { event.preventDefault(); first.focus(); }
+  }
+});
+$('addressSuggestions').addEventListener('keydown', event => {
+  if (event.key === 'Escape') { hideAddressSuggestions(); $('newStreet').focus(); }
+});
+document.addEventListener('click', event => {
+  if (!event.target.closest('.address-field')) hideAddressSuggestions();
+});
 $('prepareAddress').addEventListener('click', prepareAddress);
 $('saveMessageDraft').addEventListener('click', saveMessageDraft);
 $('openLumitCalculator').addEventListener('click', openLumitCalculator);
