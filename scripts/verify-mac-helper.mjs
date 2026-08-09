@@ -49,6 +49,7 @@ import {
   assertPipedriveFileActionAllowed,
 } from '../local-mac-helper/chrome-pipedrive.mjs';
 import { cleanupFundingWorkingCopy, stageFundingWorkingCopy } from '../local-mac-helper/local-working-files.mjs';
+import { fundingMessageFingerprint } from '../local-mac-helper/funding-monitor-state.mjs';
 
 assert.equal(Object.keys(FUNDING_DOCUMENTS).length, 7);
 assert.equal(FUNDING_SENDER_EMAIL, 'foerderung@heat-hero.com');
@@ -183,6 +184,10 @@ assert.equal(validatePipedriveFundingSnapshot({
 assert.equal(PIPEDRIVE_FILE_POLICY.delete, false);
 assert.equal(assertPipedriveFileActionAllowed('download'), true);
 assert.throws(() => assertPipedriveFileActionAllowed('delete'), /unter keinen Umständen gelöscht/);
+const stableMailDescription = 'Unterhaltung, 2 Mitteilungen, Absender: Max Beispiel, Betreff: Förderunterlagen A-4711, Neueste Nachricht: 09.08.26, Hat Dateien, Nachrichtenvorschau: Anbei die Unterlagen';
+const changedMailPreview = 'Unterhaltung, 2 Mitteilungen, Absender: Max Beispiel, Betreff: Förderunterlagen A-4711, Geantwortet Neueste Nachricht: 09.08.26, Hat Dateien, Nachrichtenvorschau: Andere dynamische Vorschau';
+assert.equal(fundingMessageFingerprint(stableMailDescription), fundingMessageFingerprint(changedMailPreview));
+assert.notEqual(fundingMessageFingerprint(stableMailDescription), fundingMessageFingerprint(stableMailDescription.replace('2 Mitteilungen', '3 Mitteilungen')));
 
 const localCleanupTestRoot = await mkdtemp(path.join(os.tmpdir(), 'iva-funding-local-cleanup-'));
 try {

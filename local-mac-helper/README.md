@@ -84,7 +84,7 @@ Der Kontakt hinter dem Pipedrive-Feld **Vertriebspartner** liefert Anzeigenamen 
 
 ## Laufender Fördermonitor
 
-Der 30-Minuten-Monitor besitzt einen persistenten Ausgangsstand unter `~/Library/Application Support/IVA Mac Helper/funding-monitor-state.json`. Bereits vorhandene Posteingangsmails und bei Aktivierung vollständige Deals werden beim ersten Lauf nicht rückwirkend verarbeitet oder an Viktoria gemeldet. Neue Nachrichten werden über einen Fingerprint erkannt und erst nach erfolgreich abgeschlossenem Vorgang quittiert.
+Der 30-Minuten-Monitor besitzt einen persistenten Ausgangsstand unter `~/Library/Application Support/IVA Mac Helper/funding-monitor-state.json`. Bereits vorhandene Posteingangsmails und bei Aktivierung vollständige Deals werden beim ersten Lauf nicht rückwirkend verarbeitet oder an Viktoria gemeldet. Neue Nachrichten werden über einen stabilen Fingerprint aus Absender, Betreff, Datum und Gesprächsstand erkannt; wechselnde Outlook-Vorschautexte erzeugen dadurch keine falschen Neuzugänge. Der Monitor stellt ein geschlossenes Outlook-Hauptfenster vor der Ordnerwahl wieder her und quittiert eine Nachricht erst nach erfolgreich abgeschlossenem Vorgang.
 
 Bis zur ausdrücklichen Freigabe gilt `mode=review-only`, `emailSendEnabled=false` und `replyDraftsOnly=true`: IVA darf Dateien prüfen, verifiziert in Pipedrive hochladen und fehlende Unterlagen als Antwortentwurf vorbereiten, aber keine E-Mail versenden. Die spätere automatische Versandfreigabe ist ein separater Zustandswechsel.
 

@@ -7,8 +7,20 @@ import { openOutlookAccountFolder, runMacUiBridge } from './macos-ui.mjs';
 
 const FUNDING_MAILBOX = 'foerderung@heat-hero.com';
 
-function fingerprint(value) {
-  return createHash('sha256').update(String(value || '')).digest('hex');
+function stableMessageIdentity(value) {
+  const description = String(value || '').replace(/\s+/g, ' ').trim();
+  const sender = description.match(/Absender:\s*(.*?),\s*Betreff:/i)?.[1]?.trim() || '';
+  const subject = description.match(/Betreff:\s*(.*?)(?:,\s*(?:Geantwortet\s+)?(?:Neueste Nachricht:\s*)?\d{2}\.\d{2}\.\d{2}|,\s*(?:Heute|Gestern)\b|,\s+Hat Dateien|,\s+Nachrichtenvorschau:)/i)?.[1]?.trim() || '';
+  const date = description.match(/(?:Neueste Nachricht:\s*)?(\d{2}\.\d{2}\.\d{2})/i)?.[1] || '';
+  const conversationCount = description.match(/Unterhaltung,\s*(\d+)\s+Mitteilungen/i)?.[1] || '1';
+  const identity = [sender, subject, date, conversationCount]
+    .map(part => part.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim())
+    .join('|');
+  return identity.replace(/\|/g, '') ? identity : description;
+}
+
+export function fundingMessageFingerprint(value) {
+  return createHash('sha256').update(stableMessageIdentity(value)).digest('hex');
 }
 
 export function defaultFundingMonitorStateFile() {
@@ -59,7 +71,7 @@ export async function initializeFundingMonitor({ fundingScan, persist = true } =
     intervalMinutes: 30,
     emailSendEnabled: false,
     replyDraftsOnly: true,
-    processedMessageFingerprints: [...new Set(messageDescriptions.map(fingerprint))],
+    processedMessageFingerprints: [...new Set(messageDescriptions.map(fundingMessageFingerprint))],
     baselineMessageCount: messageDescriptions.length,
     completedDealIdsAtBaseline: [...new Set(completedDealIds)],
     whatsappSentDealIds: [],
@@ -75,7 +87,7 @@ export async function detectNewFundingMessages({ filePath = defaultFundingMonito
   const processed = new Set(state.processedMessageFingerprints || []);
   const descriptions = await readFundingInboxDescriptions();
   const messages = descriptions
-    .map(description => ({ fingerprint: fingerprint(description), description }))
+    .map(description => ({ fingerprint: fundingMessageFingerprint(description), description }))
     .filter(item => !processed.has(item.fingerprint));
   return {
     checkedAt: new Date().toISOString(),

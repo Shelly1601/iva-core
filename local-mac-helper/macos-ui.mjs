@@ -175,6 +175,10 @@ export async function openOutlookAccountFolder({ from, folder }) {
   if (!accountLabel) throw new Error(`Für ${requestedFrom || 'das Outlook-Konto'} ist kein geprüftes Konto hinterlegt.`);
   const folderName = String(folder || '').trim();
   if (!folderName) throw new Error('Outlook-Ordnername fehlt.');
+  // `activate` allein stellt unter macOS kein geschlossenes Outlook-Hauptfenster
+  // wieder her. Der Monitor öffnet die App deshalb zuerst idempotent und darf
+  // erst danach den fest hinterlegten Kontoordner auswählen.
+  await run('/usr/bin/open', ['-a', 'Microsoft Outlook'], { timeoutMs: 15000 });
   await runMacUiBridge(['activate']);
   await runMacUiBridge(['press-shallowest', 'AXButton', 'Cancel Search Button']).catch(() => {});
   return runMacUiBridge(['open-account-folder', accountLabel, folderName], { timeoutMs: 30000 });
