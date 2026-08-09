@@ -66,6 +66,9 @@ function objectValuesAsArray(value) {
   const entries = Object.entries(value);
   if (!entries.length) return [];
   if (entries.every(([, item]) => item && typeof item === 'object')) return entries.map(([, item]) => item);
+  if (entries.every(([, item]) => ['string', 'number'].includes(typeof item))) {
+    return entries.map(([id, label]) => ({ id, label }));
+  }
   return [];
 }
 
@@ -396,9 +399,30 @@ export async function qonektoCustomerCapabilityStatus() {
   };
 }
 
-function normalizeReference(item = {}) {
-  const id = cleanText(item.ameise_id ?? item.id ?? item.value ?? item.code, 160);
-  const label = cleanText(item.bezeichnung ?? item.name ?? item.label ?? item.titel ?? item.anrede, 240) || id;
+const KNOWN_SALUTATIONS = Object.freeze({
+  1: 'Herr',
+  2: 'Frau',
+  7: 'Firma',
+});
+
+export function normalizeReference(item = {}, kind = '') {
+  const scalar = ['string', 'number'].includes(typeof item) ? item : '';
+  const id = cleanText(scalar || deepValue(item, [
+    'ameise_id', 'id', 'code', 'key', 'value',
+    'anrede_ameise_id', 'anrede_id', 'salutation_id',
+    'vermittler_ameise_id', 'vermittler_id', 'broker_id',
+  ]), 160);
+  const firstName = cleanText(deepValue(item, ['vorname', 'first_name', 'given_name']), 120);
+  const lastName = cleanText(deepValue(item, ['nachname', 'last_name', 'surname']), 160);
+  let label = cleanText(deepValue(item, [
+    'bezeichnung', 'kurzbezeichnung', 'label', 'name', 'titel',
+    'anrede_bezeichnung', 'anrede', 'salutation', 'vermittler_bezeichnung', 'vermittler', 'broker_name',
+  ]), 240) || [firstName, lastName].filter(Boolean).join(' ');
+  if (!label || label === id || /^\d+$/.test(label)) {
+    if (kind === 'salutation') label = KNOWN_SALUTATIONS[id] || `Weitere Anrede (ID ${id})`;
+    else if (kind === 'broker' && id === '009T7N') label = 'Nadine Sell';
+    else label = id;
+  }
   return { id, label, raw: item };
 }
 
@@ -414,8 +438,8 @@ export async function getQonektoCustomerReferences({ force = false } = {}) {
     optionalRead(selected.brokers, {}, ['vermittler', 'brokers']),
   ]);
   const result = {
-    salutations: salutationsResult.data.map(normalizeReference).filter(item => item.id),
-    brokers: brokersResult.data.map(normalizeReference).filter(item => item.id),
+    salutations: salutationsResult.data.map(item => normalizeReference(item, 'salutation')).filter(item => item.id),
+    brokers: brokersResult.data.map(item => normalizeReference(item, 'broker')).filter(item => item.id),
     warnings: [salutationsResult, brokersResult].filter(entry => entry.error).map(entry => entry.error),
   };
   return cacheSet(cacheKey, result, 60 * 60_000);

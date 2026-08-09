@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import {
   arrayFromPayload,
+  normalizeReference,
   normalizeQonektoContract,
   normalizeQonektoCustomer,
   unwrapQonektoResult,
@@ -91,5 +93,26 @@ const referencedContract = normalizeQonektoContract({
 assert.equal(referencedContract.id, 'V-3', 'verschachtelte Kunden-ID darf die Vertrags-ID nicht ueberschreiben');
 assert.equal(referencedContract.category, 'Wohngebäude');
 assert.equal(referencedContract.company, 'Beispiel Versicherer');
+
+assert.deepEqual(
+  arrayFromPayload({ anreden: { 1: 'Herr', 2: 'Frau', 7: 'Firma' } }, ['anreden']),
+  [{ id: '1', label: 'Herr' }, { id: '2', label: 'Frau' }, { id: '7', label: 'Firma' }],
+);
+assert.equal(normalizeReference({ anrede_ameise_id: 1 }, 'salutation').label, 'Herr');
+assert.equal(normalizeReference({ vermittler_id: '009T7N' }, 'broker').label, 'Nadine Sell');
+assert.deepEqual(
+  normalizeReference({ vermittler_ameise_id: 'A-1', vorname: 'Mara', nachname: 'Makler' }, 'broker'),
+  { id: 'A-1', label: 'Mara Makler', raw: { vermittler_ameise_id: 'A-1', vorname: 'Mara', nachname: 'Makler' } },
+);
+
+const customerHtml = await fs.readFile(new URL('../public/customers.html', import.meta.url), 'utf8');
+const customerJs = await fs.readFile(new URL('../public/customers.js', import.meta.url), 'utf8');
+assert.match(customerHtml, /id="newBroker"><option value="009T7N">Nadine Sell · 009T7N/);
+assert.match(customerHtml, /id="newTransferToQonekto" type="checkbox"/);
+assert.match(customerHtml, /id="closeNewCustomer"[^>]+type="button"|type="button"[^>]+id="closeNewCustomer"/);
+assert.match(customerHtml, /id="cancelNewCustomer"/);
+assert.match(customerJs, /qonektoDraft: values/);
+assert.match(customerJs, /transferLocalCustomerBtn/);
+assert.doesNotMatch(customerJs, /prepareCreateCustomer/);
 
 console.log('PASS Qonekto-Kunden: verschachtelte MCP-Ergebnisse, Kunden- und Vertragsnormalisierung');
