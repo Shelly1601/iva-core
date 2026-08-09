@@ -11,7 +11,12 @@ export const PIPEDRIVE_FUNDING_CONFIG = Object.freeze({
   stages: Object.freeze({
     documents: Object.freeze({
       label: 'Antrag eingereicht / Förderunterlagen einreichen',
-      aliases: ['Antrag eingereicht / Förderunterlagen', 'Antrag eingereicht / Förderunterlagen einreichen'],
+      aliases: [
+        'Antrag eingereicht / Förderunterlagen',
+        'Antrag eingereicht / Förderunterlagen einreichen',
+        'Auftrag eingereicht / Förderunterlagen',
+        'Auftrag eingereicht / Förderunterlagen einreichen',
+      ],
       checkMode: 'complete-document-review',
       moveWhenCompleteTo: 'Förderung beantragt',
       stayInStage: false,

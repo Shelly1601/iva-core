@@ -364,8 +364,26 @@ export function buildPipedriveFieldProposals(snapshot = {}, analysis = {}) {
 export function classifyFundingDocumentName(value) {
   const fileName = path.basename(String(value || '')).normalize('NFKC');
   const normalized = fileName.toLowerCase().replace(/[\s_-]+/g, ' ');
-  if (/angebot.*(unterschrieben|signiert)|(?:unterschrieben|signiert).*angebot/i.test(normalized)) {
+  if (/angebot.*(untersch(?:rieben|r?\.?|rift)?|unterzeichnet|signiert)|(?:untersch(?:rieben|r?\.?|rift)?|unterzeichnet|signiert).*angebot|\bHH-(?:AN|AB)-[A-Z0-9-]+.*(?:untersch(?:rieben|r?\.?|rift)?|unterzeichnet|signiert)/i.test(fileName)) {
     return { type: 'signed_offer', confidence: 0.99, fileName };
+  }
+  if (/(personalausweis|(?:^|\s)(?:ausweis|perso)(?:\s|\.|$)|identit[aä]tskarte|id karte)/i.test(normalized)) {
+    return { type: 'identity_card', confidence: 0.96, fileName };
+  }
+  if (/(meldebescheinigung|meldebesch(?:einigung)?|meldebest(?:[aä]|ae)tigung|(?:^|\s)mb(?:\s|\.|$))/i.test(normalized)) {
+    return { type: 'registration_certificate', confidence: 0.98, fileName };
+  }
+  if (/grundbuch(?:auszug)?|(?:^|\s)(?:gb|gba)(?:\s|\.|$)/i.test(normalized)) {
+    return { type: 'land_register', confidence: 0.98, fileName };
+  }
+  if (/(einkommensteuer|steuerbescheid|est bescheid|bescheid)/i.test(normalized) && /2023/.test(normalized)) {
+    return { type: 'tax_assessment_2023', confidence: 0.98, fileName };
+  }
+  if (/(einkommensteuer|steuerbescheid|est bescheid|bescheid)/i.test(normalized) && /2024/.test(normalized)) {
+    return { type: 'tax_assessment_2024', confidence: 0.98, fileName };
+  }
+  if (/(kfw.{0,40}(konto|aktivierung|best(?:[aä]|ae)tigung|zugang|zuschuss)|(?:konto|aktivierung|best(?:[aä]|ae)tigung|zugang|zuschuss).{0,40}kfw|antragsbest(?:[aä]|ae)tigung.{0,30}heizungsf(?:[oö]|oe)rd)/i.test(normalized)) {
+    return { type: 'kfw_account_confirmation', confidence: 0.94, fileName };
   }
   if (/(tmb|thb|moa|moreapp|registration)/i.test(normalized.replace(/\s+/g, ''))) {
     return { type: 'technical_feasibility', confidence: 0.95, fileName };

@@ -169,6 +169,36 @@ export async function deleteOutlookDraftsViaUi({ from, entries = [] }) {
   };
 }
 
+export async function openOutlookAccountFolder({ from, folder }) {
+  const requestedFrom = normalizeEmail(from);
+  const accountLabel = OUTLOOK_ACCOUNT_LABELS[requestedFrom];
+  if (!accountLabel) throw new Error(`Für ${requestedFrom || 'das Outlook-Konto'} ist kein geprüftes Konto hinterlegt.`);
+  const folderName = String(folder || '').trim();
+  if (!folderName) throw new Error('Outlook-Ordnername fehlt.');
+  await runMacUiBridge(['activate']);
+  await runMacUiBridge(['press-shallowest', 'AXButton', 'Cancel Search Button']).catch(() => {});
+  return runMacUiBridge(['open-account-folder', accountLabel, folderName], { timeoutMs: 30000 });
+}
+
+export async function inspectOutlookMessageAttachments(description) {
+  const exactDescription = String(description || '');
+  if (!exactDescription) throw new Error('Für die Outlook-Anlagenprüfung fehlt die exakte Nachrichtenbeschreibung.');
+  return runMacUiBridge(['inspect-message-attachments', exactDescription], { timeoutMs: 30000 });
+}
+
+export async function inspectOutlookMessagesAttachments(descriptions) {
+  const exactDescriptions = Array.isArray(descriptions) ? descriptions.map(String).filter(Boolean) : [];
+  if (!exactDescriptions.length) return { count: 0, inspections: [] };
+  await mkdir(TEMP_DIR, { recursive: true, mode: 0o700 });
+  const inputFile = path.join(TEMP_DIR, `${randomUUID()}.json`);
+  try {
+    await writeFile(inputFile, JSON.stringify(exactDescriptions), { mode: 0o600 });
+    return await runMacUiBridge(['inspect-message-attachments-file', inputFile], { timeoutMs: Math.max(30000, exactDescriptions.length * 2500) });
+  } finally {
+    await unlink(inputFile).catch(() => {});
+  }
+}
+
 async function pasteHtmlIntoOutlook(html) {
   await mkdir(TEMP_DIR, { recursive: true, mode: 0o700 });
   const htmlFile = path.join(TEMP_DIR, `${randomUUID()}.html`);

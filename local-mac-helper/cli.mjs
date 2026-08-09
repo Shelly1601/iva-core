@@ -4,10 +4,17 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { renderFundingMissingDocumentsEmail, withFundingSender } from './funding.mjs';
 import { createOutlookDraft, deleteOutlookDrafts, diagnoseOutlook, normalizeDraftPayload } from './outlook.mjs';
-import { diagnosePipedriveChrome, readPipedriveFundingDeal } from './chrome-pipedrive.mjs';
+import {
+  createPipedriveFundingRequestNotes,
+  diagnosePipedriveChrome,
+  readPipedriveFundingDeal,
+  uploadPipedriveDealFiles,
+} from './chrome-pipedrive.mjs';
 import { diagnoseWhatsAppMac } from './whatsapp-mac.mjs';
 import { startMacHelperServer } from './server.mjs';
 import { analyzeFundingPdf } from './funding-document-extractor.mjs';
+import { loadFundingScan, scanPipedriveFundingBoard } from './funding-scan.mjs';
+import { loadFundingMailScan, scanFundingMailbox } from './funding-mail-scan.mjs';
 import {
   FUNDING_ROLLBACK_CONFIRMATION,
   FundingBatchService,
@@ -44,7 +51,7 @@ const batchService = new FundingBatchService({
 });
 
 async function main() {
-  const [command, filePath, confirmation] = process.argv.slice(2);
+  const [command, filePath, confirmation, extra] = process.argv.slice(2);
   if (command === 'doctor') return console.log(JSON.stringify({
     outlook: await diagnoseOutlook(),
     pipedrive: await diagnosePipedriveChrome(),
@@ -52,6 +59,28 @@ async function main() {
   }, null, 2));
   if (command === 'serve') return startMacHelperServer();
   if (command === 'read-pipedrive-deal') return console.log(JSON.stringify(await readPipedriveFundingDeal({ dealId: filePath }), null, 2));
+  if (command === 'upload-pipedrive-files') {
+    if (extra !== '--commit') throw new Error('Pipedrive-Dateien wurden nicht hochgeladen. Zum Bestätigen --commit anhängen.');
+    return console.log(JSON.stringify(await uploadPipedriveDealFiles({ dealId: filePath, directory: confirmation }), null, 2));
+  }
+  if (command === 'create-pipedrive-funding-notes') {
+    if (confirmation !== '--commit') throw new Error('Pipedrive-Notizen wurden nicht erstellt. Zum Bestätigen --commit anhängen.');
+    return console.log(JSON.stringify(await createPipedriveFundingRequestNotes(await readJson(filePath)), null, 2));
+  }
+  if (command === 'scan-funding-board') {
+    const report = await scanPipedriveFundingBoard({
+      onProgress: ({ processed, total }) => console.error(`Förderprüfung: ${processed}/${total} Fälle gelesen`),
+    });
+    return console.log(JSON.stringify(report, null, 2));
+  }
+  if (command === 'latest-funding-scan') return console.log(JSON.stringify(await loadFundingScan(), null, 2));
+  if (command === 'scan-funding-mailbox') {
+    const report = await scanFundingMailbox({
+      onProgress: ({ processed, total }) => console.error(`Förderpostfach: ${processed}/${total} Nachrichten mit Anlagen zur lokalen Dokumentprüfung markiert`),
+    });
+    return console.log(JSON.stringify(report, null, 2));
+  }
+  if (command === 'latest-funding-mail-scan') return console.log(JSON.stringify(await loadFundingMailScan(), null, 2));
   if (command === 'analyze-funding-pdf') return console.log(JSON.stringify(await analyzeFundingPdf(filePath), null, 2));
   if (command === 'preview-funding') return console.log(JSON.stringify(compose(await readJson(filePath)), null, 2));
   if (command === 'create-funding-draft') {
@@ -79,6 +108,12 @@ async function main() {
 
   node local-mac-helper/cli.mjs doctor
   node local-mac-helper/cli.mjs read-pipedrive-deal <deal-id>
+  node local-mac-helper/cli.mjs upload-pipedrive-files <deal-id> <pdf-ordner> --commit
+  node local-mac-helper/cli.mjs create-pipedrive-funding-notes /pfad/notizen.json --commit
+  node local-mac-helper/cli.mjs scan-funding-board
+  node local-mac-helper/cli.mjs latest-funding-scan
+  node local-mac-helper/cli.mjs scan-funding-mailbox
+  node local-mac-helper/cli.mjs latest-funding-mail-scan
   node local-mac-helper/cli.mjs analyze-funding-pdf /pfad/dokument.pdf
   node local-mac-helper/cli.mjs preview-funding /pfad/fall.json
   node local-mac-helper/cli.mjs create-funding-draft /pfad/fall.json --commit

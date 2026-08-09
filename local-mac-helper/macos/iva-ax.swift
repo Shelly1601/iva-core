@@ -58,6 +58,16 @@ func collect(_ root: AXUIElement, maxDepth: Int = 18, maxNodes: Int = 6000) -> [
     return output
 }
 
+func descendant(_ root: AXUIElement, path: [Int]) -> AXUIElement? {
+    var current = root
+    for index in path {
+        let items = children(current)
+        guard items.indices.contains(index) else { return nil }
+        current = items[index]
+    }
+    return current
+}
+
 func outlookApplication() throws -> (NSRunningApplication, AXUIElement) {
     guard AXIsProcessTrusted() else {
         throw HelperError.message("macOS-Bedienungshilfe ist für den aufrufenden Helper nicht freigegeben.")
@@ -144,6 +154,16 @@ func centerPoint(_ element: AXUIElement) throws -> CGPoint {
         throw HelperError.message("Position oder Größe des Bedienelements konnte nicht gelesen werden.")
     }
     return CGPoint(x: position.x + size.width / 2, y: position.y + size.height / 2)
+}
+
+func elementFrame(_ element: AXUIElement) -> CGRect? {
+    guard let positionValue = attribute(element, kAXPositionAttribute), CFGetTypeID(positionValue) == AXValueGetTypeID(),
+          let sizeValue = attribute(element, kAXSizeAttribute), CFGetTypeID(sizeValue) == AXValueGetTypeID() else { return nil }
+    var position = CGPoint.zero
+    var size = CGSize.zero
+    guard AXValueGetValue(unsafeBitCast(positionValue, to: AXValue.self), .cgPoint, &position),
+          AXValueGetValue(unsafeBitCast(sizeValue, to: AXValue.self), .cgSize, &size) else { return nil }
+    return CGRect(origin: position, size: size)
 }
 
 func click(_ element: AXUIElement) throws {
@@ -545,6 +565,125 @@ do {
         exit(0)
     }
 
+    if command == "press-visible" {
+        guard arguments.count >= 3 else { throw HelperError.message("press-visible benötigt AX-Rolle und exakte Beschriftung.") }
+        let found = nodes.filter { matches($0, role: arguments[1], description: arguments[2]) }
+        guard found.count == 1 else { throw HelperError.message("Bedienelement ist nicht eindeutig: \(found.count) Treffer.") }
+        _ = AXUIElementPerformAction(found[0].element, "AXScrollToVisible" as CFString)
+        usleep(350_000)
+        let result = AXUIElementPerformAction(found[0].element, kAXPressAction as CFString)
+        if result != .success { try click(found[0].element) }
+        usleep(700_000)
+        try writeJSON(["pressed": true, "element": dictionary(found[0])])
+        exit(0)
+    }
+
+    if command == "inspect-message-attachments" {
+        guard arguments.count >= 2 else { throw HelperError.message("inspect-message-attachments benötigt die exakte Nachrichtenbeschreibung.") }
+        let found = nodes.filter { matches($0, role: "AXCell", description: arguments[1]) }
+        guard found.count == 1 else { throw HelperError.message("Outlook-Nachricht ist nicht eindeutig: \(found.count) Treffer.") }
+        _ = AXUIElementPerformAction(found[0].element, "AXScrollToVisible" as CFString)
+        usleep(200_000)
+        let result = AXUIElementPerformAction(found[0].element, kAXPressAction as CFString)
+        if result != .success { try click(found[0].element) }
+        usleep(500_000)
+        let refreshed = collect(focusedRoot(appElement))
+        let attachmentGroups = refreshed.filter { node in
+            node.role == "AXGroup" && node.identifier == "_NS:136" && !node.description.isEmpty
+        }
+        let grids = refreshed.filter { node in
+            node.role == "AXGroup" && node.identifier == "attachmentGrid"
+        }
+        try writeJSON([
+            "opened": true,
+            "message": dictionary(found[0]),
+            "attachmentGrid": grids.first.map(dictionary) as Any,
+            "attachments": attachmentGroups.map(dictionary),
+        ])
+        exit(0)
+    }
+
+    if command == "inspect-message-attachments-file" {
+        guard arguments.count >= 2 else { throw HelperError.message("inspect-message-attachments-file benötigt eine JSON-Datei.") }
+        let data = try Data(contentsOf: URL(fileURLWithPath: arguments[1]))
+        guard let descriptions = try JSONSerialization.jsonObject(with: data) as? [String] else {
+            throw HelperError.message("Die Outlook-Nachrichtenliste ist ungültig.")
+        }
+        let messageNodes = nodes.filter { node in
+            node.role == "AXCell" && (node.description.contains("Betreff:") || node.description.contains("Kein Betreff"))
+        }
+        let rowIndices = messageNodes.compactMap { $0.path.count >= 2 ? $0.path[$0.path.count - 2] : nil }
+        let maximumRowIndex = max(1, rowIndices.max() ?? max(1, messageNodes.count - 1))
+        var inspections: [[String: Any]] = []
+        for description in descriptions {
+            let original = messageNodes.filter { matches($0, role: "AXCell", description: description) }
+            guard original.count == 1 else {
+                inspections.append(["description": description, "error": "Outlook-Nachricht ist nicht eindeutig: \(original.count) Treffer."])
+                continue
+            }
+            let rowIndex = original[0].path.count >= 2 ? original[0].path[original[0].path.count - 2] : 0
+            var ratio = min(1.0, max(0.0, Double(rowIndex) / Double(maximumRowIndex)))
+            var selectedNode: AXNode? = nil
+            for _ in 0..<7 {
+                let currentRoot = focusedRoot(appElement)
+                if let scrollBar = descendant(currentRoot, path: [1, 6, 2, 0, 0, 0, 1, 1]) {
+                    _ = AXUIElementSetAttributeValue(scrollBar, kAXValueAttribute as CFString, NSNumber(value: ratio))
+                    usleep(120_000)
+                }
+                let messageListRoot = descendant(currentRoot, path: [1, 6, 2, 0, 0]) ?? currentRoot
+                let listFrame = elementFrame(messageListRoot)
+                let currentMessages = collect(messageListRoot, maxDepth: 8, maxNodes: 1800)
+                let visibleMessages = currentMessages.filter { node in
+                    guard node.role == "AXCell", (node.description.contains("Betreff:") || node.description.contains("Kein Betreff")),
+                          let nodeFrame = elementFrame(node.element), let listFrame else { return false }
+                    return nodeFrame.height > 2 && nodeFrame.midY >= listFrame.minY && nodeFrame.midY <= listFrame.maxY
+                }
+                if let exact = visibleMessages.first(where: { matches($0, role: "AXCell", description: description) }) {
+                    selectedNode = exact
+                    break
+                }
+                let visibleIndices = visibleMessages.compactMap { $0.path.count >= 2 ? $0.path[$0.path.count - 2] : nil }
+                guard let minimum = visibleIndices.min(), let maximum = visibleIndices.max() else { break }
+                if rowIndex < minimum {
+                    ratio = max(0.0, ratio - max(0.01, Double(minimum - rowIndex) / Double(maximumRowIndex)))
+                } else if rowIndex > maximum {
+                    ratio = min(1.0, ratio + max(0.01, Double(rowIndex - maximum) / Double(maximumRowIndex)))
+                } else {
+                    break
+                }
+            }
+            guard let selectedNode else {
+                inspections.append(["description": description, "error": "Outlook-Nachricht konnte nicht zuverlässig in den sichtbaren Bereich gebracht werden."])
+                continue
+            }
+            do { try click(selectedNode.element) }
+            catch {
+                let result = AXUIElementPerformAction(selectedNode.element, kAXPressAction as CFString)
+                if result != .success {
+                    inspections.append(["description": description, "error": "Outlook-Nachricht konnte nicht sichtbar ausgewählt werden."])
+                    continue
+                }
+            }
+            usleep(220_000)
+            let refreshedRoot = focusedRoot(appElement)
+            let previewRoot = descendant(refreshedRoot, path: [1, 6, 2, 0, 2]) ?? refreshedRoot
+            let refreshed = collect(previewRoot, maxDepth: 12, maxNodes: 700)
+            let attachmentGroups = refreshed.filter { node in
+                node.role == "AXGroup" && node.identifier == "_NS:136" && !node.description.isEmpty
+            }
+            let grids = refreshed.filter { node in
+                node.role == "AXGroup" && node.identifier == "attachmentGrid"
+            }
+            inspections.append([
+                "description": description,
+                "attachmentGrid": grids.first.map(dictionary) ?? NSNull(),
+                "attachments": attachmentGroups.map(dictionary),
+            ])
+        }
+        try writeJSON(["count": inspections.count, "inspections": inspections])
+        exit(0)
+    }
+
     if command == "press-shallowest" {
         guard arguments.count >= 3 else { throw HelperError.message("press-shallowest benötigt AX-Rolle und exakte Beschriftung.") }
         let found = nodes.filter { matches($0, role: arguments[1], description: arguments[2]) }.sorted { $0.path.count < $1.path.count }
@@ -642,6 +781,37 @@ do {
         }
         usleep(900_000)
         try writeJSON(["opened": true, "account": accountName, "folder": draftCell.description, "element": dictionary(draftCell)])
+        exit(0)
+    }
+
+    if command == "open-account-folder" {
+        guard arguments.count >= 3 else { throw HelperError.message("open-account-folder benötigt Kontonamen und Ordnernamen.") }
+        let accountName = arguments[1]
+        let folderName = arguments[2]
+        let accountCells = nodes.filter { $0.role == "AXCell" && $0.description == accountName }
+        guard accountCells.count == 1, accountCells[0].path.count >= 2 else {
+            throw HelperError.message("Das Outlook-Konto ist in der Ordnerleiste nicht eindeutig sichtbar.")
+        }
+        let accountPath = accountCells[0].path
+        let siblingPrefix = Array(accountPath.dropLast(2))
+        let accountIndex = accountPath[accountPath.count - 2]
+        let folderCells = nodes.filter { node in
+            guard node.role == "AXCell", node.description.hasPrefix(folderName), node.path.count == accountPath.count else { return false }
+            return Array(node.path.dropLast(2)) == siblingPrefix && node.path[node.path.count - 2] > accountIndex
+        }.sorted { $0.path[$0.path.count - 2] < $1.path[$1.path.count - 2] }
+        guard let folderCell = folderCells.first else {
+            throw HelperError.message("Der Outlook-Ordner \(folderName) des Kontos ist nicht sichtbar.")
+        }
+        let rowPath = Array(folderCell.path.dropLast())
+        let row = nodes.first { $0.role == "AXRow" && $0.path == rowPath }
+        if let row {
+            let selected = AXUIElementSetAttributeValue(row.element, kAXSelectedAttribute as CFString, kCFBooleanTrue)
+            if selected != .success { try click(row.element) }
+        } else {
+            try click(folderCell.element)
+        }
+        usleep(900_000)
+        try writeJSON(["opened": true, "account": accountName, "folder": folderCell.description, "element": dictionary(folderCell)])
         exit(0)
     }
 

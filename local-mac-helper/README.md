@@ -66,6 +66,18 @@ IVA prüft ausschließlich die Pipeline **Auftragsmachbarkeit** und darin diese 
 
 Eine nur in Outlook gefundene Datei zählt nicht als vollständig. Reihenfolge: richtigen Deal und Dokumenttyp bestätigen → gegebenenfalls Bilder je Unterlage zu einer PDF zusammenfügen → eindeutig benennen → in Pipedrive hochladen → Upload verifizieren → gesamte Checkliste erneut prüfen → erst dann gegebenenfalls die erlaubte Stufenänderung ausführen.
 
+Der verifizierte Upload nutzt die bereits angemeldete Pipedrive-Sitzung in Chrome, akzeptiert ausschließlich PDFs aus einem ausdrücklich benannten IVA-Arbeitsordner und liest danach die Dateiliste des konkreten Deals erneut. Gleichnamige bereits vorhandene Dateien werden nicht doppelt hochgeladen. Der alte blinde Dateiauswahl-Klick ist nicht Teil des produktiven Wegs.
+
+```bash
+node local-mac-helper/cli.mjs upload-pipedrive-files <deal-id> <pdf-ordner> --commit
+```
+
+Nach erfolgreich erstellten Outlook-Entwürfen können die zugehörigen, idempotenten Pipedrive-Notizen als eigener bestätigter Schritt angelegt werden. Jede Notiz listet nur die tatsächlich angefragten Unterlagen und nennt Patrick sowie - falls eindeutig vorhanden - den Vertriebspartner.
+
+```bash
+node local-mac-helper/cli.mjs create-pipedrive-funding-notes /pfad/notizen.json --commit
+```
+
 Nach der Verarbeitung gilt: Lokale Download-, OCR-, Bild- und PDF-Zwischenkopien werden erst nach abgeschlossener Auswertung beziehungsweise verifiziertem Upload entfernt. Diese lokale Bereinigung verändert niemals die Originaldatei im Pipedrive-Verlauf. Auch bei Fehlern wird der IVA-Arbeitsordner aufgeräumt. Dateien außerhalb des IVA-Arbeitsordners werden nicht pauschal gelöscht; nur ein ausdrücklich als temporärer Pipedrive-Download markierter Pfad aus `~/Downloads` darf beim Einstellen in den Arbeitsordner konsumiert werden.
 
 Der Kontakt hinter dem Pipedrive-Feld **Vertriebspartner** liefert Anzeigenamen und E-Mail-Adresse für Anrede und CC. Zum strukturierten, rein lokalen Auslesen der bereits angemeldeten Chrome-Sitzung muss einmal **Chrome → Ansicht → Entwickler → JavaScript von Apple Events erlauben** aktiviert werden. Zugangsdaten werden nicht in IVA-Dateien geschrieben.
