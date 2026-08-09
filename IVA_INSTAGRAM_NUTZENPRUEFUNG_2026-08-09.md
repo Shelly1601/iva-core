@@ -31,7 +31,7 @@ Die zulässigen Ergebnisse sind: in bestehenden Agenten integrieren, als neuer A
 | `DanF4k0oq2t` | Grundriss-Skizze als möbliertes 3D-Bild | begrenzt sinnvoll | Energie-Agent darf es nur als Konzeptvorschau nach Maß-/Raumprüfung nutzen |
 | `Dau9lThIom_` | Datenbank gescheiterter Startups | sinnvoll als Gegenbeleg | Chancenfinder nutzt Failure-Research als Signal, aber nie als Marktnachweis |
 | `Daz90y7MpNo` | weiterer KI-App-Builder | Doppelung | IVA-Builder bleibt bis zu sauberer Git-/Test-/Deploy-Trennung deaktiviert |
-| `DbA8wcFohcR` | MIT-Kurse und Vorlesungen | hochwertige Quelle | in Wissensmediathek als Lernindex; Lizenz- und Kommerzialitätsgrenzen sichtbar |
+| `DbA8wcFohcR` | MIT-Kurse und Vorlesungen | hochwertige Wissensquelle | Konzepte, Methoden und Fakten werden abrufbar; IVA formuliert eigenständig und kopiert keine geschützten Kursmaterialien |
 | `Dah7D0iIFiU` | Programmier-Lernplattform | Anbieter nicht eindeutig | nur Kandidat, bis die konkrete Primärquelle feststeht |
 | `DaIBlv4InFn` | Tech-Roadmaps und Interviewfragen | sinnvoll als Checkliste | roadmap.sh als Navigationsquelle, nicht als alleiniger Standard |
 | `DZ16SSgIWwT` | weitere Sammlung kostenloser Websites | Discovery-only | keine pauschale Übernahme |
@@ -70,4 +70,4 @@ Die zulässigen Ergebnisse sind: in bestehenden Agenten integrieren, als neuer A
 - Kein neuer App-Builder-Agent allein aufgrund der Reels. IVA hat bereits die notwendige Entwicklungsarchitektur; der Builder bleibt deaktiviert, bis Git-, Test-, Vorschau-, Deployment- und Rollback-Freigaben technisch getrennt sind.
 - Keine Base44-Abhängigkeit. Base44 bleibt ein möglicher Prototyping- oder UI-Benchmark, nicht IVAs führendes Backend.
 - Open Generative AI wird nicht pauschal installiert. Der Quellcode ist offen, die vielen Cloud-Modelle benötigen jedoch API-Zugänge/Guthaben; lokale Videoerzeugung benötigt geeignete Hardware.
-- Keine ungeprüfte Volltextsammlung aus Kursen, Creator-Profilen oder Tool-Aggregatoren.
+- Keine ungeprüfte Volltextsammlung aus Kursen, Creator-Profilen oder Tool-Aggregatoren. Das darin vermittelte Wissen darf IVA jedoch erschließen, mit Quellenhinweis abrufen und in eigenständige Erklärungen oder neue Kurskonzepte einfließen lassen.

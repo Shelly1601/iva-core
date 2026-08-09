@@ -181,7 +181,7 @@ Erst mit einer Meta-Testnummer prüfen. Keine echte Vertragsauskunft ohne eindeu
 - Beratung: 12 Module sind intern testbar; GKV bleibt ohne gewählten Anbieter nur Übergabe.
 - Sales Coach: benötigt zuerst die macOS-Begleit-App und Einwilligungs-Gate, keinen vorschnell erfundenen Railway-Key.
 - PLAUD: offizieller OAuth-/MCP-Weg fehlt noch; kein Passwort in Railway oder IVA speichern.
-- Wissen/Kurse: Der Wissens-Agent ist mit einer kuratierten Quellenmediathek aktiv. Inhalte ohne Herkunft, Rechtebasis und Versionsstand bleiben außerhalb der aktiven Suche; kommerzielle Kursproduktion benötigt weiterhin eine gesonderte Quellenfreigabe.
+- Wissen/Kurse: Der Wissens-Agent ist mit einer kuratierten Quellenmediathek aktiv. Fachliches Wissen, Fakten, Methoden und Konzepte dürfen abgerufen und eigenständig neu erklärt werden. Geschützte Texte, Folien, Videos, Aufgaben und Grafiken werden nicht als Vollkopie übernommen; kommerzielle Kursausgaben müssen eine eigenständige Darstellung mit hinreichendem Abstand sein.
 - Builder/QA: bleibt bis zu getrennten Git-/Deploy-/Rollback-Freigaben deaktiviert.
 
 ## 8. Automatisierte Tests

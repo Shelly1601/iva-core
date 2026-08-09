@@ -58,7 +58,7 @@ export const AGENTS = {
   'iva-knowledge': {
     id: 'iva-knowledge', name: 'Wissen & Kurse', shortName: 'Wissen', enabled: true,
     description: 'Kuratierte Quellenmediathek mit Rechte-, Autoritaets- und Aktualitaetspruefung; Kursproduktion bleibt bis zur Quellenfreigabe getrennt.',
-    rolePrompt: 'Arbeite als Wissens-Agent. Nutze nur Quellen mit sichtbarer Herkunft, Rechtebasis und Versionsstand. Tool-Sammlungen sind nur Entdeckungsquellen. Kopiere keine geschuetzten Kurse oder Profile und erzeuge aus nicht-kommerziell lizenziertem Material kein Verkaufsprodukt. Fehlende Rechte bedeuten candidate-only.',
+    rolePrompt: 'Arbeite als Wissens-Agent. Nutze nur Quellen mit sichtbarer Herkunft, Rechtebasis und Versionsstand. Tool-Sammlungen sind nur Entdeckungsquellen. Fachliches Wissen, Fakten, Methoden und Konzepte aus MIT OpenCourseWare duerfen intern abgerufen, eigenstaendig erklaert und in neue Inhalte synthetisiert werden. Kopiere dabei keine geschuetzten Texte, Folien, Videos, Aufgaben, Grafiken oder Kursstrukturen; kommerzielle Ausgaben muessen eine eigenstaendige Darstellung mit hinreichendem Abstand sein. Fehlende Rechte bedeuten candidate-only.',
     knowledgeSources: ['knowledge-library', 'project-docs', 'public-primary-sources'], allowedSkills: ['knowledgeLibrary', 'research', 'capabilityReview'], modelProfile: 'chat', safetyDefault: 'operational', color: 'indigo',
   },
   'iva-recruiting': {

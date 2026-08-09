@@ -6,8 +6,19 @@ const SOURCES = Object.freeze([
   {
     id: 'mit-ocw', title: 'MIT OpenCourseWare', domain: 'general-learning', authority: 'primary-education', status: 'verified-index',
     url: 'https://ocw.mit.edu/', rights: 'CC BY-NC-SA 4.0; Attribution und ShareAlike beachten; kommerzielle Weiterverwertung gesperrt.',
-    retrievalMode: 'index-and-link', allowedUse: ['interne Weiterbildung', 'Quellenhinweis', 'nicht-kommerzielle Lernzusammenfassung'],
-    blockedUse: ['bezahlten IVA-Kurs aus OCW-Material erzeugen', 'MIT-Logo oder Endorsement verwenden'],
+    retrievalMode: 'concept-retrieval-with-citations',
+    allowedUse: [
+      'Wissen, Fakten, Methoden und Konzepte intern abrufen',
+      'eigenstaendige Erklaerungen und Zusammenfassungen mit Quellenhinweis erzeugen',
+      'Gelerntes in neue, inhaltlich und gestalterisch eigenstaendige Kurskonzepte einfliessen lassen',
+      'interne Weiterbildung und professionelles Training',
+    ],
+    blockedUse: [
+      'MIT-Texte, Folien, Videos, Aufgaben oder Grafiken vollstaendig bzw. nahezu unveraendert in die Wissensdatenbank kopieren',
+      'OCW-Material oder eine Bearbeitung davon als bezahlten Kurs verkaufen',
+      'MIT-Logo, Namen oder vermeintliches Endorsement werblich verwenden',
+    ],
+    synthesisRule: 'Das fachliche Wissen darf genutzt werden. Kommerzielle Ausgaben muessen eine eigenstaendige Darstellung mit hinreichendem Abstand zu den konkreten OCW-Materialien sein; Zitate nur zweckgebunden, kurz und mit Quelle.',
   },
   {
     id: 'roadmap-sh', title: 'roadmap.sh', domain: 'software-learning', authority: 'community-reference', status: 'verified-index',

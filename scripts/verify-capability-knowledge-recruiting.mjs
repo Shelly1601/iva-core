@@ -24,6 +24,10 @@ assert.ok(listCapabilityReviews({ decision: 'new-agent-candidate' }).some(item =
 
 assert.ok(knowledgeLibraryStatus().total >= 6);
 assert.ok(listKnowledgeLibrary({ domain: 'recruiting' }).some(item => item.id === 'linkedin-recruiter-help'));
+const mitSource = listKnowledgeLibrary({ domain: 'general-learning' }).find(item => item.id === 'mit-ocw');
+assert.equal(mitSource.retrievalMode, 'concept-retrieval-with-citations');
+assert.ok(mitSource.allowedUse.some(item => /Kurskonzepte/.test(item)));
+assert.ok(mitSource.blockedUse.some(item => /nahezu unveraendert/.test(item)));
 const sourceCandidate = assessKnowledgeSourceCandidate({
   title: 'Offizielle Testquelle', url: 'https://example.test/docs', publisher: 'Anbieter', rightsBasis: 'Link und Zitat erlaubt',
   intendedUse: 'Live-Referenz', isPrimarySource: true, rightsConfirmed: true,
