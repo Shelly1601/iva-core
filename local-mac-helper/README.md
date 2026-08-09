@@ -82,6 +82,18 @@ Nach der Verarbeitung gilt: Lokale Download-, OCR-, Bild- und PDF-Zwischenkopien
 
 Der Kontakt hinter dem Pipedrive-Feld **Vertriebspartner** liefert Anzeigenamen und E-Mail-Adresse für Anrede und CC. Zum strukturierten, rein lokalen Auslesen der bereits angemeldeten Chrome-Sitzung muss einmal **Chrome → Ansicht → Entwickler → JavaScript von Apple Events erlauben** aktiviert werden. Zugangsdaten werden nicht in IVA-Dateien geschrieben.
 
+## Laufender Fördermonitor
+
+Der 30-Minuten-Monitor besitzt einen persistenten Ausgangsstand unter `~/Library/Application Support/IVA Mac Helper/funding-monitor-state.json`. Bereits vorhandene Posteingangsmails und bei Aktivierung vollständige Deals werden beim ersten Lauf nicht rückwirkend verarbeitet oder an Viktoria gemeldet. Neue Nachrichten werden über einen Fingerprint erkannt und erst nach erfolgreich abgeschlossenem Vorgang quittiert.
+
+Bis zur ausdrücklichen Freigabe gilt `mode=review-only`, `emailSendEnabled=false` und `replyDraftsOnly=true`: IVA darf Dateien prüfen, verifiziert in Pipedrive hochladen und fehlende Unterlagen als Antwortentwurf vorbereiten, aber keine E-Mail versenden. Die spätere automatische Versandfreigabe ist ein separater Zustandswechsel.
+
+```bash
+node local-mac-helper/cli.mjs initialize-funding-monitor --commit
+node local-mac-helper/cli.mjs funding-monitor-status
+node local-mac-helper/cli.mjs funding-monitor-new-mail
+```
+
 Die Belegsuche läuft immer über **Verlauf → Alle**. Der separate Reiter **Dokumente** ist für diesen Workflow nicht die Quelle. Dadurch werden auch Belege berücksichtigt, die im Gesamtverlauf stehen, aber im reinen Dateien- oder Dokumente-Filter fehlen.
 
 Unterschriebene Angebote und TMB-PDFs können seitenweise auf eindeutig beschriftete Auftrags-, Kunden- und Telefonnummern sowie Hersteller und Leistung der Anlage geprüft werden. Als TMB werden auch Dateinamen mit `THB`, `MoA`, `MoreApp` oder `Registration` erkannt. Reine Scan-PDFs werden lokal per Tesseract-OCR erschlossen, sofern Tesseract auf dem Mac verfügbar ist. Jeder Treffer enthält Quelldatei, Seitenzahl, Textausschnitt und Confidence.

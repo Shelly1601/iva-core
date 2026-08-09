@@ -16,6 +16,13 @@ import { analyzeFundingPdf } from './funding-document-extractor.mjs';
 import { loadFundingScan, scanPipedriveFundingBoard } from './funding-scan.mjs';
 import { loadFundingMailScan, scanFundingMailbox } from './funding-mail-scan.mjs';
 import {
+  acknowledgeFundingMessages,
+  detectNewFundingMessages,
+  initializeFundingMonitor,
+  loadFundingMonitorState,
+  recordFundingMonitorOutcome,
+} from './funding-monitor-state.mjs';
+import {
   FUNDING_ROLLBACK_CONFIRMATION,
   FundingBatchService,
   createJsonFundingStateStore,
@@ -81,6 +88,21 @@ async function main() {
     return console.log(JSON.stringify(report, null, 2));
   }
   if (command === 'latest-funding-mail-scan') return console.log(JSON.stringify(await loadFundingMailScan(), null, 2));
+  if (command === 'initialize-funding-monitor') {
+    if (filePath !== '--commit') throw new Error('Der Fördermonitor wurde nicht initialisiert. Zum Bestätigen --commit anhängen.');
+    return console.log(JSON.stringify(await initializeFundingMonitor(), null, 2));
+  }
+  if (command === 'funding-monitor-status') return console.log(JSON.stringify(await loadFundingMonitorState(), null, 2));
+  if (command === 'funding-monitor-new-mail') return console.log(JSON.stringify(await detectNewFundingMessages(), null, 2));
+  if (command === 'funding-monitor-ack') {
+    if (confirmation !== '--commit') throw new Error('Neue Nachrichten wurden nicht als verarbeitet markiert. Zum Bestätigen --commit anhängen.');
+    const input = await readJson(filePath);
+    return console.log(JSON.stringify(await acknowledgeFundingMessages(input.fingerprints || input), null, 2));
+  }
+  if (command === 'funding-monitor-record') {
+    if (confirmation !== '--commit') throw new Error('Das Monitor-Ergebnis wurde nicht gespeichert. Zum Bestätigen --commit anhängen.');
+    return console.log(JSON.stringify(await recordFundingMonitorOutcome(await readJson(filePath)), null, 2));
+  }
   if (command === 'analyze-funding-pdf') return console.log(JSON.stringify(await analyzeFundingPdf(filePath), null, 2));
   if (command === 'preview-funding') return console.log(JSON.stringify(compose(await readJson(filePath)), null, 2));
   if (command === 'create-funding-draft') {
@@ -114,6 +136,11 @@ async function main() {
   node local-mac-helper/cli.mjs latest-funding-scan
   node local-mac-helper/cli.mjs scan-funding-mailbox
   node local-mac-helper/cli.mjs latest-funding-mail-scan
+  node local-mac-helper/cli.mjs initialize-funding-monitor --commit
+  node local-mac-helper/cli.mjs funding-monitor-status
+  node local-mac-helper/cli.mjs funding-monitor-new-mail
+  node local-mac-helper/cli.mjs funding-monitor-ack /pfad/fingerprints.json --commit
+  node local-mac-helper/cli.mjs funding-monitor-record /pfad/ergebnis.json --commit
   node local-mac-helper/cli.mjs analyze-funding-pdf /pfad/dokument.pdf
   node local-mac-helper/cli.mjs preview-funding /pfad/fall.json
   node local-mac-helper/cli.mjs create-funding-draft /pfad/fall.json --commit
