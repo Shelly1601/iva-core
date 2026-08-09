@@ -101,7 +101,7 @@ import {
   qonektoCustomerCapabilityStatus,
   upsertQonektoCustomerAutomatically,
 } from './integrations/qonekto-customers.js';
-import { crmQonektoSyncStatus, runCrmQonektoSync } from './integrations/crm-qonekto-sync.js';
+import { crmQonektoSyncStatus, normalizeCrmLeadForIvaWorkspace, runCrmQonektoSync } from './integrations/crm-qonekto-sync.js';
 import { buildNameSearchVariants, resolveLeadName } from './crm/name-matching.js';
 import { suggestGermanAddresses } from './integrations/address-autocomplete.js';
 import {
@@ -345,6 +345,64 @@ async function fetchAllLeads() {
   return await Promise.all(CRM_SOURCES.map(fetchLeads));
 }
 
+function crmLeadRows(value) {
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value?.data)) return value.data;
+  if (Array.isArray(value?.leads)) return value.leads;
+  if (Array.isArray(value?.leads?.data)) return value.leads.data;
+  return [];
+}
+
+async function importCrmCustomerFile({ projekt = '', suche = '' } = {}) {
+  const query = String(suche || '').trim();
+  if (!query) throw new Error('Kundenname fuer den CRM-Import fehlt.');
+  const sources = (await fetchAllLeads()).filter(source => !projekt || source.projekt.toLocaleLowerCase('de').includes(String(projekt).toLocaleLowerCase('de')));
+  const candidates = sources.flatMap(source => crmLeadRows(source.leads).map(lead => ({ ...lead, __ivaProject: source.projekt })));
+  const resolution = resolveLeadName(query, candidates, 8);
+  if (resolution.matchStatus !== 'unique') {
+    return {
+      saved: false,
+      matchStatus: resolution.matchStatus,
+      candidates: resolution.candidates.slice(0, 3).map(candidate => ({ name: candidate.name, project: candidate.lead.__ivaProject, email: candidate.email, city: candidate.city })),
+      clarification: resolution.matchStatus === 'ambiguous'
+        ? `Welche Person ist gemeint: ${resolution.candidates.slice(0, 3).map(candidate => `${candidate.name} (${candidate.lead.__ivaProject})`).join(', ')}?`
+        : 'Wie wird der Nachname geschrieben? Im CRM wurde kein eindeutiger Treffer gefunden.',
+    };
+  }
+  const lead = resolution.bestMatch.lead;
+  const input = normalizeCrmLeadForIvaWorkspace(lead, { project: lead.__ivaProject || projekt || 'CRM' });
+  const localFiles = await workspaces.listWorkspaces({ mode: 'kunde' });
+  const exactName = String(input.customer.name || '').toLocaleLowerCase('de');
+  const exactEmail = String(input.customer.email || '').toLocaleLowerCase('de');
+  const possibleDuplicates = localFiles.filter(workspace => {
+    if (workspace.data?.crm?.sourceKey === input.data.crm.sourceKey) return false;
+    if (exactEmail && String(workspace.customer?.email || '').toLocaleLowerCase('de') === exactEmail) return true;
+    return exactName && String(workspace.customer?.name || '').toLocaleLowerCase('de') === exactName;
+  });
+  if (possibleDuplicates.length > 1) {
+    return {
+      saved: false,
+      matchStatus: 'local-duplicates',
+      candidates: possibleDuplicates.slice(0, 5).map(workspace => ({ id: workspace.id, name: workspace.customer?.name || workspace.title, email: workspace.customer?.email || '' })),
+      clarification: 'In IVA gibt es bereits mehrere Akten mit diesem Namen. Bitte die überzähligen Akten im Kundenbereich löschen und den Import danach erneut starten.',
+    };
+  }
+  if (possibleDuplicates.length === 1) input.data.idempotencyKey = possibleDuplicates[0].data?.idempotencyKey || `workspace:${possibleDuplicates[0].id}`;
+  const workspace = possibleDuplicates.length === 1
+    ? await workspaces.updateWorkspace(possibleDuplicates[0].id, { title: input.title, status: 'active', customer: input.customer, data: input.data })
+    : await workspaces.createWorkspace(input);
+  for (const note of input.notes || []) {
+    if (!(workspace.notes || []).some(existing => existing.text === note.text && existing.source === note.source)) await workspaces.addWorkspaceNote(workspace.id, note.text, note.source);
+  }
+  return {
+    saved: true,
+    matchStatus: 'unique',
+    action: possibleDuplicates.length === 1 ? 'updated-existing-customer-file' : 'created-or-updated-customer-file',
+    workspace: await workspaces.getWorkspace(workspace.id),
+    transferredToQonekto: false,
+  };
+}
+
 async function syncStrategyCustomersToQonekto({ force = false } = {}) {
   return runCrmQonektoSync({
     fetchLeads: () => fetchLeads(GOALS_CONCEPTS_CRM_SOURCE),
@@ -476,6 +534,7 @@ Tool-Nutzung:
 - Bevor du aus einem Reel, Profil, fremden Tool oder einer spontanen Idee eine neue IVA-Funktion oder einen neuen Agenten empfiehlst, MUSST du assessCapability aufrufen. Pruefe echten Zusatznutzen, bestehende Abdeckung, offiziellen Nachweis, Rechte, Kosten, Datenschutz und Sicherheitsfolgen. Ergebnis "integrate-existing" bedeutet: keinen neuen Agenten bauen. "needs-verification" oder "watch" bedeutet: noch nicht integrieren. Fremden Code, geschuetzte Texte oder Designs niemals kopieren; nur eigenstaendig implementierte Funktionsmuster uebernehmen.
 - Live-Daten oder Aktion nötig (Kalender, Mails, Leads, Todos, Kampagnen, Bilder, Qonekto/blau direkt): Tool sofort aufrufen. Nie "hätte ich Zugriff auf…", nie "soll ich mal nachsehen?" — machen und dann zusammenfassen.
 - CRM-Namen aus Sprache oder freier Texteingabe können falsch geschrieben beziehungsweise transkribiert sein. Vor jeder CRM-Auskunft oder -Aktion zu einer namentlich genannten Person findHeatHeroLeads mit der gelieferten Schreibweise aufrufen. Das Werkzeug durchsucht Schreibvarianten. Bei matchStatus "unique" ausschließlich den gespeicherten CRM-Namen und die gespeicherte ID verwenden. Bei "ambiguous" mit höchstens drei Kandidaten nachfragen, welcher gemeint ist. Bei "not-found" genau eine Frage stellen: wie der Nachname geschrieben wird. Niemals einen ähnlich klingenden Namen stillschweigend auswählen. Bei anderen CRM-Projekten ohne eigenen Resolver gilt mindestens dieselbe Rückfragepflicht, bis der gespeicherte Vollname eindeutig ist.
+- Wenn Nadine verlangt, eine Kundenakte aus dem CRM anzulegen oder CRM-Daten in die Kundenakte zu ziehen, ausschließlich importCrmCustomerFile aufrufen. Dieses Werkzeug erstellt eine aktive Kundenakte, übernimmt vorhandene Kontaktdaten und CRM-Notizen und verhindert Dubletten. Dafür niemals mehrfach createWorkspace aufrufen. Eine Qonekto-/Blau-direkt-Übertragung erfolgt dadurch ausdrücklich noch nicht.
 - Mehrere Quellen relevant (z. B. Kalender + Mails + Leads): parallel abrufen.
 - Fach-/Recherche-Anfragen: askArchitect mit der präzisen Frage. Der Router entscheidet zwischen knowledge (zeitloses Fachwissen zu Finanz/Versicherung/Vorsorge/Rente) und web-research (aktuelle öffentliche Fakten wie Gesetze, Grenzwerte, Beitragssätze, Freibeträge, Fördersätze, Produktdatenblätter, Versicherungsbedingungen, Preise, Nachrichten, Öffnungszeiten). Für JEDE aktuelle Zahl / jeden aktuellen Grenzwert PFLICHT diesen Router nutzen statt aus dem Kopf zu antworten. Für eigene Systeme (Kalender/Mails/CRM/Leads/Kampagnen/Todos/Bilder) stattdessen direkt das passende Tool.
 - Kundinnen, Kunden, Vertraege, Dokumente, Archiv, Aufgaben oder Schaeden aus blau direkt/AMEISE/Qonekto: zuerst listQonektoTools nutzen. Lesende Werkzeuge mit callQonektoReadTool sofort ausfuehren. Veraendernde Werkzeuge ausschliesslich mit prepareQonektoWrite vorbereiten, Aenderung klar wiederholen und Nadine fragen, ob sie das wirklich will. Ausgefuehrt wird serverseitig erst nach ihrer separaten, exakten Antwort "Ja, Qonekto-Aenderung ausfuehren". Niemals behaupten, eine nur vorbereitete Aenderung sei bereits erfolgt. Destruktive Werkzeuge bleiben blockiert. Niemals Qonekto-Daten raten oder durch oeffentliche Web-Recherche ersetzen.
@@ -524,7 +583,7 @@ const ALL_SKILLS = {
   memory:    memorySkill({ loadMemory, saveMemory }),
   calendar:  calendarSkill({ getEventsRaw, getCalendlyEvents, fmtEvents }),
   mails:     mailsSkill({ loadMailAccounts, fetchInbox }),
-  crm:       crmSkill({ fetchAllLeads, searchHeatHeroLeads, updateHeatHeroLeadStatus }),
+  crm:       crmSkill({ fetchAllLeads, searchHeatHeroLeads, updateHeatHeroLeadStatus, importCrmCustomerFile }),
   marketing: marketingSkill({ campaigns, brands, analyzeReferences, generateImage, generateContent }),
   research:  researchSkill({ askArchitect }),
   workspaces: workspacesSkill({ workspaces }),
@@ -1251,6 +1310,12 @@ app.patch('/api/workspaces/:id', async (req, res) => {
   try {
     const workspace = await workspaces.updateWorkspace(req.params.id, req.body || {});
     res.status(workspace ? 200 : 404).json(workspace || { error: 'not found' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/workspaces/:id', async (req, res) => {
+  try {
+    const workspace = await workspaces.deleteWorkspace(req.params.id, { mode: req.query?.mode || undefined });
+    res.status(workspace ? 200 : 404).json(workspace ? { ok: true, deletedId: workspace.id, mode: workspace.mode } : { error: 'not found' });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/workspaces/:id/notes', async (req, res) => {

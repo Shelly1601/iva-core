@@ -65,6 +65,7 @@ function mergePlain(base, patch, depth = 0) {
 
 function publicWorkspace(workspace) {
   const out = safeClone(workspace);
+  if (out.mode === 'kunde' && out.status === 'draft') out.status = 'active';
   out.files = (out.files || []).map(({ storageName, ...file }) => file);
   return out;
 }
@@ -75,6 +76,45 @@ function initialData(mode) {
   }
   if (mode === 'beratung') return { schemaVersion: 'iva-advice-1.0', appointmentAt: '', topic: '', goal: '', facts: '', recommendation: '', adviceModules: [], activeAdviceModule: '', moduleData: {} };
   return { project: '', company: '', relationship: '', nextStep: '' };
+}
+
+function normalizedCustomer(value = {}) {
+  const customer = plainObject(value);
+  return {
+    id: cleanText(customer.id, 160),
+    name: cleanText(customer.name, 200),
+    salutationKey: cleanText(customer.salutationKey, 40),
+    salutation: cleanText(customer.salutation, 100),
+    firstName: cleanText(customer.firstName, 160),
+    lastName: cleanText(customer.lastName, 200),
+    company: cleanText(customer.company, 240),
+    legalForm: cleanText(customer.legalForm, 160),
+    email: cleanText(customer.email, 320),
+    phone: cleanText(customer.phone, 100),
+    street: cleanText(customer.street, 240),
+    zip: cleanText(customer.zip, 40),
+    city: cleanText(customer.city, 160),
+    address: cleanText(customer.address, 500),
+    brokerId: cleanText(customer.brokerId, 100),
+  };
+}
+
+function normalizedNotes(notes = [], fallbackSource = 'import') {
+  const now = new Date().toISOString();
+  return (Array.isArray(notes) ? notes : [])
+    .map(note => typeof note === 'string' ? { text: note } : plainObject(note))
+    .map(note => ({
+      id: cleanText(note.id, 160) || crypto.randomUUID(),
+      text: cleanText(note.text, 10000),
+      source: cleanText(note.source, 80) || fallbackSource,
+      createdAt: cleanText(note.createdAt, 80) || now,
+    }))
+    .filter(note => note.text)
+    .slice(0, 500);
+}
+
+function workspaceIdentity(data = {}) {
+  return cleanText(data?.crm?.sourceKey, 500) || cleanText(data?.idempotencyKey, 500);
 }
 
 export async function listWorkspaces({ mode } = {}) {
@@ -94,25 +134,36 @@ export async function createWorkspace(input = {}) {
   return mutate(data => {
     const mode = WORKSPACE_MODES.includes(input.mode) ? input.mode : 'beratung';
     const now = new Date().toISOString();
-    const customer = plainObject(input.customer);
+    const rawCustomer = plainObject(input.customer);
+    const customer = normalizedCustomer(rawCustomer);
+    const workspaceData = mergePlain(initialData(mode), input.data);
+    const identity = workspaceIdentity(workspaceData);
+    const existing = identity
+      ? data.workspaces.find(item => item.mode === mode && workspaceIdentity(item.data) === identity)
+      : null;
+    if (existing) {
+      existing.title = cleanText(input.title, 160) || existing.title;
+      existing.status = mode === 'kunde' ? 'active' : existing.status;
+      existing.customer = normalizedCustomer({ ...existing.customer, ...rawCustomer });
+      existing.data = mergePlain(existing.data, workspaceData);
+      const notes = normalizedNotes(input.notes, workspaceData?.crm?.project ? `crm:${workspaceData.crm.project}` : 'import');
+      const knownNotes = new Set((existing.notes || []).map(note => `${note.source}|${note.text}`));
+      existing.notes = [...(existing.notes || []), ...notes.filter(note => !knownNotes.has(`${note.source}|${note.text}`))];
+      existing.updatedAt = now;
+      return publicWorkspace(existing);
+    }
     const workspace = {
       id: crypto.randomUUID(),
       mode,
       title: cleanText(input.title, 160) || ({ beratung: 'Neue Beratung', kunde: 'Neue Kundenakte', energie: 'Neue Energieplanung' })[mode],
-      status: 'draft',
-      customer: {
-        id: cleanText(customer.id, 160),
-        name: cleanText(customer.name, 200),
-        email: cleanText(customer.email, 320),
-        phone: cleanText(customer.phone, 100),
-        address: cleanText(customer.address, 500),
-      },
-      data: mergePlain(initialData(mode), input.data),
+      status: ['draft', 'active', 'review', 'complete'].includes(input.status) ? input.status : mode === 'kunde' ? 'active' : 'draft',
+      customer,
+      data: workspaceData,
       visit: mergePlain({
         consent: { granted: false, grantedAt: null, method: '' },
         plaud: { recordingId: '', status: 'not-linked', importedAt: null },
       }, input.visit),
-      notes: [],
+      notes: normalizedNotes(input.notes, workspaceData?.crm?.project ? `crm:${workspaceData.crm.project}` : 'import'),
       files: [],
       createdAt: now,
       updatedAt: now,
@@ -128,12 +179,27 @@ export async function updateWorkspace(id, patch = {}) {
     if (!workspace) return null;
     if ('title' in patch) workspace.title = cleanText(patch.title, 160) || workspace.title;
     if ('status' in patch && ['draft', 'active', 'review', 'complete'].includes(patch.status)) workspace.status = patch.status;
-    if ('customer' in patch) workspace.customer = mergePlain(workspace.customer, patch.customer);
+    if ('customer' in patch) workspace.customer = normalizedCustomer({ ...workspace.customer, ...plainObject(patch.customer) });
     if ('data' in patch) workspace.data = mergePlain(workspace.data, patch.data);
     if ('visit' in patch) workspace.visit = mergePlain(workspace.visit, patch.visit);
     workspace.updatedAt = new Date().toISOString();
     return publicWorkspace(workspace);
   });
+}
+
+export async function deleteWorkspace(id, { mode } = {}) {
+  const removed = await mutate(data => {
+    const index = data.workspaces.findIndex(workspace => workspace.id === id && (!mode || workspace.mode === mode));
+    if (index < 0) return null;
+    const [workspace] = data.workspaces.splice(index, 1);
+    return publicWorkspace(workspace);
+  });
+  if (!removed) return null;
+  const filesRoot = path.resolve(FILES_DIR) + path.sep;
+  const folder = path.resolve(FILES_DIR, removed.id);
+  if (!folder.startsWith(filesRoot)) throw new Error('Ungueltiger Arbeitsbereichspfad.');
+  await fs.rm(folder, { recursive: true, force: true });
+  return removed;
 }
 
 export async function addWorkspaceNote(id, text, source = 'manual') {

@@ -54,6 +54,39 @@ function splitName(firstName, lastName, fullName) {
   return { firstName: firstName || parts.slice(0, -1).join(' '), lastName: parts.at(-1) };
 }
 
+function crmNotes(source) {
+  const noteKeys = new Set(['notiz', 'notizen', 'note', 'notes', 'kommentar', 'kommentare', 'comment', 'comments', 'bemerkung', 'bemerkungen', 'description', 'beschreibung'].map(normalize));
+  const textKeys = ['text', 'inhalt', 'content', 'notiz', 'note', 'kommentar', 'comment', 'beschreibung', 'description'];
+  const collected = [];
+  const add = value => {
+    if (['string', 'number'].includes(typeof value)) {
+      const text = clean(value, 10000);
+      if (text) collected.push(text);
+      return;
+    }
+    if (Array.isArray(value)) return value.forEach(add);
+    if (!value || typeof value !== 'object') return;
+    const direct = valueFor(value, textKeys);
+    if (direct) add(direct);
+  };
+  for (const object of nodes(source)) {
+    if (Array.isArray(object)) continue;
+    for (const [key, value] of Object.entries(object)) if (noteKeys.has(normalize(key))) add(value);
+  }
+  return [...new Set(collected)].slice(0, 100);
+}
+
+function salutationProfile(lead, values) {
+  const raw = clean(valueFor(lead, ['anrede', 'salutation', 'geschlecht', 'gender']), 100);
+  const normalized = normalize(raw);
+  const id = clean(valueFor(lead, ['anrede_id', 'salutation_id']), 100);
+  if (values.firma || id === '7' || /firma|company|unternehmen/.test(normalized)) return { key: 'company', label: 'Firma' };
+  if (id === '2' || /frau|female|weiblich/.test(normalized)) return { key: 'female', label: 'Frau' };
+  if (id === '1' || /herr|mann|^male$|maennlich/.test(normalized)) return { key: 'male', label: 'Mann' };
+  if (/divers|diverse|nichtbinaer|nonbinary/.test(normalized)) return { key: 'diverse', label: 'Divers' };
+  return { key: '', label: raw };
+}
+
 export function normalizeCrmLeadForQonekto(lead = {}) {
   const id = clean(valueFor(lead, ['id', 'lead_id', 'leadId', 'uuid']), 160);
   const stage = clean(valueFor(lead, [
@@ -74,6 +107,7 @@ export function normalizeCrmLeadForQonekto(lead = {}) {
     vorname: names.firstName,
     nachname: names.lastName,
     firma: clean(valueFor(lead, ['firma', 'unternehmen', 'company', 'company_name']), 240),
+    rechtsform: clean(valueFor(lead, ['rechtsform', 'legal_form', 'legalForm', 'company_type']), 160),
     strasse: clean(valueFor(lead, ['strasse', 'straße', 'street', 'address_line_1']), 240),
     plz: clean(valueFor(lead, ['plz', 'postleitzahl', 'zip', 'postal_code']), 40),
     ort: clean(valueFor(lead, ['ort', 'stadt', 'city']), 160),
@@ -88,6 +122,48 @@ export function normalizeCrmLeadForQonekto(lead = {}) {
     stage,
     values: compactValues,
     missing: [!id && 'CRM-ID', !names.lastName && 'Nachname'].filter(Boolean),
+  };
+}
+
+export function normalizeCrmLeadForIvaWorkspace(lead = {}, { project = 'CRM' } = {}) {
+  const normalized = normalizeCrmLeadForQonekto(lead);
+  const values = normalized.values;
+  const profile = salutationProfile(lead, values);
+  const company = clean(values.firma, 240);
+  const name = company || [values.vorname, values.nachname].filter(Boolean).join(' ') || 'Neue Kundenakte';
+  const sourceId = normalized.id || clean(values.kommunikation?.email, 320) || normalize(name);
+  const address = [values.strasse, [values.plz, values.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  return {
+    mode: 'kunde',
+    status: 'active',
+    title: `${name} · Kundenakte`,
+    customer: {
+      name,
+      salutationKey: profile.key,
+      salutation: profile.label,
+      firstName: values.vorname || '',
+      lastName: values.nachname || '',
+      company,
+      legalForm: values.rechtsform || '',
+      email: values.kommunikation?.email || '',
+      phone: values.kommunikation?.telefon || values.kommunikation?.mobil || '',
+      street: values.strasse || '',
+      zip: values.plz || '',
+      city: values.ort || '',
+      address,
+      brokerId: values.vermittler_id || '009T7N',
+    },
+    data: {
+      project,
+      company,
+      relationship: 'Aus CRM in IVA übernommen · noch nicht an Qonekto übertragen',
+      nextStep: 'Kontaktdaten prüfen; bei Bedarf an Blau Direkt übertragen',
+      crm: { project, sourceId, sourceKey: `${project}:${sourceId}`, importedAt: new Date().toISOString() },
+      qonektoDraft: values,
+      qonektoLabels: { salutation: profile.label, salutationKey: profile.key, broker: values.vermittler_id === '009T7N' || !values.vermittler_id ? 'Nadine Sell' : '' },
+      qonektoSync: { requested: false, status: 'local-only', updatedAt: new Date().toISOString() },
+    },
+    notes: crmNotes(lead).map(text => ({ text, source: `crm:${project}` })),
   };
 }
 

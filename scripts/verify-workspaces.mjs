@@ -45,6 +45,41 @@ try {
   assert.equal(list[0].notes.length, 1);
   assert.equal(list[0].files.length, 2);
   assert.equal('storageName' in list[0].files[0], false);
+
+  const customer = await store.createWorkspace({
+    mode: 'kunde',
+    title: 'Mara Muster · Kundenakte',
+    customer: {
+      name: 'Mara Muster', salutationKey: 'female', salutation: 'Frau', firstName: 'Mara', lastName: 'Muster',
+      email: 'mara@example.test', phone: '+49 170 1234567', street: 'Testweg 1', zip: '12345', city: 'Berlin', brokerId: '009T7N',
+    },
+    data: { crm: { project: 'Goals & Concepts', sourceId: 'L-1', sourceKey: 'Goals & Concepts:L-1' } },
+    notes: [{ text: 'CRM-Notiz eins', source: 'crm:Goals & Concepts' }],
+  });
+  assert.equal(customer.status, 'active', 'Kundenakte darf nicht pauschal als Entwurf markiert werden');
+  assert.equal(customer.customer.salutation, 'Frau');
+  assert.equal(customer.notes.length, 1);
+
+  const importedAgain = await store.createWorkspace({
+    mode: 'kunde',
+    title: 'Mara Muster · Kundenakte',
+    customer: { name: 'Mara Muster', phone: '+49 170 7654321' },
+    data: { crm: { project: 'Goals & Concepts', sourceId: 'L-1', sourceKey: 'Goals & Concepts:L-1' } },
+    notes: [
+      { text: 'CRM-Notiz eins', source: 'crm:Goals & Concepts' },
+      { text: 'CRM-Notiz zwei', source: 'crm:Goals & Concepts' },
+    ],
+  });
+  assert.equal(importedAgain.id, customer.id, 'derselbe CRM-Datensatz darf keine zweite Kundenakte erzeugen');
+  assert.equal(importedAgain.customer.email, 'mara@example.test', 'nicht erneut gelieferte Felder bleiben erhalten');
+  assert.equal(importedAgain.customer.phone, '+49 170 7654321');
+  assert.equal(importedAgain.notes.length, 2, 'CRM-Notizen werden ergänzt und dedupliziert');
+  assert.equal((await store.listWorkspaces({ mode: 'kunde' })).length, 1);
+
+  const deleted = await store.deleteWorkspace(customer.id, { mode: 'kunde' });
+  assert.equal(deleted.id, customer.id);
+  assert.equal(await store.getWorkspace(customer.id), null);
+  assert.equal((await store.listWorkspaces({ mode: 'kunde' })).length, 0);
   console.log('PASS workspaces: CRUD, verschachtelte Daten, Notizen, Dateien und Musterabrechnungs-Upload');
 } finally {
   await fs.rm(testDir, { recursive: true, force: true });

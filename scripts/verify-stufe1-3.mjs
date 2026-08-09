@@ -30,7 +30,7 @@ const BASELINE = [
   'createTodo', 'completeTodo', 'remember',
   'getCalendar', 'getCalendly',
   'getMails',
-  'getLeads', 'findHeatHeroLeads', 'updateHeatHeroLeadStatus',
+  'getLeads', 'findHeatHeroLeads', 'importCrmCustomerFile', 'updateHeatHeroLeadStatus',
   'listCampaigns', 'createCampaign', 'analyzeReferences', 'analyzeCampaign', 'generateImage', 'generateContent', 'listBrands', 'createBrand', 'updateBrand',
   'askArchitect',
 ];
@@ -68,6 +68,7 @@ const deps = {
   fetchAllLeads: async () => [],
   searchHeatHeroLeads: async () => ({ count: 0, leads: [] }),
   updateHeatHeroLeadStatus: async () => ({ neuer_status: 'test' }),
+  importCrmCustomerFile: async () => ({ saved: true }),
   campaigns: { listCampaigns: async () => [], createCampaign: async () => ({}), getCampaign: async () => null, updateCampaign: async () => ({}), deleteCampaign: async () => true },
   brands: { listBrands: async () => [], createBrand: async () => ({}), getBrand: async () => null, updateBrand: async () => ({}), deleteBrand: async () => true },
   analyzeReferences: async () => ({ ok: true }),

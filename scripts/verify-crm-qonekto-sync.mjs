@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import {
   isStrategyConversationLead,
+  normalizeCrmLeadForIvaWorkspace,
   normalizeCrmLeadForQonekto,
   runCrmQonektoSync,
 } from '../integrations/crm-qonekto-sync.js';
@@ -31,6 +32,20 @@ try {
   assert.equal(normalized.values.kommunikation.email, 'mara@example.test');
   assert.equal(normalized.values.plz, '12345');
   assert.equal(isStrategyConversationLead(normalized.stage), true);
+
+  const ivaCustomer = normalizeCrmLeadForIvaWorkspace({
+    id: 'L-FIRMA', anrede: 'Firma', firma: 'Muster Solar GmbH', rechtsform: 'GmbH',
+    email: 'kontakt@muster-solar.example', telefon: '+49 421 12345',
+    strasse: 'Sonnenweg 7', plz: '28279', ort: 'Bremen',
+    notes: [{ text: 'Kundin möchte Rückruf am Vormittag.' }, 'Interesse an PV und Speicher.'],
+  }, { project: 'Goals & Concepts' });
+  assert.equal(ivaCustomer.status, 'active');
+  assert.equal(ivaCustomer.customer.salutationKey, 'company');
+  assert.equal(ivaCustomer.customer.company, 'Muster Solar GmbH');
+  assert.equal(ivaCustomer.customer.legalForm, 'GmbH');
+  assert.equal(ivaCustomer.customer.zip, '28279');
+  assert.equal(ivaCustomer.notes.length, 2);
+  assert.equal(ivaCustomer.data.crm.sourceKey, 'Goals & Concepts:L-FIRMA');
 
   let phone = '+49 170 1234567';
   let calls = 0;

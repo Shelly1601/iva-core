@@ -2,7 +2,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 
-export function crmSkill({ fetchAllLeads, searchHeatHeroLeads, updateHeatHeroLeadStatus }) {
+export function crmSkill({ fetchAllLeads, searchHeatHeroLeads, updateHeatHeroLeadStatus, importCrmCustomerFile }) {
   return {
     getLeads: tool({
       description: 'Ruft Leads aus allen getrennten CRM-Systemen ab. Ohne projekt: alle. Mit projekt: nur dieses. „Heat Hero CRM (eigenstaendig)“ und „Heat Hero (im Multi CRM)“ sind verschiedene Datenquellen.',
@@ -26,6 +26,14 @@ export function crmSkill({ fetchAllLeads, searchHeatHeroLeads, updateHeatHeroLea
       }),
       execute: async ({ suche, limit }) => searchHeatHeroLeads(suche, limit || 20),
     }),
+    importCrmCustomerFile: tool({
+      description: 'Legt aus einem eindeutig gefundenen CRM-Datensatz eine echte aktive IVA-Kundenakte an oder aktualisiert die bereits zugeordnete Akte. Übernimmt deterministisch Anrede, Name/Firma, Rechtsform, E-Mail, Telefon, Straße, PLZ, Ort und vorhandene CRM-Notizen. Sucht Schreibvarianten, erzeugt keine weitere Akte bei Mehrdeutigkeit oder lokalen Dubletten und überträgt niemals automatisch an Qonekto/Blau Direkt. Dieses Werkzeug verwenden, wenn Nadine sagt, IVA solle eine Kundenakte aus dem CRM anlegen oder die CRM-Daten in die Kundenakte ziehen; dafür nicht createWorkspace verwenden.',
+      parameters: z.object({
+        suche: z.string().min(1).describe('Gehörter oder geschriebener Kundenname'),
+        projekt: z.string().optional().describe('Optionales CRM-Projekt, zum Beispiel Goals & Concepts oder Heat Hero'),
+      }),
+      execute: async input => importCrmCustomerFile(input),
+    }),
     updateHeatHeroLeadStatus: tool({
       description: 'Aendert den Status eines Kunden ausschliesslich im eigenstaendigen grossen Heat Hero CRM. Nur aufrufen, wenn Nadine die konkrete Statusaenderung in ihrer aktuellen Nachricht ausdruecklich beauftragt oder bestaetigt hat. Vorher den Kunden mit findHeatHeroLeads eindeutig bestimmen. Die Aenderung wird im CRM protokolliert.',
       parameters: z.object({
@@ -38,4 +46,4 @@ export function crmSkill({ fetchAllLeads, searchHeatHeroLeads, updateHeatHeroLea
   };
 }
 
-export const crmSkillMeta = { id: 'crm', toolNames: ['getLeads', 'findHeatHeroLeads', 'updateHeatHeroLeadStatus'] };
+export const crmSkillMeta = { id: 'crm', toolNames: ['getLeads', 'findHeatHeroLeads', 'importCrmCustomerFile', 'updateHeatHeroLeadStatus'] };

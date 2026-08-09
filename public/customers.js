@@ -2,6 +2,7 @@ const LS_TOKEN = 'iva_token';
 const LS_SESSION = 'iva_customer_session';
 const DEFAULT_BROKER_ID = '009T7N';
 const KNOWN_SALUTATION_LABELS = { 1: 'Herr', 2: 'Frau', 7: 'Firma' };
+const SALUTATION_LABELS = { male: 'Mann', female: 'Frau', diverse: 'Divers', company: 'Firma' };
 const $ = id => document.getElementById(id);
 const state = {
   customers: [],
@@ -76,20 +77,24 @@ function workspaceQonektoDraft(workspace) {
 function localCustomer(workspace) {
   const customer = workspace.customer || {};
   const draft = workspaceQonektoDraft(workspace);
+  const salutationKey = customer.salutationKey || workspace.data?.qonektoLabels?.salutationKey || '';
   return {
     id: `local:${workspace.id}`,
     externalId: customer.id || '',
-    name: customer.name || workspace.title || 'Neue Kundenakte',
-    firstName: draft.vorname || '',
-    lastName: draft.nachname || '',
+    name: customer.name || draft.firma || [draft.vorname, draft.nachname].filter(Boolean).join(' ') || workspace.title || 'Neue Kundenakte',
+    firstName: customer.firstName || draft.vorname || '',
+    lastName: customer.lastName || draft.nachname || '',
+    company: customer.company || draft.firma || '',
+    legalForm: customer.legalForm || draft.rechtsform || '',
     email: customer.email || draft.kommunikation?.email || '',
     phone: customer.phone || draft.kommunikation?.telefon || '',
-    street: draft.strasse || '',
-    zip: draft.plz || '',
-    city: draft.ort || '',
+    street: customer.street || draft.strasse || '',
+    zip: customer.zip || draft.plz || '',
+    city: customer.city || draft.ort || '',
     address: customer.address || [draft.strasse, [draft.plz, draft.ort].filter(Boolean).join(' ')].filter(Boolean).join(', '),
-    brokerId: draft.vermittler_id || '',
-    salutation: workspace.data?.qonektoLabels?.salutation || '',
+    brokerId: customer.brokerId || draft.vermittler_id || '',
+    salutationKey,
+    salutation: customer.salutation || workspace.data?.qonektoLabels?.salutation || SALUTATION_LABELS[salutationKey] || '',
     source: 'iva',
     workspace,
   };
@@ -133,7 +138,7 @@ function renderCustomerList() {
     copy.append(name, detail);
     const source = document.createElement('span');
     source.className = `source-pill${customer.source === 'iva' ? ' local' : ''}`;
-    source.textContent = customer.source === 'iva' ? 'Entwurf' : 'Blau';
+    source.textContent = customer.source === 'iva' ? 'IVA' : 'Blau';
     button.append(avatar, copy, source);
     button.addEventListener('click', () => openCustomer(customer.id));
     root.appendChild(button);
@@ -161,7 +166,7 @@ async function loadCustomers({ force = false, keepSelection = true } = {}) {
   }
   state.customers = mergeCustomers(qonekto.customers || [], state.workspaces);
   renderCustomerList();
-  if (qonektoError) showNotice(`Qonekto konnte gerade nicht geladen werden: ${qonektoError.message}. Deine IVA-Entwürfe bleiben sichtbar.`, 'error');
+  if (qonektoError) showNotice(`Qonekto konnte gerade nicht geladen werden: ${qonektoError.message}. Deine IVA-Kundenakten bleiben sichtbar.`, 'error');
   if (previousId && state.customers.some(customer => customer.id === previousId)) await openCustomer(previousId, { force });
 }
 
@@ -179,8 +184,17 @@ async function ensureWorkspace(customer) {
       customer: {
         id: customer.id || '',
         name: customer.name || '',
+        salutationKey: customer.salutationKey || '',
+        salutation: customer.salutation || '',
+        firstName: customer.firstName || '',
+        lastName: customer.lastName || '',
+        company: customer.company || '',
+        legalForm: customer.legalForm || '',
         email: customer.email || '',
         phone: customer.mobile || customer.phone || '',
+        street: customer.street || '',
+        zip: customer.zip || '',
+        city: customer.city || '',
         address: sourceAddress(customer),
       },
       data: { project: 'Goals & Concepts', company: customer.company || '', relationship: 'Qonekto / Blau Direkt', nextStep: '' },
@@ -274,13 +288,14 @@ function renderDetail(detail, listId) {
   const detailRoot = $('customerDetail');
   detailRoot.innerHTML = `
     <div class="detail-head">
-      <div class="identity"><span class="avatar">${escapeHtml(initials(customer.name))}</span><div><div class="identity-line"><span class="${sourceIsLocal ? 'live-badge local-badge' : 'live-badge'}">${sourceIsLocal ? 'IVA-Entwurf' : 'Qonekto live'}</span><span>Kunden-ID ${escapeHtml(customer.id || 'noch nicht vergeben')}</span></div><h1>${escapeHtml(customer.name)}</h1><div class="muted">${escapeHtml(sourceAddress(customer) || 'Adresse noch nicht hinterlegt')}</div></div></div>
+      <div class="identity"><span class="avatar">${escapeHtml(initials(customer.name))}</span><div><div class="identity-line"><span class="${sourceIsLocal ? 'live-badge local-badge' : 'live-badge'}">${sourceIsLocal ? 'IVA-Kundenakte' : 'Qonekto live'}</span><span>Kunden-ID ${escapeHtml(customer.id || 'noch nicht an Blau Direkt übertragen')}</span></div><h1>${escapeHtml(customer.name)}</h1><div class="muted">${escapeHtml(sourceAddress(customer) || 'Adresse noch nicht hinterlegt')}</div></div></div>
       <div class="top-actions">${customerUrl ? `<a class="btn" href="${escapeHtml(customerUrl)}" target="_blank" rel="noopener">In Blau Direkt öffnen ↗</a>` : ''}<button class="btn" id="refreshDetail">↻ Aktualisieren</button></div>
     </div>
     <div class="stats"><div class="stat"><span>Verträge</span><b>${contracts.length}</b></div><div class="stat"><span>Gesellschaften</span><b>${new Set(contracts.map(contract => contract.company).filter(Boolean)).size}</b></div><div class="stat"><span>IVA-Notizen</span><b>${localNotes.length}</b></div><div class="stat"><span>Dokumente</span><b>${localFiles.length}</b></div></div>
     <div class="grid">
       <section class="card"><h2>Kontaktdaten <span class="tag">Stammdaten</span></h2><div class="data-grid">
         ${datum('Anrede', customer.salutation)}${datum('Vermittler-ID', customer.brokerId)}
+        ${datum(customer.company ? 'Firma' : 'Vorname', customer.company || customer.firstName)}${datum(customer.company ? 'Rechtsform' : 'Nachname', customer.company ? customer.legalForm : customer.lastName)}
         ${datum('E-Mail', customer.email, { link: customer.email ? `mailto:${customer.email}` : '' })}
         ${datum('Telefon', customer.mobile || customer.phone, { link: customer.mobile || customer.phone ? `tel:${customer.mobile || customer.phone}` : '' })}
         ${datum('Straße', customer.street)}${datum('PLZ / Ort', [customer.zip, customer.city].filter(Boolean).join(' '))}
@@ -289,11 +304,12 @@ function renderDetail(detail, listId) {
       </div></section>
       <section class="card"><h2>Service & Aktionen <span class="tag">mit Sicherheitsabfrage</span></h2><div class="service-grid">
         ${sourceIsLocal ? '<button class="service" id="transferLocalCustomerBtn"><b>↗ An Blau Direkt übertragen</b><small>Daten prüfen und Qonekto-Anlage separat bestätigen</small></button>' : ''}
-        <button class="service" id="editAddressBtn" ${sourceIsLocal ? 'disabled' : ''}><b>⌂ Adresse ändern</b><small>Vorbereiten, prüfen, ausdrücklich bestätigen</small></button>
+        <button class="service" id="editAddressBtn"><b>✎ Kontaktdaten bearbeiten</b><small>${sourceIsLocal ? 'Direkt in der IVA-Kundenakte speichern' : 'Bei Blau Direkt vorbereiten und ausdrücklich bestätigen'}</small></button>
         <button class="service" id="messageCompanyBtn" ${contracts.length ? '' : 'disabled'}><b>✉ Gesellschaft anschreiben</b><small>Vertragsbezogenen Entwurf anlegen</small></button>
         <button class="service" id="uploadDocumentBtn"><b>↑ Dokument ablegen</b><small>PDF oder Bild in die IVA-Akte</small></button>
         <button class="service" id="newConsultationBtn"><b>◌ Beratung starten</b><small>Mit diesem Kunden vorausfüllen</small></button>
         <button class="service" id="lumitApplicationBtn" ${sourceIsLocal ? 'disabled' : ''}><b>☀ LUMIT-Antrag</b><small>Online abschließen und als servicierten Antrag übernehmen</small></button>
+        ${sourceIsLocal ? '<button class="service danger" id="deleteLocalCustomerBtn"><b>× IVA-Kundenakte löschen</b><small>Löscht nur diese lokale IVA-Akte – niemals Pipedrive oder Blau Direkt</small></button>' : ''}
       </div></section>
       <section class="card full"><h2>Verträge <span class="tag">Blau Direkt</span></h2>${contractRows(contracts)}</section>
       <section class="card"><h2>IVA-Arbeitsnotizen <span class="tag">nur deine Akte</span></h2><div class="note-list">${localNotes.length ? localNotes.slice().reverse().map(note => `<div class="note"><b>${escapeHtml(note.text)}</b><small>${escapeHtml(note.source || 'manual')} · ${escapeHtml(new Date(note.createdAt).toLocaleString('de-DE'))}</small></div>`).join('') : '<div class="empty-card">Noch keine IVA-Notizen.</div>'}</div><div class="composer"><textarea id="noteDraft" placeholder="Notiz, Wiedervorlage oder nächsten Schritt eintragen …"></textarea><button class="btn primary" id="saveNoteBtn">Speichern</button></div></section>
@@ -358,6 +374,7 @@ function bindDetailEvents(listId) {
   $('refreshDetail')?.addEventListener('click', () => openCustomer(listId, { force: true }));
   $('transferLocalCustomerBtn')?.addEventListener('click', prepareLocalCustomerTransfer);
   $('editAddressBtn')?.addEventListener('click', openAddressDialog);
+  $('deleteLocalCustomerBtn')?.addEventListener('click', deleteLocalCustomer);
   $('messageCompanyBtn')?.addEventListener('click', openMessageDialog);
   $('uploadDocumentBtn')?.addEventListener('click', () => $('documentInput').click());
   $('newConsultationBtn')?.addEventListener('click', openConsultation);
@@ -368,6 +385,26 @@ function bindDetailEvents(listId) {
 
 function currentCustomer() {
   return state.current?.detail?.customer || state.current?.customer || null;
+}
+
+async function deleteLocalCustomer() {
+  const workspace = state.currentWorkspace;
+  const customer = currentCustomer();
+  if (!workspace?.id || state.current?.detail?.source !== 'iva') return;
+  const confirmed = window.confirm(`IVA-Kundenakte „${customer?.name || workspace.title}“ wirklich löschen?\n\nGelöscht werden nur die lokale IVA-Akte sowie ihre lokalen Notizen und Dateien. In Pipedrive, Qonekto und Blau Direkt wird nichts gelöscht.`);
+  if (!confirmed) return;
+  try {
+    await api(`/api/workspaces/${encodeURIComponent(workspace.id)}?mode=kunde`, { method: 'DELETE' });
+    state.workspaces = state.workspaces.filter(item => item.id !== workspace.id);
+    state.customers = state.customers.filter(item => item.id !== `local:${workspace.id}`);
+    state.current = null;
+    state.currentWorkspace = null;
+    $('customerDetail').hidden = true;
+    $('customerDetail').innerHTML = '';
+    $('emptyState').hidden = false;
+    renderCustomerList();
+    showNotice('Die lokale IVA-Kundenakte wurde gelöscht. Pipedrive, Qonekto und Blau Direkt blieben unverändert.', 'success');
+  } catch (error) { showNotice(`IVA-Kundenakte konnte nicht gelöscht werden: ${error.message}`, 'error'); }
 }
 
 async function saveNote() {
@@ -415,9 +452,23 @@ function openConsultation() {
 
 function openAddressDialog() {
   const customer = currentCustomer();
+  const salutationKey = salutationKeyFor(customer);
+  if (salutationKey === 'diverse' && customer.salutationId) $('editSalutation').querySelector('option[value="diverse"]').dataset.externalId = clean(customer.salutationId);
+  $('editSalutation').value = salutationKey;
+  $('editBroker').value = customer.brokerId || DEFAULT_BROKER_ID;
+  $('editFirstName').value = customer.firstName || '';
+  $('editLastName').value = customer.lastName || '';
+  $('editCompany').value = customer.company || '';
+  $('editLegalForm').value = customer.legalForm || '';
+  $('editEmail').value = customer.email || '';
+  $('editPhone').value = customer.mobile || customer.phone || '';
   $('editStreet').value = customer.street || '';
   $('editZip').value = customer.zip || '';
   $('editCity').value = customer.city || '';
+  setPartyFields('edit', salutationKey);
+  $('editCustomerHint').textContent = state.current?.detail?.source === 'iva'
+    ? 'Diese Angaben werden direkt in der lokalen IVA-Kundenakte gespeichert.'
+    : 'Die Änderung bei Blau Direkt wird zuerst vorbereitet und erst nach deiner ausdrücklichen Bestätigung ausgeführt.';
   $('addressDialog').showModal();
 }
 
@@ -671,7 +722,7 @@ async function loadReferences() {
   try {
     state.references = await api('/api/customers/references');
   } catch (error) {
-    showNotice(`Qonekto-Referenzdaten konnten nicht geladen werden: ${error.message}. Ein IVA-Entwurf ist trotzdem möglich.`, 'error');
+    showNotice(`Qonekto-Referenzdaten konnten nicht geladen werden: ${error.message}. Eine lokale IVA-Kundenakte ist trotzdem möglich.`, 'error');
     state.references = { salutations: [], brokers: [] };
   }
   populateCustomerReferences();
@@ -690,17 +741,10 @@ function referenceOptionLabel(item, kind) {
 }
 
 function populateCustomerReferences() {
-  const salutations = [...(state.references?.salutations || [])];
-  for (const [id, label] of Object.entries(KNOWN_SALUTATION_LABELS)) {
-    if (!salutations.some(item => clean(item.id) === id)) salutations.push({ id, label });
-  }
-  const salutationSelect = $('newSalutation');
-  salutationSelect.innerHTML = '<option value="">Bitte wählen</option>';
-  for (const item of salutations) {
-    const option = document.createElement('option');
-    option.value = clean(item.id);
-    option.textContent = referenceOptionLabel(item, 'salutation');
-    salutationSelect.appendChild(option);
+  const diverseReference = (state.references?.salutations || []).find(item => /divers|nicht.?bin/i.test(clean(item.label)));
+  for (const select of [$('newSalutation'), $('editSalutation')]) {
+    const diverseOption = select?.querySelector('option[value="diverse"]');
+    if (diverseOption && diverseReference?.id) diverseOption.dataset.externalId = clean(diverseReference.id);
   }
 
   const brokers = [...(state.references?.brokers || [])];
@@ -716,10 +760,39 @@ function populateCustomerReferences() {
   brokerSelect.value = DEFAULT_BROKER_ID;
 }
 
+function salutationKeyFor(customer = {}) {
+  if (SALUTATION_LABELS[customer.salutationKey]) return customer.salutationKey;
+  if (clean(customer.salutationId) === '1') return 'male';
+  if (clean(customer.salutationId) === '2') return 'female';
+  if (clean(customer.salutationId) === '7') return 'company';
+  const value = clean(customer.salutation).toLocaleLowerCase('de');
+  if (customer.company || /firma|unternehmen|company/.test(value)) return 'company';
+  if (/frau|weiblich|female/.test(value)) return 'female';
+  if (/divers|nicht.?bin/.test(value)) return 'diverse';
+  if (/herr|mann|männlich|male/.test(value)) return 'male';
+  return '';
+}
+
+function setPartyFields(prefix, key = '') {
+  const company = key === 'company';
+  $(`${prefix}FirstNameField`).hidden = company;
+  $(`${prefix}LastNameField`).hidden = company;
+  $(`${prefix}CompanyField`).hidden = !company;
+  $(`${prefix}LegalFormField`).hidden = !company;
+  $(`${prefix}LastName`).required = !company;
+  $(`${prefix}Company`).required = company;
+  $(`${prefix}LegalForm`).required = company;
+}
+
+function externalSalutationId(prefix) {
+  return clean($(`${prefix}Salutation`).selectedOptions[0]?.dataset.externalId);
+}
+
 async function openNewCustomer() {
   $('newCustomerForm').reset();
   hideAddressSuggestions();
   $('newTransferToQonekto').checked = false;
+  setPartyFields('new', '');
   if ($('newBroker').querySelector(`option[value="${DEFAULT_BROKER_ID}"]`)) $('newBroker').value = DEFAULT_BROKER_ID;
   $('newCustomerDialog').showModal();
   await loadReferences();
@@ -799,11 +872,14 @@ function applyAddressSuggestion(suggestion) {
 }
 
 function newCustomerValues() {
+  const salutationKey = clean($('newSalutation').value);
   return {
-    anrede_id: clean($('newSalutation').value),
+    anrede_id: externalSalutationId('new'),
     vermittler_id: clean($('newBroker').value),
-    vorname: clean($('newFirstName').value),
-    nachname: clean($('newLastName').value),
+    vorname: salutationKey === 'company' ? '' : clean($('newFirstName').value),
+    nachname: salutationKey === 'company' ? '' : clean($('newLastName').value),
+    firma: salutationKey === 'company' ? clean($('newCompany').value) : '',
+    rechtsform: salutationKey === 'company' ? clean($('newLegalForm').value) : '',
     strasse: clean($('newStreet').value),
     plz: clean($('newZip').value),
     ort: clean($('newCity').value),
@@ -812,8 +888,10 @@ function newCustomerValues() {
 }
 
 function newCustomerLabels() {
+  const salutationKey = clean($('newSalutation').value);
   return {
-    salutation: clean($('newSalutation').selectedOptions[0]?.textContent).replace(/\s+·\s+\S+$/, ''),
+    salutation: SALUTATION_LABELS[salutationKey] || '',
+    salutationKey,
     broker: clean($('newBroker').selectedOptions[0]?.textContent).replace(/\s+·\s+\S+$/, ''),
   };
 }
@@ -838,15 +916,22 @@ async function saveLocalCustomer() {
   const labels = newCustomerLabels();
   $('saveLocalCustomer').disabled = true;
   try {
-    const name = [values.vorname, values.nachname].filter(Boolean).join(' ');
+    const name = values.firma || [values.vorname, values.nachname].filter(Boolean).join(' ');
     const now = new Date().toISOString();
     const workspace = await api('/api/workspaces', {
       method: 'POST',
       body: JSON.stringify({
         mode: 'kunde', title: `${name} · Kundenakte`,
-        customer: { name, email: values.kommunikation.email, phone: values.kommunikation.telefon, address: [values.strasse, [values.plz, values.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') },
+        status: 'active',
+        customer: {
+          name, salutationKey: labels.salutationKey, salutation: labels.salutation,
+          firstName: values.vorname, lastName: values.nachname, company: values.firma, legalForm: values.rechtsform,
+          email: values.kommunikation.email, phone: values.kommunikation.telefon,
+          street: values.strasse, zip: values.plz, city: values.ort, brokerId: values.vermittler_id,
+          address: [values.strasse, [values.plz, values.ort].filter(Boolean).join(' ')].filter(Boolean).join(', '),
+        },
         data: {
-          project: 'Goals & Concepts', company: '',
+          project: 'Goals & Concepts', company: values.firma || '',
           relationship: transferRequested ? 'IVA-Kundenakte · Qonekto-Übertragung vorbereitet' : 'IVA-Kundenakte · noch nicht in Qonekto angelegt',
           nextStep: transferRequested ? 'Qonekto-Anlage ausdrücklich bestätigen' : 'Bei Bedarf an Blau Direkt übertragen',
           qonektoDraft: values,
@@ -864,6 +949,13 @@ async function saveLocalCustomer() {
     await openCustomer(customer.id);
     if (!transferRequested) {
       showNotice('Kundenakte wurde vollständig in IVA gespeichert. An Blau Direkt wurde nichts übertragen.', 'success');
+      return;
+    }
+    if (!values.anrede_id) {
+      await patchLocalWorkspace(workspace.id, {
+        data: { qonektoSync: { requested: false, status: 'local-only', updatedAt: new Date().toISOString() }, relationship: 'IVA-Kundenakte · noch nicht in Qonekto angelegt', nextStep: 'Qonekto-Anrede für Divers prüfen und Übertragung erneut starten' },
+      });
+      showNotice('Die IVA-Kundenakte wurde gespeichert. Für „Divers“ hat Qonekto keine eindeutige Anrede-ID geliefert; deshalb wurde noch nichts übertragen.', 'error');
       return;
     }
     const prepared = await prepareAction('create-customer', '', values, { workspaceId: workspace.id, values, labels });
@@ -910,15 +1002,66 @@ async function prepareAction(kind, customerId, values, context = null) {
 async function prepareLocalCustomerTransfer() {
   const workspace = state.currentWorkspace;
   const values = workspaceQonektoDraft(workspace);
-  if (!workspace?.id || !values.nachname) return showNotice('In dieser IVA-Akte fehlen die gespeicherten Qonekto-Stammdaten.', 'error');
+  if (!workspace?.id || (!values.nachname && !values.firma)) return showNotice('In dieser IVA-Akte fehlen die gespeicherten Qonekto-Stammdaten.', 'error');
   if (!values.anrede_id) return showNotice('Vor der Übertragung muss in der Kundenakte eine Anrede ergänzt werden.', 'error');
   const labels = workspace.data?.qonektoLabels || {};
   await prepareAction('create-customer', '', values, { workspaceId: workspace.id, values, labels });
 }
 
+function editCustomerValues() {
+  const salutationKey = clean($('editSalutation').value);
+  return {
+    anrede_id: externalSalutationId('edit'),
+    vermittler_id: clean($('editBroker').value) || DEFAULT_BROKER_ID,
+    vorname: salutationKey === 'company' ? '' : clean($('editFirstName').value),
+    nachname: salutationKey === 'company' ? '' : clean($('editLastName').value),
+    firma: salutationKey === 'company' ? clean($('editCompany').value) : '',
+    rechtsform: salutationKey === 'company' ? clean($('editLegalForm').value) : '',
+    strasse: clean($('editStreet').value),
+    plz: clean($('editZip').value),
+    ort: clean($('editCity').value),
+    kommunikation: { email: clean($('editEmail').value), telefon: clean($('editPhone').value) },
+  };
+}
+
 async function prepareAddress() {
+  const form = $('addressDialog').querySelector('form');
+  if (!form.reportValidity()) return;
   const customer = currentCustomer();
-  await prepareAction('update-customer', customer.id, { strasse: clean($('editStreet').value), plz: clean($('editZip').value), ort: clean($('editCity').value) });
+  const values = editCustomerValues();
+  const salutationKey = clean($('editSalutation').value);
+  const salutation = SALUTATION_LABELS[salutationKey] || '';
+  if (state.current?.detail?.source !== 'iva') {
+    await prepareAction('update-customer', customer.id, values);
+    return;
+  }
+  const workspace = state.currentWorkspace;
+  if (!workspace?.id) return showNotice('Die lokale IVA-Kundenakte wurde nicht gefunden.', 'error');
+  const name = values.firma || [values.vorname, values.nachname].filter(Boolean).join(' ');
+  try {
+    const updated = await patchLocalWorkspace(workspace.id, {
+      title: `${name} · Kundenakte`, status: 'active',
+      customer: {
+        name, salutationKey, salutation, firstName: values.vorname, lastName: values.nachname,
+        company: values.firma, legalForm: values.rechtsform, email: values.kommunikation.email,
+        phone: values.kommunikation.telefon, street: values.strasse, zip: values.plz, city: values.ort,
+        brokerId: values.vermittler_id,
+        address: [values.strasse, [values.plz, values.ort].filter(Boolean).join(' ')].filter(Boolean).join(', '),
+      },
+      data: {
+        company: values.firma,
+        qonektoDraft: values,
+        qonektoLabels: { salutation, salutationKey, broker: values.vermittler_id === DEFAULT_BROKER_ID ? 'Nadine Sell' : '' },
+      },
+    });
+    const local = localCustomer(updated);
+    state.current.customer = local;
+    state.current.detail = localDetail(updated);
+    $('addressDialog').close();
+    renderCustomerList();
+    renderDetail(state.current.detail, state.current.listId);
+    showNotice('Kontaktdaten wurden in der IVA-Kundenakte gespeichert.', 'success');
+  } catch (error) { showNotice(`Kontaktdaten konnten nicht gespeichert werden: ${error.message}`, 'error'); }
 }
 
 async function executePreparedAction() {
@@ -991,6 +1134,8 @@ $('refreshCustomers').addEventListener('click', () => loadCustomers({ force: tru
 $('newCustomerBtn').addEventListener('click', openNewCustomer);
 $('emptyNewBtn').addEventListener('click', openNewCustomer);
 $('newCustomerForm').addEventListener('submit', event => { event.preventDefault(); saveLocalCustomer(); });
+$('newSalutation').addEventListener('change', event => setPartyFields('new', event.target.value));
+$('editSalutation').addEventListener('change', event => setPartyFields('edit', event.target.value));
 $('closeNewCustomer').addEventListener('click', closeNewCustomerDialog);
 $('cancelNewCustomer').addEventListener('click', closeNewCustomerDialog);
 $('newCustomerDialog').addEventListener('cancel', event => { event.preventDefault(); closeNewCustomerDialog(); });

@@ -226,6 +226,7 @@ export function normalizeQonektoCustomer(raw = {}) {
     birthDate: cleanText(deepValue(entity, ['geburtsdatum', 'birth_date', 'date_of_birth']), 80),
     profession: cleanText(deepValue(entity, ['beruf', 'profession', 'berufsbezeichnung']), 200),
     brokerId: cleanText(deepValue(entity, ['vermittler_id', 'broker_id', 'vermittler_ameise_id']), 100),
+    salutationId: cleanText(deepValue(entity, ['anrede_id', 'salutation_id', 'anrede_ameise_id']), 100),
     salutation: cleanText(deepValue(entity, ['anrede', 'salutation', 'anrede_bezeichnung']), 100) || referenceLabel(entity, ['anrede', 'salutation']),
     legalForm: cleanText(deepValue(entity, ['rechtsform', 'legal_form']), 160),
     simplrUsername: cleanText(deepValue(entity, ['benutzername_simplr', 'simplr_username']), 200),
