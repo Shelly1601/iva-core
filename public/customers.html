@@ -88,6 +88,63 @@
   </form>
 </dialog>
 
+<dialog id="lumitDialog">
+  <form method="dialog">
+    <div class="dialog-head"><div><h2>LUMIT · servicierter Antrag</h2><div class="muted">Onlineabschluss über Mannheimer, danach kontrollierter Blau-direkt-Nachprozess.</div></div><button class="close" value="cancel">×</button></div>
+    <div class="dialog-body">
+      <div class="review"><strong>Verbindliche Zuordnung</strong><br>Blau-direkt-Agenturnummer: <b id="lumitAgency">–</b><br>Vermittlernummer: <b id="lumitBroker">–</b><br>Zieladresse: <b id="lumitEmail">–</b></div>
+      <div class="form-grid" style="margin-top:14px">
+        <div class="field"><label>Versicherungsbeginn *</label><select id="lumitStartMode"><option value="immediate">Sofort / nächstmöglich</option><option value="specified-date">Bestimmtes Datum</option></select></div>
+        <div class="field"><label>Gewünschtes Datum</label><input id="lumitRequestedStartDate" type="date" disabled></div>
+        <div class="field full"><label>Betriebsfertigkeit / Inbetriebnahme, falls bekannt</label><input id="lumitOperationalReadinessDate" type="date"><small>„Sofort“ bedeutet gewünschter Beginn ab heute. Der tatsächliche Schutz richtet sich nach Annahme, Police und Betriebsfertigkeit.</small></div>
+        <div class="field full"><label>Antragsnummer, falls vorhanden</label><input id="lumitApplicationNumber" placeholder="Antragsnummer aus der Mannheimer-E-Mail"></div>
+        <div class="field full"><label>Erzeugtes Antrags-PDF *</label><input id="lumitApplicationPdf" type="file" accept="application/pdf,.pdf"></div>
+        <div class="field full"><label><input id="lumitCompletionConfirmed" type="checkbox" style="width:auto"> Der Onlineabschluss wurde vollständig durchgeführt.</label></div>
+        <div class="field full"><label><input id="lumitAgencyConfirmed" type="checkbox" style="width:auto"> Agenturnummer 162-58556 steht im Antrag.</label></div>
+        <div class="field full"><label><input id="lumitBrokerConfirmed" type="checkbox" style="width:auto"> Vermittlernummer 009T7N steht im Antrag.</label></div>
+        <div class="field full"><label><input id="lumitDigitalDeliveryConsent" type="checkbox" style="width:auto"> Der Kunde hat der digitalen Policenzustellung zugestimmt und eine gültige E-Mail-Adresse angegeben.</label></div>
+      </div>
+      <div class="review" id="lumitResult" hidden></div>
+      <div class="review"><strong>HOME-Regel:</strong> Die Einreichung erfolgt ausschließlich über den Online-Rechner. Das danach erzeugte PDF wird an Mannheimer übermittelt und in der zugehörigen Blau-direkt-Kundenakte abgelegt.</div>
+      <div class="review"><strong>Policenweg:</strong> Im Antrag wird „ausschließlich digital über blau direkt/BiPRO an den Vermittler“ angefordert. Dieser Wunsch gilt erst nach Bestätigung durch Mannheimer. Nach Eingang prüft Hauswertschutz die Unterlagen und erstellt ein kompaktes Hauswertschutz-Kundenpaket. IVA versendet nichts automatisch; die Kundenbereitstellung braucht eine ausdrückliche Freigabe. Die Originalpolice bleibt unverändert als Anlage enthalten.</div>
+      <div class="review" id="lumitPackageSection" hidden>
+        <strong>Hauswertschutz-Kundenpaket</strong>
+        <p class="muted" id="lumitPackageApplication">Zuerst muss ein servicierter Antrag angelegt sein.</p>
+        <div class="form-grid" style="margin-top:12px">
+          <div class="field full"><label>Mannheimer-Originalpolice *</label><input id="lumitPolicyPdf" type="file" accept="application/pdf,.pdf"></div>
+          <div class="field"><label>Policennummer</label><input id="lumitPolicyNumber" placeholder="z. B. VS-123456"></div>
+          <div class="field"><label>Abrechnungszeitraum</label><select id="lumitBillingPeriod"><option value="monatlich">monatlich</option><option value="jaehrlich">jährlich</option></select></div>
+          <div class="field"><label>Gesamtpreis *</label><input id="lumitTotalPrice" inputmode="decimal" placeholder="29,90"></div>
+          <div class="field"><label>Versicherungsbeitrag *</label><input id="lumitInsurancePremium" inputmode="decimal" placeholder="19,90"></div>
+          <div class="field"><label>Hauswertschutz-Service *</label><input id="lumitServiceFee" inputmode="decimal" placeholder="10,00"></div>
+          <div class="field"><label>Name Servicepaket</label><input id="lumitServicePackageName" value="Hauswertschutz Servicepaket"></div>
+          <div class="field"><label>Anrede im Willkommensbrief</label><select id="lumitCustomerSalutation"><option value="neutral">Neutral</option><option value="frau">Frau</option><option value="herr">Herr</option></select></div>
+          <div class="field full"><label>Digitale Schadenkanäle</label><small>Diese Angaben erscheinen auf der Titelseite und im Schadenablauf. Bis zur Aktivierung werden sie im PDF ausdrücklich als Platzhalter markiert.</small></div>
+          <div class="field"><label>WhatsApp für Schadenmeldungen</label><input id="lumitClaimsWhatsapp" placeholder="+49 XXX XXXXXXX"></div>
+          <div class="field"><label>Automatisierte Schaden-E-Mail</label><input id="lumitClaimsEmail" type="email" placeholder="schaden@ihre-domain.de"></div>
+          <div class="field"><label>Digitale Erreichbarkeit</label><input id="lumitClaimsAvailability" value="Digital rund um die Uhr einreichen"></div>
+          <div class="field"><label>Persönliche Rückmeldezeiten</label><input id="lumitClaimsServiceHours" placeholder="z. B. Mo-Fr, 09:00-17:00 Uhr"></div>
+          <div class="field full"><label><input id="lumitClaimsChannelsReady" type="checkbox" style="width:auto"> WhatsApp- und E-Mail-Kanal sind eingerichtet, getestet und für Kunden freigegeben.</label></div>
+          <div class="field full"><label>Versicherte Energietechnik *</label><input id="lumitInsuredTechnologies" placeholder="z. B. Photovoltaikanlage, Batteriespeicher, Wärmepumpe"><small>Nur Technik eintragen, die in der geprüften Originalpolice genannt ist.</small></div>
+          <div class="field full"><label>Leistungsbausteine laut geprüfter Police</label><small>Nur anhaken, wenn der jeweilige Baustein in Police oder besonderen Vereinbarungen ausdrücklich bestätigt ist. Nicht angehakte Punkte erscheinen als nicht bestätigt bzw. nicht automatisch enthalten.</small></div>
+          <div class="field"><label><input id="lumitPropertyInsuranceIncluded" type="checkbox" style="width:auto"> Sachschutz ist enthalten</label></div>
+          <div class="field"><label><input id="lumitPropertyHazardsIncluded" type="checkbox" style="width:auto"> Feuer, Leitungswasser, Sturm und Hagel sind enthalten</label></div>
+          <div class="field"><label><input id="lumitYieldLossIncluded" type="checkbox" style="width:auto"> Ertragsausfall ist enthalten</label></div>
+          <div class="field"><label><input id="lumitOperatorLiabilityIncluded" type="checkbox" style="width:auto"> Betreiber-Haftpflicht ist enthalten</label></div>
+          <div class="field"><label><input id="lumitAssemblyCoverIncluded" type="checkbox" style="width:auto"> Montageschutz ist enthalten</label></div>
+          <div class="field full"><label><input id="lumitOfficialScopeConfirmed" type="checkbox" style="width:auto"> Der konkrete Versicherungsumfang wurde mit Police und besonderen Vereinbarungen abgeglichen.</label><small>Erst danach übernimmt IVA die Leistungsgrenzen, den Selbstbehalt und die Ertragsausfallwerte in die Kundenmappe.</small></div>
+          <div class="field"><label>Optional: aktueller Trust-Badge 1</label><input id="lumitTrustBadge1" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg"><small>Standardmäßig wird der belegte ProvenExpert-Badge 2025 verwendet. Hier kann später das 2026-Original ersetzt werden.</small></div>
+          <div class="field"><label>Optional: aktueller Trust-Badge 2</label><input id="lumitTrustBadge2" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg"><small>Nur tatsächlich verliehene Auszeichnungen verwenden; Jahreszahl niemals automatisch ändern.</small></div>
+          <div class="field full"><label><input id="lumitPolicyReviewed" type="checkbox" style="width:auto"> Hauswertschutz hat Originalpolice, Versicherungsbeitrag und Kundendaten geprüft.</label></div>
+        </div>
+        <div class="review" id="lumitPackageResult" hidden></div>
+        <div class="dialog-actions" style="padding:14px 0 0"><button class="btn primary" type="button" id="createLumitCustomerPackage">Gesamtdokument erstellen</button><button class="btn" type="button" id="approveLumitCustomerPackage" hidden>Nach Prüfung freigeben</button></div>
+      </div>
+    </div>
+    <div class="dialog-actions"><button class="btn" value="cancel">Schließen</button><button class="btn" type="button" id="openLumitCalculator">Mannheimer-Rechner öffnen ↗</button><button class="btn primary" type="button" id="createLumitPostProcess">Nachprozess anlegen</button></div>
+  </form>
+</dialog>
+
 <dialog id="confirmDialog">
   <div class="dialog-head"><div><h2>Qonekto-Änderung bestätigen</h2><div class="muted">Bitte prüfe die Änderung noch einmal.</div></div><button class="close" id="closeConfirm">×</button></div>
   <div class="dialog-body"><div id="confirmSummary"></div><div class="review"><strong>Willst du das wirklich machen?</strong><br>Erst der nächste Klick schreibt die Änderung nach Qonekto/Blau Direkt.</div></div>

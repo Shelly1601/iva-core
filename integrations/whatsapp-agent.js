@@ -4,6 +4,7 @@ import { getCampaign } from '../marketing/campaigns.js';
 import { getQonektoCustomerDetail, listQonektoCustomers } from './qonekto-customers.js';
 import {
   appendWhatsAppMessages,
+  createOrUpdateWhatsAppHandoff,
   createOrUpdateClaimIntake,
   getWhatsAppConversation,
   resolveWhatsAppProfile,
@@ -58,7 +59,7 @@ async function resolveCustomerBySender(sender) {
 }
 
 function answerKnowledge(profile) {
-  return (profile.answers || []).map(item => `Frage: ${item.question}\nFreigegebene Antwort: ${item.answer}`).join('\n\n');
+  return (profile.answers || []).map(item => `Frage: ${item.question}\nFreigegebene Antwort: ${item.answer}${item.source ? `\nQuelle: ${item.source}` : '\nQuelle: nicht hinterlegt – keine konkrete Fach-/Deckungsbehauptung daraus ableiten'}${item.verifiedAt ? `\nGeprueft am: ${item.verifiedAt}` : ''}`).join('\n\n');
 }
 
 function compactHistory(conversation) {
@@ -127,12 +128,25 @@ export async function handleWhatsAppMessage({ profileId = '', phoneNumberId = ''
   const reply = intent.coverage
     ? deterministicCoverageReply(profile, customerContext)
     : await buildWhatsAppReply({ profile, sender, text, conversation, customerContext, campaign, claimIntake, simulate });
+  const handoffReasons = [intent.human && 'human-request', intent.coverage && 'coverage-review', (intent.claim || claimIntake) && 'claim-review'].filter(Boolean);
+  const handoffTicket = handoffReasons.length ? await createOrUpdateWhatsAppHandoff({
+    id: conversation.handoffTicketId,
+    profileId: profile.id,
+    sender,
+    customerId: customerContext?.customer?.id || conversation.customerId || '',
+    owner: profile.handoffOwner,
+    slaMinutes: profile.handoffSlaMinutes,
+    reasons: handoffReasons,
+    priority: intent.claim || claimIntake ? 'high' : 'normal',
+    lastMessage: text,
+  }) : null;
   const updated = await appendWhatsAppMessages(profile.id, sender, [
     { role: 'user', text, messageId },
     { role: 'assistant', text: reply },
   ], {
     customerId: customerContext?.customer?.id || conversation.customerId || '',
     claimIntakeId: claimIntake?.id || conversation.claimIntakeId || '',
+    handoffTicketId: handoffTicket?.id || conversation.handoffTicketId || '',
     humanHandoff: intent.human || intent.coverage || conversation.humanHandoff,
   });
   return {
@@ -141,6 +155,7 @@ export async function handleWhatsAppMessage({ profileId = '', phoneNumberId = ''
     customerStatus: customerContext.status,
     customer: customerContext.status === 'matched' ? customerContext.customer : null,
     claimIntake: claimIntake ? { id: claimIntake.id, status: claimIntake.status } : null,
+    handoffTicket: handoffTicket ? { id: handoffTicket.id, status: handoffTicket.status, owner: handoffTicket.owner, dueAt: handoffTicket.dueAt, reasons: handoffTicket.reasons } : null,
     humanHandoff: updated.humanHandoff,
     safety: {
       coverageEvidenceRequired: intent.coverage,

@@ -3,7 +3,7 @@
 // gemeinsamen IVA-Core. Der Router waehlt deterministisch; unbekannte oder
 // deaktivierte Agenten fallen sicher auf IVA Standard zurueck.
 
-const STANDARD_SKILLS = ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'qonekto'];
+const STANDARD_SKILLS = ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'qonekto', 'lumit', 'capabilityReview', 'knowledgeLibrary', 'recruiting'];
 
 export const AGENTS = {
   'iva-standard': {
@@ -16,9 +16,9 @@ export const AGENTS = {
   'iva-customer': {
     id: 'iva-customer', name: 'Kunden & Backoffice', shortName: 'Kunden', enabled: true,
     description: 'Kundenakten, CRM, Qonekto/blau direkt, Termine, Mails, Dokumente und Servicevorgaenge.',
-    rolePrompt: 'Arbeite als Kunden- und Backoffice-Agent. Qonekto/blau direkt ist fachliche Stammdatenquelle. Lies zuerst, vermeide Dubletten und bereite jede Aenderung nur ueber den vorgesehenen Bestaetigungsweg vor.',
-    knowledgeSources: ['crm', 'qonekto', 'mails', 'calendar', 'workspaces'],
-    allowedSkills: ['memory', 'calendar', 'mails', 'crm', 'workspaces', 'qonekto', 'selfImprovement'], modelProfile: 'chat', safetyDefault: 'operational', color: 'blue',
+    rolePrompt: 'Arbeite als Kunden- und Backoffice-Agent. Qonekto/blau direkt ist fachliche Stammdatenquelle. Lies zuerst, vermeide Dubletten und bereite jede Aenderung nur ueber den vorgesehenen Bestaetigungsweg vor. Bei LUMIT gilt zwingend: Onlineabschluss ueber Agentur 162-58556, Vermittlernummer 009T7N pruefen, danach servicierter Antrag, Mail an den Mannheimer-Poolservice, Dokument in die Blau-direkt-Kundenakte und Uebergabe an Hauswertschutz. Fordere die Police ausschliesslich digital ueber den Vermittler an, behaupte diesen Versandweg aber erst nach Bestaetigung durch Mannheimer/blau direkt. Nach Policeneingang: nichts automatisch an den Kunden senden; erst Hauswertschutz-Pruefung, kompaktes Markenpaket mit unveraenderter Originalpolice und lesbarer Vertrags-/Preisaufteilung, dann ausdrueckliche Freigabe.',
+    knowledgeSources: ['crm', 'qonekto', 'mails', 'calendar', 'workspaces', 'lumit-workflow'],
+    allowedSkills: ['memory', 'calendar', 'mails', 'crm', 'workspaces', 'qonekto', 'lumit', 'selfImprovement'], modelProfile: 'chat', safetyDefault: 'operational', color: 'blue',
   },
   'iva-finance': {
     id: 'iva-finance', name: 'Beratung & Fachpruefung', shortName: 'Beratung', enabled: true,
@@ -30,14 +30,14 @@ export const AGENTS = {
   'iva-marketing': {
     id: 'iva-marketing', name: 'Marketing & Growth', shortName: 'Marketing', enabled: true,
     description: 'Marktanalyse, Content, Kampagnen, Ads-Auswertung, Lead-Recherche und Chancenradar.',
-    rolePrompt: 'Arbeite als Marketing- und Growth-Agent. Trenne Research, Entwurf, Freigabe und Publishing. Keine unbelegte Erfolgsbehauptung, kein automatischer Outreach und keine Budgetaenderung ohne den vorgesehenen Freigabesatz.',
+    rolePrompt: 'Arbeite als Marketing- und Growth-Agent. Trenne Research, Entwurf, Freigabe und Publishing. Keine unbelegte Erfolgsbehauptung, kein automatischer Outreach und keine Budgetaenderung ohne den vorgesehenen Freigabesatz. Neue Reel-/Tool-Ideen muessen zuerst durch assessCapability; Vorbilder liefern Muster, aber niemals zu kopierenden Text, Code oder Design.',
     knowledgeSources: ['brand-profiles', 'campaigns', 'public-research', 'opportunities'],
-    allowedSkills: ['marketing', 'research', 'opportunities', 'selfImprovement'], modelProfile: 'chat', safetyDefault: 'operational', color: 'mint',
+    allowedSkills: ['marketing', 'research', 'opportunities', 'capabilityReview', 'selfImprovement'], modelProfile: 'chat', safetyDefault: 'operational', color: 'mint',
   },
   'iva-energy': {
     id: 'iva-energy', name: 'Energie & Vor Ort', shortName: 'Energie', enabled: true,
     description: 'TMB, Foto-Checkliste, Gebaeudedaten, Heizlast-Vorplanung, Foerdercheck und Energie-Fallakten.',
-    rolePrompt: 'Arbeite als Energie- und Vor-Ort-Agent. Verwende die deterministischen IVA-Rechenwege, erfinde keine Gebaeudedaten und nenne Vorplanung niemals Normnachweis oder Foerderzusage. Fehlende Pflichtangaben gezielt abfragen.',
+    rolePrompt: 'Arbeite als Energie- und Vor-Ort-Agent. Verwende die deterministischen IVA-Rechenwege, erfinde keine Gebaeudedaten und nenne Vorplanung niemals Normnachweis oder Foerderzusage. Fehlende Pflichtangaben gezielt abfragen. KI-generierte 3D-Bilder sind nur Konzeptvorschauen nach Mass- und Raumpruefung und niemals Ersatz fuer das bestaetigte Gebaeudemodell oder eine technische Berechnung.',
     knowledgeSources: ['workspaces', 'energy-rules', 'customer-context'],
     allowedSkills: ['workspaces', 'energyTariffs', 'research', 'qonekto', 'selfImprovement'], modelProfile: 'chat', safetyDefault: 'liability', color: 'amber',
   },
@@ -56,9 +56,16 @@ export const AGENTS = {
     allowedSkills: ['crm', 'advice', 'research', 'qonekto', 'selfImprovement'], modelProfile: 'chat', safetyDefault: 'operational', color: 'rose',
   },
   'iva-knowledge': {
-    id: 'iva-knowledge', name: 'Wissen & Kurse', shortName: 'Wissen', enabled: false,
-    description: 'Versionierte Wissenspakete und Kursproduktion. Wird nach sicherem Quellenimport aktiviert.',
-    rolePrompt: null, knowledgeSources: [], allowedSkills: [], modelProfile: 'chat', safetyDefault: 'operational', color: 'slate',
+    id: 'iva-knowledge', name: 'Wissen & Kurse', shortName: 'Wissen', enabled: true,
+    description: 'Kuratierte Quellenmediathek mit Rechte-, Autoritaets- und Aktualitaetspruefung; Kursproduktion bleibt bis zur Quellenfreigabe getrennt.',
+    rolePrompt: 'Arbeite als Wissens-Agent. Nutze nur Quellen mit sichtbarer Herkunft, Rechtebasis und Versionsstand. Tool-Sammlungen sind nur Entdeckungsquellen. Kopiere keine geschuetzten Kurse oder Profile und erzeuge aus nicht-kommerziell lizenziertem Material kein Verkaufsprodukt. Fehlende Rechte bedeuten candidate-only.',
+    knowledgeSources: ['knowledge-library', 'project-docs', 'public-primary-sources'], allowedSkills: ['knowledgeLibrary', 'research', 'capabilityReview'], modelProfile: 'chat', safetyDefault: 'operational', color: 'indigo',
+  },
+  'iva-recruiting': {
+    id: 'iva-recruiting', name: 'Recruiting & Interviews', shortName: 'Recruiting', enabled: true,
+    description: 'Kandidatensuche vorbereiten, Lebenslaeufe belegt gegen Stellenkriterien pruefen und strukturierte Interviews erstellen.',
+    rolePrompt: 'Arbeite als Recruiting-Agent. Bewerte nur explizite jobrelevante Kriterien und nenne immer die Belegstelle oder die Datenluecke. Keine sensiblen Merkmale ableiten, keine autonome Absage/Zusage, kein Profil-Scraping und kein Massen-Outreach. LinkedIn-Suche wird vorbereitet und erst ueber einen offiziellen oder manuell bedienten Zugang ausgefuehrt.',
+    knowledgeSources: ['knowledge-library', 'job-criteria', 'candidate-provided-documents'], allowedSkills: ['recruiting', 'knowledgeLibrary', 'research', 'capabilityReview'], modelProfile: 'chat', safetyDefault: 'liability', color: 'teal',
   },
   'iva-builder': {
     id: 'iva-builder', name: 'Entwicklung & QA', shortName: 'Builder', enabled: false,
@@ -69,7 +76,9 @@ export const AGENTS = {
 
 const ROUTES = [
   { agentId: 'iva-accounting', reason: 'Buchhaltung erkannt', pattern: /\b(buchhaltung|beleg|rechnung|eür|steuerberater|umsatzsteuer|vorsteuer|bewirtung)\b/i },
+  { agentId: 'iva-customer', reason: 'LUMIT-Antrag/Backoffice erkannt', pattern: /\b(lumit|mannheimer|servicierter antrag|mdpool)\b/i },
   { agentId: 'iva-energy', reason: 'Energie/Vor-Ort erkannt', pattern: /\b(tmb|wärmepumpe|waermepumpe|heizlast|heizkörper|heizkoerper|photovoltaik|\bpv\b|förderrechner|foerderrechner|energieplan|grundriss|stromtarif|gasvertrag|gastarif|energypartner|tarifrechner)\b/i },
+  { agentId: 'iva-recruiting', reason: 'Recruiting/Interview erkannt', pattern: /\b(recruiting|recruiter|kandidat(?:in|en)?|bewerber(?:in|innen)?|lebenslauf|cv\b|stellenprofil|vorstellungsgespräch|vorstellungsgespraech|interviewleitfaden)\b/i },
   { agentId: 'iva-marketing', reason: 'Marketing/Growth erkannt', pattern: /\b(marketing|content|instagram|facebook|linkedin|kampagne|werbeanzeige|\bads?\b|reel|hashtag|mitbewerber|marktanalyse|leadgen|chancenradar)\b/i },
   { agentId: 'iva-sales', reason: 'Sales-Coaching erkannt', pattern: /\b(sales|closing|closer|einwand|verkaufsgespräch|verkaufsgespraech|redeanteil|abschlussfrage|gesprächscoach|gespraechscoach)\b/i },
   { agentId: 'iva-finance', reason: 'Beratung/Fachvergleich erkannt', pattern: /\b(finanzberatung|altersvorsorge(?:beratung|planung)?|depot(?:vergleich)?|hausratvergleich|vertragsvergleich|din 7723|versicherung vergleichen|beratungsakte|rentenberechnung|gkv-vergleich)\b/i },

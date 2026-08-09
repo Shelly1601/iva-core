@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node index.js",
+    "test:agents": "node scripts/verify-stufe1-3.mjs",
     "test:smoke": "node scripts/smoke.js",
     "test:tmb": "node scripts/verify-tmb.mjs",
     "test:workspaces": "node scripts/verify-workspaces.mjs",
@@ -18,13 +19,18 @@
     "test:corporate-benefits": "node scripts/verify-corporate-benefits.mjs",
     "test:presentations": "node scripts/verify-presentations.mjs",
     "test:energy": "node scripts/verify-energy-calculations.mjs",
+    "test:pv-price": "node scripts/verify-pv-price-calculator.mjs",
     "test:energy-tariffs": "node scripts/verify-energy-tariffs.mjs",
     "test:whatsapp": "node scripts/verify-whatsapp.mjs",
     "test:marketing": "node scripts/verify-marketing.mjs",
     "test:accounting": "node scripts/verify-accounting.mjs",
     "test:opportunities": "node scripts/verify-opportunities.mjs",
     "test:voice": "node scripts/verify-voice-lab.mjs",
-    "test:operations": "node scripts/verify-operations.mjs"
+    "test:operations": "node scripts/verify-operations.mjs",
+    "test:lumit": "node scripts/verify-lumit.mjs",
+    "test:capability-knowledge-recruiting": "node scripts/verify-capability-knowledge-recruiting.mjs",
+    "sample:lumit-package": "node scripts/generate-lumit-package-sample.mjs",
+    "test:all": "npm run test:agents && npm run test:operations && npm run test:qonekto && npm run test:qonekto-customers && npm run test:crm-qonekto && npm run test:lumit && npm run test:marketing && npm run test:whatsapp && npm run test:tmb && npm run test:workspaces && npm run test:advice && npm run test:corporate-benefits && npm run test:presentations && npm run test:energy && npm run test:pv-price && npm run test:energy-tariffs && npm run test:accounting && npm run test:opportunities && npm run test:voice && npm run test:capability-knowledge-recruiting"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.0.0",
@@ -36,6 +42,7 @@
     "imapflow": "^1.0.0",
     "node-cron": "^3.0.3",
     "node-ical": "^0.20.0",
+    "pdf-lib": "^1.17.1",
     "pdfkit": "^0.17.2",
     "unpdf": "^0.12.1",
     "zod": "^3.23.8"

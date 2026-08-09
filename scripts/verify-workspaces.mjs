@@ -8,6 +8,9 @@ process.env.DATA_DIR = testDir;
 
 try {
   const store = await import('../workspaces/store.js?verify=' + Date.now());
+  for (const kind of ['lumit-application', 'lumit-policy-original', 'lumit-brand-asset', 'lumit-customer-package']) {
+    assert.ok(store.FILE_KINDS.includes(kind), `LUMIT-Dateityp fehlt: ${kind}`);
+  }
   const created = await store.createWorkspace({
     mode: 'energie',
     title: 'Test Energieplanung',

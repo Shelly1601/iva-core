@@ -27,6 +27,10 @@ import { opportunitiesSkill } from './skills/opportunities.js';
 import { selfImprovementSkill } from './skills/self-improvement.js';
 import { accountingSkill } from './skills/accounting.js';
 import { energyTariffsSkill } from './skills/energy-tariffs.js';
+import { lumitSkill } from './skills/lumit.js';
+import { capabilityReviewSkill } from './skills/capability-review.js';
+import { knowledgeLibrarySkill } from './skills/knowledge-library.js';
+import { recruitingSkill } from './skills/recruiting.js';
 import { listAgents, routeAgent } from './agents/registry.js';
 import { marketAnalysis } from './marketing/market.js';
 import { fetchMetaAdsInsights, marketingConnectorStatus } from './marketing/connectors.js';
@@ -71,6 +75,9 @@ import {
 } from './opportunities/store.js';
 import { formatWeeklyPitch, scoreOpportunity } from './opportunities/score.js';
 import { opportunityRadarStatus, runOpportunityScout } from './opportunities/scout.js';
+import { evaluateCapability, listCapabilityReviews } from './capabilities/evaluator.js';
+import { assessKnowledgeSourceCandidate, knowledgeLibraryStatus, listKnowledgeLibrary } from './knowledge/library.js';
+import { createCandidateSearchPlan, createInterviewGuide, screenResumeAgainstCriteria } from './recruiting/assistant.js';
 import { calculateHeatLoad, calculateKfw458Funding, ENERGY_SOURCES } from './workspaces/energy-calculations.js';
 import { calculateHeatPumpElectricity, calculatePvPrice, pvPriceCatalog } from './workspaces/pv-price-calculator.js';
 import {
@@ -95,6 +102,18 @@ import {
   upsertQonektoCustomerAutomatically,
 } from './integrations/qonekto-customers.js';
 import { crmQonektoSyncStatus, runCrmQonektoSync } from './integrations/crm-qonekto-sync.js';
+import {
+  attachLumitCustomerPackage,
+  calculateLumitPriceQuote,
+  createLumitServicedApplication,
+  getLumitApplication,
+  listLumitApplications,
+  lumitWorkflowConfig,
+  markLumitApplicationStep,
+  suggestLumitStartDate,
+  validateLumitStartDate,
+} from './integrations/lumit.js';
+import { createLumitCustomerPackagePdf } from './integrations/lumit-package.js';
 import { extractWhatsAppMessages, sendWhatsAppText, verifyWhatsAppChallenge, verifyWhatsAppSignature, whatsappStatus } from './integrations/whatsapp.js';
 import {
   getWhatsAppHubMe,
@@ -108,7 +127,9 @@ import {
   createWhatsAppProfile,
   deleteWhatsAppProfile,
   listClaimIntakes,
+  listWhatsAppHandoffs,
   listWhatsAppProfiles,
+  updateWhatsAppHandoff,
   updateWhatsAppProfile,
 } from './integrations/whatsapp-store.js';
 import { adviceConnectorStatus, publicAdviceCatalog } from './advice/catalog.js';
@@ -421,6 +442,7 @@ Challenge- und Alternativen-Reflex:
 
 Tool-Nutzung:
 
+- Bevor du aus einem Reel, Profil, fremden Tool oder einer spontanen Idee eine neue IVA-Funktion oder einen neuen Agenten empfiehlst, MUSST du assessCapability aufrufen. Pruefe echten Zusatznutzen, bestehende Abdeckung, offiziellen Nachweis, Rechte, Kosten, Datenschutz und Sicherheitsfolgen. Ergebnis "integrate-existing" bedeutet: keinen neuen Agenten bauen. "needs-verification" oder "watch" bedeutet: noch nicht integrieren. Fremden Code, geschuetzte Texte oder Designs niemals kopieren; nur eigenstaendig implementierte Funktionsmuster uebernehmen.
 - Live-Daten oder Aktion nötig (Kalender, Mails, Leads, Todos, Kampagnen, Bilder, Qonekto/blau direkt): Tool sofort aufrufen. Nie "hätte ich Zugriff auf…", nie "soll ich mal nachsehen?" — machen und dann zusammenfassen.
 - Mehrere Quellen relevant (z. B. Kalender + Mails + Leads): parallel abrufen.
 - Fach-/Recherche-Anfragen: askArchitect mit der präzisen Frage. Der Router entscheidet zwischen knowledge (zeitloses Fachwissen zu Finanz/Versicherung/Vorsorge/Rente) und web-research (aktuelle öffentliche Fakten wie Gesetze, Grenzwerte, Beitragssätze, Freibeträge, Fördersätze, Produktdatenblätter, Versicherungsbedingungen, Preise, Nachrichten, Öffnungszeiten). Für JEDE aktuelle Zahl / jeden aktuellen Grenzwert PFLICHT diesen Router nutzen statt aus dem Kopf zu antworten. Für eigene Systeme (Kalender/Mails/CRM/Leads/Kampagnen/Todos/Bilder) stattdessen direkt das passende Tool.
@@ -479,6 +501,10 @@ const ALL_SKILLS = {
   accounting: accountingSkill({ listAccountingEntities, listAccountingDocuments, getAccountingDocument, accountingSummary }),
   energyTariffs: energyTariffsSkill({ workspaces, energyTariffStatus, prepareWorkspaceEnergyTariffRequest }),
   selfImprovement: selfImprovementSkill({ savePronunciationCorrection, saveCommunicationPreference, captureImprovementRequest, listVoiceLearning }),
+  lumit:      lumitSkill({ lumitWorkflowConfig, listLumitApplications, createLumitServicedApplication, markLumitApplicationStep }),
+  capabilityReview: capabilityReviewSkill({ evaluateCapability, listCapabilityReviews }),
+  knowledgeLibrary: knowledgeLibrarySkill({ listKnowledgeLibrary, knowledgeLibraryStatus, assessKnowledgeSourceCandidate }),
+  recruiting: recruitingSkill({ createCandidateSearchPlan, screenResumeAgainstCriteria, createInterviewGuide }),
   qonekto:   null, // wird pro Anfrage mit der echten sessionId erzeugt
 };
 
@@ -775,6 +801,7 @@ async function controlSnapshot() {
     connector('voice-input', 'Spracheingabe', Boolean(voiceResult.configured?.groq), ['GROQ_API_KEY'], 'Transkription mit Groq Whisper.'),
     connector('voice-output', 'IVA Stimme', Boolean(voiceResult.configured?.elevenLabs), ['ELEVENLABS_API_KEY'], 'Sprachausgabe mit ElevenLabs; eine feste Voice-ID ist optional.'),
     connector('qonekto', 'Qonekto / blau direkt', Boolean(qonektoResult.reachable), ['QONEKTO_MCP_TOKEN'], qonektoResult.reachable ? `${qonektoResult.toolCount || qonektoResult.tools?.total || 0} Werkzeuge erreichbar.` : (qonektoResult.error || 'Nicht erreichbar.')),
+    connector('lumit', 'Mannheimer LUMIT · servicierter Antrag', true, [], `Agentur ${lumitWorkflowConfig().agency.display} · Vermittler ${lumitWorkflowConfig().brokerNumber} · Nachprozess vorbereitet.`),
     connector('crm-goals', 'CRM · Goals & Concepts', envReady('MEINCRM_SERVICE_KEY', 'GOALS_CONCEPTS_PROJECT_ID'), ['MEINCRM_SERVICE_KEY', 'GOALS_CONCEPTS_PROJECT_ID'], `${projectIds} CRM-Projektzuordnungen hinterlegt.`),
     connector('crm-heathero', 'HeatHero CRM', envReady('HEATHERO_API_KEY'), ['HEATHERO_API_KEY'], 'Eigener Lead-Zugang.'),
     connector(
@@ -930,6 +957,170 @@ app.get('/api/qonekto/status', async (req, res) => {
 app.get('/api/qonekto/tools', async (req, res) => {
   try { res.json(await listQonektoTools({ search: String(req.query?.search || '').slice(0, 100) })); }
   catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// --- Mannheimer LUMIT: Onlineabschluss plus kontrollierter Nachprozess. ---
+app.get('/api/lumit/config', (_req, res) => res.json(lumitWorkflowConfig()));
+app.post('/api/lumit/price-quote', (req, res) => {
+  try { res.json(calculateLumitPriceQuote(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/lumit/start-date/suggestion', (req, res) => {
+  try {
+    const suggestion = suggestLumitStartDate(req.body || {});
+    const validation = req.body?.selectedDate
+      ? validateLumitStartDate(req.body || {})
+      : null;
+    res.json({ suggestion, validation });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/api/lumit/applications', async (req, res) => {
+  try {
+    res.json(await listLumitApplications({
+      customerId: String(req.query?.customerId || '').slice(0, 180),
+      status: String(req.query?.status || '').slice(0, 80),
+      limit: Math.min(Math.max(Number(req.query?.limit) || 100, 1), 500),
+    }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/lumit/applications/:id', async (req, res) => {
+  const application = await getLumitApplication(req.params.id);
+  res.status(application ? 200 : 404).json(application || { error: 'LUMIT-Vorgang nicht gefunden.' });
+});
+app.post('/api/lumit/applications', async (req, res) => {
+  try {
+    const application = await createLumitServicedApplication(req.body || {});
+    await recordAudit({
+      category: 'lumit',
+      action: 'servicierter-antrag-vorbereitet',
+      status: application.duplicate ? 'duplicate' : 'pending',
+      actor: 'iva-customer',
+      target: application.customerId,
+      detail: `${application.label} · ${application.applicationNumber || application.applicationFileName}`,
+    });
+    res.status(application.duplicate ? 200 : 201).json(application);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/lumit/applications/:id/customer-package', async (req, res) => {
+  try {
+    const application = await getLumitApplication(req.params.id);
+    if (!application) return res.status(404).json({ error: 'LUMIT-Vorgang nicht gefunden.' });
+    if (req.body?.policyReviewedByHauswertschutz !== true) {
+      return res.status(400).json({ error: 'Die Hauswertschutz-Pruefung der Originalpolice muss ausdruecklich bestaetigt werden.' });
+    }
+    const policy = await workspaces.readWorkspaceFile(application.workspaceId, String(req.body?.policyDocumentId || ''));
+    if (!policy || policy.meta?.mime !== 'application/pdf') return res.status(400).json({ error: 'Die Mannheimer-Originalpolice fehlt oder ist keine PDF.' });
+
+    if (req.body?.insurerLogoDocumentId) {
+      return res.status(400).json({ error: 'Auf Hauswertschutz-Markenseiten wird kein Versichererlogo eingebunden. Der Risikotraeger wird auf der Vertragsseite in Textform genannt.' });
+    }
+    const trustBadges = [];
+    const trustBadgeDocumentIds = Array.isArray(req.body?.trustBadgeDocumentIds)
+      ? req.body.trustBadgeDocumentIds.filter(Boolean).slice(0, 3)
+      : [];
+    for (const documentId of trustBadgeDocumentIds) {
+      const badge = await workspaces.readWorkspaceFile(application.workspaceId, String(documentId));
+      if (!badge || !['image/png', 'image/jpeg'].includes(badge.meta?.mime)) {
+        return res.status(400).json({ error: 'Trust-Badges müssen als PNG oder JPEG vorliegen.' });
+      }
+      trustBadges.push({ buffer: badge.buffer, mime: badge.meta.mime, name: badge.meta.name });
+    }
+
+    const pdf = await createLumitCustomerPackagePdf({
+      customerName: application.customerName,
+      policyNumber: req.body?.policyNumber,
+      totalPrice: req.body?.totalPrice,
+      insurancePremium: req.body?.insurancePremium,
+      serviceFee: req.body?.serviceFee,
+      billingPeriod: req.body?.billingPeriod,
+      servicePackageName: req.body?.servicePackageName,
+      customerSalutation: req.body?.customerSalutation,
+      insuredTechnologies: req.body?.insuredTechnologies,
+      propertyInsuranceIncluded: req.body?.propertyInsuranceIncluded === true,
+      propertyHazardsIncluded: req.body?.propertyHazardsIncluded === true,
+      yieldLossIncluded: req.body?.yieldLossIncluded === true,
+      operatorLiabilityIncluded: req.body?.operatorLiabilityIncluded === true,
+      assemblyCoverIncluded: req.body?.assemblyCoverIncluded === true,
+      officialScopeConfirmed: req.body?.officialScopeConfirmed === true,
+      servicePhone: '02183 3989753',
+      serviceEmail: 'info@hauswertschutz.de',
+      serviceAddress: 'Olfenweg 12, 41569 Rommerskirchen',
+      claimsWhatsapp: req.body?.claimsWhatsapp,
+      claimsEmail: req.body?.claimsEmail,
+      claimsAvailability: req.body?.claimsAvailability,
+      claimsServiceHours: req.body?.claimsServiceHours,
+      claimsChannelsReady: req.body?.claimsChannelsReady === true,
+      insuranceStartDate: application.requestedStartMode === 'immediate'
+        ? 'sofort / nächstmöglich'
+        : application.requestedStartDate,
+      originalPolicyBuffer: policy.buffer,
+      originalPolicyFileName: policy.meta.name,
+      trustBadges,
+    });
+    const safeCustomer = String(application.customerName || 'Kunde').normalize('NFKD').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 70) || 'Kunde';
+    const packageFile = await workspaces.storeWorkspaceFile(application.workspaceId, {
+      name: `Hauswertschutz-Energietechnik-Kundenpaket-${safeCustomer}.pdf`,
+      mime: 'application/pdf',
+      kind: 'lumit-customer-package',
+      buffer: pdf,
+    });
+    const updated = await attachLumitCustomerPackage(application.id, {
+      policyDocumentId: policy.meta.id,
+      policyFileName: policy.meta.name,
+      policySha256: policy.meta.sha256,
+      packageDocumentId: packageFile.id,
+      packageFileName: packageFile.name,
+      totalPrice: req.body?.totalPrice,
+      insurancePremium: req.body?.insurancePremium,
+      serviceFee: req.body?.serviceFee,
+      billingPeriod: req.body?.billingPeriod,
+      customerSalutation: req.body?.customerSalutation,
+      insuredTechnologies: req.body?.insuredTechnologies,
+      propertyInsuranceIncluded: req.body?.propertyInsuranceIncluded === true,
+      propertyHazardsIncluded: req.body?.propertyHazardsIncluded === true,
+      yieldLossIncluded: req.body?.yieldLossIncluded === true,
+      operatorLiabilityIncluded: req.body?.operatorLiabilityIncluded === true,
+      assemblyCoverIncluded: req.body?.assemblyCoverIncluded === true,
+      officialScopeConfirmed: req.body?.officialScopeConfirmed === true,
+      claimsWhatsapp: req.body?.claimsWhatsapp,
+      claimsEmail: req.body?.claimsEmail,
+      claimsAvailability: req.body?.claimsAvailability,
+      claimsServiceHours: req.body?.claimsServiceHours,
+      claimsChannelsReady: req.body?.claimsChannelsReady === true,
+      insurerLogoIncluded: false,
+      insurerLogoUsageApproved: false,
+      trustBadgeFileNames: trustBadges.length
+        ? trustBadges.map(item => item.name)
+        : lumitWorkflowConfig().customerPackage.defaultTrustBadges.map(item => item.name),
+      policyReviewedByHauswertschutz: true,
+    });
+    await recordAudit({
+      category: 'lumit', action: 'hauswertschutz-kundenpaket-erzeugt', status: 'review', actor: 'iva-customer',
+      target: application.customerId, detail: packageFile.name,
+    });
+    res.status(201).json({
+      application: updated,
+      file: packageFile,
+      downloadUrl: `/api/workspaces/${encodeURIComponent(application.workspaceId)}/files/${encodeURIComponent(packageFile.id)}`,
+      automaticCustomerDelivery: false,
+      approvalRequired: true,
+    });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.patch('/api/lumit/applications/:id/steps/:step', async (req, res) => {
+  try {
+    const application = await markLumitApplicationStep(req.params.id, req.params.step, req.body?.completed !== false);
+    if (!application) return res.status(404).json({ error: 'LUMIT-Vorgang nicht gefunden.' });
+    await recordAudit({
+      category: 'lumit',
+      action: req.params.step,
+      status: application.steps?.[req.params.step] ? 'completed' : 'reopened',
+      actor: 'iva-customer',
+      target: application.customerId,
+      detail: application.applicationNumber || application.applicationFileName,
+    });
+    res.json(application);
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // --- Kundenportal: Qonekto/Blau direkt ist Stammdatenquelle, IVA die Arbeitsakte. ---
@@ -1277,6 +1468,35 @@ app.post('/api/marketing/reports', async (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// --- Nutzenpruefung: neue Tools/Agenten erst nach Beleg-, Doppelungs- und Rechtecheck ---
+app.get('/api/capabilities/reviews', (req, res) => res.json({ reviews: listCapabilityReviews({ category: String(req.query?.category || ''), decision: String(req.query?.decision || '') }) }));
+app.post('/api/capabilities/assess', (req, res) => {
+  try { res.json(evaluateCapability(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// --- Wissensmediathek: kuratierte Quellen statt ungepruefter Volltextsammlung ---
+app.get('/api/knowledge-library/status', (_req, res) => res.json(knowledgeLibraryStatus()));
+app.get('/api/knowledge-library', (req, res) => res.json({ sources: listKnowledgeLibrary({ domain: String(req.query?.domain || ''), status: String(req.query?.status || '') }) }));
+app.post('/api/knowledge-library/assess', (req, res) => {
+  try { res.json(assessKnowledgeSourceCandidate(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// --- Recruiting: Vorbereitung und Belegpruefung, ohne autonomes Sourcing/Entscheiden ---
+app.post('/api/recruiting/search-plan', (req, res) => {
+  try { res.json(createCandidateSearchPlan(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/recruiting/screen-resume', (req, res) => {
+  try { res.json(screenResumeAgainstCriteria(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/recruiting/interview-guide', (req, res) => {
+  try { res.json(createInterviewGuide(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // --- Chancen-Agent: Instagram-Signale -> Quellencheck -> Potenzialranking ---
 app.get('/api/opportunities/status', async (_req, res) => res.json(await opportunityRadarStatus()));
 app.get('/api/opportunities/settings', async (_req, res) => res.json(await getOpportunitySettings()));
@@ -1358,6 +1578,13 @@ app.patch('/api/whatsapp/profiles/:id', async (req, res) => {
 });
 app.delete('/api/whatsapp/profiles/:id', async (req, res) => res.json({ ok: await deleteWhatsAppProfile(req.params.id) }));
 app.get('/api/whatsapp/claims', async (req, res) => res.json(await listClaimIntakes({ status: String(req.query?.status || ''), limit: req.query?.limit })));
+app.get('/api/whatsapp/handoffs', async (req, res) => res.json(await listWhatsAppHandoffs({ status: String(req.query?.status || ''), limit: req.query?.limit })));
+app.patch('/api/whatsapp/handoffs/:id', async (req, res) => {
+  try {
+    const ticket = await updateWhatsAppHandoff(req.params.id, req.body || {});
+    res.status(ticket ? 200 : 404).json(ticket || { error: 'not found' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 app.post('/api/whatsapp/simulate', async (req, res) => {
   try {
     res.json(await handleWhatsAppMessage({

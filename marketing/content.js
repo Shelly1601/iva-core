@@ -56,7 +56,8 @@ export async function generateContent(campaign, brand, { briefing = '', count = 
 ${brandBlock ? brandBlock + '\n' : ''}${profile ? 'Gelerntes Muster-Profil der Vorbild-Konten:\n' + profile + '\n' : (refs ? 'Vorbild-Konten: ' + refs + '\n' : '')}
 ${formatSpec(format, count)}
 
-Alles auf Deutsch, sofort verwendbar, keine Vorrede. Richte dich strikt nach Zielgruppe und Tonalitaet der Marke.`;
+Alles auf Deutsch, sofort verwendbar, keine Vorrede. Richte dich strikt nach Zielgruppe und Tonalitaet der Marke.
+Referenz-Konten liefern nur abstrakte Muster wie Hook-Struktur, Rhythmus, Informationsdichte und visuelle Hierarchie. Uebernimm niemals konkrete Saetze, Claims, Bildkompositionen, Logos, Figuren oder geschuetzte Designs. Logo-/Bild-Transitionen und 3D-Assets sind nur optionale Mittel, wenn sie die Botschaft wirklich verstaendlicher machen. Nenne keine Erfolgs-, Gratis- oder Unbegrenzt-Behauptung ohne belegte Primarquelle.`;
 
   const userPrompt = briefing ? `Meine Vorgabe: ${briefing}` : `Erzeuge ${count} starke Ideen im gelernten Stil.`;
   const { text } = await generateText({ model: anthropic(model), system, prompt: userPrompt });

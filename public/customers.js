@@ -7,6 +7,8 @@ const state = {
   current: null,
   currentWorkspace: null,
   references: null,
+  lumitConfig: null,
+  lumitApplication: null,
   prepared: null,
   sessionId: localStorage.getItem(LS_SESSION) || (globalThis.crypto?.randomUUID?.() || `customers-${Date.now()}`),
 };
@@ -270,6 +272,7 @@ function renderDetail(detail, listId) {
         <button class="service" id="messageCompanyBtn" ${contracts.length ? '' : 'disabled'}><b>✉ Gesellschaft anschreiben</b><small>Vertragsbezogenen Entwurf anlegen</small></button>
         <button class="service" id="uploadDocumentBtn"><b>↑ Dokument ablegen</b><small>PDF oder Bild in die IVA-Akte</small></button>
         <button class="service" id="newConsultationBtn"><b>◌ Beratung starten</b><small>Mit diesem Kunden vorausfüllen</small></button>
+        <button class="service" id="lumitApplicationBtn" ${sourceIsLocal ? 'disabled' : ''}><b>☀ LUMIT-Antrag</b><small>Online abschließen und als servicierten Antrag übernehmen</small></button>
       </div></section>
       <section class="card full"><h2>Verträge <span class="tag">Blau Direkt</span></h2>${contractRows(contracts)}</section>
       <section class="card"><h2>IVA-Arbeitsnotizen <span class="tag">nur deine Akte</span></h2><div class="note-list">${localNotes.length ? localNotes.slice().reverse().map(note => `<div class="note"><b>${escapeHtml(note.text)}</b><small>${escapeHtml(note.source || 'manual')} · ${escapeHtml(new Date(note.createdAt).toLocaleString('de-DE'))}</small></div>`).join('') : '<div class="empty-card">Noch keine IVA-Notizen.</div>'}</div><div class="composer"><textarea id="noteDraft" placeholder="Notiz, Wiedervorlage oder nächsten Schritt eintragen …"></textarea><button class="btn primary" id="saveNoteBtn">Speichern</button></div></section>
@@ -336,6 +339,7 @@ function bindDetailEvents(listId) {
   $('messageCompanyBtn')?.addEventListener('click', openMessageDialog);
   $('uploadDocumentBtn')?.addEventListener('click', () => $('documentInput').click());
   $('newConsultationBtn')?.addEventListener('click', openConsultation);
+  $('lumitApplicationBtn')?.addEventListener('click', openLumitDialog);
   $('saveNoteBtn')?.addEventListener('click', saveNote);
   document.querySelectorAll('.open-file').forEach(button => button.addEventListener('click', () => openLocalFile(button.dataset.fileId)));
 }
@@ -424,6 +428,220 @@ async function saveMessageDraft() {
     renderDetail(state.current.detail, state.current.listId);
     showNotice('Der Gesellschaftsentwurf ist sicher in der Kundenakte gespeichert. Es wurde noch nichts versendet.', 'success');
   } catch (error) { showNotice(`Entwurf konnte nicht gespeichert werden: ${error.message}`, 'error'); }
+}
+
+async function loadLumitConfig() {
+  if (!state.lumitConfig) state.lumitConfig = await api('/api/lumit/config');
+  return state.lumitConfig;
+}
+
+async function openLumitDialog() {
+  try {
+    const config = await loadLumitConfig();
+    state.lumitApplication = null;
+    $('lumitStartMode').value = 'immediate';
+    $('lumitRequestedStartDate').value = new Date().toLocaleDateString('sv-SE');
+    $('lumitRequestedStartDate').disabled = true;
+    $('lumitOperationalReadinessDate').value = '';
+    $('lumitApplicationNumber').value = '';
+    $('lumitApplicationPdf').value = '';
+    $('lumitCompletionConfirmed').checked = false;
+    $('lumitAgencyConfirmed').checked = false;
+    $('lumitBrokerConfirmed').checked = false;
+    $('lumitDigitalDeliveryConsent').checked = false;
+    $('lumitAgency').textContent = config.agency.display;
+    $('lumitBroker').textContent = config.brokerNumber;
+    $('lumitEmail').textContent = config.submissionEmail;
+    $('lumitResult').hidden = true;
+    $('lumitResult').innerHTML = '';
+    $('lumitPolicyPdf').value = '';
+    $('lumitPolicyNumber').value = '';
+    $('lumitTotalPrice').value = '';
+    $('lumitInsurancePremium').value = '';
+    $('lumitServiceFee').value = '';
+    $('lumitCustomerSalutation').value = 'neutral';
+    $('lumitInsuredTechnologies').value = '';
+    $('lumitPropertyInsuranceIncluded').checked = false;
+    $('lumitPropertyHazardsIncluded').checked = false;
+    $('lumitYieldLossIncluded').checked = false;
+    $('lumitOperatorLiabilityIncluded').checked = false;
+    $('lumitAssemblyCoverIncluded').checked = false;
+    $('lumitTrustBadge1').value = '';
+    $('lumitTrustBadge2').value = '';
+    $('lumitPolicyReviewed').checked = false;
+    $('lumitPackageResult').hidden = true;
+    $('lumitPackageResult').innerHTML = '';
+    const customer = currentCustomer();
+    if (customer?.id) {
+      const existing = await api(`/api/lumit/applications?customerId=${encodeURIComponent(customer.id)}&limit=1`);
+      state.lumitApplication = existing?.[0] || null;
+    }
+    renderLumitPackageSection();
+    $('lumitDialog').showModal();
+  } catch (error) { showNotice(`LUMIT-Ablauf konnte nicht geladen werden: ${error.message}`, 'error'); }
+}
+
+function renderLumitPackageSection() {
+  const application = state.lumitApplication;
+  const section = $('lumitPackageSection');
+  section.hidden = !application;
+  if (!application) return;
+  $('lumitPackageApplication').textContent = `${application.label} · ${application.applicationNumber || application.applicationFileName}`;
+  const result = $('lumitPackageResult');
+  const packageDocument = application.customerPackage;
+  $('approveLumitCustomerPackage').hidden = !packageDocument?.documentId || application.steps?.customerPackageApproved === true;
+  if (!packageDocument?.documentId) return;
+  result.hidden = false;
+  result.innerHTML = '';
+  const status = document.createElement('strong');
+  status.textContent = application.steps?.customerPackageApproved ? 'Kundenpaket geprüft und freigegeben.' : 'Kundenpaket erstellt – Freigabe noch offen.';
+  const note = document.createElement('p');
+  note.textContent = 'Die Mannheimer-Originalpolice ist unverändert enthalten und bleibt zusätzlich separat in der Kundenakte. Es wurde nichts an den Kunden versendet.';
+  const download = document.createElement('a');
+  download.className = 'btn';
+  download.target = '_blank';
+  download.rel = 'noopener';
+  download.href = `/api/workspaces/${encodeURIComponent(application.workspaceId)}/files/${encodeURIComponent(packageDocument.documentId)}`;
+  download.textContent = 'Gesamtdokument prüfen';
+  result.append(status, note, download);
+}
+
+async function openLumitCalculator() {
+  try {
+    const config = await loadLumitConfig();
+    window.open(config.calculatorUrl, '_blank', 'noopener');
+  } catch (error) { showNotice(`Mannheimer-Rechner konnte nicht geöffnet werden: ${error.message}`, 'error'); }
+}
+
+async function createLumitPostProcess() {
+  const customer = currentCustomer();
+  const file = $('lumitApplicationPdf').files?.[0];
+  if (!customer?.id) return showNotice('Der Kunde muss zuerst in Qonekto/Blau Direkt angelegt sein.', 'error');
+  if (!file || file.type !== 'application/pdf') return showNotice('Bitte das nach Abschluss erzeugte Antrags-PDF auswählen.', 'error');
+  if (!$('lumitCompletionConfirmed').checked || !$('lumitAgencyConfirmed').checked || !$('lumitBrokerConfirmed').checked || !$('lumitDigitalDeliveryConsent').checked) {
+    return showNotice('Bitte Onlineabschluss, Nummern und Einwilligung zur digitalen Policenzustellung vollständig kontrollieren.', 'error');
+  }
+  $('createLumitPostProcess').disabled = true;
+  try {
+    const workspace = await ensureWorkspace(customer);
+    const query = new URLSearchParams({ kind: 'lumit-application', name: file.name, mime: 'application/pdf' });
+    const uploadResponse = await fetch(`/api/workspaces/${workspace.id}/files?${query}`, {
+      method: 'POST', headers: headers({ 'Content-Type': 'application/pdf' }), body: file,
+    });
+    const storedFile = await uploadResponse.json().catch(() => null);
+    if (!uploadResponse.ok) throw new Error(storedFile?.error || `PDF-Upload HTTP ${uploadResponse.status}`);
+
+    const application = await api('/api/lumit/applications', {
+      method: 'POST',
+      body: JSON.stringify({
+        customerId: customer.id,
+        customerName: customer.name,
+        workspaceId: workspace.id,
+        applicationDocumentId: storedFile.id,
+        applicationFileName: storedFile.name,
+        applicationNumber: clean($('lumitApplicationNumber').value),
+        requestedStartMode: clean($('lumitStartMode').value),
+        requestedStartDate: clean($('lumitRequestedStartDate').value),
+        operationalReadinessDate: clean($('lumitOperationalReadinessDate').value),
+        completionConfirmed: true,
+        agencyNumberConfirmed: true,
+        brokerNumberConfirmed: true,
+        policyDigitalDeliveryConsentConfirmed: true,
+      }),
+    });
+    state.lumitApplication = application;
+    state.currentWorkspace = await api(`/api/workspaces/${workspace.id}`);
+    const result = $('lumitResult');
+    result.hidden = false;
+    result.innerHTML = '';
+    const title = document.createElement('strong');
+    title.textContent = application.duplicate ? 'Dieser Nachprozess war bereits angelegt.' : 'IVA-Nachprozess wurde angelegt.';
+    const copy = document.createElement('p');
+    copy.textContent = `Noch offen: E-Mail an ${application.submissionEmail}, Anlage als „${application.label}“, PDF-Upload und Bestätigung des digitalen Policenwegs. Nach Policeneingang folgen Hauswertschutz-Prüfung, Kundenpaket und deine ausdrückliche Freigabe. IVA leitet nichts automatisch an den Kunden weiter.`;
+    const mail = document.createElement('a');
+    mail.className = 'btn';
+    mail.href = application.handoff.mailto;
+    mail.textContent = 'E-Mail-Entwurf öffnen';
+    result.append(title, copy, mail);
+    renderLumitPackageSection();
+    renderDetail(state.current.detail, state.current.listId);
+    showNotice('LUMIT-PDF gespeichert und Nachprozess vorbereitet. E-Mail und Blau-direkt-Anlage sind noch offen.', 'success');
+  } catch (error) { showNotice(`LUMIT-Nachprozess konnte nicht angelegt werden: ${error.message}`, 'error'); }
+  finally { $('createLumitPostProcess').disabled = false; }
+}
+
+async function uploadLumitWorkspaceFile(workspaceId, file, kind) {
+  const query = new URLSearchParams({ kind, name: file.name, mime: file.type || 'application/octet-stream' });
+  const response = await fetch(`/api/workspaces/${workspaceId}/files?${query}`, {
+    method: 'POST', headers: headers({ 'Content-Type': file.type || 'application/octet-stream' }), body: file,
+  });
+  const stored = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(stored?.error || `Datei-Upload HTTP ${response.status}`);
+  return stored;
+}
+
+async function createLumitCustomerPackage() {
+  const application = state.lumitApplication;
+  const policy = $('lumitPolicyPdf').files?.[0];
+  const trustBadgeFiles = [$('lumitTrustBadge1').files?.[0], $('lumitTrustBadge2').files?.[0]].filter(Boolean);
+  if (!application?.id) return showNotice('Zuerst muss der servicierte LUMIT-Antrag angelegt sein.', 'error');
+  if (!policy || policy.type !== 'application/pdf') return showNotice('Bitte die unveränderte Mannheimer-Originalpolice als PDF auswählen.', 'error');
+  if (!clean($('lumitInsuredTechnologies').value)) return showNotice('Bitte die in der Police versicherte Energietechnik eintragen.', 'error');
+  if (!$('lumitPolicyReviewed').checked) return showNotice('Bitte die Hauswertschutz-Prüfung der Police ausdrücklich bestätigen.', 'error');
+  if (!$('lumitOfficialScopeConfirmed').checked) return showNotice('Bitte den konkreten Versicherungsumfang mit Police und besonderen Vereinbarungen abgleichen und bestätigen.', 'error');
+  $('createLumitCustomerPackage').disabled = true;
+  try {
+    const policyStored = await uploadLumitWorkspaceFile(application.workspaceId, policy, 'lumit-policy-original');
+    const trustBadgeStored = [];
+    for (const badge of trustBadgeFiles) trustBadgeStored.push(await uploadLumitWorkspaceFile(application.workspaceId, badge, 'lumit-brand-asset'));
+    const packageResult = await api(`/api/lumit/applications/${encodeURIComponent(application.id)}/customer-package`, {
+      method: 'POST',
+      body: JSON.stringify({
+        policyDocumentId: policyStored.id,
+        policyReviewedByHauswertschutz: true,
+        policyNumber: clean($('lumitPolicyNumber').value),
+        totalPrice: clean($('lumitTotalPrice').value),
+        insurancePremium: clean($('lumitInsurancePremium').value),
+        serviceFee: clean($('lumitServiceFee').value),
+        billingPeriod: clean($('lumitBillingPeriod').value),
+        servicePackageName: clean($('lumitServicePackageName').value),
+        customerSalutation: clean($('lumitCustomerSalutation').value),
+        claimsWhatsapp: clean($('lumitClaimsWhatsapp').value),
+        claimsEmail: clean($('lumitClaimsEmail').value),
+        claimsAvailability: clean($('lumitClaimsAvailability').value),
+        claimsServiceHours: clean($('lumitClaimsServiceHours').value),
+        claimsChannelsReady: $('lumitClaimsChannelsReady').checked,
+        insuredTechnologies: clean($('lumitInsuredTechnologies').value),
+        propertyInsuranceIncluded: $('lumitPropertyInsuranceIncluded').checked,
+        propertyHazardsIncluded: $('lumitPropertyHazardsIncluded').checked,
+        yieldLossIncluded: $('lumitYieldLossIncluded').checked,
+        operatorLiabilityIncluded: $('lumitOperatorLiabilityIncluded').checked,
+        assemblyCoverIncluded: $('lumitAssemblyCoverIncluded').checked,
+        officialScopeConfirmed: $('lumitOfficialScopeConfirmed').checked,
+        trustBadgeDocumentIds: trustBadgeStored.map(item => item.id),
+      }),
+    });
+    state.lumitApplication = packageResult.application;
+    state.currentWorkspace = await api(`/api/workspaces/${application.workspaceId}`);
+    renderLumitPackageSection();
+    renderDetail(state.current.detail, state.current.listId);
+    showNotice('Hauswertschutz-Gesamtdokument erstellt. Es ist noch nicht freigegeben und wurde nicht versendet.', 'success');
+  } catch (error) { showNotice(`Kundenpaket konnte nicht erstellt werden: ${error.message}`, 'error'); }
+  finally { $('createLumitCustomerPackage').disabled = false; }
+}
+
+async function approveLumitCustomerPackage() {
+  const application = state.lumitApplication;
+  if (!application?.customerPackage?.documentId) return showNotice('Es gibt noch kein Kundenpaket zur Freigabe.', 'error');
+  $('approveLumitCustomerPackage').disabled = true;
+  try {
+    state.lumitApplication = await api(`/api/lumit/applications/${encodeURIComponent(application.id)}/steps/customerPackageApproved`, {
+      method: 'PATCH', body: JSON.stringify({ completed: true }),
+    });
+    renderLumitPackageSection();
+    showNotice('Kundenpaket freigegeben. IVA hat es weiterhin nicht automatisch versendet.', 'success');
+  } catch (error) { showNotice(`Freigabe fehlgeschlagen: ${error.message}`, 'error'); }
+  finally { $('approveLumitCustomerPackage').disabled = false; }
 }
 
 async function loadReferences() {
@@ -553,6 +771,15 @@ $('saveLocalCustomer').addEventListener('click', saveLocalCustomer);
 $('prepareCreateCustomer').addEventListener('click', prepareCreateCustomer);
 $('prepareAddress').addEventListener('click', prepareAddress);
 $('saveMessageDraft').addEventListener('click', saveMessageDraft);
+$('openLumitCalculator').addEventListener('click', openLumitCalculator);
+$('lumitStartMode').addEventListener('change', event => {
+  const specified = event.target.value === 'specified-date';
+  $('lumitRequestedStartDate').disabled = !specified;
+  if (!$('lumitRequestedStartDate').value) $('lumitRequestedStartDate').value = new Date().toLocaleDateString('sv-SE');
+});
+$('createLumitPostProcess').addEventListener('click', createLumitPostProcess);
+$('createLumitCustomerPackage').addEventListener('click', createLumitCustomerPackage);
+$('approveLumitCustomerPackage').addEventListener('click', approveLumitCustomerPackage);
 $('executeConfirm').addEventListener('click', executePreparedAction);
 $('cancelConfirm').addEventListener('click', cancelPreparedAction);
 $('closeConfirm').addEventListener('click', cancelPreparedAction);

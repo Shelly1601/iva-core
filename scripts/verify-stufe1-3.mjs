@@ -5,16 +5,26 @@
 //  4) Ein echter Anthropic-Call via Router (ohne Tools, minimaler Prompt)
 //  5) Persistenz: recordUsage schreibt Datei, addiert bei zweitem Call
 //  6) Ungueltiges IVA_MODEL_<TASK> wirft klaren Fehler (kein stiller Fallback)
+import 'dotenv/config';
 import fs from 'fs/promises';
-import { chooseModel, listTasks, listModels, inspectRouting, recordUsage, currentSpendEUR } from '../core/router.js';
-import { AGENTS, getAgent, listAgents } from '../agents/registry.js';
-import { memorySkill, memorySkillMeta } from '../skills/memory.js';
-import { calendarSkill, calendarSkillMeta } from '../skills/calendar.js';
-import { mailsSkill, mailsSkillMeta } from '../skills/mails.js';
-import { crmSkill, crmSkillMeta } from '../skills/crm.js';
-import { marketingSkill, marketingSkillMeta } from '../skills/marketing.js';
-import { researchSkill, researchSkillMeta } from '../skills/research.js';
+import os from 'os';
+import path from 'path';
 import { generateText } from 'ai';
+
+// Router-Persistenz muss im Test in einem Wegwerfverzeichnis landen. Der Wert
+// wird vor dem dynamischen Router-Import gesetzt, weil der Router DATA_DIR beim
+// Laden des Moduls bindet.
+const TEST_DATA_DIR = await fs.mkdtemp(path.join(os.tmpdir(), 'iva-router-test-'));
+process.env.DATA_DIR = TEST_DATA_DIR;
+
+const { chooseModel, listTasks, listModels, inspectRouting, recordUsage, currentSpendEUR } = await import('../core/router.js');
+const { AGENTS, getAgent, listAgents, routeAgent } = await import('../agents/registry.js');
+const { memorySkill } = await import('../skills/memory.js');
+const { calendarSkill } = await import('../skills/calendar.js');
+const { mailsSkill } = await import('../skills/mails.js');
+const { crmSkill } = await import('../skills/crm.js');
+const { marketingSkill } = await import('../skills/marketing.js');
+const { researchSkill } = await import('../skills/research.js');
 
 const BASELINE = [
   'createTodo', 'completeTodo', 'remember',
@@ -86,9 +96,14 @@ eq('  Standard-Agent existiert', getAgent('iva-standard').id, 'iva-standard');
 eq('  iva-marketing enabled', AGENTS['iva-marketing'].enabled, true);
 eq('  iva-finance enabled', AGENTS['iva-finance'].enabled, true);
 eq('  iva-sales enabled', AGENTS['iva-sales'].enabled, true);
+eq('  iva-knowledge enabled', AGENTS['iva-knowledge'].enabled, true);
+eq('  iva-recruiting enabled', AGENTS['iva-recruiting'].enabled, true);
 eq('  getAgent(disabled) -> iva-standard (kein Aktivierungs-Bypass)', getAgent('iva-builder').id, 'iva-standard');
 eq('  getAgent(unbekannt) -> iva-standard', getAgent('does-not-exist').id, 'iva-standard');
-eq('  iva-standard allowedSkills', getAgent('iva-standard').allowedSkills, ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'selfImprovement', 'qonekto']);
+eq('  iva-standard allowedSkills', getAgent('iva-standard').allowedSkills, ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'qonekto', 'lumit', 'capabilityReview', 'knowledgeLibrary', 'recruiting']);
+eq('  LUMIT routet zu Kunden/Backoffice', routeAgent('LUMIT als servicierter Antrag anlegen').agent.id, 'iva-customer');
+truthy('  Kunden-Agent besitzt LUMIT-Skill', getAgent('iva-customer').allowedSkills.includes('lumit'));
+eq('  Recruiting-Anfrage routet zum Recruiting-Agent', routeAgent('Bitte Lebenslauf fuer das Vorstellungsgespraech pruefen').agent.id, 'iva-recruiting');
 eq('  iva-standard modelProfile', getAgent('iva-standard').modelProfile, 'chat');
 
 console.log('\n[4] Echter LLM-Call via Router (chat-Profil, ohne Tools)');
@@ -120,7 +135,7 @@ try {
   const spend1 = await currentSpendEUR();
   const r = chooseModel({ task: 'route' });
   await recordUsage(r, { promptTokens: 1000, completionTokens: 200 });
-  const dataDir = process.env.DATA_DIR || '/data';
+  const dataDir = process.env.DATA_DIR;
   const raw = JSON.parse(await fs.readFile(dataDir + '/model-usage.json', 'utf8'));
   const monthKey = new Date().getUTCFullYear() + '-' + String(new Date().getUTCMonth() + 1).padStart(2, '0');
   const month = raw.months?.[monthKey];
@@ -150,4 +165,5 @@ try {
 }
 
 console.log('\n' + (fails === 0 ? 'ALLE TESTS PASS' : `${fails} FAIL(S)`));
-process.exit(fails === 0 ? 0 : 1);
+await fs.rm(TEST_DATA_DIR, { recursive: true, force: true });
+process.exitCode = fails === 0 ? 0 : 1;

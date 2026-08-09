@@ -4,10 +4,11 @@ import fs from 'fs/promises';
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const FILE = DATA_DIR + '/whatsapp.json';
 const MODES = ['lead', 'service', 'hybrid'];
+const HANDOFF_STATUSES = new Set(['open', 'in-progress', 'resolved']);
 let writeQueue = Promise.resolve();
 
 function initialData() {
-  return { profiles: [], conversations: {}, claimIntakes: [] };
+  return { version: 2, profiles: [], conversations: {}, claimIntakes: [], handoffTickets: [] };
 }
 
 function clean(value, max = 2000) {
@@ -18,6 +19,8 @@ function normalizeAnswers(value) {
   return (Array.isArray(value) ? value : []).slice(0, 100).map(item => ({
     question: clean(item?.question, 500),
     answer: clean(item?.answer, 2000),
+    source: clean(item?.source, 1000),
+    verifiedAt: clean(item?.verifiedAt, 60),
   })).filter(item => item.question && item.answer);
 }
 
@@ -34,6 +37,8 @@ export function normalizeWhatsAppProfile(input = {}, current = {}) {
     objective: clean(input.objective, 1000) || (input.objective === '' ? '' : current.objective || 'Passenden Termin vereinbaren'),
     welcomeText: clean(input.welcomeText, 2000) || (input.welcomeText === '' ? '' : current.welcomeText || ''),
     handoffText: clean(input.handoffText, 2000) || (input.handoffText === '' ? '' : current.handoffText || 'Ich gebe das sicherheitshalber persönlich weiter.'),
+    handoffOwner: clean(input.handoffOwner, 200) || (input.handoffOwner === '' ? '' : current.handoffOwner || ''),
+    handoffSlaMinutes: Math.max(15, Math.min(10_080, Number(input.handoffSlaMinutes ?? current.handoffSlaMinutes) || 240)),
     requireCustomerMatch: input.requireCustomerMatch === undefined ? (current.requireCustomerMatch ?? true) : input.requireCustomerMatch !== false,
     answers: input.answers === undefined ? (current.answers || []) : normalizeAnswers(input.answers),
     createdAt: current.createdAt || new Date().toISOString(),
@@ -44,7 +49,12 @@ export function normalizeWhatsAppProfile(input = {}, current = {}) {
 async function load() {
   try {
     const data = JSON.parse(await fs.readFile(FILE, 'utf8'));
-    return { ...initialData(), ...data, profiles: Array.isArray(data.profiles) ? data.profiles : [], conversations: data.conversations || {}, claimIntakes: Array.isArray(data.claimIntakes) ? data.claimIntakes : [] };
+    return {
+      ...initialData(), ...data, version: 2,
+      profiles: Array.isArray(data.profiles) ? data.profiles : [], conversations: data.conversations || {},
+      claimIntakes: Array.isArray(data.claimIntakes) ? data.claimIntakes : [],
+      handoffTickets: Array.isArray(data.handoffTickets) ? data.handoffTickets : [],
+    };
   } catch { return initialData(); }
 }
 
@@ -115,13 +125,13 @@ function conversationKey(profileId, sender) {
 
 export async function getWhatsAppConversation(profileId, sender) {
   const key = conversationKey(profileId, sender);
-  return (await load()).conversations[key] || { key, profileId, sender, messages: [], customerId: '', claimIntakeId: '', humanHandoff: false };
+  return (await load()).conversations[key] || { key, profileId, sender, messages: [], customerId: '', claimIntakeId: '', handoffTicketId: '', humanHandoff: false };
 }
 
 export async function appendWhatsAppMessages(profileId, sender, messages = [], patch = {}) {
   return mutate(data => {
     const key = conversationKey(profileId, sender);
-    const current = data.conversations[key] || { key, profileId, sender, messages: [], customerId: '', claimIntakeId: '', humanHandoff: false, createdAt: new Date().toISOString() };
+    const current = data.conversations[key] || { key, profileId, sender, messages: [], customerId: '', claimIntakeId: '', handoffTicketId: '', humanHandoff: false, createdAt: new Date().toISOString() };
     const additions = (Array.isArray(messages) ? messages : []).map(item => ({
       role: item.role === 'assistant' ? 'assistant' : 'user',
       text: clean(item.text, 6000),
@@ -158,4 +168,52 @@ export async function listClaimIntakes({ status = '', limit = 100 } = {}) {
     .filter(item => !status || item.status === status)
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
     .slice(0, Math.min(Math.max(Number(limit) || 100, 1), 500));
+}
+
+export async function createOrUpdateWhatsAppHandoff({ id = '', profileId, sender, customerId = '', owner = '', slaMinutes = 240, reasons = [], priority = 'normal', lastMessage = '' } = {}) {
+  return mutate(data => {
+    let ticket = data.handoffTickets.find(item => id && item.id === id && item.status !== 'resolved');
+    if (!ticket) ticket = data.handoffTickets.find(item => item.profileId === profileId && item.sender === sender && item.status !== 'resolved');
+    const now = new Date();
+    if (!ticket) {
+      ticket = {
+        id: crypto.randomUUID(), profileId, sender, customerId, owner: clean(owner, 200), status: 'open',
+        priority: priority === 'high' ? 'high' : 'normal', reasons: [], trace: [],
+        dueAt: new Date(now.getTime() + Math.max(15, Math.min(10_080, Number(slaMinutes) || 240)) * 60_000).toISOString(),
+        createdAt: now.toISOString(),
+      };
+      data.handoffTickets.push(ticket);
+    }
+    ticket.customerId = customerId || ticket.customerId;
+    ticket.owner = clean(owner, 200) || ticket.owner;
+    ticket.priority = priority === 'high' ? 'high' : ticket.priority;
+    ticket.reasons = [...new Set([...(ticket.reasons || []), ...((Array.isArray(reasons) ? reasons : []).map(item => clean(item, 100)).filter(Boolean))])];
+    if (lastMessage) ticket.trace.push({ at: now.toISOString(), message: clean(lastMessage, 1000) });
+    ticket.trace = ticket.trace.slice(-30);
+    ticket.updatedAt = now.toISOString();
+    return { ...ticket };
+  });
+}
+
+export async function listWhatsAppHandoffs({ status = '', limit = 100 } = {}) {
+  return (await load()).handoffTickets
+    .filter(item => !status || item.status === status)
+    .sort((a, b) => String(a.dueAt).localeCompare(String(b.dueAt)))
+    .slice(0, Math.min(Math.max(Number(limit) || 100, 1), 500));
+}
+
+export async function updateWhatsAppHandoff(id, patch = {}) {
+  return mutate(data => {
+    const ticket = data.handoffTickets.find(item => item.id === id);
+    if (!ticket) return null;
+    if (patch.status && !HANDOFF_STATUSES.has(patch.status)) throw new Error('Ungueltiger Ticketstatus');
+    if (patch.status) ticket.status = patch.status;
+    if (patch.owner !== undefined) ticket.owner = clean(patch.owner, 200);
+    if (patch.note) ticket.trace.push({ at: new Date().toISOString(), message: clean(patch.note, 1000), type: 'internal-note' });
+    ticket.trace = ticket.trace.slice(-30);
+    ticket.updatedAt = new Date().toISOString();
+    if (ticket.status === 'resolved' && !ticket.resolvedAt) ticket.resolvedAt = ticket.updatedAt;
+    if (ticket.status !== 'resolved') delete ticket.resolvedAt;
+    return { ...ticket };
+  });
 }

@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { initialEnergyData } from './tmb.js';
 
 export const WORKSPACE_MODES = ['beratung', 'kunde', 'energie'];
-export const FILE_KINDS = ['floorplan', 'elevation', 'photo', 'tmb-template', 'document', 'payroll-sample', 'audio'];
+export const FILE_KINDS = ['floorplan', 'elevation', 'photo', 'tmb-template', 'document', 'payroll-sample', 'audio', 'lumit-application', 'lumit-policy-original', 'lumit-brand-asset', 'lumit-customer-package'];
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const STORE_FILE = path.join(DATA_DIR, 'workspaces.json');

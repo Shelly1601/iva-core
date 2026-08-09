@@ -64,6 +64,19 @@ Noch zu prüfen:
 - Erst danach den Strategiegespräch-Sync aktivieren.
 - Qonekto-/Blau-Direkt-Daten bleiben fachliche Quelle; IVA speichert Quell-ID und Sync-Zeitpunkt.
 
+### Mannheimer LUMIT / Hauswertschutz
+
+- ✅ Fester Online-Rechner mit blau-direkt-Zuordnung hinterlegt (`md=162`, `asnr=58556`).
+- ✅ Blau-direkt-Agenturnummer `162-58556` und Vermittlernummer `009T7N` als Pflichtkontrolle im IVA-Nachprozess hinterlegt.
+- ✅ Nachprozess „servicierter Antrag“, Zieladresse `mdpool@mannheimer.de`, IVA-Dokumentablage und Übergabe an Hauswertschutz implementiert.
+- 🟡 Produktiv noch mit einem benannten Testkunden prüfen: erzeugtes Antrags-PDF, Vermittlernummer im PDF, Qonekto-Werkzeug zur Anlage als servicierter Antrag und Dokumentupload.
+- 🟡 Digitaler Policenweg ist als Wunsch hinterlegt: Mannheimer/blau direkt müssen einmal schriftlich bestätigen, dass keine zusätzliche Kundenpost erfolgt. Danach gilt: digitaler Eingang → Hauswertschutz-Prüfung → kompaktes Kundenpaket mit unveränderter Originalpolice → ausdrückliche Freigabe. Kein automatischer Kundenversand.
+- ✅ Generator für ein zusammenhängendes Hauswertschutz-Kundenpaket gebaut: Schutzurkunde, kompakte Preis-/Vertragsübersicht, Trennseite und danach sämtliche Seiten der unveränderten Mannheimer-Originalpolice. Originaldatei und Hash bleiben separat gespeichert.
+- 🟡 Mannheimer-Logo nur nach dokumentierter Nutzungsfreigabe einbinden; ohne Freigabe nutzt das Paket eine neutrale Textkennzeichnung des Versicherers.
+- 🟡 E-Mail-Versand ist vorbereitet, aber noch nicht automatisiert; der bestehende IMAP-Zugang liest nur. Vor Liveautomatik einen freigegebenen SMTP-/Microsoft-/Gmail-Sendekanal anbinden.
+- ℹ️ LUMIT HOME muss laut Mannheimer über den Online-Rechner eingereicht werden. Manueller PDF-Deckungsauftrag nur für LUMIT FLEX, wenn der aktuelle Vordruck verwendet wird.
+- Für diesen festen Ablauf sind keine zusätzlichen Railway-Secrets erforderlich. Ein späterer E-Mail-Sendekanal kann neue Secrets benötigen.
+
 ## 4. Marketing-Zentrale
 
 | Priorität | Status | Railway-Variable | Einrichtung |

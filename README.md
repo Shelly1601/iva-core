@@ -49,6 +49,7 @@ Das Zielbild für die sichere Beleg- und Steuerberater-Vorbereitung steht in [`I
 ## Lokale Prüfungen
 - `npm run test:workspaces` – Fallakten, Dateien und Persistenz.
 - `npm run test:tmb` – versioniertes TMB-Schema und visuell prüfbares Muster-PDF unter `output/pdf/IVA-TMB-Muster.pdf`.
+- `npm run test:lumit` – LUMIT-Nachprozess, manuelle Kundenpaket-Freigabe und Zusammenführung mit der unveränderten Originalpolice.
 - `npm run test:qonekto` – Qonekto-Konfiguration und serverseitigen Leseschutz prüfen (ohne echten Token).
 - `npm run test:energy` – Heizlast-Rechenweg, Pflichtfelder und versionierte KfW-458-Regeln.
 - `npm run test:energy-tariffs` – EnergyPartner-Handoff, Pflichtfelder und gesperrte Einreichung.

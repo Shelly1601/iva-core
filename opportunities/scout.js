@@ -12,6 +12,7 @@ import {
 import { formatWeeklyPitch, scoreOpportunity, sortOpportunities } from './score.js';
 
 const HASHTAG_ACTOR_URL = 'https://api.apify.com/v2/acts/apify~instagram-hashtag-scraper/run-sync-get-dataset-items';
+export const CURATED_DISCOVERY_ACCOUNTS = Object.freeze(['iamformed', 'herr_tech', 'setupsai', 'lucaswebq', 'nickgeringer', 'beasttechx']);
 const clean = (value, max = 1000) => String(value || '').trim().slice(0, max);
 const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
@@ -96,7 +97,7 @@ async function synthesizeOpportunities(posts, settings) {
     model: routed.model,
     system: `Du bist IVAs Chancen-Analyst. Du sichtest reale Instagram-Signale, aber du glaubst weder Einkommensversprechen noch Reichweite blind. Finde maximal 8 eigenstaendig umsetzbare, legale Geschaeftsmodelle, bei denen KI den Aufwand deutlich senken kann. Keine Kopie fremder Inhalte, kein Spam, keine MLM-/Trading-/Gluecksspiel-/Krypto-Schnellreich-Ideen, keine Dark Patterns. "Passiv" bedeutet hier: nach einem realistischen Aufbau mit begrenzter laufender Pflege, niemals ohne Arbeit.
 
-Arbeite AUSSCHLIESSLICH mit den gelieferten Quellen. Mehrere Posts, die nur denselben Hype wiederholen, sind noch kein Marktnachweis. Umsatz- oder Einkommensangaben sind unbestaetigte Claims. Jede Chance braucht einen kleinen bezahlbaren 7-Tage-Validierungstest.
+Arbeite AUSSCHLIESSLICH mit den gelieferten Quellen. Instagram-Posts und Creator-Profile sind Entdeckungssignale, keine Produkt-, Preis-, Lizenz- oder Wirksamkeitsbelege. Mehrere Posts, die nur denselben Hype wiederholen, sind noch kein Marktnachweis. Umsatz- oder Einkommensangaben sind unbestaetigte Claims. Jede Chance braucht einen kleinen bezahlbaren 7-Tage-Validierungstest und vor jeder Tool-/Agenten-Integration zusaetzlich IVAs Capability-Gate mit offizieller Primarquelle.
 
 Antworte ausschließlich als valides JSON ohne Markdown:
 {"ideas":[{"title":"","summary":"","customer":"","offer":"","monetization":"","aiLeverage":"","firstValidation":"","evidence":"","evidenceLimits":"","risks":"","saturation":"","setupHours":0,"ongoingHoursPerWeek":0,"initialBudgetEur":0,"revenueClaim":"nur falls Quelle einen Claim nennt, dann ausdrücklich unbestätigt","recommendedAgent":"marketing|course|web|sales|energy|other","sourceRefs":[1],"ratings":{"demandEvidence":0,"monetizationClarity":0,"automationFit":0,"lowOngoingEffort":0,"speedToValidate":0,"nadineFit":0,"evidenceQuality":0,"defensibility":0,"platformRisk":0,"legalRisk":0,"saturationRisk":0,"hypeRisk":0}}],"discardedSignals":[{"signal":"","reason":""}]}
@@ -116,7 +117,12 @@ export async function runOpportunityScout({ trigger = 'manual' } = {}) {
     if (!process.env.APIFY_TOKEN) throw new Error('APIFY_TOKEN fehlt. Ohne echten Instagram-Datenzugang wird kein Wochenranking erfunden.');
     const hashtagRaw = await scrapeInstagramHashtags(settings.hashtags, { resultsLimit: settings.maxSourcesPerRun });
     const sourcePosts = hashtagRaw.map(post => normalizePost(post, 'hashtag'));
-    for (const account of settings.seedAccounts.slice(0, 5)) {
+    // Die kuratierten Creator bleiben reine Entdeckungsquellen. Pro Lauf rotieren
+    // nur zwei davon, damit der bestehende Wochenlauf nicht unbemerkt teuer wird.
+    const week = Math.floor(Date.now() / (7 * 24 * 60 * 60 * 1000));
+    const curatedRotation = [0, 1].map(offset => CURATED_DISCOVERY_ACCOUNTS[(week + offset) % CURATED_DISCOVERY_ACCOUNTS.length]);
+    const seedAccounts = [...new Set([...settings.seedAccounts.slice(0, 3), ...curatedRotation])].slice(0, 5);
+    for (const account of seedAccounts) {
       try {
         const posts = await scrapeInstagram(account, { resultsLimit: Math.max(8, Math.min(20, Math.floor(settings.maxSourcesPerRun / 4))) });
         sourcePosts.push(...posts.map(post => normalizePost(post, 'seed-account')));
@@ -166,7 +172,8 @@ export async function opportunityRadarStatus() {
     ready: Boolean(process.env.APIFY_TOKEN),
     provider: 'Apify · öffentliche Instagram-Signale',
     weekly: { enabled: settings.weeklyEnabled, schedule: 'Montag 08:30 · Europe/Berlin', telegram: Boolean(process.env.TELEGRAM_BOT_TOKEN) },
-    safeguards: ['Quellenpflicht', 'keine Einkommensgarantie', 'Kosten-/Zeit-Caps', 'keine automatische Umsetzung'],
+    safeguards: ['Instagram nur als Entdeckungssignal', 'offizielle Primarquelle vor Integration', 'keine Einkommensgarantie', 'Kosten-/Zeit-Caps', 'keine automatische Umsetzung'],
+    curatedDiscoveryAccounts: CURATED_DISCOVERY_ACCOUNTS,
     missing: process.env.APIFY_TOKEN ? [] : ['APIFY_TOKEN'],
     counts,
   };
