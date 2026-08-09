@@ -19,7 +19,7 @@ export function crmSkill({ fetchAllLeads, searchHeatHeroLeads, updateHeatHeroLea
       },
     }),
     findHeatHeroLeads: tool({
-      description: 'Sucht Kunden ausschliesslich im eigenstaendigen grossen Heat Hero CRM, zum Beispiel nach Name, E-Mail oder Telefonnummer. Nicht fuer den Heat-Hero-Anteil im Multi CRM verwenden.',
+      description: 'Sucht Kunden ausschliesslich im eigenstaendigen grossen Heat Hero CRM, zum Beispiel nach Name, E-Mail oder Telefonnummer. Bei Namen werden automatisch phonetisch plausible Schreibvarianten und Teilnamen gesucht, Treffer gerankt und als matchStatus unique, ambiguous oder not-found zurückgegeben. unique darf verwendet werden; bei ambiguous muss IVA zwischen den Kandidaten nachfragen, bei not-found nach der Schreibweise des Nachnamens. Nicht fuer den Heat-Hero-Anteil im Multi CRM verwenden.',
       parameters: z.object({
         suche: z.string().min(1),
         limit: z.number().int().min(1).max(50).optional(),

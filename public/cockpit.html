@@ -168,14 +168,14 @@
     <div class="head"><span class="o"></span> Chat mit IVA</div>
     <div class="msgs" id="msgs"><div class="bubble sys">Verbinde mich mit deinem Server …</div></div>
     <div class="ask">
-      <button class="mic" id="wakeBtn" title="Wake-Word „Eva wake up“ an/aus (Chrome)">👂</button>
-      <button class="mic" id="micBtn" title="Sprechen (Chrome)" disabled>🎙</button>
+      <button class="mic" id="wakeBtn" title="Zuhörmodus mit Wake-Word an/aus (Chrome)" aria-pressed="false">👂</button>
+      <button class="mic" id="micBtn" title="Einmal sprechen / Mikrofon sofort ausschalten (Chrome)" aria-pressed="false" disabled>🎙</button>
       <input id="chatIn" placeholder="Frag IVA … tippen, Mikro, oder „Eva wake up“" disabled>
       <button id="chatSend" disabled>Senden</button>
       <button class="mic" id="ttsBtn" title="Evas Stimme an/aus">🔊</button>
     </div>
   </section>
-  <div class="footer">IVA-Cockpit · v7 · Command Center · live vom Server</div>
+  <div class="footer">IVA-Cockpit · v8 · Command Center · live vom Server</div>
   <span id="m-mail" hidden></span><span id="m-lead" hidden></span><span id="m-stat" hidden></span>
 </div>
 
@@ -232,7 +232,12 @@
   function bubble(cls,text){const d=document.createElement('div');d.className='bubble '+cls;d.textContent=text;$('msgs').appendChild(d);$('msgs').scrollTop=$('msgs').scrollHeight;return d;}
   function workspaceIntent(text){const s=String(text||'').toLowerCase();if(!/(öffne|oeffne|geh|gehe|wechsel|möchte|moechte|will)/.test(s))return null;if(/kontrollzentrum|agentenzentrale|freigaben|connector-status/.test(s))return'kontrolle';if(/sprachlabor|sprachtraining|voice lab/.test(s))return'sprache';if(/chancenradar|chancen-agent|chancen agent|businessideen|einkommensideen/.test(s))return'chancen';if(/buchhaltung|belege|rechnungen/.test(s))return'buchhaltung';if(/kunden|kundenmaske|kundenakte/.test(s))return'kunde';if(/energieplaner|energieplanung|energieberatung|wärmepumpenplaner|waermepumpenplaner/.test(s))return'energie';if(/beratungsmodus|beratung/.test(s))return'beratung';return null;}
   let toolWindowCounter=0;
-  function openToolWindow(url,label='Arbeitsbereich'){
+  function openToolWindow(url,label='Arbeitsbereich',{sameTab=false}={}){
+    if(sameTab){
+      bubble('sys',`${label} wird jetzt hier geöffnet.`);
+      setTimeout(()=>location.assign(url),60);
+      return 'same-tab';
+    }
     const availableWidth=Math.max(360,Number(screen.availWidth)||innerWidth||1280);
     const availableHeight=Math.max(540,Number(screen.availHeight)||innerHeight||900);
     const width=Math.min(1480,Math.max(980,Math.round(availableWidth*.86)),availableWidth);
@@ -242,14 +247,18 @@
     const name='ivaToolWindow'+Date.now()+(toolWindowCounter++);
     const features=`popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`;
     const win=window.open(url,name,features);
-    if(!win){bubble('sys',`${label} konnte nicht geöffnet werden. Bitte Pop-ups für IVA erlauben – das Cockpit bleibt unverändert geöffnet.`);return false;}
+    if(!win){
+      bubble('sys',`Pop-up blockiert – ${label} wird deshalb hier geöffnet.`);
+      setTimeout(()=>location.assign(url),60);
+      return 'same-tab';
+    }
     try{win.opener=null;win.focus();}catch{}
-    return true;
+    return 'popup';
   }
-  function openWorkspace(mode,prompt=''){
+  function openWorkspace(mode,prompt='',options={}){
     let url=mode==='kunde'?'/customers':mode==='energie'?'/advice?group=energy':'/advice';
     if(prompt){const separator=url.includes('?')?'&':'?';url+=separator+'prompt='+encodeURIComponent(prompt);}
-    return openToolWindow(url,mode==='kunde'?'Kundenbereich':mode==='energie'?'Energieberatung':'Beratung');
+    return openToolWindow(url,mode==='kunde'?'Kundenbereich':mode==='energie'?'Energieberatung':'Beratung',options);
   }
   $('openWhatsApp').addEventListener('click',()=>openToolWindow('/whatsapp','WhatsApp'));
   $('openMarketing').addEventListener('click',()=>openToolWindow('/marketing','Marketing'));
@@ -258,7 +267,7 @@
   $('openVoiceLab').addEventListener('click',()=>openToolWindow('/voice-lab','Sprachlabor'));
   $('openControl').addEventListener('click',()=>openToolWindow('/control','Kontrollzentrum'));
   async function sendChat(viaVoice){const inp=$('chatIn');const t=inp.value.trim();if(!t)return;
-    const target=workspaceIntent(t);if(target){bubble('user',t);inp.value='';let opened=false;if(target==='buchhaltung'||target==='chancen'||target==='sprache'||target==='kontrolle'){const url=target==='buchhaltung'?'/accounting':target==='chancen'?'/opportunities':target==='kontrolle'?'/control':'/voice-lab';opened=openToolWindow(url,({buchhaltung:'Buchhaltung',chancen:'Chancenradar',sprache:'Sprachlabor',kontrolle:'Kontrollzentrum'})[target]);}else opened=openWorkspace(target,t);if(opened)bubble('sys',({beratung:'Beratungsmodus',kunde:'Kundenbereich',energie:'Beratung · Energie & Versorgung',buchhaltung:'Buchhaltung',chancen:'Chancenradar',sprache:'Sprachlabor',kontrolle:'Kontrollzentrum'})[target]+' wurde in einem neuen Fenster geöffnet. Das Cockpit bleibt hier geöffnet.');return;}
+    const target=workspaceIntent(t);if(target){bubble('user',t);inp.value='';let opened=false;const openOptions={sameTab:viaVoice===true};if(target==='buchhaltung'||target==='chancen'||target==='sprache'||target==='kontrolle'){const url=target==='buchhaltung'?'/accounting':target==='chancen'?'/opportunities':target==='kontrolle'?'/control':'/voice-lab';opened=openToolWindow(url,({buchhaltung:'Buchhaltung',chancen:'Chancenradar',sprache:'Sprachlabor',kontrolle:'Kontrollzentrum'})[target],openOptions);}else opened=openWorkspace(target,t,openOptions);if(opened==='popup')bubble('sys',({beratung:'Beratungsmodus',kunde:'Kundenbereich',energie:'Beratung · Energie & Versorgung',buchhaltung:'Buchhaltung',chancen:'Chancenradar',sprache:'Sprachlabor',kontrolle:'Kontrollzentrum'})[target]+' wurde in einem neuen Fenster geöffnet. Das Cockpit bleibt hier geöffnet.');return;}
     unlockAudio();
     if(viaVoice===true){ beginVoiceTurn(t); clearVoiceDraft(); setState('thinking'); try{if(rec)rec.stop();}catch(e){} }   // Ohr aus, solange IVA denkt+spricht
     bubble('user',t);inp.value='';const b=bubble('iva','…');
@@ -334,7 +343,7 @@
     try{ evaAudio.src='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
       evaAudio.play().catch(()=>{}); }catch(e){}
     setupAudioAnalyser(); }
-  function afterSpeak(){ finishVoiceTurn(); setState(wakeOn?'listening':'idle'); if(wakeOn) startRec(); }   // Ohr wieder an, sobald Eva fertig geredet hat
+  function afterSpeak(){ finishVoiceTurn(); setState(shouldListen()?'listening':'idle'); if(shouldListen()) startRec(); }
   // ---- TTS-Queue: satzweise Wiedergabe waehrend Claude streamt (Phase 2) ----
   // Trigger fuer "Satz abgeschlossen":
   //   1) Terminator (. ! ?) im Puffer wird gefolgt von weiterem gestreamten Text -> Ende bewiesen.
@@ -454,7 +463,7 @@
 
   // ---- Sprache: Mikro + Wake-Word „Eva wake up" + Gespraechsmodus (nur Chrome) ----
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  let rec=null, wakeOn=false, awake=false;
+  let rec=null, wakeOn=false, awake=false, manualMicOn=false, recognitionRunning=false;
   // SpeechRecognition liefert bereits ein finales Segment. Eine weitere starre
   // Drei-Sekunden-Pause machte jeden Dialog unnötig träge; 850 ms fängt nur noch
   // unmittelbar nachgelieferte Segmente ab.
@@ -466,6 +475,7 @@
     voicePauseTimer=setTimeout(()=>{
       const txt=voiceDraft.trim(); voiceDraft=''; voicePauseTimer=null;
       if(!txt||isBusyState()) return;
+      if(manualMicOn){ manualMicOn=false; $('micBtn').classList.remove('rec'); $('micBtn').setAttribute('aria-pressed','false'); }
       $('chatIn').value=txt;
       sendChat(true);
     },VOICE_PAUSE_MS);
@@ -477,27 +487,43 @@
     setStatus('on','Eva hört weiter zu …');
     armVoicePause();
   }
-  function startRec(){ if(!rec||isBusyState())return; try{rec.start();}catch(e){} }
+  function shouldListen(){ return wakeOn||manualMicOn; }
+  function startRec(){ if(!rec||isBusyState()||!shouldListen()||recognitionRunning)return; try{rec.start();}catch(e){} }
+  function stopListening({status='Mikrofon aus'}={}){
+    clearVoiceDraft(); manualMicOn=false; wakeOn=false; awake=false; recognitionRunning=false;
+    $('micBtn').classList.remove('rec'); $('micBtn').setAttribute('aria-pressed','false');
+    $('wakeBtn').classList.remove('on'); $('wakeBtn').setAttribute('aria-pressed','false');
+    try{rec?.abort();}catch(e){}
+    if(!isBusyState())setState('idle');
+    setStatus('on',status);
+  }
   function ensureRec(){
     if(!SR){ bubble('sys','Sprache/Wake-Word geht nur in Chrome — Safari kann das leider nicht.'); return null; }
     if(rec) return rec;
     rec=new SR(); rec.lang='de-DE'; rec.continuous=true; rec.interimResults=true;
+    rec.onstart=()=>{ recognitionRunning=true; if(manualMicOn)$('micBtn').classList.add('rec'); };
     rec.onresult=e=>{
+      if(!shouldListen())return;
       let finalText='', hasInterim=false;
       for(let i=e.resultIndex;i<e.results.length;i++){
         const part=(e.results[i][0]?.transcript||'').trim();
         if(e.results[i].isFinal) finalText=(finalText+' '+part).trim();
         else if(part) hasInterim=true;
       }
-      if(finalText){ if(wakeOn) handleWake(finalText); else queueVoiceText(finalText); }
+      if(finalText){ if(wakeOn) handleWake(finalText); else if(manualMicOn) queueVoiceText(finalText); }
       else if(hasInterim&&voiceDraft) armVoicePause();
     };
     rec.onend=()=>{
-      $('micBtn').classList.remove('rec');
-      if(!isBusyState()&&(wakeOn||voiceDraft)){ startRec(); }
-      else if(!wakeOn&&state==='listening'){ setState('idle'); }
+      recognitionRunning=false;
+      if(!manualMicOn)$('micBtn').classList.remove('rec');
+      if(!isBusyState()&&shouldListen()){ startRec(); }
+      else if(!shouldListen()&&state==='listening'){ setState('idle'); }
     };
-    rec.onerror=()=>{ $('micBtn').classList.remove('rec'); };
+    rec.onerror=event=>{
+      recognitionRunning=false;
+      if(['not-allowed','service-not-allowed','audio-capture'].includes(event?.error)) stopListening({status:'Mikrofon nicht verfügbar'});
+      else if(!manualMicOn)$('micBtn').classList.remove('rec');
+    };
     return rec;
   }
   function handleWake(txt){ const low=txt.toLowerCase();
@@ -513,12 +539,22 @@
       if(rest.length>2){ queueVoiceText(rest); } else { setStatus('on','Eva hört zu …'); }
     }
   }
-  function toggleMic(){ if(wakeOn) return; const r=ensureRec(); if(!r)return;
-    clearVoiceDraft(); setState('listening'); $('micBtn').classList.add('rec'); try{r.start();}catch(e){$('micBtn').classList.remove('rec');} }
-  function toggleWake(){ const r=ensureRec(); if(!r)return;
-    clearVoiceDraft(); wakeOn=!wakeOn; awake=false; $('wakeBtn').classList.toggle('on',wakeOn);
-    if(wakeOn){ unlockAudio(); if(!isBusyState()) setState('listening'); setStatus('on','👂 warte auf „Eva wake up"'); startRec(); }
-    else { if(!isBusyState()) setState('idle'); try{r.stop();}catch(e){} setStatus('on','verbunden'); } }
+  function toggleMic(){
+    if(manualMicOn||wakeOn){ stopListening(); return; }
+    const r=ensureRec(); if(!r)return;
+    clearVoiceDraft(); manualMicOn=true; wakeOn=false; awake=false;
+    $('micBtn').classList.add('rec'); $('micBtn').setAttribute('aria-pressed','true');
+    $('wakeBtn').classList.remove('on'); $('wakeBtn').setAttribute('aria-pressed','false');
+    setState('listening'); setStatus('on','Mikrofon an · hört einmal zu'); startRec();
+  }
+  function toggleWake(){
+    if(wakeOn){ stopListening(); return; }
+    const r=ensureRec(); if(!r)return;
+    clearVoiceDraft(); manualMicOn=false; wakeOn=true; awake=false;
+    $('micBtn').classList.remove('rec'); $('micBtn').setAttribute('aria-pressed','false');
+    $('wakeBtn').classList.add('on'); $('wakeBtn').setAttribute('aria-pressed','true');
+    unlockAudio(); if(!isBusyState())setState('listening'); setStatus('on','👂 warte auf „Eva wake up"'); startRec();
+  }
   $('micBtn').addEventListener('click',toggleMic);
   $('wakeBtn').addEventListener('click',toggleWake);
 

@@ -20,6 +20,8 @@ const {
   voiceLearningPromptContext,
 } = await import('../voice-lab/store.js');
 const { prepareSpeechText } = await import('../voice.js');
+const cockpitSource = await fs.readFile(new URL('../public/cockpit.html', import.meta.url), 'utf8');
+const transcriptionSource = await fs.readFile(new URL('../voice-lab/transcribe.js', import.meta.url), 'utf8');
 
 assert.ok(VOICE_TEST_PHRASES.length >= 8);
 assert.equal(calculateWordErrorRate('Eva öffne die Kundenakte', 'Eva öffne Kundenakte').errors, 1);
@@ -63,5 +65,14 @@ assert.equal(learning.communicationPreferences.length, 1);
 assert.equal(learning.improvementRequests.length, 1);
 const learnedSummary = await voiceLabSummary();
 assert.deepEqual(learnedSummary.learned, { pronunciations: 1, communicationPreferences: 1, improvementRequests: 1 });
+
+assert.match(cockpitSource, /function shouldListen\(\)\{ return wakeOn\|\|manualMicOn; \}/);
+assert.match(cockpitSource, /rec\?\.abort\(\)/, 'Mikro aus muss die Erkennung hart abbrechen');
+assert.match(cockpitSource, /if\(!shouldListen\(\)\)return;/, 'Ergebnisse nach Mikro aus müssen ignoriert werden');
+assert.match(cockpitSource, /if\(!isBusyState\(\)&&shouldListen\(\)\)\{ startRec\(\); \}/, 'Nur ein aktiver Hörmodus darf neu starten');
+assert.match(cockpitSource, /location\.assign\(url\)/, 'Blockierte Pop-ups brauchen Same-Tab-Fallback');
+assert.match(cockpitSource, /openOptions=\{sameTab:viaVoice===true\}/, 'Sprachbefehle öffnen Arbeitsbereiche ohne Pop-up-Abhängigkeit');
+assert.doesNotMatch(cockpitSource, /Bitte Pop-ups für IVA erlauben/);
+assert.match(transcriptionSource, /Eigennamen und buchstabierte Namen exakt wiedergeben/);
 
 console.log('IVA Voice-Lab: OK');

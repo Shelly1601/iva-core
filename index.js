@@ -102,6 +102,7 @@ import {
   upsertQonektoCustomerAutomatically,
 } from './integrations/qonekto-customers.js';
 import { crmQonektoSyncStatus, runCrmQonektoSync } from './integrations/crm-qonekto-sync.js';
+import { buildNameSearchVariants, resolveLeadName } from './crm/name-matching.js';
 import { suggestGermanAddresses } from './integrations/address-autocomplete.js';
 import {
   attachLumitCustomerPackage,
@@ -206,7 +207,7 @@ const MAX_TURNS = 16; // letzte 16 Nachrichten (8 Paare) als Kontext je Session
 // Wird identisch von askIva (Telegram) und streamIva (Cockpit-Stream) angehaengt.
 const VOICE_SYSTEM_SUFFIX = `
 
-DIESE ANFRAGE KOMMT PER SPRACHE. Sprich mit Nadine wie in einem echten, zügigen Gespräch – nicht wie in einem Bericht. Antworte direkt mit dem wichtigsten Gedanken. Standardmäßig höchstens vier kurze, flüssige Sätze und nur ein Gedanke pro Satz; ausführlicher nur, wenn Nadine das ausdrücklich verlangt. Wenn dir eine Angabe fehlt, stelle genau eine konkrete Rückfrage. Keine Einleitungs- oder Schlussfloskeln, kein Markdown, keine Listen, keine Tabellen, keine Emojis, keine URLs, E-Mail-Adressen oder Dateipfade zum Vorlesen. Schreibe Datum, Uhrzeit, Zahlen und Abkürzungen so, dass sie auf Deutsch natürlich gesprochen werden. Übersetze sperrige Fachkürzel in verständliche Alltagssprache. Sicherheits-, Quellen- und Bestätigungsregeln bleiben vollständig bestehen: Nichts erfinden, keine Änderung ohne die dafür vorgesehene Bestätigung und keine wichtige Warnung weglassen.`;
+DIESE ANFRAGE KOMMT PER SPRACHE. Sprich mit Nadine wie in einem echten, zügigen Gespräch – nicht wie in einem Bericht. Antworte direkt mit dem wichtigsten Gedanken. Standardmäßig höchstens vier kurze, flüssige Sätze und nur ein Gedanke pro Satz; ausführlicher nur, wenn Nadine das ausdrücklich verlangt. Wenn dir eine Angabe fehlt, stelle genau eine konkrete Rückfrage. Namen aus der Transkription sind ausdrücklich NICHT als korrekt geschrieben bestätigt. Bei einer CRM-Anfrage mit Personenname zuerst findHeatHeroLeads mit dem gehörten Namen aufrufen. Das Werkzeug prüft Schreibvarianten. Nur bei matchStatus "unique" den gespeicherten CRM-Namen verwenden. Bei "ambiguous" höchstens drei gefundene Namen zur Auswahl nennen; bei "not-found" genau fragen, wie der Nachname geschrieben wird. Namen niemals aus der Transkription erraten. Keine Einleitungs- oder Schlussfloskeln, kein Markdown, keine Listen, keine Tabellen, keine Emojis, keine URLs, E-Mail-Adressen oder Dateipfade zum Vorlesen. Schreibe Datum, Uhrzeit, Zahlen und Abkürzungen so, dass sie auf Deutsch natürlich gesprochen werden. Übersetze sperrige Fachkürzel in verständliche Alltagssprache. Sicherheits-, Quellen- und Bestätigungsregeln bleiben vollständig bestehen: Nichts erfinden, keine Änderung ohne die dafür vorgesehene Bestätigung und keine wichtige Warnung weglassen.`;
 async function loadConversations() {
   try { return JSON.parse(await fs.readFile(CONV_FILE, 'utf8')); } catch { return {}; }
 }
@@ -375,9 +376,38 @@ async function heatHeroGateway(path = '', { method = 'GET', body } = {}) {
 }
 
 async function searchHeatHeroLeads(search, limit = 20) {
-  const params = new URLSearchParams({ search: String(search || '').trim(), limit: String(Math.min(Math.max(limit || 20, 1), 50)) });
-  const payload = await heatHeroGateway(`?${params.toString()}`);
-  return { system: 'Heat Hero CRM (eigenstaendig)', count: payload?.count ?? payload?.data?.length ?? 0, leads: payload?.data ?? [] };
+  const query = String(search || '').trim();
+  const safeLimit = Math.min(Math.max(limit || 20, 1), 50);
+  const fetchVariant = async variant => {
+    const params = new URLSearchParams({ search: variant, limit: String(Math.max(safeLimit, 30)) });
+    const payload = await heatHeroGateway(`?${params.toString()}`);
+    const leads = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.leads) ? payload.leads : Array.isArray(payload) ? payload : [];
+    return { variant, leads };
+  };
+  const direct = await fetchVariant(query);
+  const looksLikeName = /\p{L}/u.test(query) && !query.includes('@') && !/\d{5,}/.test(query);
+  if (!looksLikeName) {
+    return {
+      system: 'Heat Hero CRM (eigenstaendig)', query, searchedVariants: [query], count: direct.leads.length,
+      matchStatus: direct.leads.length === 1 ? 'unique' : direct.leads.length ? 'ambiguous' : 'not-found',
+      leads: direct.leads.slice(0, safeLimit),
+    };
+  }
+  let combined = [...direct.leads];
+  let resolution = resolveLeadName(query, combined, safeLimit);
+  const variants = buildNameSearchVariants(query, 8);
+  if (resolution.matchStatus !== 'unique') {
+    const additional = await Promise.all(variants.filter(variant => variant !== query).slice(0, 6).map(fetchVariant));
+    combined = combined.concat(...additional.flatMap(result => result.leads));
+    resolution = resolveLeadName(query, combined, safeLimit);
+  }
+  return {
+    system: 'Heat Hero CRM (eigenstaendig)',
+    ...resolution,
+    searchedVariants: variants,
+    count: resolution.candidates.length,
+    leads: resolution.candidates.map(candidate => candidate.lead),
+  };
 }
 
 async function updateHeatHeroLeadStatus(id, status, reason) {
@@ -445,6 +475,7 @@ Tool-Nutzung:
 
 - Bevor du aus einem Reel, Profil, fremden Tool oder einer spontanen Idee eine neue IVA-Funktion oder einen neuen Agenten empfiehlst, MUSST du assessCapability aufrufen. Pruefe echten Zusatznutzen, bestehende Abdeckung, offiziellen Nachweis, Rechte, Kosten, Datenschutz und Sicherheitsfolgen. Ergebnis "integrate-existing" bedeutet: keinen neuen Agenten bauen. "needs-verification" oder "watch" bedeutet: noch nicht integrieren. Fremden Code, geschuetzte Texte oder Designs niemals kopieren; nur eigenstaendig implementierte Funktionsmuster uebernehmen.
 - Live-Daten oder Aktion nötig (Kalender, Mails, Leads, Todos, Kampagnen, Bilder, Qonekto/blau direkt): Tool sofort aufrufen. Nie "hätte ich Zugriff auf…", nie "soll ich mal nachsehen?" — machen und dann zusammenfassen.
+- CRM-Namen aus Sprache oder freier Texteingabe können falsch geschrieben beziehungsweise transkribiert sein. Vor jeder CRM-Auskunft oder -Aktion zu einer namentlich genannten Person findHeatHeroLeads mit der gelieferten Schreibweise aufrufen. Das Werkzeug durchsucht Schreibvarianten. Bei matchStatus "unique" ausschließlich den gespeicherten CRM-Namen und die gespeicherte ID verwenden. Bei "ambiguous" mit höchstens drei Kandidaten nachfragen, welcher gemeint ist. Bei "not-found" genau eine Frage stellen: wie der Nachname geschrieben wird. Niemals einen ähnlich klingenden Namen stillschweigend auswählen. Bei anderen CRM-Projekten ohne eigenen Resolver gilt mindestens dieselbe Rückfragepflicht, bis der gespeicherte Vollname eindeutig ist.
 - Mehrere Quellen relevant (z. B. Kalender + Mails + Leads): parallel abrufen.
 - Fach-/Recherche-Anfragen: askArchitect mit der präzisen Frage. Der Router entscheidet zwischen knowledge (zeitloses Fachwissen zu Finanz/Versicherung/Vorsorge/Rente) und web-research (aktuelle öffentliche Fakten wie Gesetze, Grenzwerte, Beitragssätze, Freibeträge, Fördersätze, Produktdatenblätter, Versicherungsbedingungen, Preise, Nachrichten, Öffnungszeiten). Für JEDE aktuelle Zahl / jeden aktuellen Grenzwert PFLICHT diesen Router nutzen statt aus dem Kopf zu antworten. Für eigene Systeme (Kalender/Mails/CRM/Leads/Kampagnen/Todos/Bilder) stattdessen direkt das passende Tool.
 - Kundinnen, Kunden, Vertraege, Dokumente, Archiv, Aufgaben oder Schaeden aus blau direkt/AMEISE/Qonekto: zuerst listQonektoTools nutzen. Lesende Werkzeuge mit callQonektoReadTool sofort ausfuehren. Veraendernde Werkzeuge ausschliesslich mit prepareQonektoWrite vorbereiten, Aenderung klar wiederholen und Nadine fragen, ob sie das wirklich will. Ausgefuehrt wird serverseitig erst nach ihrer separaten, exakten Antwort "Ja, Qonekto-Aenderung ausfuehren". Niemals behaupten, eine nur vorbereitete Aenderung sei bereits erfolgt. Destruktive Werkzeuge bleiben blockiert. Niemals Qonekto-Daten raten oder durch oeffentliche Web-Recherche ersetzen.

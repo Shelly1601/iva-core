@@ -19,6 +19,7 @@ export async function transcribeAudio(buffer, { mime = 'audio/webm', fileName = 
   form.append('model', 'whisper-large-v3-turbo');
   form.append('language', 'de');
   form.append('temperature', '0');
+  form.append('prompt', 'Deutsche Geschäftssprache. Eigennamen und buchstabierte Namen exakt wiedergeben. Häufige Begriffe: IVA, Heat Hero, HausWertSchutz, Qonekto, Blau Direkt, Pipedrive, Photovoltaik, Wärmepumpe. Keine Namen ergänzen oder frei korrigieren.');
   const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
