@@ -57,9 +57,9 @@ Nicht als Serviceleistung versprochen werden dürfen eine garantierte Schadenreg
 
 Hauswertschutz darf als Hauptmarke auftreten und der Gesamtpreis darf die visuell führende Preisangabe sein. Auf Landingpage, Schutzübersicht und erster Paketseite müssen die Preisbestandteile nicht gleich groß wie der Gesamtpreis inszeniert werden. Unmittelbar vor der verbindlichen Erklärung des Kunden erscheint jedoch ein kurzer, normal lesbarer Abschnitt „Verträge und Preis“:
 
-> **Ihr Gesamtpreis: 29,90 € monatlich**  
-> davon LUMIT-Versicherungsprämie: 19,90 €  
-> Hauswertschutz-Servicepaket: 10,00 € inkl. geltender Umsatzsteuer  
+> **Ihr Gesamtpreis: 29,90 € monatlich**<br>
+> davon LUMIT-Versicherungsprämie: 19,90 €<br>
+> Hauswertschutz-Servicepaket: 10,00 € inkl. geltender Umsatzsteuer<br>
 > Zwei Verträge, gemeinsam digital abgeschlossen.
 
 Die Zahlen sind nur ein Darstellungsbeispiel und keine Kalkulation.
