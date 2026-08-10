@@ -75,7 +75,7 @@ async function executeDeviceCommand(command) {
     // greifen beide auf macOS Accessibility/Apple Events zu und koennen sich
     // bei parallelen Probes gegenseitig einen falschen Negativstatus liefern.
     const outlook = await diagnoseOutlook();
-    const bridge = await runMacUiBridge(['doctor'], { timeoutMs: 15000 }).catch(() => ({ trusted: false }));
+    const bridge = await runMacUiBridge(['accessibility-status', '--prompt'], { timeoutMs: 15000 }).catch(() => ({ trusted: false }));
     const pipedrive = await diagnosePipedriveChrome();
     const whatsapp = await diagnoseWhatsAppMac();
     return {

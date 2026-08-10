@@ -342,6 +342,20 @@ func pasteText(_ text: String, into element: AXUIElement) throws {
 do {
     let arguments = Array(CommandLine.arguments.dropFirst())
     let command = arguments.first ?? "doctor"
+
+    if command == "accessibility-status" {
+        let shouldPrompt = arguments.contains("--prompt")
+        let trusted: Bool
+        if shouldPrompt {
+            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+            trusted = AXIsProcessTrustedWithOptions(options)
+        } else {
+            trusted = AXIsProcessTrusted()
+        }
+        try writeJSON(["trusted": trusted, "promptRequested": shouldPrompt])
+        exit(0)
+    }
+
     let (app, appElement) = try outlookApplication()
 
     if command == "doctor" {
