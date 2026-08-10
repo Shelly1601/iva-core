@@ -53,7 +53,7 @@ Beispielstruktur für `fall.json`:
 
 Der Absender muss in Falldateien nicht mehr eingetragen werden. Er wird für diesen Workflow immer fest als `foerderung@heat-hero.com` gesetzt. Ein abweichender übergebener Absender führt zum Abbruch.
 
-Patrick steht fest mit `p.germer@heat-hero.com` im Feld **An**. Die eindeutig zugeordnete E-Mail-Adresse des Vertriebspartners wird ins **CC** gesetzt. Ist zusätzlich ein belastbarer Personenname vorhanden, lautet die Anrede beispielsweise `Hallo Patrick, hallo Holger,`. Ist nur die VP-E-Mail vorhanden, bleibt es bei `Hallo Patrick,`. Fehlende oder uneindeutige Adressen werden nicht geraten.
+Das Feld **An** folgt einer festen Priorität: Mitglieder des lokal synchronisierten WhatsApp-Rosters **HEATHERO Direktvertrieb** gehen immer an Noah Zielinski (`n.zielinski@heat-hero.com`), auch wenn ihre Adresse oder der Deal zugleich EKD enthält. Andere eindeutige EKD-Fälle gehen an Florian Bolz (`f.bolz@heat-hero.com`); alles Übrige geht an Patrick Germer (`p.germer@heat-hero.com`). Die eindeutig zugeordnete VP-Adresse bleibt im **CC**. Name, Adresse oder Vertriebsweg werden niemals geraten.
 
 Die Fallreferenz wird in dieser Reihenfolge gebildet: **Kundenname + Auftragsnummer**, ersatzweise **Kundenname + Ort**, ansonsten nur **Kundenname**. Eine fehlende Auftragsnummer verhindert damit weder den Förderentwurf noch die spätere interne Fertigmeldung.
 
@@ -72,13 +72,22 @@ Der verifizierte Upload nutzt die bereits angemeldete Pipedrive-Sitzung in Chrom
 node local-mac-helper/cli.mjs upload-pipedrive-files <deal-id> <pdf-ordner> --commit
 ```
 
-Nach erfolgreich erstellten Outlook-Entwürfen können die zugehörigen, idempotenten Pipedrive-Notizen als eigener bestätigter Schritt angelegt werden. Jede Notiz listet nur die tatsächlich angefragten Unterlagen und nennt Patrick sowie - falls eindeutig vorhanden - den Vertriebspartner.
+Nach erfolgreich erstellten Outlook-Entwürfen können die zugehörigen, idempotenten Pipedrive-Notizen als eigener bestätigter Schritt angelegt werden. Jede Notiz listet nur die tatsächlich angefragten Unterlagen und nennt den nach derselben Priorität ermittelten Verantwortlichen sowie - falls eindeutig vorhanden - den Vertriebspartner. Sichtbar endet jede IVA-Notiz mit **(Notiz von Nadine)**; technische IVA-Kennungen werden nicht in den Dealtext geschrieben. Eine in der Akte dokumentierte KfW-E-Mail-Adresse samt Passwort gilt als KfW-Kontobestätigung; Passwörter werden in Statusausgaben konsequent ausgeblendet. Relevante schriftliche Hinweise aus einer eindeutig zugeordneten Fördermail werden als kurze, konkrete Informationsnotiz übernommen. Bei KfW-Zugangsdaten sind E-Mail-Adresse und Passwort Pflichtangaben; ein bloßer Verweis auf das Förderpostfach ist nicht zulässig.
 
 ```bash
 node local-mac-helper/cli.mjs create-pipedrive-funding-notes /pfad/notizen.json --commit
+node local-mac-helper/cli.mjs create-pipedrive-funding-info-note /pfad/notiz.json --commit
+node local-mac-helper/cli.mjs update-pipedrive-funding-notes /pfad/notizen.json --commit
+node local-mac-helper/cli.mjs direct-sales-roster-status
+node local-mac-helper/cli.mjs sync-direct-sales-roster --commit
 ```
 
-Nach der Verarbeitung gilt: Lokale Download-, OCR-, Bild- und PDF-Zwischenkopien werden erst nach abgeschlossener Auswertung beziehungsweise verifiziertem Upload entfernt. Diese lokale Bereinigung verändert niemals die Originaldatei im Pipedrive-Verlauf. Auch bei Fehlern wird der IVA-Arbeitsordner aufgeräumt. Dateien außerhalb des IVA-Arbeitsordners werden nicht pauschal gelöscht; nur ein ausdrücklich als temporärer Pipedrive-Download markierter Pfad aus `~/Downloads` darf beim Einstellen in den Arbeitsordner konsumiert werden.
+Nach der Verarbeitung gilt: Lokale Download-, OCR-, Bild- und PDF-Zwischenkopien werden erst entfernt, wenn (1) der Upload in den exakten Pipedrive-Deal verifiziert ist, (2) der passende E-Mail- oder WhatsApp-Ausgang bestätigt ist und (3) keine manuelle Dokumentprüfung mehr offen ist. Diese lokale Bereinigung verändert niemals E-Mails oder Originaldateien im Pipedrive-Verlauf. Dateien außerhalb von `~/Library/Application Support/IVA Mac Helper/incoming/<Nachrichten-Fingerprint>` werden von diesem Abschlussweg nicht gelöscht.
+
+```bash
+node local-mac-helper/cli.mjs funding-cleanup-policy
+node local-mac-helper/cli.mjs cleanup-funding-review <nachrichten-fingerprint> --commit
+```
 
 Der Kontakt hinter dem Pipedrive-Feld **Vertriebspartner** liefert Anzeigenamen und E-Mail-Adresse für Anrede und CC. Zum strukturierten, rein lokalen Auslesen der bereits angemeldeten Chrome-Sitzung muss einmal **Chrome → Ansicht → Entwickler → JavaScript von Apple Events erlauben** aktiviert werden. Zugangsdaten werden nicht in IVA-Dateien geschrieben.
 
@@ -172,4 +181,15 @@ Routen:
 - `GET /v1/funding/batches` und `GET /v1/funding/batches/:id` für Prüfprotokolle
 - `POST /v1/funding/batches/:id/rollback` beziehungsweise `/v1/funding/batches/last/rollback` mit `{ "confirmation": "Alles rückgängig machen" }`
 
-Als nächster Schritt kommt ein ausgehender, gepaarter Jobkanal zu IVA-Core hinzu. Dadurch muss Railway niemals eine eingehende Verbindung zum MacBook öffnen.
+## MacBook → iMac über IVA
+
+Der Geräteagent fragt IVA-Core alle 15 Sekunden über HTTPS nach einem eng freigegebenen Befehl. Der iMac öffnet keinen eingehenden Port und aktiviert weder SSH noch macOS Remote Login. Das Gerätetoken liegt im macOS-Schlüsselbund unter `de.iva.device-agent`; Railway erhält denselben Wert ausschließlich als Secret `IMAC_DEVICE_TOKEN`.
+
+Freigegeben sind zunächst: Computer-/Fördermonitor-Status, ein Review-only-Förderlauf, Zusammenfassung der Förder-Review-Warteschlange sowie das Öffnen von Outlook, Chrome, WhatsApp oder Codex. Freie Shell-Befehle, beliebige Dateipfade und Zugangsdaten sind im Gerätekanal nicht zulässig.
+
+```bash
+node local-mac-helper/cli.mjs imac-device-agent-policy
+node local-mac-helper/cli.mjs provision-imac-device-token --commit
+node local-mac-helper/cli.mjs install-imac-device-agent --commit
+node local-mac-helper/cli.mjs imac-device-agent-status
+```

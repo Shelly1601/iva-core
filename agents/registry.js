@@ -3,7 +3,7 @@
 // gemeinsamen IVA-Core. Der Router waehlt deterministisch; unbekannte oder
 // deaktivierte Agenten fallen sicher auf IVA Standard zurueck.
 
-const STANDARD_SKILLS = ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'qonekto', 'lumit', 'capabilityReview', 'knowledgeLibrary', 'recruiting'];
+const STANDARD_SKILLS = ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'qonekto', 'lumit', 'capabilityReview', 'knowledgeLibrary', 'recruiting', 'deviceControl'];
 
 export const AGENTS = {
   'iva-standard': {

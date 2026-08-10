@@ -19,6 +19,7 @@
     "test:crm-name-matching": "node scripts/verify-crm-name-matching.mjs",
     "test:crm-qonekto": "node scripts/verify-crm-qonekto-sync.mjs",
     "test:mac-helper": "node scripts/verify-mac-helper.mjs",
+    "test:device-control": "node scripts/verify-device-control.mjs",
     "test:advice": "node scripts/verify-advice.mjs",
     "test:corporate-benefits": "node scripts/verify-corporate-benefits.mjs",
     "test:presentations": "node scripts/verify-presentations.mjs",

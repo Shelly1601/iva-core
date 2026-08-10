@@ -22,10 +22,14 @@ export function defaultFundingScanFile() {
 function summarizeSnapshot(snapshot) {
   const recognizedDocuments = snapshot.documents.filter(document => document.confidence >= 0.9 && document.type !== 'unknown');
   const presentDocumentIds = [...new Set(recognizedDocuments.map(document => document.type))];
+  if (snapshot.kfwAccountConfirmedByCredentials && !presentDocumentIds.includes('kfw_account_confirmation')) {
+    presentDocumentIds.push('kfw_account_confirmation');
+  }
   const missingBaseDocumentIds = FUNDING_BASE_REQUIRED_DOCUMENTS.filter(id => !presentDocumentIds.includes(id));
   const unknownFiles = snapshot.documents.filter(document => document.type === 'unknown').map(document => document.fileName);
   return {
     dealId: snapshot.dealId,
+    dealTitle: snapshot.dealTitle || null,
     customerName: snapshot.customerName,
     stage: snapshot.stage,
     location: snapshot.location,
@@ -33,6 +37,13 @@ function summarizeSnapshot(snapshot) {
     vpName: snapshot.vpName,
     vpEmail: snapshot.vpEmail,
     files: snapshot.files,
+    noteCount: snapshot.noteCount || 0,
+    latestNoteAt: snapshot.latestNoteAt || null,
+    latestExternalNote: snapshot.latestExternalNote || null,
+    kfwAccountConfirmedByCredentials: snapshot.kfwAccountConfirmedByCredentials === true,
+    kfwCredentialEvidenceNoteIds: snapshot.kfwCredentialEvidenceNoteIds || [],
+    kfwCredentialInvalidationNoteIds: snapshot.kfwCredentialInvalidationNoteIds || [],
+    ivaFundingRequestNotes: snapshot.ivaFundingRequestNotes || [],
     presentDocumentIds,
     missingBaseDocumentIds,
     unknownFiles,
@@ -65,6 +76,9 @@ export async function scanPipedriveFundingBoard({ batchSize = 100, persist = tru
   const entries = Object.entries(board.stages);
   const dealIds = entries.flatMap(([, deals]) => deals.map(deal => deal.id));
   const result = await readPipedriveFundingDealsViaApi({ dealIds, batchSize, onProgress });
+  if (result.read !== dealIds.length || result.failed) {
+    throw new Error(`Förderprüfung unvollständig: ${result.read}/${dealIds.length} Deals gelesen, ${result.failed} Fehler. Der letzte vollständige Stand wird nicht überschrieben.`);
+  }
   const cases = result.snapshots.map(summarizeSnapshot);
   const report = {
     version: 1,

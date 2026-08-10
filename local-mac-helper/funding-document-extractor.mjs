@@ -272,7 +272,7 @@ export function parseFundingDocumentPages(pageTexts, { sourceFile = 'Dokument.pd
   };
 }
 
-export async function analyzeFundingPdf(filePath) {
+export async function analyzeFundingPdf(filePath, { includePageText = false } = {}) {
   const absolutePath = path.resolve(String(filePath || ''));
   if (!filePath || path.extname(absolutePath).toLowerCase() !== '.pdf') throw new Error('Für die Dokumentauswertung wird eine PDF-Datei benötigt.');
   const file = await stat(absolutePath);
@@ -283,7 +283,7 @@ export async function analyzeFundingPdf(filePath) {
   const pdf = await getDocumentProxy(new Uint8Array(bytes));
   const extracted = await extractText(pdf, { mergePages: false });
   const ocr = await ocrMissingPdfPages(pdf, [...extracted.text]);
-  return {
+  const result = {
     ...parseFundingDocumentPages(ocr.pageTexts, { sourceFile: path.basename(absolutePath) }),
     absolutePath,
     fileSize: file.size,
@@ -294,6 +294,8 @@ export async function analyzeFundingPdf(filePath) {
       engine: ocr.engine,
     },
   };
+  if (includePageText) result.extractedPageTexts = ocr.pageTexts;
+  return result;
 }
 
 function normalizeExisting(fieldKey, value) {

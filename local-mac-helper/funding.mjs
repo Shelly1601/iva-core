@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { loadDirectSalesRosterSync, matchDirectSalesPartner } from './direct-sales-roster.mjs';
 
 export const FUNDING_DOCUMENTS = Object.freeze({
   signed_offer: 'Unterschriebenes Angebot',
@@ -12,6 +13,11 @@ export const FUNDING_DOCUMENTS = Object.freeze({
 
 export const FUNDING_SENDER_EMAIL = 'foerderung@heat-hero.com';
 export const FUNDING_PRIMARY_RECIPIENT_EMAIL = 'p.germer@heat-hero.com';
+export const FUNDING_SUPERVISORS = Object.freeze({
+  default: Object.freeze({ route: 'default', name: 'Patrick Germer', firstName: 'Patrick', email: 'p.germer@heat-hero.com' }),
+  ekd: Object.freeze({ route: 'ekd', name: 'Florian Bolz', firstName: 'Florian', email: 'f.bolz@heat-hero.com' }),
+  direct_sales: Object.freeze({ route: 'direct_sales', name: 'Noah Zielinski', firstName: 'Noah', email: 'n.zielinski@heat-hero.com' }),
+});
 export const FUNDING_SIGNATURE = Object.freeze({
   name: 'Nadine Sell',
   title: 'Sales Operations Manager',
@@ -72,10 +78,32 @@ export function buildFundingCaseReference(input = {}) {
   };
 }
 
+export function resolveFundingSupervisor(input = {}) {
+  const routeEvidence = [
+    input.fundingRoute,
+    input.route,
+    input.dealTitle,
+    input.sourceText,
+    input.vpName,
+    input.vertriebspartnerName,
+    input.vpEmail,
+    input.vertriebspartnerEmail,
+  ].map(value => clean(value)).join(' ');
+  if (/^(?:direct_sales|direktvertrieb)$/i.test(clean(input.fundingRoute || input.route))) return FUNDING_SUPERVISORS.direct_sales;
+  const rosterMatch = matchDirectSalesPartner({
+    vpName: input.vpName || input.vertriebspartnerName,
+    vpEmail: input.vpEmail || input.vertriebspartnerEmail,
+  }, input.directSalesRoster || loadDirectSalesRosterSync());
+  if (rosterMatch.matched) return { ...FUNDING_SUPERVISORS.direct_sales, rosterMatch };
+  if (/(?:^|\W)ekd(?:\W|$)|@ekd-solar\.de\b/i.test(routeEvidence)) return { ...FUNDING_SUPERVISORS.ekd, rosterMatch };
+  return { ...FUNDING_SUPERVISORS.default, rosterMatch };
+}
+
 export function resolveFundingRecipients(input = {}) {
+  const supervisor = resolveFundingSupervisor(input);
   const suppliedTo = Array.isArray(input.to) ? input.to.map(extractEmailAddress).filter(Boolean) : [];
-  if (suppliedTo.length && (suppliedTo.length !== 1 || suppliedTo[0] !== FUNDING_PRIMARY_RECIPIENT_EMAIL)) {
-    throw new Error(`Förderentwürfe dürfen im An-Feld ausschließlich an ${FUNDING_PRIMARY_RECIPIENT_EMAIL} adressiert werden.`);
+  if (suppliedTo.length && (suppliedTo.length !== 1 || suppliedTo[0] !== supervisor.email)) {
+    throw new Error(`Der Förderentwurf muss für den erkannten Vertriebsweg im An-Feld an ${supervisor.email} adressiert werden.`);
   }
 
   const suppliedCc = Array.isArray(input.cc) ? input.cc.map(extractEmailAddress).filter(Boolean) : [];
@@ -89,15 +117,19 @@ export function resolveFundingRecipients(input = {}) {
   const vpFirstName = firstNameFromContactName(input.vpFirstName || vpName);
   const warnings = [];
   if (rawVpEmail && !vpEmail) warnings.push('Die Vertriebspartner-E-Mail ist nicht eindeutig gültig und wurde nicht ins CC übernommen.');
-  if (!vpEmail) warnings.push('Keine eindeutige Vertriebspartner-E-Mail vorhanden; der Entwurf geht nur an Patrick.');
+  if (!vpEmail) warnings.push(`Keine eindeutige Vertriebspartner-E-Mail vorhanden; der Entwurf geht nur an ${supervisor.firstName}.`);
 
   return {
-    to: [FUNDING_PRIMARY_RECIPIENT_EMAIL],
-    cc: vpEmail && vpEmail !== FUNDING_PRIMARY_RECIPIENT_EMAIL ? [vpEmail] : [],
+    to: [supervisor.email],
+    cc: vpEmail && vpEmail !== supervisor.email ? [vpEmail] : [],
     vpName,
     vpFirstName,
     vpEmail: vpEmail || null,
-    greeting: vpFirstName ? `Hallo Patrick, hallo ${vpFirstName},` : 'Hallo Patrick,',
+    supervisor,
+    route: supervisor.route,
+    greeting: vpFirstName && vpFirstName.toLowerCase() !== supervisor.firstName.toLowerCase()
+      ? `Hallo ${supervisor.firstName}, hallo ${vpFirstName},`
+      : `Hallo ${supervisor.firstName},`,
     warnings,
   };
 }

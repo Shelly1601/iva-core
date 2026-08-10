@@ -85,6 +85,15 @@ func focusedRoot(_ appElement: AXUIElement) -> AXUIElement {
     return appElement
 }
 
+func activateApplication(_ app: NSRunningApplication) {
+    if #available(macOS 14.0, *) {
+        app.activate()
+    } else {
+        activateApplication(app)
+    }
+    usleep(300_000)
+}
+
 func focusedWindow(_ appElement: AXUIElement) throws -> AXUIElement {
     guard let window = attribute(appElement, kAXFocusedWindowAttribute), CFGetTypeID(window) == AXUIElementGetTypeID() else {
         throw HelperError.message("Kein fokussiertes Outlook-Fenster gefunden.")
@@ -107,7 +116,7 @@ func dictionary(_ node: AXNode) -> [String: Any] {
     let actionResult = AXUIElementCopyActionNames(node.element, &actionValues)
     let actions = actionResult == .success ? (actionValues as? [String] ?? []) : []
     let enabledValue = attribute(node.element, kAXEnabledAttribute) as? Bool ?? true
-    return [
+    var result: [String: Any] = [
         "path": node.path,
         "role": node.role,
         "title": node.title,
@@ -115,7 +124,11 @@ func dictionary(_ node: AXNode) -> [String: Any] {
         "identifier": node.identifier,
         "enabled": enabledValue,
         "actions": actions,
-    ] as [String: Any]
+    ]
+    if let frame = elementFrame(node.element) {
+        result["frame"] = ["x": frame.origin.x, "y": frame.origin.y, "width": frame.size.width, "height": frame.size.height]
+    }
+    return result
 }
 
 func safeValue(_ element: AXUIElement) -> String {
@@ -140,6 +153,37 @@ func writeJSON(_ value: Any) throws {
 func matches(_ node: AXNode, role: String, description: String) -> Bool {
     guard node.role == role else { return false }
     return description.isEmpty || node.description == description || node.title == description || node.identifier == description
+}
+
+func normalizedAXText(_ value: String) -> String {
+    return value.replacingOccurrences(of: "\u{00a0}", with: " ")
+        .replacingOccurrences(of: "\n", with: " ")
+        .split(whereSeparator: { $0.isWhitespace })
+        .joined(separator: " ")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+func matchesSidebarLabel(_ node: AXNode, label: String) -> Bool {
+    guard node.role == "AXRow" || node.role == "AXCell" else { return false }
+    let expected = normalizedAXText(label)
+    let values = [node.description, node.title, safeValue(node.element)].map(normalizedAXText)
+    return values.contains(expected) || values.contains { value in
+        value.hasPrefix(expected + " ") || value.hasPrefix(expected + ";")
+    }
+}
+
+func sidebarFolder(after account: AXNode, named folderName: String, in nodes: [AXNode]) -> AXNode? {
+    guard !account.path.isEmpty else { return nil }
+    let depthToDrop = account.role == "AXCell" && account.path.count >= 2 ? 2 : 1
+    let prefix = Array(account.path.dropLast(depthToDrop))
+    let indexPosition = account.path.count - depthToDrop
+    let accountIndex = account.path[indexPosition]
+    return nodes.filter { node in
+        guard node.role == account.role, node.path.count == account.path.count,
+              Array(node.path.dropLast(depthToDrop)) == prefix,
+              node.path[indexPosition] > accountIndex else { return false }
+        return matchesSidebarLabel(node, label: folderName)
+    }.sorted { $0.path[indexPosition] < $1.path[indexPosition] }.first
 }
 
 func centerPoint(_ element: AXUIElement) throws -> CGPoint {
@@ -312,8 +356,7 @@ do {
     }
 
     if command == "activate" {
-        app.activate(options: [.activateIgnoringOtherApps])
-        usleep(250_000)
+        activateApplication(app)
         try writeJSON(["activated": true, "focusedWindowTitle": focusedWindowTitle(appElement)])
         exit(0)
     }
@@ -330,10 +373,31 @@ do {
         exit(found.isEmpty ? 2 : 0)
     }
 
+    if command == "find-app" {
+        guard arguments.count >= 2 else { throw HelperError.message("find-app benötigt mindestens eine AX-Rolle.") }
+        let role = arguments[1]
+        let description = arguments.count >= 3 ? arguments[2] : ""
+        let found = collect(appElement, maxDepth: 22, maxNodes: 12000).filter { matches($0, role: role, description: description) }
+        try writeJSON(["count": found.count, "matches": found.map(dictionary)])
+        exit(found.isEmpty ? 2 : 0)
+    }
+
     if command == "value" {
         guard arguments.count >= 3 else { throw HelperError.message("value benötigt AX-Rolle und exakte Beschriftung.") }
         let found = nodes.filter { matches($0, role: arguments[1], description: arguments[2]) }
         guard found.count == 1 else { throw HelperError.message("Bedienelement ist nicht eindeutig: \(found.count) Treffer.") }
+        try writeJSON([
+            "value": safeValue(found[0].element),
+            "element": dictionary(found[0]),
+            "focusedWindowTitle": focusedWindowTitle(appElement),
+        ])
+        exit(0)
+    }
+
+    if command == "value-app" {
+        guard arguments.count >= 3 else { throw HelperError.message("value-app benötigt AX-Rolle und exakte Beschriftung.") }
+        let found = collect(appElement, maxDepth: 22, maxNodes: 12000).filter { matches($0, role: arguments[1], description: arguments[2]) }
+        guard found.count == 1 else { throw HelperError.message("Bedienelement ist appweit nicht eindeutig: \(found.count) Treffer.") }
         try writeJSON([
             "value": safeValue(found[0].element),
             "element": dictionary(found[0]),
@@ -353,6 +417,16 @@ do {
             "element": dictionary(found[0]),
             "valueLength": arguments[3].count,
         ])
+        exit(0)
+    }
+
+    if command == "set-value-app" {
+        guard arguments.count >= 4 else { throw HelperError.message("set-value-app benötigt AX-Rolle, exakte Beschriftung und Wert.") }
+        let found = collect(appElement, maxDepth: 22, maxNodes: 12000).filter { matches($0, role: arguments[1], description: arguments[2]) }
+        guard found.count == 1 else { throw HelperError.message("Bedienelement ist appweit nicht eindeutig: \(found.count) Treffer.") }
+        let result = AXUIElementSetAttributeValue(found[0].element, kAXValueAttribute as CFString, arguments[3] as CFTypeRef)
+        guard result == .success else { throw HelperError.message("Wert konnte appweit nicht gesetzt werden: AX-Fehler \(result.rawValue).") }
+        try writeJSON(["updated": true, "element": dictionary(found[0]), "valueLength": arguments[3].count])
         exit(0)
     }
 
@@ -412,11 +486,97 @@ do {
         try click(found[0].element)
         usleep(100_000)
         try commandShortcut(0) // Befehl+A
-        try typeText(arguments[3])
+        if arguments[3].isEmpty { try keyboardEvent(51) } // Rückschritt löscht auch Empfänger-Chips
+        else { try typeText(arguments[3]) }
         usleep(150_000)
         try keyboardEvent(36) // Eingabetaste
         usleep(250_000)
         try writeJSON(["updated": true, "confirmed": true, "element": dictionary(found[0]), "valueLength": arguments[3].count])
+        exit(0)
+    }
+
+    if command == "replace-text-app-and-confirm" {
+        guard arguments.count >= 4 else { throw HelperError.message("replace-text-app-and-confirm benötigt AX-Rolle, exakte Beschriftung und Wert.") }
+        let found = collect(appElement, maxDepth: 22, maxNodes: 12000).filter { matches($0, role: arguments[1], description: arguments[2]) }
+        guard found.count == 1 else { throw HelperError.message("Bedienelement ist appweit nicht eindeutig: \(found.count) Treffer.") }
+        _ = AXUIElementSetAttributeValue(found[0].element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        try click(found[0].element)
+        usleep(100_000)
+        try commandShortcut(0) // Befehl+A
+        if arguments[3].isEmpty { try keyboardEvent(51) }
+        else { try typeText(arguments[3]) }
+        usleep(150_000)
+        try keyboardEvent(36)
+        usleep(250_000)
+        try writeJSON(["updated": true, "confirmed": true, "element": dictionary(found[0]), "valueLength": arguments[3].count])
+        exit(0)
+    }
+
+    if command == "open-draft-search-result" {
+        guard arguments.count >= 2 else { throw HelperError.message("open-draft-search-result benötigt den exakten Betreff.") }
+        let expectedSubject = arguments[1]
+        let subjectNeedle = "Betreff: \(expectedSubject),"
+        let candidates = nodes.filter { node in
+            node.role == "AXCell" && node.description.contains(subjectNeedle) && node.description.contains("Ordner: Entwürfe")
+        }
+        guard candidates.count == 1 else {
+            throw HelperError.message("Entwurfsaktualisierung abgebrochen: Erwartet wurde genau ein Suchtreffer im Ordner Entwürfe, gefunden wurden \(candidates.count).")
+        }
+        let rowPath = Array(candidates[0].path.dropLast())
+        let row = nodes.first { $0.role == "AXRow" && $0.path == rowPath }
+        if let row {
+            let selected = AXUIElementSetAttributeValue(row.element, kAXSelectedAttribute as CFString, kCFBooleanTrue)
+            if selected != .success { try click(row.element) }
+        } else {
+            try click(candidates[0].element)
+        }
+        usleep(800_000)
+        let refreshed = collect(focusedRoot(appElement))
+        let subjectFields = refreshed.filter { matches($0, role: "AXTextField", description: "subjectTextField") }
+        guard subjectFields.count == 1, safeValue(subjectFields[0].element) == expectedSubject else {
+            throw HelperError.message("Entwurfsaktualisierung abgebrochen: Der ausgewählte Entwurf konnte nicht über seinen Betreff verifiziert werden.")
+        }
+        try writeJSON(["opened": true, "subject": expectedSubject, "searchResult": dictionary(candidates[0])])
+        exit(0)
+    }
+
+    if command == "select-search-suggestion" {
+        guard arguments.count >= 2 else { throw HelperError.message("select-search-suggestion benötigt den exakten Suchtext.") }
+        let expected = arguments[1]
+        let candidates = nodes.filter { node in
+            node.role == "AXCell" && node.description.contains("Suchvorschlag") && node.description.contains(expected)
+        }.sorted { $0.path.count < $1.path.count }
+        guard let selected = candidates.first else { throw HelperError.message("Kein eindeutiger Outlook-Suchvorschlag gefunden.") }
+        try click(selected.element)
+        usleep(1_200_000)
+        try writeJSON(["selected": true, "searchText": expected, "element": dictionary(selected)])
+        exit(0)
+    }
+
+    if command == "compose-summary" {
+        let composeNodes = collect(appElement, maxDepth: 22, maxNodes: 12000)
+        let accountPickers = composeNodes.filter { matches($0, role: "AXPopUpButton", description: "accountPicker") }
+        let subjectFields = composeNodes.filter { matches($0, role: "AXTextField", description: "subjectTextField") }
+        guard accountPickers.count == 1 && subjectFields.count == 1 else {
+            throw HelperError.message("Entwurfsprüfung abgebrochen: Das Verfassen-Fenster ist nicht eindeutig sichtbar.")
+        }
+        let emailPattern = try NSRegularExpression(pattern: "[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", options: [.caseInsensitive])
+        var emails = Set<String>()
+        for node in composeNodes {
+            let searchable = "\(node.title) \(node.description) \(safeValue(node.element))"
+            let range = NSRange(searchable.startIndex..<searchable.endIndex, in: searchable)
+            for match in emailPattern.matches(in: searchable, range: range) {
+                if let swiftRange = Range(match.range, in: searchable) {
+                    emails.insert(String(searchable[swiftRange]).lowercased())
+                }
+            }
+        }
+        try writeJSON([
+            "account": safeValue(accountPickers[0].element),
+            "subject": safeValue(subjectFields[0].element),
+            "recipientEmails": Array(emails).sorted(),
+            "focusedWindowTitle": focusedWindowTitle(appElement),
+        ])
         exit(0)
     }
 
@@ -448,8 +608,7 @@ do {
     }
 
     if command == "new-message" {
-        app.activate(options: [.activateIgnoringOtherApps])
-        usleep(200_000)
+        activateApplication(app)
         try commandShortcut(45) // Befehl+N
         usleep(700_000)
         let composeNodes = collect(focusedRoot(appElement))
@@ -540,16 +699,57 @@ do {
         exit(0)
     }
 
+    if command == "paste-html-file-app" {
+        guard arguments.count >= 4 else { throw HelperError.message("paste-html-file-app benötigt AX-Rolle, exakte Beschriftung und Dateipfad.") }
+        let found = collect(appElement, maxDepth: 22, maxNodes: 12000).filter { matches($0, role: arguments[1], description: arguments[2]) }
+        guard found.count == 1 else { throw HelperError.message("Bedienelement ist appweit nicht eindeutig: \(found.count) Treffer.") }
+        let characterCount = try pasteHTMLFile(arguments[3], into: found[0].element)
+        try writeJSON([
+            "pasted": true,
+            "characterCount": characterCount,
+            "element": dictionary(found[0]),
+        ])
+        exit(0)
+    }
+
+    if command == "paste-html-file-app-largest" {
+        guard arguments.count >= 4 else { throw HelperError.message("paste-html-file-app-largest benötigt AX-Rolle, exakte Beschriftung und Dateipfad.") }
+        let found = collect(appElement, maxDepth: 22, maxNodes: 12000).filter { matches($0, role: arguments[1], description: arguments[2]) }
+        let ranked = found.compactMap { node -> (AXNode, CGFloat)? in
+            guard let frame = elementFrame(node.element), frame.width > 20, frame.height > 20 else { return nil }
+            return (node, frame.width * frame.height)
+        }.sorted { $0.1 > $1.1 }
+        guard let selected = ranked.first, ranked.count == 1 || selected.1 > ranked[1].1 else {
+            throw HelperError.message("Der Outlook-Mailtext ist appweit nicht eindeutig auswählbar: \(found.count) Treffer.")
+        }
+        let characterCount = try pasteHTMLFile(arguments[3], into: selected.0.element)
+        try writeJSON(["pasted": true, "characterCount": characterCount, "element": dictionary(selected.0)])
+        exit(0)
+    }
+
     if command == "paste-text" {
         guard arguments.count >= 4 else { throw HelperError.message("paste-text benötigt AX-Rolle, exakte Beschriftung und Text.") }
         let found = nodes.filter { matches($0, role: arguments[1], description: arguments[2]) }
         guard found.count == 1 else { throw HelperError.message("Bedienelement ist nicht eindeutig: \(found.count) Treffer.") }
-        app.activate(options: [.activateIgnoringOtherApps])
+        activateApplication(app)
         usleep(150_000)
         try pasteText(arguments[3], into: found[0].element)
         if AXUIElementPerformAction(found[0].element, kAXConfirmAction as CFString) != .success {
             try keyboardEvent(36) // Eingabetaste
         }
+        usleep(250_000)
+        try writeJSON(["pasted": true, "characterCount": arguments[3].count, "element": dictionary(found[0])])
+        exit(0)
+    }
+
+    if command == "paste-text-app" {
+        guard arguments.count >= 4 else { throw HelperError.message("paste-text-app benötigt AX-Rolle, exakte Beschriftung und Text.") }
+        let found = collect(appElement, maxDepth: 22, maxNodes: 12000).filter { matches($0, role: arguments[1], description: arguments[2]) }
+        guard found.count == 1 else { throw HelperError.message("Bedienelement ist appweit nicht eindeutig: \(found.count) Treffer.") }
+        activateApplication(app)
+        usleep(150_000)
+        try pasteText(arguments[3], into: found[0].element)
+        if AXUIElementPerformAction(found[0].element, kAXConfirmAction as CFString) != .success { try keyboardEvent(36) }
         usleep(250_000)
         try writeJSON(["pasted": true, "characterCount": arguments[3].count, "element": dictionary(found[0])])
         exit(0)
@@ -598,6 +798,68 @@ do {
             "opened": true,
             "message": dictionary(found[0]),
             "attachmentGrid": grids.first.map(dictionary) as Any,
+            "attachments": attachmentGroups.map(dictionary),
+        ])
+        exit(0)
+    }
+
+    if command == "download-open-message-attachments" {
+        guard arguments.count >= 2 else { throw HelperError.message("download-open-message-attachments benötigt einen absoluten Zielordner.") }
+        let destination = URL(fileURLWithPath: arguments[1]).standardizedFileURL.path
+        guard destination.hasPrefix("/") else { throw HelperError.message("Der Outlook-Downloadordner muss absolut sein.") }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: destination, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw HelperError.message("Der Outlook-Downloadordner existiert nicht.")
+        }
+
+        let currentRoot = focusedRoot(appElement)
+        let currentNodes = collect(currentRoot)
+        let grids = currentNodes.filter { $0.role == "AXGroup" && $0.identifier == "attachmentGrid" }
+        guard grids.count == 1 else { throw HelperError.message("Die geöffnete Outlook-Mail besitzt kein eindeutig sichtbares Anlagenfeld.") }
+        let attachmentGroups = currentNodes.filter { node in
+            node.role == "AXGroup" && node.identifier == "_NS:136" && !node.description.isEmpty
+        }
+        guard !attachmentGroups.isEmpty else { throw HelperError.message("In der geöffneten Outlook-Mail wurden keine Anlagen erkannt.") }
+        let downloadButtons = currentNodes.filter { matches($0, role: "AXButton", description: "Alle herunterladen") }
+        guard downloadButtons.count == 1 else { throw HelperError.message("Outlooks Schaltfläche „Alle herunterladen“ ist nicht eindeutig verfügbar.") }
+        _ = AXUIElementPerformAction(downloadButtons[0].element, "AXScrollToVisible" as CFString)
+        usleep(200_000)
+        let pressResult = AXUIElementPerformAction(downloadButtons[0].element, kAXPressAction as CFString)
+        if pressResult != .success { try click(downloadButtons[0].element) }
+
+        var chooserVisible = false
+        for _ in 0..<30 {
+            usleep(100_000)
+            let title = focusedWindowTitle(appElement)
+            if title == "Verzeichnis wählen" || title == "Choose Directory" {
+                chooserVisible = true
+                break
+            }
+        }
+        guard chooserVisible else { throw HelperError.message("Outlooks Verzeichnisauswahl wurde nicht sichtbar.") }
+
+        try keyboardEvent(5, flags: [.maskCommand, .maskShift]) // Befehl+Umschalt+G
+        usleep(250_000)
+        try typeText(destination)
+        try keyboardEvent(36) // Eingabe
+        usleep(500_000)
+
+        let chooserRoot = focusedRoot(appElement)
+        let chooserNodes = collect(chooserRoot, maxDepth: 12, maxNodes: 2000)
+        let chooseButtons = chooserNodes.filter { node in
+            node.role == "AXButton" && (node.identifier == "OKButton" || node.description == "Auswählen" || node.title == "Auswählen" || node.description == "Choose" || node.title == "Choose")
+        }
+        guard chooseButtons.count == 1 else { throw HelperError.message("Der Zielordner konnte in Outlook nicht eindeutig bestätigt werden.") }
+        let chooseResult = AXUIElementPerformAction(chooseButtons[0].element, kAXPressAction as CFString)
+        if chooseResult != .success { try click(chooseButtons[0].element) }
+        usleep(900_000)
+        guard focusedWindowTitle(appElement) != "Verzeichnis wählen" else {
+            throw HelperError.message("Outlooks Verzeichnisauswahl wurde nach der Bestätigung nicht geschlossen.")
+        }
+        try writeJSON([
+            "downloadStarted": true,
+            "destination": destination,
+            "expectedAttachmentCount": attachmentGroups.count,
             "attachments": attachmentGroups.map(dictionary),
         ])
         exit(0)
@@ -757,27 +1019,23 @@ do {
     if command == "open-account-drafts" {
         guard arguments.count >= 2 else { throw HelperError.message("open-account-drafts benötigt den exakten Kontonamen.") }
         let accountName = arguments[1]
-        let accountCells = nodes.filter { $0.role == "AXCell" && $0.description == accountName }
-        guard accountCells.count == 1, accountCells[0].path.count >= 2 else {
+        let accountCells = nodes.filter { matchesSidebarLabel($0, label: accountName) }
+        guard accountCells.count == 1 else {
             throw HelperError.message("Das Outlook-Konto ist in der Ordnerleiste nicht eindeutig sichtbar.")
         }
-        let accountPath = accountCells[0].path
-        let siblingPrefix = Array(accountPath.dropLast(2))
-        let accountIndex = accountPath[accountPath.count - 2]
-        let draftCells = nodes.filter { node in
-            guard node.role == "AXCell", node.description.hasPrefix("Entwürfe"), node.path.count == accountPath.count else { return false }
-            return Array(node.path.dropLast(2)) == siblingPrefix && node.path[node.path.count - 2] > accountIndex
-        }.sorted { $0.path[$0.path.count - 2] < $1.path[$1.path.count - 2] }
-        guard let draftCell = draftCells.first else {
+        guard let draftCell = sidebarFolder(after: accountCells[0], named: "Entwürfe", in: nodes) else {
             throw HelperError.message("Der Entwürfe-Ordner des Outlook-Kontos ist nicht sichtbar.")
         }
-        let rowPath = Array(draftCell.path.dropLast())
-        let row = nodes.first { $0.role == "AXRow" && $0.path == rowPath }
-        if let row {
-            let selected = AXUIElementSetAttributeValue(row.element, kAXSelectedAttribute as CFString, kCFBooleanTrue)
-            if selected != .success { try click(row.element) }
+        if draftCell.role == "AXRow" {
+            let selected = AXUIElementSetAttributeValue(draftCell.element, kAXSelectedAttribute as CFString, kCFBooleanTrue)
+            if selected != .success { try click(draftCell.element) }
         } else {
-            try click(draftCell.element)
+            let rowPath = Array(draftCell.path.dropLast())
+            let row = nodes.first { $0.role == "AXRow" && $0.path == rowPath }
+            if let row {
+                let selected = AXUIElementSetAttributeValue(row.element, kAXSelectedAttribute as CFString, kCFBooleanTrue)
+                if selected != .success { try click(row.element) }
+            } else { try click(draftCell.element) }
         }
         usleep(900_000)
         try writeJSON(["opened": true, "account": accountName, "folder": draftCell.description, "element": dictionary(draftCell)])
@@ -788,27 +1046,41 @@ do {
         guard arguments.count >= 3 else { throw HelperError.message("open-account-folder benötigt Kontonamen und Ordnernamen.") }
         let accountName = arguments[1]
         let folderName = arguments[2]
-        let accountCells = nodes.filter { $0.role == "AXCell" && $0.description == accountName }
-        guard accountCells.count == 1, accountCells[0].path.count >= 2 else {
+        let currentTitle = focusedWindowTitle(appElement)
+        if currentTitle.hasPrefix(folderName + " • " + accountName) || currentTitle == folderName + " - " + accountName {
+            try writeJSON(["opened": true, "alreadyOpen": true, "account": accountName, "folder": folderName, "focusedWindowTitle": currentTitle])
+            exit(0)
+        }
+        let outlookWindows = (attribute(appElement, kAXWindowsAttribute) as? [AXUIElement]) ?? []
+        var matchingWindows: [(window: AXUIElement, nodes: [AXNode], account: AXNode)] = []
+        for window in outlookWindows {
+            let windowNodes = collect(window)
+            let accountCells = windowNodes.filter { matchesSidebarLabel($0, label: accountName) }
+            if accountCells.count == 1 {
+                matchingWindows.append((window: window, nodes: windowNodes, account: accountCells[0]))
+            }
+        }
+        guard matchingWindows.count == 1 else {
             throw HelperError.message("Das Outlook-Konto ist in der Ordnerleiste nicht eindeutig sichtbar.")
         }
-        let accountPath = accountCells[0].path
-        let siblingPrefix = Array(accountPath.dropLast(2))
-        let accountIndex = accountPath[accountPath.count - 2]
-        let folderCells = nodes.filter { node in
-            guard node.role == "AXCell", node.description.hasPrefix(folderName), node.path.count == accountPath.count else { return false }
-            return Array(node.path.dropLast(2)) == siblingPrefix && node.path[node.path.count - 2] > accountIndex
-        }.sorted { $0.path[$0.path.count - 2] < $1.path[$1.path.count - 2] }
-        guard let folderCell = folderCells.first else {
+        let selectedWindow = matchingWindows[0]
+        activateApplication(app)
+        _ = AXUIElementSetAttributeValue(selectedWindow.window, kAXMainAttribute as CFString, kCFBooleanTrue)
+        _ = AXUIElementSetAttributeValue(selectedWindow.window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        usleep(250_000)
+        guard let folderCell = sidebarFolder(after: selectedWindow.account, named: folderName, in: selectedWindow.nodes) else {
             throw HelperError.message("Der Outlook-Ordner \(folderName) des Kontos ist nicht sichtbar.")
         }
-        let rowPath = Array(folderCell.path.dropLast())
-        let row = nodes.first { $0.role == "AXRow" && $0.path == rowPath }
-        if let row {
-            let selected = AXUIElementSetAttributeValue(row.element, kAXSelectedAttribute as CFString, kCFBooleanTrue)
-            if selected != .success { try click(row.element) }
+        if folderCell.role == "AXRow" {
+            let selected = AXUIElementSetAttributeValue(folderCell.element, kAXSelectedAttribute as CFString, kCFBooleanTrue)
+            if selected != .success { try click(folderCell.element) }
         } else {
-            try click(folderCell.element)
+            let rowPath = Array(folderCell.path.dropLast())
+            let row = selectedWindow.nodes.first { $0.role == "AXRow" && $0.path == rowPath }
+            if let row {
+                let selected = AXUIElementSetAttributeValue(row.element, kAXSelectedAttribute as CFString, kCFBooleanTrue)
+                if selected != .success { try click(row.element) }
+            } else { try click(folderCell.element) }
         }
         usleep(900_000)
         try writeJSON(["opened": true, "account": accountName, "folder": folderCell.description, "element": dictionary(folderCell)])

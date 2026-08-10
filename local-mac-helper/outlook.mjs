@@ -1,6 +1,6 @@
 import { access, stat } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { createOutlookDraftViaUi, deleteOutlookDraftsViaUi } from './macos-ui.mjs';
+import { createOutlookDraftViaUi, deleteOutlookDraftsViaUi, updateOutlookDraftsViaUi, updateOutlookDraftViaUi } from './macos-ui.mjs';
 
 const OUTLOOK_APP = '/Applications/Microsoft Outlook.app';
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -225,6 +225,33 @@ export async function deleteOutlookDrafts(input = {}) {
     recoverableFromDeletedItems: true,
     sent: false,
   };
+}
+
+export async function updateOutlookDraft(input = {}) {
+  const draft = normalizeDraftPayload(input);
+  await validateAttachmentPaths(draft.attachments);
+  const diagnosis = await diagnoseOutlook();
+  if (!diagnosis.outlook.installed || !diagnosis.outlook.running) {
+    throw new Error('Microsoft Outlook ist nicht geöffnet. Es wurde kein Entwurf aktualisiert.');
+  }
+  if (!diagnosis.capabilities.sharedSenderUiPrerequisitesReady) {
+    throw new Error('Outlook kann den vorhandenen Entwurf nicht über die freigegebene macOS-Oberfläche aktualisieren.');
+  }
+  return updateOutlookDraftViaUi(draft);
+}
+
+export async function updateOutlookDrafts(inputs = [], { onProgress } = {}) {
+  const drafts = (Array.isArray(inputs) ? inputs : []).map(input => normalizeDraftPayload(input));
+  if (!drafts.length) return { requested: 0, updated: 0, failed: 0, results: [], sent: false };
+  for (const draft of drafts) await validateAttachmentPaths(draft.attachments);
+  const diagnosis = await diagnoseOutlook();
+  if (!diagnosis.outlook.installed || !diagnosis.outlook.running) {
+    throw new Error('Microsoft Outlook ist nicht geöffnet. Es wurden keine Entwürfe aktualisiert.');
+  }
+  if (!diagnosis.capabilities.sharedSenderUiPrerequisitesReady) {
+    throw new Error('Outlook kann vorhandene Entwürfe nicht über die freigegebene macOS-Oberfläche aktualisieren.');
+  }
+  return updateOutlookDraftsViaUi(drafts, { onProgress });
 }
 
 async function commandSucceeds(command, args) {

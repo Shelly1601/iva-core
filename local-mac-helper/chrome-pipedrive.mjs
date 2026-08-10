@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { classifyFundingDocumentName } from './funding-document-extractor.mjs';
+import { resolveFundingSupervisor } from './funding.mjs';
 
 const PIPEDRIVE_HOST = 'simplegategmbh.pipedrive.com';
 const MAX_OUTPUT_BYTES = 256 * 1024;
@@ -574,6 +575,7 @@ export async function readPipedriveFundingDealsViaApi({ dealIds, batchSize = 8, 
     const batch = ids.slice(offset, offset + safeBatchSize);
     const raw = await executePipedriveJavaScript(String.raw`(() => {
       const ids = ${JSON.stringify(batch)};
+      const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
       const resource = performance.getEntriesByType('resource').map(entry => entry.name).find(name => name.includes('session_token='));
       const sessionToken = resource ? new URL(resource).searchParams.get('session_token') : '';
       if (!sessionToken) return JSON.stringify({ fatal: 'missing_session_token', items: [] });
@@ -615,6 +617,40 @@ export async function readPipedriveFundingDealsViaApi({ dealIds, batchSize = 8, 
         try {
           const deal = request('/api/v1/deals/' + id + '?get_activity_summary=false&get_updated_deal_stage_averages=false') || {};
           const files = request('/api/v1/deals/' + id + '/files?start=0&limit=500') || [];
+          const notes = request('/api/v1/notes?deal_id=' + encodeURIComponent(id) + '&start=0&limit=500') || [];
+          const noteEvidence = notes.map(note => {
+            const content = String(note?.content || '');
+            const document = new DOMParser().parseFromString(content, 'text/html');
+            const text = clean(document.body?.textContent || content);
+            const marker = content.match(/IVA-FUNDING-REQUEST:\d+:[0-9a-f]{24}/i)?.[0] || null;
+            const kfwEvidenceMarker = content.match(/IVA-KFW-EVIDENCE:\d+:[0-9a-f]{24}/i)?.[0] || null;
+            const humanReadableIvaRequest = /^fehlende unterlagen:/i.test(text)
+              && /angefragt\./i.test(text)
+              && /\(notiz von nadine\)\s*$/i.test(text);
+            const kfwEmailMatch = text.match(/[a-z0-9.!#$%&'*+/=?^_{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+            const kfwSecretAfterEmail = kfwEmailMatch
+              ? text.slice((kfwEmailMatch.index || 0) + kfwEmailMatch[0].length).trim().match(/^(\S{6,})/)?.[1] || ''
+              : '';
+            const hasExplicitKfwCredentials = Boolean(kfwEmailMatch)
+              && (/(?:passwort|kennwort)\s*[:=\-]\s*\S{3,}/i.test(text)
+                || (/kfw.{0,30}konto/i.test(text) && /[A-Za-z]/.test(kfwSecretAfterEmail) && /\d/.test(kfwSecretAfterEmail)));
+            const redactedExcerpt = text
+              .replace(/[a-z0-9.!#$%&'*+/=?^_{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/ig, '[E-Mail ausgeblendet]')
+              .replace(/((?:passwort|kennwort)\s*[:=\-]\s*)\S+/ig, '$1[ausgeblendet]')
+              .slice(0, 600);
+            return {
+              noteId: String(note?.id || ''),
+              addTime: note?.add_time || note?.addTime || null,
+              updateTime: note?.update_time || note?.updateTime || null,
+              hasKfwCredentials: hasExplicitKfwCredentials,
+              invalidatesKfwCredentials: /(?:zugangsdaten|passwort|kennwort|kfw.{0,30}konto).{0,80}(?:stimm(?:en|t)\s+nicht|ungültig|ungueltig|geändert|geaendert|nicht\s+bestätigt|nicht\s+bestaetigt|nicht\s+bestatigt)|(?:konto|aktivierungslink).{0,60}(?:nicht\s+bestätigt|nicht\s+bestaetigt|nicht\s+bestatigt)/i.test(text),
+              isIvaFundingRequest: Boolean(marker) || humanReadableIvaRequest,
+              marker,
+              kfwEvidenceMarker,
+              includesKfwMissing: (Boolean(marker) || humanReadableIvaRequest) && /(?:kfw.{0,60}(?:konto|bestätigung|bestatigung|bestaetigung|zugang)|bestätigung.{0,60}kfw|bestatigung.{0,60}kfw|bestaetigung.{0,60}kfw)/i.test(text),
+              redactedExcerpt,
+            };
+          });
           const customerName = String(deal.person_name || '').trim() || null;
           const title = String(deal.title || '').trim();
           const titleOrderNumber = title.match(/\bHH-(?:AN|AB)-[A-Z0-9-]{4,}\b/i)?.[0]?.toUpperCase() || null;
@@ -650,6 +686,19 @@ export async function readPipedriveFundingDealsViaApi({ dealIds, batchSize = 8, 
             vpPersonId: vpId ? String(vpId) : null,
             vpEmail: primaryEmail(vp) || (typeof vpId === 'string' && vpId.includes('@') ? vpId.toLowerCase() : null),
             files: files.map(file => String(file.name || file.file_name || '').trim()).filter(Boolean),
+            noteCount: notes.length,
+            latestNoteAt: noteEvidence.map(note => note.updateTime || note.addTime).filter(Boolean).sort().at(-1) || null,
+            latestExternalNote: noteEvidence
+              .filter(note => !note.isIvaFundingRequest)
+              .sort((a, b) => String(b.updateTime || b.addTime || '').localeCompare(String(a.updateTime || a.addTime || '')))[0] || null,
+            // Fachvorgabe: Ein dokumentiertes KfW-Zugangsdatenpaar aus E-Mail
+            // und Passwort gilt für die Fördercheckliste als Kontobestätigung.
+            // Abweichende spätere Hinweise bleiben separat sichtbar, heben
+            // diese Checklistenwertung aber nicht automatisch auf.
+            kfwAccountConfirmedByCredentials: noteEvidence.some(note => note.hasKfwCredentials),
+            kfwCredentialEvidenceNoteIds: noteEvidence.filter(note => note.hasKfwCredentials).map(note => note.noteId),
+            kfwCredentialInvalidationNoteIds: noteEvidence.filter(note => note.invalidatesKfwCredentials).map(note => note.noteId),
+            ivaFundingRequestNotes: noteEvidence.filter(note => note.isIvaFundingRequest),
           });
         } catch (error) {
           items.push({ dealId: id, error: error.message });
@@ -850,17 +899,25 @@ const escapePipedriveNoteHtml = value => String(value || '')
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#39;');
 
-export async function createPipedriveFundingRequestNote({ dealId, missingDocumentLabels, vpName, vpEmail } = {}) {
+function fundingRequestRecipientText({ vpName, vpEmail, ...routingInput } = {}) {
+  const vp = String(vpName || vpEmail || '').replace(/\s+/g, ' ').trim();
+  const supervisor = resolveFundingSupervisor({ vpName, vpEmail, ...routingInput });
+  return {
+    supervisor,
+    text: vp ? `bei ${supervisor.name} und ${vp} angefragt.` : `bei ${supervisor.name} angefragt.`,
+  };
+}
+
+export async function createPipedriveFundingRequestNote({ dealId, missingDocumentLabels, vpName, vpEmail, ...routingInput } = {}) {
   const id = String(dealId || '').replace(/\D/g, '');
   if (!id) throw new Error('Fuer die Pipedrive-Notiz fehlt eine gueltige Deal-ID.');
   const labels = [...new Set((Array.isArray(missingDocumentLabels) ? missingDocumentLabels : [])
     .map(value => String(value || '').replace(/\s+/g, ' ').trim()).filter(Boolean))];
   if (!labels.length) throw new Error('Ohne fehlende Unterlagen wird keine Pipedrive-Notiz erzeugt.');
-  const vp = String(vpName || vpEmail || '').replace(/\s+/g, ' ').trim();
   const fingerprint = createHash('sha256').update(JSON.stringify({ id, labels })).digest('hex').slice(0, 24);
   const marker = `IVA-FUNDING-REQUEST:${id}:${fingerprint}`;
-  const recipientText = vp ? `bei Patrick Germer und ${vp} angefragt.` : 'bei Patrick Germer angefragt.';
-  const content = `<p><strong>Fehlende Unterlagen:</strong></p><ul>${labels.map(label => `<li>${escapePipedriveNoteHtml(label)}</li>`).join('')}</ul><p>${escapePipedriveNoteHtml(recipientText)}</p><p>(Notiz von Nadine)</p><div style="display:none">${marker}</div>`;
+  const recipientText = fundingRequestRecipientText({ vpName, vpEmail, ...routingInput }).text;
+  const content = `<p><strong>Fehlende Unterlagen:</strong></p><ul>${labels.map(label => `<li>${escapePipedriveNoteHtml(label)}</li>`).join('')}</ul><p>${escapePipedriveNoteHtml(recipientText)}</p><p>(Notiz von Nadine)</p>`;
 
   const createdIds = await openTemporaryPipedriveDealTabs([id]);
   try {
@@ -886,13 +943,20 @@ export async function createPipedriveFundingRequestNote({ dealId, missingDocumen
         }
         return payload?.data;
       };
+      const semanticText = value => {
+        const document = new DOMParser().parseFromString(String(value || ''), 'text/html');
+        return String(document.body?.textContent || value || '').replace(/\s+/g, ' ').trim();
+      };
       try {
         const current = request('GET', '/api/v1/notes?deal_id=' + encodeURIComponent(dealId) + '&start=0&limit=500') || [];
-        const existing = current.find(note => String(note.content || '').includes(marker));
+        const expectedText = semanticText(content);
+        const existing = current.find(note => semanticText(note.content) === expectedText
+          && /\(Notiz von Nadine\)\s*$/i.test(semanticText(note.content)));
         if (existing) return JSON.stringify({ created: false, alreadyPresent: true, noteId: String(existing.id || ''), marker });
         const note = request('POST', '/api/v1/notes', { deal_id: Number(dealId), content });
         const verified = (request('GET', '/api/v1/notes?deal_id=' + encodeURIComponent(dealId) + '&start=0&limit=500') || [])
-          .find(item => String(item.content || '').includes(marker));
+          .find(item => semanticText(item.content) === expectedText
+            && /\(Notiz von Nadine\)\s*$/i.test(semanticText(item.content)));
         if (!verified) return JSON.stringify({ error: 'note_not_verified' });
         return JSON.stringify({ created: true, alreadyPresent: false, noteId: String(verified.id || note?.id || ''), marker });
       } catch (error) {
@@ -906,18 +970,187 @@ export async function createPipedriveFundingRequestNote({ dealId, missingDocumen
   }
 }
 
-function preparePipedriveFundingRequestNote({ dealId, missingDocumentLabels, vpName, vpEmail } = {}) {
+function preparePipedriveFundingRequestNote({ dealId, missingDocumentLabels, vpName, vpEmail, ...routingInput } = {}) {
   const id = String(dealId || '').replace(/\D/g, '');
   if (!id) throw new Error('Fuer die Pipedrive-Notiz fehlt eine gueltige Deal-ID.');
   const labels = [...new Set((Array.isArray(missingDocumentLabels) ? missingDocumentLabels : [])
     .map(value => String(value || '').replace(/\s+/g, ' ').trim()).filter(Boolean))];
   if (!labels.length) throw new Error(`Deal ${id}: Ohne fehlende Unterlagen wird keine Pipedrive-Notiz erzeugt.`);
-  const vp = String(vpName || vpEmail || '').replace(/\s+/g, ' ').trim();
   const fingerprint = createHash('sha256').update(JSON.stringify({ id, labels })).digest('hex').slice(0, 24);
   const marker = `IVA-FUNDING-REQUEST:${id}:${fingerprint}`;
-  const recipientText = vp ? `bei Patrick Germer und ${vp} angefragt.` : 'bei Patrick Germer angefragt.';
-  const content = `<p><strong>Fehlende Unterlagen:</strong></p><ul>${labels.map(label => `<li>${escapePipedriveNoteHtml(label)}</li>`).join('')}</ul><p>${escapePipedriveNoteHtml(recipientText)}</p><p>(Notiz von Nadine)</p><div style="display:none">${marker}</div>`;
+  const recipientText = fundingRequestRecipientText({ vpName, vpEmail, ...routingInput }).text;
+  const content = `<p><strong>Fehlende Unterlagen:</strong></p><ul>${labels.map(label => `<li>${escapePipedriveNoteHtml(label)}</li>`).join('')}</ul><p>${escapePipedriveNoteHtml(recipientText)}</p><p>(Notiz von Nadine)</p>`;
   return { dealId: id, marker, content };
+}
+
+function preparePipedriveFundingRequestNoteUpdate({ dealId, noteId, marker, missingDocumentLabels, vpName, vpEmail, ...routingInput } = {}) {
+  const id = String(dealId || '').replace(/\D/g, '');
+  const safeNoteId = String(noteId || '').replace(/\D/g, '');
+  const safeMarker = String(marker || '').trim();
+  if (!id || !safeNoteId) throw new Error('Für die Pipedrive-Notizaktualisierung fehlen Deal- oder Notiz-ID.');
+  if (safeMarker && !new RegExp(`^IVA-FUNDING-REQUEST:${id}:[0-9a-f]{24}$`, 'i').test(safeMarker)) {
+    throw new Error(`Deal ${id}: Die IVA-Notizkennung ist ungültig.`);
+  }
+  const labels = [...new Set((Array.isArray(missingDocumentLabels) ? missingDocumentLabels : [])
+    .map(value => String(value || '').replace(/\s+/g, ' ').trim()).filter(Boolean))];
+  if (!labels.length) throw new Error(`Deal ${id}: Eine leere IVA-Notiz darf nur über den gesonderten Löschpfad entfernt werden.`);
+  const recipientText = fundingRequestRecipientText({ vpName, vpEmail, ...routingInput }).text;
+  const content = `<p><strong>Fehlende Unterlagen:</strong></p><ul>${labels.map(label => `<li>${escapePipedriveNoteHtml(label)}</li>`).join('')}</ul><p>${escapePipedriveNoteHtml(recipientText)}</p><p>(Notiz von Nadine)</p>`;
+  return { dealId: id, noteId: safeNoteId, marker: safeMarker, content };
+}
+
+export function renderPipedriveFundingInformationNote({ heading, details } = {}) {
+  const safeHeading = String(heading || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+  if (!safeHeading) throw new Error('Für die Pipedrive-Information fehlt eine Überschrift.');
+  const safeDetails = (Array.isArray(details) ? details : []).map(item => {
+    if (typeof item === 'string') return { label: '', value: item.replace(/\s+/g, ' ').trim() };
+    return {
+      label: String(item?.label || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+      value: String(item?.value || '').replace(/\s+/g, ' ').trim().slice(0, 2000),
+    };
+  }).filter(item => item.value).slice(0, 30);
+  if (!safeDetails.length) throw new Error('Für die Pipedrive-Information fehlen konkrete Inhalte.');
+  if (/kfw/i.test(safeHeading)) {
+    const labels = safeDetails.map(item => item.label.toLowerCase());
+    if (!labels.some(label => /e-mail|email/.test(label)) || !labels.some(label => /passwort|kennwort/.test(label))) {
+      throw new Error('Eine KfW-Zugangsdaten-Notiz muss E-Mail-Adresse und Passwort konkret ausweisen.');
+    }
+  }
+  const content = `<p><strong>${escapePipedriveNoteHtml(safeHeading)}</strong></p><ul>${safeDetails.map(item => `<li>${item.label ? `<strong>${escapePipedriveNoteHtml(item.label)}:</strong> ` : ''}${escapePipedriveNoteHtml(item.value)}</li>`).join('')}</ul><p>(Notiz von Nadine)</p>`;
+  return { heading: safeHeading, details: safeDetails, content };
+}
+
+export async function createPipedriveFundingInformationNote({ dealId, heading, details } = {}) {
+  const id = String(dealId || '').replace(/\D/g, '');
+  if (!id) throw new Error('Für die Pipedrive-Information fehlt eine gültige Deal-ID.');
+  const rendered = renderPipedriveFundingInformationNote({ heading, details });
+  const createdIds = await openTemporaryPipedriveDealTabs([id]);
+  try {
+    await activatePipedriveDealTab(id);
+    await waitForPipedriveDealTab(id);
+    const result = JSON.parse(await executePipedriveJavaScript(String.raw`(() => {
+      const dealId = ${JSON.stringify(id)};
+      const content = ${JSON.stringify(rendered.content)};
+      const resource = performance.getEntriesByType('resource').map(entry => entry.name).find(name => name.includes('session_token='));
+      const sessionToken = resource ? new URL(resource).searchParams.get('session_token') : '';
+      if (!sessionToken) return JSON.stringify({ error: 'missing_session_token' });
+      const request = (method, path, body = null) => {
+        const separator = path.includes('?') ? '&' : '?';
+        const xhr = new XMLHttpRequest();
+        xhr.open(method, path + separator + 'strict_mode=true&session_token=' + encodeURIComponent(sessionToken), false);
+        if (body) xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.send(body ? JSON.stringify(body) : null);
+        let payload = null;
+        try { payload = JSON.parse(xhr.responseText); } catch {}
+        if (xhr.status < 200 || xhr.status >= 300 || payload?.success === false) throw new Error('HTTP ' + xhr.status);
+        return payload?.data;
+      };
+      const semanticText = value => {
+        const document = new DOMParser().parseFromString(String(value || ''), 'text/html');
+        return String(document.body?.textContent || value || '').replace(/\s+/g, ' ').trim();
+      };
+      try {
+        const path = '/api/v1/notes?deal_id=' + encodeURIComponent(dealId) + '&start=0&limit=500';
+        const expectedText = semanticText(content);
+        const current = request('GET', path) || [];
+        const existing = current.find(note => semanticText(note.content) === expectedText);
+        if (existing) return JSON.stringify({ created: false, alreadyPresent: true, noteId: String(existing.id || '') });
+        const created = request('POST', '/api/v1/notes', { deal_id: Number(dealId), content });
+        const verified = (request('GET', path) || []).find(note => semanticText(note.content) === expectedText
+          && /\(Notiz von Nadine\)\s*$/i.test(semanticText(note.content))
+          && !/IVA-(?:FUNDING|KFW)-/i.test(String(note.content || '')));
+        if (!verified) throw new Error('note_not_verified');
+        return JSON.stringify({ created: true, alreadyPresent: false, noteId: String(verified.id || created?.id || '') });
+      } catch (error) {
+        return JSON.stringify({ error: String(error?.message || error) });
+      }
+    })()`, { dealId: id, timeoutMs: 30000 }));
+    if (result.error) throw new Error(`Pipedrive-Information für Deal ${id}: ${result.error}`);
+    return { dealId: id, heading: rendered.heading, ...result, mutated: result.created === true, deletedFromPipedrive: false };
+  } finally {
+    await closeTemporaryPipedriveDealTabs(createdIds).catch(() => {});
+  }
+}
+
+export async function updatePipedriveFundingRequestNotes({ items } = {}) {
+  const prepared = (Array.isArray(items) ? items : []).map(preparePipedriveFundingRequestNoteUpdate);
+  if (!prepared.length) return { requested: 0, updated: 0, unchanged: 0, failed: 0, results: [], mutated: false };
+  if (prepared.length > 100) throw new Error('In einem Lauf dürfen höchstens 100 IVA-Pipedrive-Notizen aktualisiert werden.');
+  if (new Set(prepared.map(item => item.noteId)).size !== prepared.length) throw new Error('Eine Pipedrive-Notiz ist im Aktualisierungslauf mehrfach enthalten.');
+
+  const sourceDealId = prepared.find(item => item.dealId === '8153')?.dealId || prepared[0].dealId;
+  const createdIds = await openTemporaryPipedriveDealTabs([sourceDealId]);
+  try {
+    await activatePipedriveDealTab(sourceDealId);
+    await waitForPipedriveDealTab(sourceDealId);
+    const result = JSON.parse(await executePipedriveJavaScript(String.raw`(() => {
+      const items = ${JSON.stringify(prepared)};
+      const resource = performance.getEntriesByType('resource').map(entry => entry.name).find(name => name.includes('session_token='));
+      const sessionToken = resource ? new URL(resource).searchParams.get('session_token') : '';
+      if (!sessionToken) return JSON.stringify({ fatal: 'missing_session_token', results: [] });
+      const request = (method, path, body = null) => {
+        const separator = path.includes('?') ? '&' : '?';
+        const xhr = new XMLHttpRequest();
+        xhr.open(method, path + separator + 'strict_mode=true&session_token=' + encodeURIComponent(sessionToken), false);
+        if (body) xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.send(body ? JSON.stringify(body) : null);
+        let payload = null;
+        try { payload = JSON.parse(xhr.responseText); } catch {}
+        if (xhr.status < 200 || xhr.status >= 300 || payload?.success === false) {
+          throw new Error('HTTP ' + xhr.status + ': ' + String(payload?.error || xhr.responseText || 'request_failed').slice(0, 240));
+        }
+        return payload?.data;
+      };
+      const semanticText = content => {
+        const document = new DOMParser().parseFromString(String(content || ''), 'text/html');
+        return String(document.body?.textContent || content || '').replace(/\s+/g, ' ').trim();
+      };
+      const results = [];
+      for (const item of items) {
+        try {
+          const path = '/api/v1/notes?deal_id=' + encodeURIComponent(item.dealId) + '&start=0&limit=500';
+          const current = request('GET', path) || [];
+          const exact = current.filter(note => String(note.id) === item.noteId);
+          const currentText = exact.length === 1 ? semanticText(exact[0].content) : '';
+          const legacyMarkerMatches = item.marker && String(exact[0]?.content || '').includes(item.marker);
+          const humanReadableRequestMatches = /^Fehlende Unterlagen:/i.test(currentText)
+            && /angefragt\./i.test(currentText)
+            && /\(Notiz von Nadine\)\s*(?:IVA-FUNDING-REQUEST:[^\s]+)?\s*$/i.test(currentText);
+          if (exact.length !== 1 || (!legacyMarkerMatches && !humanReadableRequestMatches)) {
+            throw new Error('safety_check_failed');
+          }
+          if (String(exact[0].content || '') === item.content) {
+            results.push({ dealId: item.dealId, noteId: item.noteId, updated: false, unchanged: true, verified: true });
+            continue;
+          }
+          request('PUT', '/api/v1/notes/' + encodeURIComponent(item.noteId), { content: item.content });
+          const expectedText = semanticText(item.content);
+          const verified = (request('GET', path) || []).filter(note => String(note.id) === item.noteId
+            && semanticText(note.content) === expectedText
+            && /\(Notiz von Nadine\)\s*$/i.test(semanticText(note.content))
+            && !/IVA-FUNDING-REQUEST:/i.test(String(note.content || '')));
+          if (verified.length !== 1) throw new Error('update_not_verified');
+          results.push({ dealId: item.dealId, noteId: item.noteId, updated: true, unchanged: false, verified: true });
+        } catch (error) {
+          results.push({ dealId: item.dealId, noteId: item.noteId, updated: false, unchanged: false, verified: false, error: String(error?.message || error) });
+        }
+      }
+      return JSON.stringify({ results });
+    })()`, { dealId: sourceDealId, timeoutMs: 180000 }));
+    if (result.fatal) throw new Error('Der angemeldete Pipedrive-Notizzugriff ist nicht verfügbar.');
+    const results = result.results || [];
+    return {
+      requested: prepared.length,
+      updated: results.filter(item => item.updated).length,
+      unchanged: results.filter(item => item.unchanged).length,
+      failed: results.filter(item => !item.verified).length,
+      results,
+      mutated: results.some(item => item.updated),
+      deletedFromPipedrive: false,
+    };
+  } finally {
+    await closeTemporaryPipedriveDealTabs(createdIds).catch(() => {});
+  }
 }
 
 export async function createPipedriveFundingRequestNotes({ items } = {}) {
@@ -949,18 +1182,26 @@ export async function createPipedriveFundingRequestNotes({ items } = {}) {
         }
         return payload?.data;
       };
+      const semanticText = content => {
+        const document = new DOMParser().parseFromString(String(content || ''), 'text/html');
+        return String(document.body?.textContent || content || '').replace(/\s+/g, ' ').trim();
+      };
       const results = [];
       for (const item of items) {
         try {
           const path = '/api/v1/notes?deal_id=' + encodeURIComponent(item.dealId) + '&start=0&limit=500';
           const current = request('GET', path) || [];
-          const existing = current.find(note => String(note.content || '').includes(item.marker));
+          const expectedText = semanticText(item.content);
+          const existing = current.find(note => semanticText(note.content) === expectedText
+            && /\(Notiz von Nadine\)\s*$/i.test(semanticText(note.content)));
           if (existing) {
             results.push({ dealId: item.dealId, created: false, alreadyPresent: true, verified: true, noteId: String(existing.id || '') });
             continue;
           }
           const note = request('POST', '/api/v1/notes', { deal_id: Number(item.dealId), content: item.content });
-          const verified = (request('GET', path) || []).find(candidate => String(candidate.content || '').includes(item.marker));
+          const verified = (request('GET', path) || []).find(candidate => semanticText(candidate.content) === expectedText
+            && /\(Notiz von Nadine\)\s*$/i.test(semanticText(candidate.content))
+            && !/IVA-FUNDING-REQUEST:/i.test(String(candidate.content || '')));
           if (!verified) throw new Error('note_not_verified');
           results.push({ dealId: item.dealId, created: true, alreadyPresent: false, verified: true, noteId: String(verified.id || note?.id || '') });
         } catch (error) {

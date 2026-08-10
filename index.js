@@ -31,6 +31,7 @@ import { lumitSkill } from './skills/lumit.js';
 import { capabilityReviewSkill } from './skills/capability-review.js';
 import { knowledgeLibrarySkill } from './skills/knowledge-library.js';
 import { recruitingSkill } from './skills/recruiting.js';
+import { deviceControlSkill } from './skills/device-control.js';
 import { listAgents, routeAgent } from './agents/registry.js';
 import { marketAnalysis } from './marketing/market.js';
 import { fetchMetaAdsInsights, marketingConnectorStatus } from './marketing/connectors.js';
@@ -149,6 +150,15 @@ import {
 } from './operations/store.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'node:crypto';
+import {
+  IVA_IMAC_DEVICE_ID,
+  claimNextDeviceCommand,
+  completeDeviceCommand,
+  deviceCommandStatus,
+  enqueueDeviceCommand,
+  listDeviceCommands,
+} from './device-control/store.js';
 
 const app = express();
 app.use(express.json({
@@ -533,6 +543,7 @@ Tool-Nutzung:
 
 - Bevor du aus einem Reel, Profil, fremden Tool oder einer spontanen Idee eine neue IVA-Funktion oder einen neuen Agenten empfiehlst, MUSST du assessCapability aufrufen. Pruefe echten Zusatznutzen, bestehende Abdeckung, offiziellen Nachweis, Rechte, Kosten, Datenschutz und Sicherheitsfolgen. Ergebnis "integrate-existing" bedeutet: keinen neuen Agenten bauen. "needs-verification" oder "watch" bedeutet: noch nicht integrieren. Fremden Code, geschuetzte Texte oder Designs niemals kopieren; nur eigenstaendig implementierte Funktionsmuster uebernehmen.
 - Live-Daten oder Aktion nötig (Kalender, Mails, Leads, Todos, Kampagnen, Bilder, Qonekto/blau direkt): Tool sofort aufrufen. Nie "hätte ich Zugriff auf…", nie "soll ich mal nachsehen?" — machen und dann zusammenfassen.
+- Wenn Nadine ausdrücklich sagt, dass etwas "auf dem iMac" passieren soll, ausschließlich sendCommandToImac mit einer freigegebenen Aktion verwenden. Niemals so tun, als sei ein nur eingereihter Befehl bereits ausgeführt; bei Bedarf anschließend getImacCommandStatus nutzen. Keine freien Shell-Befehle, keine Zugangsdaten und keine beliebigen Dateipfade an den Gerätekanal übergeben.
 - CRM-Namen aus Sprache oder freier Texteingabe können falsch geschrieben beziehungsweise transkribiert sein. Vor jeder CRM-Auskunft oder -Aktion zu einer namentlich genannten Person findHeatHeroLeads mit der gelieferten Schreibweise aufrufen. Das Werkzeug durchsucht Schreibvarianten. Bei matchStatus "unique" ausschließlich den gespeicherten CRM-Namen und die gespeicherte ID verwenden. Bei "ambiguous" mit höchstens drei Kandidaten nachfragen, welcher gemeint ist. Bei "not-found" genau eine Frage stellen: wie der Nachname geschrieben wird. Niemals einen ähnlich klingenden Namen stillschweigend auswählen. Bei anderen CRM-Projekten ohne eigenen Resolver gilt mindestens dieselbe Rückfragepflicht, bis der gespeicherte Vollname eindeutig ist.
 - Wenn Nadine verlangt, eine Kundenakte aus dem CRM anzulegen oder CRM-Daten in die Kundenakte zu ziehen, ausschließlich importCrmCustomerFile aufrufen. Dieses Werkzeug erstellt eine aktive Kundenakte, übernimmt vorhandene Kontaktdaten und CRM-Notizen und verhindert Dubletten. Dafür niemals mehrfach createWorkspace aufrufen. Eine Qonekto-/Blau-direkt-Übertragung erfolgt dadurch ausdrücklich noch nicht.
 - Mehrere Quellen relevant (z. B. Kalender + Mails + Leads): parallel abrufen.
@@ -596,6 +607,7 @@ const ALL_SKILLS = {
   capabilityReview: capabilityReviewSkill({ evaluateCapability, listCapabilityReviews }),
   knowledgeLibrary: knowledgeLibrarySkill({ listKnowledgeLibrary, knowledgeLibraryStatus, assessKnowledgeSourceCandidate }),
   recruiting: recruitingSkill({ createCandidateSearchPlan, screenResumeAgainstCriteria, createInterviewGuide }),
+  deviceControl: deviceControlSkill({ enqueueDeviceCommand, deviceCommandStatus }),
   qonekto:   null, // wird pro Anfrage mit der echten sessionId erzeugt
 };
 
@@ -848,6 +860,34 @@ app.post('/webhooks/whatsapp', (req, res) => {
   })();
 });
 
+function authorizedImacAgent(req) {
+  const expected = String(process.env.IMAC_DEVICE_TOKEN || '');
+  const supplied = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (expected.length < 32 || supplied.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
+}
+
+// Der iMac baut die Verbindung ausschließlich ausgehend zu Railway auf. Diese
+// Endpunkte verwenden ein eigenes Gerätetoken statt des Cockpit-Tokens.
+app.get('/device-agent/:deviceId/commands/next', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
+  try { res.json({ command: await claimNextDeviceCommand(req.params.deviceId) }); }
+  catch (error) { res.status(500).json({ error: error.message }); }
+});
+app.post('/device-agent/:deviceId/commands/:commandId/complete', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
+  try {
+    res.json(await completeDeviceCommand({
+      deviceId: req.params.deviceId,
+      commandId: req.params.commandId,
+      leaseToken: req.body?.leaseToken,
+      ok: req.body?.ok === true,
+      result: req.body?.result || null,
+      error: req.body?.error || '',
+    }));
+  } catch (error) { res.status(409).json({ error: error.message }); }
+});
+
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type', 'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS' };
 app.use('/api', (req, res, next) => {
   res.set(CORS);
@@ -886,6 +926,7 @@ async function controlSnapshot() {
   const projectIds = CRM_SOURCES.filter(source => source.mode === 'rest' && source.projectId).length;
   const connectors = [
     connector('core-api', 'IVA API-Schutz', envReady('API_TOKEN'), ['API_TOKEN'], 'Schuetzt Cockpit und App-Zugriffe.'),
+    connector('imac-device-agent', 'iMac-Gerätekanal', envReady('IMAC_DEVICE_TOKEN'), ['IMAC_DEVICE_TOKEN'], 'Ausgehender, gerätegebundener Befehlskanal ohne offenen iMac-Port.'),
     connector('anthropic', 'IVA Kernmodell', envReady('ANTHROPIC_API_KEY'), ['ANTHROPIC_API_KEY'], 'Chat, Planung und Fachagenten.'),
     connector('gemini', 'Gemini Nebenmodell', envReady('GEMINI_API_KEY'), ['GEMINI_API_KEY'], 'Guentige Marketing-, Markt- und Nebenanalysen.'),
     connector('telegram', 'Telegram', envReady('TELEGRAM_BOT_TOKEN'), ['TELEGRAM_BOT_TOKEN'], 'Assistentenkanal und proaktive Berichte.'),
@@ -950,6 +991,31 @@ app.get('/api/control/status', async (_req, res) => {
 app.get('/api/control/runs', async (req, res) => res.json(await listAgentRuns({ limit: req.query?.limit, status: String(req.query?.status || ''), agentId: String(req.query?.agentId || '') })));
 app.get('/api/control/approvals', async (req, res) => res.json(await listApprovals({ limit: req.query?.limit, status: String(req.query?.status || '') })));
 app.get('/api/control/audit', async (req, res) => res.json(await listAudit({ limit: req.query?.limit, category: String(req.query?.category || '') })));
+app.get('/api/devices/:deviceId/commands', async (req, res) => {
+  try {
+    if (req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.status(404).json({ error: 'device not found' });
+    res.json({ commands: await listDeviceCommands({ deviceId: req.params.deviceId, limit: req.query?.limit }) });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+app.get('/api/devices/:deviceId/commands/:commandId', async (req, res) => {
+  try {
+    const command = await deviceCommandStatus(req.params.commandId);
+    if (!command || command.deviceId !== req.params.deviceId) return res.status(404).json({ error: 'command not found' });
+    res.json({ command });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+app.post('/api/devices/:deviceId/commands', async (req, res) => {
+  try {
+    const command = await enqueueDeviceCommand({
+      deviceId: req.params.deviceId,
+      action: req.body?.action,
+      payload: req.body?.payload || {},
+      requestedBy: req.body?.requestedBy || 'api',
+      requestText: req.body?.requestText || '',
+    });
+    res.status(202).json({ queued: true, command });
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
 app.get('/api/leads', async (_req, res) => res.json(await fetchAllLeads()));
 app.get('/api/crm-qonekto-sync/status', async (_req, res) => res.json(await crmQonektoSyncStatus()));
 app.post('/api/crm-qonekto-sync/run', async (req, res) => {

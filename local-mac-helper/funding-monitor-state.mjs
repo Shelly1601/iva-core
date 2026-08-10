@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
@@ -6,6 +8,25 @@ import { loadFundingScan } from './funding-scan.mjs';
 import { openOutlookAccountFolder, runMacUiBridge } from './macos-ui.mjs';
 
 const FUNDING_MAILBOX = 'foerderung@heat-hero.com';
+const execFileAsync = promisify(execFile);
+
+export async function fundingMonitorBackgroundReadiness({ minimumIdleSeconds = 300 } = {}) {
+  const threshold = Math.max(60, Math.min(3600, Number(minimumIdleSeconds) || 300));
+  if (process.platform !== 'darwin') return { canRunUiAutomation: false, reason: 'unsupported_platform', minimumIdleSeconds: threshold };
+  try {
+    const { stdout } = await execFileAsync('/usr/sbin/ioreg', ['-c', 'IOHIDSystem', '-d', '4'], { timeout: 5000, maxBuffer: 1024 * 1024 });
+    const nanoseconds = Number(String(stdout).match(/"HIDIdleTime"\s*=\s*(\d+)/)?.[1] || 0);
+    const idleSeconds = Math.floor(nanoseconds / 1_000_000_000);
+    return {
+      canRunUiAutomation: idleSeconds >= threshold,
+      idleSeconds,
+      minimumIdleSeconds: threshold,
+      reason: idleSeconds >= threshold ? 'mac_idle' : 'user_active',
+    };
+  } catch (error) {
+    return { canRunUiAutomation: false, reason: 'idle_state_unavailable', minimumIdleSeconds: threshold, error: String(error?.message || error).slice(0, 240) };
+  }
+}
 
 function stableMessageIdentity(value) {
   const description = String(value || '').replace(/\s+/g, ' ').trim();

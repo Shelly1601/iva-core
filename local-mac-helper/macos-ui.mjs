@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, realpath, stat, unlink, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -71,7 +71,7 @@ function emailFromAccountPicker(value) {
 export async function inspectOutlookCompose(expectedFrom) {
   const requestedFrom = normalizeEmail(expectedFrom);
   if (!requestedFrom) throw new Error('Für die Outlook-Prüfung fehlt die erwartete Absenderadresse.');
-  const account = await runMacUiBridge(['value', 'AXPopUpButton', 'accountPicker']);
+  const account = await runMacUiBridge(['value-app', 'AXPopUpButton', 'accountPicker'], { timeoutMs: 30000 });
   const selectedFrom = emailFromAccountPicker(account.value);
   const exactSenderSelected = selectedFrom === requestedFrom;
   return {
@@ -103,7 +103,7 @@ export async function selectExactOutlookComposeSender(expectedFrom) {
 async function fillRecipientField(identifier, values) {
   const addresses = Array.isArray(values) ? values.filter(Boolean).map(String) : [];
   if (!addresses.length) return;
-  await runMacUiBridge(['set-value-and-confirm', 'AXTextField', identifier, addresses.join('; ')], { timeoutMs: 30000 });
+  await runMacUiBridge(['replace-text-app-and-confirm', 'AXTextField', identifier, addresses.join('; ')], { timeoutMs: 30000 });
 }
 
 export async function createOutlookDraftViaUi({ from, subject, body, html = '', to = [], cc = [], bcc = [], attachments = [] }) {
@@ -133,6 +133,78 @@ export async function createOutlookDraftViaUi({ from, subject, body, html = '', 
     }
     throw error;
   }
+}
+
+async function updatePreparedOutlookDraftInCurrentFolder({ from, subject, body, html = '', to = [], cc = [], bcc = [], attachments = [] }) {
+  if (attachments.length) throw new Error('Outlook-UI-Abbruch: Ein vorhandener Förderentwurf mit Anlagen wird nicht automatisch überschrieben.');
+  const requestedFrom = normalizeEmail(from);
+  if (!String(subject || '').trim() || !to.length) throw new Error('Entwurfsaktualisierung abgebrochen: Betreff oder An-Empfänger fehlt.');
+  await runMacUiBridge(['set-value-shallowest-and-confirm', 'AXTextField', 'Search Bar', subject], { timeoutMs: 30000 });
+  await new Promise(resolve => setTimeout(resolve, 1400));
+  try {
+    await runMacUiBridge(['open-draft-search-result', subject], { timeoutMs: 30000 });
+  } catch (error) {
+    if (!/gefunden wurden 0/.test(error.message)) throw error;
+    await runMacUiBridge(['select-search-suggestion', subject]);
+    await new Promise(resolve => setTimeout(resolve, 1400));
+    await runMacUiBridge(['open-draft-search-result', subject], { timeoutMs: 30000 });
+  }
+  await assertOutlookComposeSender(requestedFrom);
+
+  await runMacUiBridge(['set-value-app', 'AXTextField', 'toTextField', to.join('; ')], { timeoutMs: 30000 });
+  // Die Vertriebspartneradresse ändert sich bei diesem Nachabgleich nicht.
+  // Cc/Bcc bleiben deshalb unangetastet; damit können keine vorhandenen Chips
+  // versehentlich in einer von Outlook virtualisierten Ansicht verloren gehen.
+  const result = await fillVerifiedOutlookCompose({ from: requestedFrom, subject, body, html, allowExistingSubject: true });
+  await runMacUiBridge(['save'], { timeoutMs: 30000 });
+  const verified = await runMacUiBridge(['compose-summary'], { timeoutMs: 30000 });
+  const actualRecipients = (verified.recipientEmails || []).map(normalizeEmail);
+  if (!to.every(address => actualRecipients.includes(normalizeEmail(address)))) {
+    throw new Error(`Entwurfsaktualisierung abgebrochen: Der An-Empfänger ${to.join(', ')} konnte nach dem Speichern nicht sichtbar verifiziert werden.`);
+  }
+  return {
+    ...result,
+    updated: true,
+    channel: 'macos-accessibility',
+    verifiedRecipients: actualRecipients,
+    closedAfterSave: false,
+  };
+}
+
+export async function updateOutlookDraftsViaUi(drafts, { onProgress } = {}) {
+  const entries = Array.isArray(drafts) ? drafts : [];
+  if (!entries.length || entries.length > 100) throw new Error('Für die Outlook-Entwurfsaktualisierung werden 1 bis 100 Entwürfe benötigt.');
+  const requestedFrom = normalizeEmail(entries[0]?.from);
+  const accountLabel = OUTLOOK_ACCOUNT_LABELS[requestedFrom];
+  if (!accountLabel) throw new Error(`Entwurfsaktualisierung abgebrochen: Für ${requestedFrom || 'das Absenderkonto'} ist kein geprüftes Outlook-Konto hinterlegt.`);
+  if (entries.some(entry => normalizeEmail(entry.from) !== requestedFrom)) throw new Error('Entwurfsaktualisierung abgebrochen: Die Entwürfe stammen nicht alle aus demselben Konto.');
+  if (new Set(entries.map(entry => String(entry.subject || '').trim())).size !== entries.length) throw new Error('Entwurfsaktualisierung abgebrochen: Die Betreffe sind nicht eindeutig.');
+
+  await run('/usr/bin/open', ['-a', 'Microsoft Outlook'], { timeoutMs: 15000 });
+  await runMacUiBridge(['activate']);
+  await runMacUiBridge(['shortcut', '18', 'command']);
+  await runMacUiBridge(['open-account-folder', accountLabel, 'Entwürfe'], { timeoutMs: 30000 });
+  await runMacUiBridge(['press-shallowest', 'AXButton', 'Cancel Search Button']).catch(() => {});
+
+  const results = [];
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    try {
+      const result = await updatePreparedOutlookDraftInCurrentFolder(entry);
+      results.push({ index, subject: entry.subject, updated: result.updated === true, sent: false, result });
+    } catch (error) {
+      results.push({ index, subject: entry.subject, updated: false, sent: false, error: error.message });
+      break;
+    }
+    if (typeof onProgress === 'function') onProgress({ processed: index + 1, total: entries.length, subject: entry.subject });
+  }
+  return { requested: entries.length, updated: results.filter(item => item.updated).length, failed: results.filter(item => item.error).length, results, sent: false };
+}
+
+export async function updateOutlookDraftViaUi(draft) {
+  const batch = await updateOutlookDraftsViaUi([draft]);
+  if (batch.failed) throw new Error(batch.results.find(item => item.error)?.error || 'Outlook-Entwurfsaktualisierung fehlgeschlagen.');
+  return batch.results[0].result;
 }
 
 export async function deleteOutlookDraftsViaUi({ from, entries = [] }) {
@@ -190,6 +262,81 @@ export async function inspectOutlookMessageAttachments(description) {
   return runMacUiBridge(['inspect-message-attachments', exactDescription], { timeoutMs: 30000 });
 }
 
+function attachmentNameFromDescription(value) {
+  return String(value || '').match(/^(.+?\.(?:pdf|png|jpe?g|heic|tiff?))(?:,\s+.*)?$/i)?.[1]?.trim() || null;
+}
+
+function managedFundingDownloadRoot() {
+  return path.join(
+    process.env.IVA_MAC_HELPER_DATA_DIR || path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper'),
+    'incoming',
+  );
+}
+
+function isInside(root, candidate) {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+async function waitForDownloadedAttachments(directory, expectedNames, { timeoutMs = 120000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let stableSignature = '';
+  let stablePasses = 0;
+  while (Date.now() < deadline) {
+    const entries = (await readdir(directory, { withFileTypes: true }))
+      .filter(entry => entry.isFile() && !entry.name.startsWith('.'))
+      .map(entry => entry.name)
+      .sort();
+    const metadata = await Promise.all(entries.map(async name => {
+      const file = await stat(path.join(directory, name));
+      return { name, size: file.size };
+    }));
+    const signature = JSON.stringify(metadata);
+    if (metadata.length >= expectedNames.length && metadata.every(item => item.size > 0) && signature === stableSignature) stablePasses += 1;
+    else stablePasses = 0;
+    stableSignature = signature;
+    if (stablePasses >= 2) return metadata;
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  throw new Error(`Outlook-Download wurde nicht innerhalb von ${Math.round(timeoutMs / 1000)} Sekunden vollständig verifiziert.`);
+}
+
+export async function downloadOutlookMessageAttachments(description, destinationDirectory) {
+  const managedRoot = managedFundingDownloadRoot();
+  await mkdir(managedRoot, { recursive: true, mode: 0o700 });
+  const resolvedRoot = await realpath(managedRoot);
+  const destination = path.resolve(String(destinationDirectory || ''));
+  if (!destination || !isInside(resolvedRoot, destination) || destination === resolvedRoot) {
+    throw new Error('Outlook-Anlagen dürfen nur in einen eigenen IVA-Förder-Eingangsordner geladen werden.');
+  }
+  await mkdir(destination, { recursive: false, mode: 0o700 });
+  const existing = await readdir(destination);
+  if (existing.length) throw new Error('Der IVA-Förder-Eingangsordner ist nicht leer; Download abgebrochen.');
+
+  const inspection = await inspectOutlookMessageAttachments(description);
+  const expectedNames = (inspection.attachments || []).map(item => attachmentNameFromDescription(item.description)).filter(Boolean);
+  const expectedCount = Number(String(inspection.attachmentGrid?.description || '').match(/\d+/)?.[0] || expectedNames.length);
+  if (!expectedNames.length || expectedNames.length !== expectedCount) {
+    throw new Error('Outlook-Anlagen konnten vor dem Download nicht vollständig und eindeutig benannt werden.');
+  }
+  const started = await runMacUiBridge(['download-open-message-attachments', destination], { timeoutMs: 30000 });
+  const files = await waitForDownloadedAttachments(destination, expectedNames);
+  const normalizedExpected = expectedNames.map(value => value.normalize('NFC').toLowerCase()).sort();
+  const normalizedActual = files.map(item => item.name.normalize('NFC').toLowerCase()).sort();
+  if (JSON.stringify(normalizedExpected) !== JSON.stringify(normalizedActual)) {
+    throw new Error('Die lokal gespeicherten Outlook-Anlagen stimmen nicht exakt mit der sichtbaren Anlagenliste überein.');
+  }
+  return {
+    destination,
+    expectedCount,
+    downloadedCount: files.length,
+    files,
+    verified: true,
+    messageMutated: false,
+    ...started,
+  };
+}
+
 export async function inspectOutlookMessagesAttachments(descriptions) {
   const exactDescriptions = Array.isArray(descriptions) ? descriptions.map(String).filter(Boolean) : [];
   if (!exactDescriptions.length) return { count: 0, inspections: [] };
@@ -208,7 +355,7 @@ async function pasteHtmlIntoOutlook(html) {
   const htmlFile = path.join(TEMP_DIR, `${randomUUID()}.html`);
   try {
     await writeFile(htmlFile, String(html), { mode: 0o600 });
-    return await runMacUiBridge(['paste-html-file', 'AXTextArea', '', htmlFile], { timeoutMs: 30000 });
+    return await runMacUiBridge(['paste-html-file-app-largest', 'AXTextArea', '', htmlFile], { timeoutMs: 30000 });
   } finally {
     await unlink(htmlFile).catch(() => {});
   }
@@ -216,7 +363,7 @@ async function pasteHtmlIntoOutlook(html) {
 
 export async function fillVerifiedOutlookCompose({ from, subject, body, html = '', allowExistingSubject = false }) {
   const before = await assertOutlookComposeSender(from);
-  const currentSubject = await runMacUiBridge(['value', 'AXTextField', 'subjectTextField']);
+  const currentSubject = await runMacUiBridge(['value-app', 'AXTextField', 'subjectTextField']);
   const existingSubject = String(currentSubject.value || '').trim();
   if (!allowExistingSubject && existingSubject) {
     throw new Error('Outlook-Abbruch: Der geöffnete Entwurf enthält bereits einen Betreff. Er wurde nicht überschrieben.');
@@ -225,11 +372,13 @@ export async function fillVerifiedOutlookCompose({ from, subject, body, html = '
     throw new Error('Outlook-Abbruch: Der vorhandene Betreff stimmt nicht exakt mit dem zu aktualisierenden Entwurf überein.');
   }
 
-  await runMacUiBridge(['paste-text', 'AXTextField', 'subjectTextField', subject]);
+  if (!allowExistingSubject || !existingSubject) {
+    await runMacUiBridge(['paste-text-app', 'AXTextField', 'subjectTextField', subject]);
+  }
   if (String(html).trim()) await pasteHtmlIntoOutlook(html);
-  else await runMacUiBridge(['set-value', 'AXTextArea', '', `${String(body).trim()}\n`]);
+  else await runMacUiBridge(['paste-text-app', 'AXTextArea', '', `${String(body).trim()}\n`]);
   const after = await assertOutlookComposeSender(from);
-  const verifiedSubject = await runMacUiBridge(['value', 'AXTextField', 'subjectTextField']);
+  const verifiedSubject = await runMacUiBridge(['value-app', 'AXTextField', 'subjectTextField']);
   if (String(verifiedSubject.value || '') !== String(subject)) {
     throw new Error('Outlook-Abbruch: Der Betreff konnte nach dem Eintragen nicht verifiziert werden.');
   }

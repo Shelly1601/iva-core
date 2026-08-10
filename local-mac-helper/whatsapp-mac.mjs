@@ -4,6 +4,11 @@ import { access, mkdir, stat } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { buildFundingCaseReference } from './funding.mjs';
+import {
+  DIRECT_SALES_WHATSAPP_GROUP,
+  cleanDirectSalesMemberName,
+  saveDirectSalesRoster,
+} from './direct-sales-roster.mjs';
 
 const WHATSAPP_APP = '/Applications/WhatsApp.app';
 const KEYCHAIN_SERVICE = 'de.iva.funding.whatsapp';
@@ -28,7 +33,7 @@ function commandOutput(command, args) {
     child.stdout.on('data', chunk => { stdout += chunk; });
     child.stderr.on('data', chunk => { stderr += chunk; });
     child.on('error', reject);
-    child.on('close', code => code === 0 ? resolve(stdout.trim()) : reject(new Error((stderr || 'Schlüsselbund-Eintrag nicht verfügbar.').trim())));
+    child.on('close', code => code === 0 ? resolve(stdout.trim()) : reject(new Error((stderr || stdout || 'Befehl nicht verfügbar.').trim())));
   });
 }
 
@@ -88,6 +93,71 @@ async function ensureWhatsAppProbe() {
 export async function probeWhatsAppMacLink() {
   const binary = await ensureWhatsAppProbe();
   return JSON.parse(await commandOutput(binary, []));
+}
+
+async function runWhatsAppProbe(args = []) {
+  const binary = await ensureWhatsAppProbe();
+  return JSON.parse(await commandOutput(binary, args));
+}
+
+function participantsFromDump(dump) {
+  return (dump?.textNodes || [])
+    .filter(node => {
+      const actions = Array.isArray(node?.actions) ? node.actions : [];
+      const frame = node?.frame || {};
+      return node?.role === 'AXButton'
+        && (actions.includes('AXScrollDownByPage') || actions.includes('AXScrollUpByPage'))
+        && Number(frame.x) > 650
+        && Number(frame.y) > 330
+        && Number(frame.width) > 350
+        && Number(frame.height) > 30
+        && Number(frame.height) < 100;
+    })
+    .map(node => cleanDirectSalesMemberName(node.description))
+    .filter(Boolean);
+}
+
+function dumpShowsActiveChat(dump, chatName) {
+  const normalizeChatName = value => String(value || '')
+    .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLocaleLowerCase('de');
+  const expected = normalizeChatName(chatName);
+  return (dump?.textNodes || []).some(node =>
+    node?.identifier === 'NavigationBar_HeaderViewButton'
+    && normalizeChatName(node.description) === expected);
+}
+
+export async function syncDirectSalesRosterFromWhatsApp({ persist = true } = {}) {
+  for (let index = 0; index < 3; index += 1) {
+    const closed = await runWhatsAppProbe(['--press-description', 'Fertig'])
+      .then(() => true)
+      .catch(() => false);
+    if (!closed) break;
+  }
+  const initialDump = await runWhatsAppProbe(['--dump']);
+  if (!dumpShowsActiveChat(initialDump, DIRECT_SALES_WHATSAPP_GROUP)) {
+    await runWhatsAppProbe(['--open-chat', DIRECT_SALES_WHATSAPP_GROUP]);
+  }
+  await runWhatsAppProbe(['--press-identifier', 'NavigationBar_HeaderViewButton']);
+  await runWhatsAppProbe(['--press-description', 'Mitglieder']);
+  await runWhatsAppProbe(['--scroll-members', '10']).catch(() => {});
+
+  const members = new Set();
+  let unchangedPages = 0;
+  for (let page = 0; page < 16 && unchangedPages < 4; page += 1) {
+    const dump = await runWhatsAppProbe(['--dump']);
+    const before = members.size;
+    for (const name of participantsFromDump(dump)) members.add(name);
+    unchangedPages = members.size === before ? unchangedPages + 1 : 0;
+    if (page < 15 && unchangedPages < 4) {
+      await runWhatsAppProbe(['--scroll-members', '-1']).catch(() => { unchangedPages = 4; });
+    }
+  }
+  await runWhatsAppProbe(['--press-description', 'Fertig']).catch(() => {});
+  if (!persist) return { groupName: DIRECT_SALES_WHATSAPP_GROUP, members: [...members], persisted: false };
+  return saveDirectSalesRoster([...members], { groupName: DIRECT_SALES_WHATSAPP_GROUP, sourceMemberCount: 27 });
 }
 
 export async function diagnoseWhatsAppMac() {
