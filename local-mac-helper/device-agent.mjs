@@ -10,6 +10,7 @@ import { fundingMonitorLaunchAgentStatus } from './funding-monitor-launchd.mjs';
 import { diagnoseOutlook } from './outlook.mjs';
 import { diagnosePipedriveChrome } from './chrome-pipedrive.mjs';
 import { diagnoseWhatsAppMac } from './whatsapp-mac.mjs';
+import { runMacUiBridge } from './macos-ui.mjs';
 
 const execFileAsync = promisify(execFile);
 export const IMAC_DEVICE_ID = 'imac-nadine';
@@ -70,10 +71,16 @@ function openApplication(appName) {
 
 async function executeDeviceCommand(command) {
   if (command.action === 'computer.status') {
-    const [outlook, pipedrive, whatsapp] = await Promise.all([diagnoseOutlook(), diagnosePipedriveChrome(), diagnoseWhatsAppMac()]);
+    // Die UI-Pruefungen laufen absichtlich nacheinander. Outlook und WhatsApp
+    // greifen beide auf macOS Accessibility/Apple Events zu und koennen sich
+    // bei parallelen Probes gegenseitig einen falschen Negativstatus liefern.
+    const outlook = await diagnoseOutlook();
+    const bridge = await runMacUiBridge(['doctor'], { timeoutMs: 15000 }).catch(() => ({ trusted: false }));
+    const pipedrive = await diagnosePipedriveChrome();
+    const whatsapp = await diagnoseWhatsAppMac();
     return {
       online: true,
-      outlook: { installed: outlook.outlook?.installed, running: outlook.outlook?.running, accessibility: outlook.accessibility?.enabled },
+      outlook: { installed: outlook.outlook?.installed, running: outlook.outlook?.running, accessibility: bridge.trusted === true },
       pipedrive: { chromeRunning: pipedrive.chromeRunning, readable: pipedrive.readDealFields },
       whatsapp: { installed: whatsapp.installed, running: whatsapp.running, linked: whatsapp.linkedAccountVerified },
     };
