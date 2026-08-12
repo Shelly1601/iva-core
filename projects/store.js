@@ -4,6 +4,8 @@ import crypto from 'crypto';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const STORE_FILE = path.join(DATA_DIR, 'projects.json');
+const PROJECT_FILES_DIR = path.join(DATA_DIR, 'project-files');
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const PROJECT_STATUSES = new Set(['idea', 'planned', 'prepared', 'active', 'paused', 'complete']);
 const ITEM_STATUSES = new Set(['idea', 'planned', 'foundation', 'prepared', 'active', 'paused', 'blocked', 'complete']);
 let writeQueue = Promise.resolve();
@@ -46,36 +48,99 @@ export const HEAT_HERO_PROJECT = {
 
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 function clean(value, max = 5000) { return String(value ?? '').trim().slice(0, max); }
+function projectFileDir(projectId) {
+  const safeId = clean(projectId, 100);
+  if (!/^[a-z0-9][a-z0-9_-]{0,99}$/i.test(safeId)) throw new Error('Ungültige Projekt-ID.');
+  return path.join(PROJECT_FILES_DIR, safeId);
+}
+function iso(value) {
+  const parsed = new Date(value || Date.now());
+  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+}
+function normalizeNote(note = {}) {
+  return {
+    id: clean(note.id, 100) || crypto.randomUUID(),
+    text: clean(note.text, 12000),
+    source: clean(note.source, 80) || 'manual',
+    createdAt: iso(note.createdAt),
+  };
+}
+function normalizeFolder(folder = {}) {
+  return {
+    id: clean(folder.id, 100) || crypto.randomUUID(),
+    name: clean(folder.name, 180) || 'Neuer Ordner',
+    parentId: clean(folder.parentId, 100) || null,
+    createdAt: iso(folder.createdAt),
+  };
+}
+function normalizeFile(file = {}) {
+  return {
+    id: clean(file.id, 100) || crypto.randomUUID(),
+    name: clean(file.name, 240) || 'Dokument',
+    mime: clean(file.mime, 160) || 'application/octet-stream',
+    bytes: Math.max(0, Number(file.bytes) || 0),
+    sha256: clean(file.sha256, 128),
+    folderId: clean(file.folderId, 100) || null,
+    storageName: clean(file.storageName, 300),
+    createdAt: iso(file.createdAt),
+  };
+}
 function normalizeItem(item = {}, fallback = {}) {
+  const phaseId = item.phase != null || fallback.phase != null ? `phase-${clean(item.phase ?? fallback.phase, 20)}` : '';
   return {
     ...clone(fallback), ...clone(item),
-    id: clean(item.id || fallback.id, 100) || crypto.randomUUID(),
+    id: phaseId || clean(item.id || fallback.id, 100) || crypto.randomUUID(),
     name: clean(item.name || fallback.name, 220) || 'Neuer Eintrag',
     status: ITEM_STATUSES.has(item.status) ? item.status : (ITEM_STATUSES.has(fallback.status) ? fallback.status : 'planned'),
   };
 }
 function mergeById(input = [], fallback = []) {
-  const ids = [...new Set([...fallback, ...input].map(item => item?.id).filter(Boolean))];
-  return ids.map(id => normalizeItem(input.find(item => item?.id === id) || {}, fallback.find(item => item?.id === id) || {}));
+  const key = item => item?.phase != null ? `phase-${item.phase}` : item?.id;
+  const ids = [...new Set([...fallback, ...input].map(key).filter(Boolean))];
+  return ids.map(id => normalizeItem(input.find(item => key(item) === id) || {}, fallback.find(item => key(item) === id) || {}));
 }
 function normalizeProject(input = {}, fallback = {}) {
+  const notes = Array.isArray(input.notes) ? input.notes : (fallback.notes || []);
+  const folders = Array.isArray(input.folders) ? input.folders : (fallback.folders || []);
+  const files = Array.isArray(input.files) ? input.files : (fallback.files || []);
   return {
     ...clone(fallback), ...clone(input),
     id: clean(input.id || fallback.id, 100) || crypto.randomUUID(),
     name: clean(input.name || fallback.name, 180) || 'Neues Projekt',
+    company: clean(input.company ?? fallback.company, 180),
+    category: clean(input.category ?? fallback.category, 220) || 'Projekt',
+    description: clean(input.description ?? fallback.description, 4000),
+    objective: clean(input.objective ?? fallback.objective, 4000),
     status: PROJECT_STATUSES.has(input.status) ? input.status : (PROJECT_STATUSES.has(fallback.status) ? fallback.status : 'planned'),
     areas: mergeById(Array.isArray(input.areas) ? input.areas : [], fallback.areas || []),
     phases: mergeById(Array.isArray(input.phases) ? input.phases : [], fallback.phases || []),
     automations: mergeById(Array.isArray(input.automations) ? input.automations : [], fallback.automations || []),
+    notes: notes.map(normalizeNote).filter(note => note.text),
+    folders: folders.map(normalizeFolder),
+    files: files.map(normalizeFile).filter(file => file.storageName),
   };
+}
+function publicProject(project) {
+  const output = clone(project);
+  output.files = (output.files || []).map(({ storageName, ...file }) => file);
+  return output;
 }
 async function loadStore() {
   try {
     const parsed = JSON.parse(await fs.readFile(STORE_FILE, 'utf8'));
     const saved = Array.isArray(parsed?.projects) ? parsed.projects : [];
-    const heatHero = normalizeProject(saved.find(item => item.id === 'heat-hero') || {}, HEAT_HERO_PROJECT);
-    return { version: 1, projects: [heatHero, ...saved.filter(item => item.id !== 'heat-hero').map(item => normalizeProject(item))] };
-  } catch { return { version: 1, projects: [clone(HEAT_HERO_PROJECT)] }; }
+    const deletedProjectIds = Array.isArray(parsed?.deletedProjectIds)
+      ? [...new Set(parsed.deletedProjectIds.map(id => clean(id, 100)).filter(Boolean))]
+      : [];
+    const projects = saved.filter(item => !deletedProjectIds.includes(clean(item?.id, 100))).map(item => normalizeProject(item));
+    if (!deletedProjectIds.includes('heat-hero') && !projects.some(item => item.id === 'heat-hero')) {
+      projects.unshift(normalizeProject({}, HEAT_HERO_PROJECT));
+    } else {
+      const index = projects.findIndex(item => item.id === 'heat-hero');
+      if (index >= 0) projects[index] = normalizeProject(projects[index], HEAT_HERO_PROJECT);
+    }
+    return { version: 2, deletedProjectIds, projects };
+  } catch { return { version: 2, deletedProjectIds: [], projects: [normalizeProject({}, HEAT_HERO_PROJECT)] }; }
 }
 async function saveStore(store) {
   await fs.mkdir(DATA_DIR, { recursive: true });
@@ -90,7 +155,111 @@ async function mutate(fn) {
   await job;
   return result;
 }
-export async function listProjects() { return clone((await loadStore()).projects).sort((a,b)=>a.name.localeCompare(b.name,'de')); }
-export async function getProject(id) { const item=(await loadStore()).projects.find(project=>project.id===clean(id,100)); return item?clone(item):null; }
-export async function createProject(input = {}) { return mutate(store => { const project=normalizeProject(input); if(store.projects.some(item=>item.id===project.id))throw new Error('Projekt-ID ist bereits vorhanden.'); store.projects.push(project); return clone(project); }); }
-export async function updateProject(id, patch = {}) { return mutate(store => { const index=store.projects.findIndex(item=>item.id===clean(id,100)); if(index<0)return null; store.projects[index]=normalizeProject({...store.projects[index],...patch,id:store.projects[index].id},store.projects[index]); return clone(store.projects[index]); }); }
+export async function listProjects() {
+  return (await loadStore()).projects.map(publicProject).sort((a, b) => a.name.localeCompare(b.name, 'de'));
+}
+export async function getProject(id) {
+  const item = (await loadStore()).projects.find(project => project.id === clean(id, 100));
+  return item ? publicProject(item) : null;
+}
+export async function createProject(input = {}) {
+  return mutate(store => {
+    const project = normalizeProject({ ...input, id: undefined, notes: [], folders: [], files: [], areas: [], phases: [], automations: [] });
+    store.projects.push(project);
+    store.deletedProjectIds = (store.deletedProjectIds || []).filter(id => id !== project.id);
+    return publicProject(project);
+  });
+}
+export async function updateProject(id, patch = {}) {
+  return mutate(store => {
+    const index = store.projects.findIndex(item => item.id === clean(id, 100));
+    if (index < 0) return null;
+    const current = store.projects[index];
+    store.projects[index] = normalizeProject({
+      ...current,
+      ...patch,
+      id: current.id,
+      notes: current.notes,
+      folders: current.folders,
+      files: current.files,
+    }, current);
+    return publicProject(store.projects[index]);
+  });
+}
+export async function addProjectNote(id, text, source = 'manual') {
+  const noteText = clean(text, 12000);
+  if (!noteText) throw new Error('Bitte zuerst eine Notiz eingeben.');
+  return mutate(store => {
+    const project = store.projects.find(item => item.id === clean(id, 100));
+    if (!project) return null;
+    project.notes = [...(project.notes || []), normalizeNote({ text: noteText, source })];
+    return publicProject(project);
+  });
+}
+export async function createProjectFolder(id, input = {}) {
+  const name = clean(input.name, 180);
+  const parentId = clean(input.parentId, 100) || null;
+  if (!name) throw new Error('Der Ordner braucht einen Namen.');
+  return mutate(store => {
+    const project = store.projects.find(item => item.id === clean(id, 100));
+    if (!project) return null;
+    if (parentId && !(project.folders || []).some(folder => folder.id === parentId)) {
+      throw new Error('Der übergeordnete Ordner wurde nicht gefunden.');
+    }
+    const duplicate = (project.folders || []).some(folder => folder.parentId === parentId && folder.name.localeCompare(name, 'de', { sensitivity: 'base' }) === 0);
+    if (duplicate) throw new Error('In diesem Ordner gibt es bereits einen Ordner mit diesem Namen.');
+    project.folders = [...(project.folders || []), normalizeFolder({ name, parentId })];
+    return publicProject(project);
+  });
+}
+export async function storeProjectFile(id, { name, mime, folderId, buffer }) {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error('Die Datei ist leer.');
+  if (buffer.length > MAX_FILE_BYTES) throw new Error('Die Datei ist größer als 25 MB.');
+  const safeName = clean(name, 240) || 'Dokument';
+  const requestedFolderId = clean(folderId, 100) || null;
+  return mutate(async store => {
+    const project = store.projects.find(item => item.id === clean(id, 100));
+    if (!project) return null;
+    if (requestedFolderId && !(project.folders || []).some(folder => folder.id === requestedFolderId)) {
+      throw new Error('Der Zielordner wurde nicht gefunden.');
+    }
+    const extension = path.extname(safeName).replace(/[^a-z0-9.]/gi, '').slice(0, 16);
+    const storageName = `${crypto.randomUUID()}${extension}`;
+    const projectDir = projectFileDir(project.id);
+    await fs.mkdir(projectDir, { recursive: true });
+    await fs.writeFile(path.join(projectDir, storageName), buffer, { mode: 0o600 });
+    const file = normalizeFile({
+      name: safeName,
+      mime,
+      bytes: buffer.length,
+      sha256: crypto.createHash('sha256').update(buffer).digest('hex'),
+      folderId: requestedFolderId,
+      storageName,
+    });
+    project.files = [...(project.files || []), file];
+    return publicProject({ ...project, files: [file] }).files[0];
+  });
+}
+export async function readProjectFile(id, fileId) {
+  const project = (await loadStore()).projects.find(item => item.id === clean(id, 100));
+  const file = project?.files?.find(item => item.id === clean(fileId, 100));
+  if (!project || !file?.storageName) return null;
+  const projectDir = projectFileDir(project.id);
+  const filePath = path.join(projectDir, file.storageName);
+  if (!filePath.startsWith(`${projectDir}${path.sep}`)) return null;
+  return { meta: publicProject({ files: [file] }).files[0], buffer: await fs.readFile(filePath) };
+}
+export async function deleteProject(id) {
+  const projectId = clean(id, 100);
+  const deleted = await mutate(store => {
+    const index = store.projects.findIndex(item => item.id === projectId);
+    if (index < 0) return null;
+    const [project] = store.projects.splice(index, 1);
+    store.deletedProjectIds = [...new Set([...(store.deletedProjectIds || []), project.id])];
+    return publicProject(project);
+  });
+  if (!deleted) return null;
+  const projectDir = projectFileDir(projectId);
+  if (projectDir.startsWith(`${PROJECT_FILES_DIR}${path.sep}`)) await fs.rm(projectDir, { recursive: true, force: true });
+  return deleted;
+}

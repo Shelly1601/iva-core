@@ -51,7 +51,17 @@ import {
 import { transcribeAudio } from './voice-lab/transcribe.js';
 import { askArchitect } from './agents/architect.js';
 import * as workspaces from './workspaces/store.js';
-import { createProject, getProject, listProjects, updateProject } from './projects/store.js';
+import {
+  addProjectNote,
+  createProject,
+  createProjectFolder,
+  deleteProject,
+  getProject,
+  listProjects,
+  readProjectFile,
+  storeProjectFile,
+  updateProject,
+} from './projects/store.js';
 import {
   ACCOUNTING_CATEGORIES,
   accountingSummary,
@@ -1006,6 +1016,44 @@ app.patch('/api/projects/:id', async (req, res) => {
     const project = await updateProject(req.params.id, req.body || {});
     res.status(project ? 200 : 404).json(project || { error: 'not found' });
   } catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.delete('/api/projects/:id', async (req, res) => {
+  try {
+    const project = await deleteProject(req.params.id);
+    res.status(project ? 200 : 404).json(project ? { ok: true, deletedId: project.id, deletedFiles: true } : { error: 'not found' });
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.post('/api/projects/:id/notes', async (req, res) => {
+  try {
+    const project = await addProjectNote(req.params.id, req.body?.text, req.body?.source || 'manual');
+    res.status(project ? 200 : 404).json(project || { error: 'not found' });
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.post('/api/projects/:id/folders', async (req, res) => {
+  try {
+    const project = await createProjectFolder(req.params.id, req.body || {});
+    res.status(project ? 201 : 404).json(project || { error: 'not found' });
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.post('/api/projects/:id/files', express.raw({ type: '*/*', limit: '25mb' }), async (req, res) => {
+  try {
+    const file = await storeProjectFile(req.params.id, {
+      name: req.query?.name,
+      folderId: req.query?.folderId,
+      mime: req.query?.mime || req.headers['content-type'],
+      buffer: req.body,
+    });
+    res.status(file ? 201 : 404).json(file || { error: 'not found' });
+  } catch (error) { res.status(error?.type === 'entity.too.large' ? 413 : 400).json({ error: error.message }); }
+});
+app.get('/api/projects/:id/files/:fileId', async (req, res) => {
+  try {
+    const file = await readProjectFile(req.params.id, req.params.fileId);
+    if (!file) return res.status(404).json({ error: 'not found' });
+    res.set('Content-Type', file.meta.mime || 'application/octet-stream');
+    res.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(file.meta.name)}`);
+    res.send(file.buffer);
+  } catch { res.status(404).json({ error: 'not found' }); }
 });
 app.get('/api/devices/:deviceId/commands', async (req, res) => {
   try {
