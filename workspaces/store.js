@@ -5,6 +5,7 @@ import { initialEnergyData } from './tmb.js';
 
 export const WORKSPACE_MODES = ['beratung', 'kunde', 'energie'];
 export const FILE_KINDS = ['floorplan', 'elevation', 'photo', 'tmb-template', 'document', 'payroll-sample', 'audio', 'lumit-application', 'lumit-policy-original', 'lumit-brand-asset', 'lumit-customer-package'];
+export const DOCUMENT_CATEGORIES = ['general', 'floorplan', 'consumption-proof', 'offer', 'tmb', 'contract', 'invoice', 'heating', 'pv', 'correspondence', 'other'];
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const STORE_FILE = path.join(DATA_DIR, 'workspaces.json');
@@ -220,7 +221,7 @@ function safeExtension(name) {
   return /^\.[a-z0-9]{1,8}$/.test(ext) ? ext : '';
 }
 
-export async function storeWorkspaceFile(id, { name, mime, kind, buffer }) {
+export async function storeWorkspaceFile(id, { name, mime, kind, category, buffer }) {
   if (!Buffer.isBuffer(buffer) || !buffer.length) throw new Error('Leere Datei.');
   if (buffer.length > MAX_FILE_BYTES) throw new Error('Datei ist groesser als 25 MB.');
   if (!FILE_KINDS.includes(kind)) throw new Error('Unbekannter Dateityp.');
@@ -238,6 +239,7 @@ export async function storeWorkspaceFile(id, { name, mime, kind, buffer }) {
     const file = {
       id: fileId,
       kind,
+      category: DOCUMENT_CATEGORIES.includes(category) ? category : 'general',
       name: originalName,
       mime: cleanText(mime, 160) || 'application/octet-stream',
       bytes: buffer.length,

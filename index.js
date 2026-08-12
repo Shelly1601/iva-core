@@ -51,6 +51,7 @@ import {
 import { transcribeAudio } from './voice-lab/transcribe.js';
 import { askArchitect } from './agents/architect.js';
 import * as workspaces from './workspaces/store.js';
+import { createProject, getProject, listProjects, updateProject } from './projects/store.js';
 import {
   ACCOUNTING_CATEGORIES,
   accountingSummary,
@@ -991,6 +992,21 @@ app.get('/api/control/status', async (_req, res) => {
 app.get('/api/control/runs', async (req, res) => res.json(await listAgentRuns({ limit: req.query?.limit, status: String(req.query?.status || ''), agentId: String(req.query?.agentId || '') })));
 app.get('/api/control/approvals', async (req, res) => res.json(await listApprovals({ limit: req.query?.limit, status: String(req.query?.status || '') })));
 app.get('/api/control/audit', async (req, res) => res.json(await listAudit({ limit: req.query?.limit, category: String(req.query?.category || '') })));
+app.get('/api/projects', async (_req, res) => res.json(await listProjects()));
+app.get('/api/projects/:id', async (req, res) => {
+  const project = await getProject(req.params.id);
+  res.status(project ? 200 : 404).json(project || { error: 'not found' });
+});
+app.post('/api/projects', async (req, res) => {
+  try { res.status(201).json(await createProject(req.body || {})); }
+  catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.patch('/api/projects/:id', async (req, res) => {
+  try {
+    const project = await updateProject(req.params.id, req.body || {});
+    res.status(project ? 200 : 404).json(project || { error: 'not found' });
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
 app.get('/api/devices/:deviceId/commands', async (req, res) => {
   try {
     if (req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.status(404).json({ error: 'device not found' });
@@ -1393,6 +1409,7 @@ app.post('/api/workspaces/:id/files', express.raw({ type: '*/*', limit: '25mb' }
     const file = await workspaces.storeWorkspaceFile(req.params.id, {
       name: req.query?.name,
       kind: req.query?.kind,
+      category: req.query?.category,
       mime: req.query?.mime || req.headers['content-type'],
       buffer: req.body,
     });
@@ -1825,6 +1842,7 @@ app.get('/accounting', (_req, res) => res.sendFile(path.join(__dirnameIva, 'publ
 app.get('/opportunities', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'opportunities.html')));
 app.get('/voice-lab', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'voice-lab.html')));
 app.get('/control', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'control.html')));
+app.get('/projects', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'projects.html')));
 app.get('/health/qonekto', async (_req, res) => {
   const status = await qonektoStatus();
   if (status.reachable) {

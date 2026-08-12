@@ -32,10 +32,11 @@
     "test:opportunities": "node scripts/verify-opportunities.mjs",
     "test:voice": "node scripts/verify-voice-lab.mjs",
     "test:operations": "node scripts/verify-operations.mjs",
+    "test:projects": "node scripts/verify-projects.mjs",
     "test:lumit": "node scripts/verify-lumit.mjs",
     "test:capability-knowledge-recruiting": "node scripts/verify-capability-knowledge-recruiting.mjs",
     "sample:lumit-package": "node scripts/generate-lumit-package-sample.mjs",
-    "test:all": "npm run test:agents && npm run test:operations && npm run test:qonekto && npm run test:qonekto-customers && npm run test:address-autocomplete && npm run test:customer-files && npm run test:crm-name-matching && npm run test:crm-qonekto && npm run test:mac-helper && npm run test:lumit && npm run test:marketing && npm run test:whatsapp && npm run test:tmb && npm run test:workspaces && npm run test:advice && npm run test:corporate-benefits && npm run test:presentations && npm run test:energy && npm run test:pv-price && npm run test:energy-tariffs && npm run test:accounting && npm run test:opportunities && npm run test:voice && npm run test:capability-knowledge-recruiting"
+    "test:all": "npm run test:agents && npm run test:operations && npm run test:projects && npm run test:qonekto && npm run test:qonekto-customers && npm run test:address-autocomplete && npm run test:customer-files && npm run test:crm-name-matching && npm run test:crm-qonekto && npm run test:mac-helper && npm run test:lumit && npm run test:marketing && npm run test:whatsapp && npm run test:tmb && npm run test:workspaces && npm run test:advice && npm run test:corporate-benefits && npm run test:presentations && npm run test:energy && npm run test:pv-price && npm run test:energy-tariffs && npm run test:accounting && npm run test:opportunities && npm run test:voice && npm run test:capability-knowledge-recruiting"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.0.0",

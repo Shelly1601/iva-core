@@ -122,10 +122,12 @@ function renderCustomerList() {
     return;
   }
   for (const customer of customers) {
-    const button = document.createElement('button');
-    button.className = `customer-row${state.current?.listId === customer.id ? ' active' : ''}`;
-    button.type = 'button';
-    button.dataset.customerId = customer.id;
+    const row = document.createElement('div');
+    row.className = `customer-row${state.current?.listId === customer.id ? ' active' : ''}`;
+    row.dataset.customerId = customer.id;
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    row.setAttribute('aria-label', `Kundenakte ${customer.name} öffnen`);
     const avatar = document.createElement('span');
     avatar.className = 'avatar';
     avatar.textContent = initials(customer.name);
@@ -139,9 +141,28 @@ function renderCustomerList() {
     const source = document.createElement('span');
     source.className = `source-pill${customer.source === 'iva' ? ' local' : ''}`;
     source.textContent = customer.source === 'iva' ? 'IVA' : 'Blau';
-    button.append(avatar, copy, source);
-    button.addEventListener('click', () => openCustomer(customer.id));
-    root.appendChild(button);
+    const actions = document.createElement('span');
+    actions.className = 'customer-actions';
+    actions.appendChild(source);
+    if (customer.source === 'iva' && customer.workspace?.id) {
+      const trash = document.createElement('button');
+      trash.type = 'button';
+      trash.className = 'quick-delete';
+      trash.textContent = '🗑';
+      trash.title = `IVA-Kundenakte ${customer.name} löschen`;
+      trash.setAttribute('aria-label', `IVA-Kundenakte ${customer.name} löschen`);
+      trash.addEventListener('click', event => {
+        event.stopPropagation();
+        quickDeleteLocalCustomer(customer);
+      });
+      actions.appendChild(trash);
+    }
+    row.append(avatar, copy, actions);
+    row.addEventListener('click', () => openCustomer(customer.id));
+    row.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openCustomer(customer.id); }
+    });
+    root.appendChild(row);
   }
 }
 
@@ -276,6 +297,21 @@ function rawCustomerFields(customer) {
   return `<div class="raw-grid">${entries.map(([key, value]) => `<div class="raw-item"><span>${escapeHtml(key.replaceAll('_', ' '))}</span><b>${escapeHtml(displayValue(value))}</b></div>`).join('')}</div>`;
 }
 
+const DOCUMENT_CATEGORY_LABELS = {
+  general: 'Allgemein', floorplan: 'Grundriss', 'consumption-proof': 'Verbrauch', offer: 'Angebot', tmb: 'TMB', contract: 'Vertrag', invoice: 'Rechnung', heating: 'Heizung / Wärmepumpe', pv: 'Photovoltaik', correspondence: 'Korrespondenz', other: 'Sonstiges',
+};
+let pendingDocumentFiles = [];
+
+function documentCategoryLabel(category) {
+  return DOCUMENT_CATEGORY_LABELS[category] || DOCUMENT_CATEGORY_LABELS.general;
+}
+
+function formatFileSize(bytes) {
+  const value = Number(bytes || 0);
+  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1).replace('.', ',')} MB`;
+  return `${Math.max(1, Math.round(value / 1024))} KB`;
+}
+
 function renderDetail(detail, listId) {
   const customer = detail.customer;
   const workspace = state.currentWorkspace;
@@ -306,7 +342,7 @@ function renderDetail(detail, listId) {
         ${sourceIsLocal ? '<button class="service" id="transferLocalCustomerBtn"><b>↗ An Blau Direkt übertragen</b><small>Daten prüfen und Qonekto-Anlage separat bestätigen</small></button>' : ''}
         <button class="service" id="editAddressBtn"><b>✎ Kontaktdaten bearbeiten</b><small>${sourceIsLocal ? 'Direkt in der IVA-Kundenakte speichern' : 'Bei Blau Direkt vorbereiten und ausdrücklich bestätigen'}</small></button>
         <button class="service" id="messageCompanyBtn" ${contracts.length ? '' : 'disabled'}><b>✉ Gesellschaft anschreiben</b><small>Vertragsbezogenen Entwurf anlegen</small></button>
-        <button class="service" id="uploadDocumentBtn"><b>↑ Dokument ablegen</b><small>PDF oder Bild in die IVA-Akte</small></button>
+        <button class="service" id="uploadDocumentBtn"><b>＋ Dokumente hinzufügen</b><small>Mehrere Dateien auswählen oder hineinziehen</small></button>
         <button class="service" id="newConsultationBtn"><b>◌ Beratung starten</b><small>Mit diesem Kunden vorausfüllen</small></button>
         <button class="service" id="lumitApplicationBtn" ${sourceIsLocal ? 'disabled' : ''}><b>☀ LUMIT-Antrag</b><small>Online abschließen und als servicierten Antrag übernehmen</small></button>
         ${sourceIsLocal ? '<button class="service danger" id="deleteLocalCustomerBtn"><b>× IVA-Kundenakte löschen</b><small>Löscht nur diese lokale IVA-Akte – niemals Pipedrive oder Blau Direkt</small></button>' : ''}
@@ -314,7 +350,7 @@ function renderDetail(detail, listId) {
       <section class="card full"><h2>Verträge <span class="tag">Blau Direkt</span></h2>${contractRows(contracts)}</section>
       <section class="card"><h2>IVA-Arbeitsnotizen <span class="tag">nur deine Akte</span></h2><div class="note-list">${localNotes.length ? localNotes.slice().reverse().map(note => `<div class="note"><b>${escapeHtml(note.text)}</b><small>${escapeHtml(note.source || 'manual')} · ${escapeHtml(new Date(note.createdAt).toLocaleString('de-DE'))}</small></div>`).join('') : '<div class="empty-card">Noch keine IVA-Notizen.</div>'}</div><div class="composer"><textarea id="noteDraft" placeholder="Notiz, Wiedervorlage oder nächsten Schritt eintragen …"></textarea><button class="btn primary" id="saveNoteBtn">Speichern</button></div></section>
       <section class="card"><h2>Qonekto-Archiv <span class="tag">gelesen</span></h2><div class="note-list">${archiveNotes.length ? archiveNotes.slice(0, 20).map(note => `<div class="note"><b>${escapeHtml(note.text)}</b><small>${escapeHtml(note.meta)}</small></div>`).join('') : '<div class="empty-card">Keine Archivnotizen übermittelt.</div>'}</div></section>
-      <section class="card"><h2>Dokumente in IVA</h2><div class="files">${localFiles.length ? localFiles.map(file => `<div class="file"><div><b>${escapeHtml(file.name)}</b><small>${escapeHtml(file.kind)} · ${Math.max(1, Math.round(file.bytes / 1024))} KB</small></div><button class="btn ghost open-file" data-file-id="${escapeHtml(file.id)}">Öffnen</button></div>`).join('') : '<div class="empty-card">Noch keine lokalen Dokumente.</div>'}</div></section>
+      <section class="card"><h2>Dokumente in IVA <span class="tag">Kundenakte</span><button class="doc-plus" id="addDocumentInline" title="Dokumente hinzufügen" aria-label="Dokumente hinzufügen">+</button></h2><div class="document-hint">Grundrisse, Verbrauchsnachweise, Angebote, TMBs und weitere Unterlagen bleiben direkt diesem Kunden zugeordnet.</div><div class="files">${localFiles.length ? localFiles.slice().sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''))).map(file => `<div class="file"><div class="file-copy"><span class="file-category">${escapeHtml(documentCategoryLabel(file.category))}</span><b>${escapeHtml(file.name)}</b><small>${escapeHtml(formatFileSize(file.bytes))} · ${escapeHtml(file.createdAt ? new Date(file.createdAt).toLocaleString('de-DE') : 'Datum unbekannt')}</small></div><button class="btn ghost open-file" data-file-id="${escapeHtml(file.id)}">Öffnen</button></div>`).join('') : '<div class="empty-card">Noch keine Dokumente. Klicke auf das Plus und ziehe mehrere Dateien direkt in die Kundenakte.</div>'}</div></section>
       <section class="card"><h2>Weitere Kundendaten</h2>${rawCustomerFields(customer)}</section>
     </div>`;
   $('emptyState').hidden = true;
@@ -376,7 +412,8 @@ function bindDetailEvents(listId) {
   $('editAddressBtn')?.addEventListener('click', openAddressDialog);
   $('deleteLocalCustomerBtn')?.addEventListener('click', deleteLocalCustomer);
   $('messageCompanyBtn')?.addEventListener('click', openMessageDialog);
-  $('uploadDocumentBtn')?.addEventListener('click', () => $('documentInput').click());
+  $('uploadDocumentBtn')?.addEventListener('click', openDocumentDialog);
+  $('addDocumentInline')?.addEventListener('click', openDocumentDialog);
   $('newConsultationBtn')?.addEventListener('click', openConsultation);
   $('lumitApplicationBtn')?.addEventListener('click', openLumitDialog);
   $('saveNoteBtn')?.addEventListener('click', saveNote);
@@ -387,23 +424,43 @@ function currentCustomer() {
   return state.current?.detail?.customer || state.current?.customer || null;
 }
 
-async function deleteLocalCustomer() {
-  const workspace = state.currentWorkspace;
-  const customer = currentCustomer();
-  if (!workspace?.id || state.current?.detail?.source !== 'iva') return;
-  const confirmed = window.confirm(`IVA-Kundenakte „${customer?.name || workspace.title}“ wirklich löschen?\n\nGelöscht werden nur die lokale IVA-Akte sowie ihre lokalen Notizen und Dateien. In Pipedrive, Qonekto und Blau Direkt wird nichts gelöscht.`);
-  if (!confirmed) return;
-  try {
-    await api(`/api/workspaces/${encodeURIComponent(workspace.id)}?mode=kunde`, { method: 'DELETE' });
-    state.workspaces = state.workspaces.filter(item => item.id !== workspace.id);
-    state.customers = state.customers.filter(item => item.id !== `local:${workspace.id}`);
+async function removeLocalCustomerWorkspace(workspace, customerName) {
+  await api(`/api/workspaces/${encodeURIComponent(workspace.id)}?mode=kunde`, { method: 'DELETE' });
+  state.workspaces = state.workspaces.filter(item => item.id !== workspace.id);
+  state.customers = state.customers.filter(item => item.id !== `local:${workspace.id}`);
+  if (state.current?.listId === `local:${workspace.id}` || state.currentWorkspace?.id === workspace.id) {
     state.current = null;
     state.currentWorkspace = null;
     $('customerDetail').hidden = true;
     $('customerDetail').innerHTML = '';
     $('emptyState').hidden = false;
-    renderCustomerList();
-    showNotice('Die lokale IVA-Kundenakte wurde gelöscht. Pipedrive, Qonekto und Blau Direkt blieben unverändert.', 'success');
+  }
+  renderCustomerList();
+  showNotice(`Die IVA-Kundenakte „${customerName || workspace.title}“ einschließlich ihrer lokalen Dokumente und Notizen wurde gelöscht. Pipedrive, Qonekto und Blau Direkt blieben unverändert.`, 'success');
+}
+
+async function quickDeleteLocalCustomer(customer) {
+  const workspace = customer?.workspace;
+  if (!workspace?.id || customer.source !== 'iva') return;
+  const customerName = customer.name || workspace.title;
+  const confirmed = window.confirm(`IVA-Kundenakte „${customerName}“ wirklich dauerhaft löschen?\n\nDabei werden diese IVA-Akte sowie ihre lokalen Dokumente und Notizen entfernt. Pipedrive, Qonekto und Blau Direkt bleiben unverändert.`);
+  if (!confirmed) return;
+  try {
+    await removeLocalCustomerWorkspace(workspace, customerName);
+  } catch (error) {
+    showNotice(`IVA-Kundenakte „${customerName}“ konnte nicht gelöscht werden: ${error.message}`, 'error');
+  }
+}
+
+async function deleteLocalCustomer() {
+  const workspace = state.currentWorkspace;
+  const customer = currentCustomer();
+  if (!workspace?.id || state.current?.detail?.source !== 'iva') return;
+  const customerName = customer?.name || workspace.title;
+  const confirmed = window.confirm(`IVA-Kundenakte „${customerName}“ wirklich dauerhaft löschen?\n\nDabei werden diese IVA-Akte sowie ihre lokalen Dokumente und Notizen entfernt. Pipedrive, Qonekto und Blau Direkt bleiben unverändert.`);
+  if (!confirmed) return;
+  try {
+    await removeLocalCustomerWorkspace(workspace, customerName);
   } catch (error) { showNotice(`IVA-Kundenakte konnte nicht gelöscht werden: ${error.message}`, 'error'); }
 }
 
@@ -429,18 +486,58 @@ async function openLocalFile(fileId) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-async function uploadDocument(file) {
+function showSelectedDocumentFiles(files) {
+  pendingDocumentFiles = [...(files || [])].slice(0, 20);
+  const container = $('selectedDocumentFiles');
+  if (!container) return;
+  container.innerHTML = pendingDocumentFiles.length
+    ? pendingDocumentFiles.map(file => `<div class="selected-file">${escapeHtml(file.name)} · ${escapeHtml(formatFileSize(file.size))}</div>`).join('')
+    : '<div class="muted">Noch keine Dateien ausgewählt · maximal 25 MB je Datei</div>';
+}
+
+function openDocumentDialog() {
+  $('documentCategory').value = 'general';
+  $('documentInput').value = '';
+  showSelectedDocumentFiles([]);
+  $('documentDialog').showModal();
+}
+
+function closeDocumentDialog() {
+  $('documentDialog').close();
+  $('documentInput').value = '';
+  showSelectedDocumentFiles([]);
+}
+
+async function uploadDocuments(files, category) {
   try {
+    const selected = [...(files || [])].slice(0, 20);
+    if (!selected.length) throw new Error('Bitte mindestens eine Datei auswählen oder in das Feld ziehen.');
     const workspace = await ensureWorkspace(currentCustomer());
-    const query = new URLSearchParams({ kind: 'document', name: file.name, mime: file.type || 'application/octet-stream' });
-    const response = await fetch(`/api/workspaces/${workspace.id}/files?${query}`, {
-      method: 'POST', headers: headers({ 'Content-Type': file.type || 'application/octet-stream' }), body: file,
-    });
-    const json = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(json?.error || `HTTP ${response.status}`);
+    const completed = [];
+    const failed = [];
+    for (const [index, file] of selected.entries()) {
+      showNotice(`Dokument ${index + 1} von ${selected.length} wird hochgeladen: ${file.name}`);
+      try {
+        const query = new URLSearchParams({ kind: 'document', category, name: file.name, mime: file.type || 'application/octet-stream' });
+        const response = await fetch(`/api/workspaces/${workspace.id}/files?${query}`, {
+          method: 'POST', headers: headers({ 'Content-Type': file.type || 'application/octet-stream' }), body: file,
+        });
+        const json = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(json?.error || `HTTP ${response.status}`);
+        completed.push(file.name);
+      } catch (error) {
+        failed.push({ file, error: error.message });
+      }
+    }
     state.currentWorkspace = await api(`/api/workspaces/${workspace.id}`);
     renderDetail(state.current.detail, state.current.listId);
-    showNotice(`${file.name} wurde in IVAs Kundenakte abgelegt.`, 'success');
+    if (failed.length) {
+      showSelectedDocumentFiles(failed.map(item => item.file));
+      showNotice(`${completed.length} gespeichert, ${failed.length} fehlgeschlagen: ${failed.map(item => `${item.file.name} (${item.error})`).join(' · ')}`, 'error');
+      return;
+    }
+    closeDocumentDialog();
+    showNotice(`${completed.length} Dokument${completed.length === 1 ? '' : 'e'} wurden unter „${documentCategoryLabel(category)}“ in IVAs Kundenakte abgelegt.`, 'success');
   } catch (error) { showNotice(`Upload fehlgeschlagen: ${error.message}`, 'error'); }
 }
 
@@ -1167,11 +1264,29 @@ $('approveLumitCustomerPackage').addEventListener('click', approveLumitCustomerP
 $('executeConfirm').addEventListener('click', executePreparedAction);
 $('cancelConfirm').addEventListener('click', cancelPreparedAction);
 $('closeConfirm').addEventListener('click', cancelPreparedAction);
-$('documentInput').addEventListener('change', event => {
-  const file = event.target.files?.[0];
-  if (file) uploadDocument(file);
-  event.target.value = '';
+$('documentForm').addEventListener('submit', event => {
+  event.preventDefault();
+  uploadDocuments(pendingDocumentFiles, $('documentCategory').value);
 });
+$('closeDocumentDialog').addEventListener('click', closeDocumentDialog);
+$('cancelDocumentUpload').addEventListener('click', closeDocumentDialog);
+$('documentInput').addEventListener('change', event => showSelectedDocumentFiles(event.target.files));
+const documentDropzone = $('documentDropzone');
+documentDropzone.addEventListener('click', event => {
+  if (event.target !== $('documentInput')) $('documentInput').click();
+});
+documentDropzone.addEventListener('keydown', event => {
+  if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); $('documentInput').click(); }
+});
+for (const eventName of ['dragenter', 'dragover']) documentDropzone.addEventListener(eventName, event => {
+  event.preventDefault();
+  documentDropzone.classList.add('dragging');
+});
+for (const eventName of ['dragleave', 'drop']) documentDropzone.addEventListener(eventName, event => {
+  event.preventDefault();
+  documentDropzone.classList.remove('dragging');
+});
+documentDropzone.addEventListener('drop', event => showSelectedDocumentFiles(event.dataTransfer?.files));
 $('ivaHelper').addEventListener('click', () => window.open('/cockpit', '_blank', 'noopener'));
 
 loadCustomers({ keepSelection: false });

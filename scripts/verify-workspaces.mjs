@@ -30,9 +30,10 @@ try {
 
   await store.addWorkspaceNote(created.id, 'Heizkoerper Typ 22 bestaetigt.', 'test');
   const file = await store.storeWorkspaceFile(created.id, {
-    name: 'grundriss.pdf', mime: 'application/pdf', kind: 'floorplan', buffer: Buffer.from('%PDF-test'),
+    name: 'grundriss.pdf', mime: 'application/pdf', kind: 'floorplan', category: 'floorplan', buffer: Buffer.from('%PDF-test'),
   });
   assert.equal(file.kind, 'floorplan');
+  assert.equal(file.category, 'floorplan');
   const read = await store.readWorkspaceFile(created.id, file.id);
   assert.equal(read.buffer.toString(), '%PDF-test');
   const payroll = await store.storeWorkspaceFile(created.id, {
