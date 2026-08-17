@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import crypto from 'node:crypto';
 import express from 'express';
 import fs from 'fs/promises';
 import ical from 'node-ical';
@@ -52,6 +53,23 @@ import { transcribeAudio } from './voice-lab/transcribe.js';
 import { askArchitect } from './agents/architect.js';
 import * as workspaces from './workspaces/store.js';
 import {
+  cleanupExpiredProjectProtocols,
+  ensureProjectProtocolSummaries,
+  getProjectProtocol,
+  listProjectProtocols,
+  recordProjectWorkflowResult,
+} from './projects/protocols.js';
+import {
+  createAppointmentType,
+  createBooking,
+  createBookingIcs,
+  getAppointmentTypeBySlug,
+  listAppointmentTypes,
+  listAvailableSlots,
+  listBookings,
+  updateAppointmentType,
+} from './scheduling/store.js';
+import {
   addProjectNote,
   createProject,
   createProjectFolder,
@@ -59,6 +77,7 @@ import {
   getProject,
   listProjects,
   readProjectFile,
+  setProjectAutomationEnabled,
   storeProjectFile,
   updateProject,
 } from './projects/store.js';
@@ -79,6 +98,7 @@ import {
   getOpportunity,
   getOpportunitySettings,
   listOpportunities,
+  listOpportunityLinkChecks,
   listOpportunityRuns,
   prepareOpportunityHandoff,
   updateOpportunity,
@@ -87,6 +107,7 @@ import {
 } from './opportunities/store.js';
 import { formatWeeklyPitch, scoreOpportunity } from './opportunities/score.js';
 import { opportunityRadarStatus, runOpportunityScout } from './opportunities/scout.js';
+import { checkOpportunityLink } from './opportunities/link-check.js';
 import { evaluateCapability, listCapabilityReviews } from './capabilities/evaluator.js';
 import { assessKnowledgeSourceCandidate, knowledgeLibraryStatus, listKnowledgeLibrary } from './knowledge/library.js';
 import { createCandidateSearchPlan, createInterviewGuide, screenResumeAgainstCriteria } from './recruiting/assistant.js';
@@ -159,9 +180,24 @@ import {
   recordAudit,
   resolveApprovalByExternalKey,
 } from './operations/store.js';
+import {
+  AUTOMATION_DEFINITIONS,
+  automationSummary,
+  listAutomationReports,
+  listAutomationRuns,
+  listAutomations,
+  setAutomationEnabled,
+} from './automations/store.js';
+import { createAutomationOrchestrator } from './automations/orchestrator.js';
+import {
+  buildAutomationReport,
+  deliverReportEmail,
+  deliverReportTelegram,
+  isMondayInBerlin,
+  reportingStatus,
+} from './automations/reporting.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import crypto from 'node:crypto';
 import {
   IVA_IMAC_DEVICE_ID,
   claimNextDeviceCommand,
@@ -192,6 +228,12 @@ const CRM_SOURCES = [
   { label: 'Versuro', group: 'Mein CRM', mode: 'rest', projectId: process.env.VERSURO_PROJECT_ID },
 ];
 const GOALS_CONCEPTS_CRM_SOURCE = CRM_SOURCES.find(source => source.label === 'Goals & Concepts');
+
+function secureTokenMatch(actual, expected) {
+  const left = Buffer.from(String(actual || ''));
+  const right = Buffer.from(String(expected || ''));
+  return left.length > 0 && left.length === right.length && crypto.timingSafeEqual(left, right);
+}
 
 const MAIL_BEREICHE = [
   { match: 'heat-hero.com', label: 'HeatHero' },
@@ -603,14 +645,14 @@ ${learnedCommunication}`;
 // identischen Definitionen aus skills/*.js). Neue Skills werden hier ergaenzt.
 const ALL_SKILLS = {
   memory:    memorySkill({ loadMemory, saveMemory }),
-  calendar:  calendarSkill({ getEventsRaw, getCalendlyEvents, fmtEvents }),
+  calendar:  calendarSkill({ getEventsRaw, getCalendlyEvents, fmtEvents, listAppointmentTypes, createAppointmentType }),
   mails:     mailsSkill({ loadMailAccounts, fetchInbox }),
   crm:       crmSkill({ fetchAllLeads, searchHeatHeroLeads, updateHeatHeroLeadStatus, importCrmCustomerFile }),
   marketing: marketingSkill({ campaigns, brands, analyzeReferences, generateImage, generateContent }),
   research:  researchSkill({ askArchitect }),
   workspaces: workspacesSkill({ workspaces }),
   advice:    adviceSkill({ publicAdviceCatalog, listAdviceKnowledge }),
-  opportunities: opportunitiesSkill({ listOpportunities, runOpportunityScout, prepareOpportunityHandoff }),
+  opportunities: opportunitiesSkill({ listOpportunities, runOpportunityScout, checkOpportunityLink, prepareOpportunityHandoff }),
   accounting: accountingSkill({ listAccountingEntities, listAccountingDocuments, getAccountingDocument, accountingSummary }),
   energyTariffs: energyTariffsSkill({ workspaces, energyTariffStatus, prepareWorkspaceEnergyTariffRequest }),
   selfImprovement: selfImprovementSkill({ savePronunciationCorrection, saveCommunicationPreference, captureImprovementRequest, listVoiceLearning }),
@@ -761,10 +803,14 @@ function toTelegramHTML(s) {
   return s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
 }
 async function sendTelegram(chatId, text) {
-  await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+  if (!process.env.TELEGRAM_BOT_TOKEN) throw new Error('TELEGRAM_BOT_TOKEN fehlt.');
+  const response = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: chatId, text: toTelegramHTML(text), parse_mode: 'HTML' }),
   });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok === false) throw new Error(payload.description || `Telegram HTTP ${response.status}`);
+  return payload.result || payload;
 }
 async function sendTelegramVoice(chatId, text) {
   try {
@@ -785,7 +831,7 @@ async function transcribeVoice(fileId) {
 }
 
 async function sendBriefing() {
-  const mem = await loadMemory(); if (!mem.chatId) return;
+  const mem = await loadMemory(); if (!mem.chatId) throw new Error('Telegram-Chat-ID fehlt. IVA muss zuerst einmal in Telegram angeschrieben werden.');
   const today = berlinDay(new Date());
   const [evRaw, leadsAll] = await Promise.all([getEventsRaw(2), fetchAllLeads()]);
   const todays = evRaw.filter(e => berlinDay(e.start) === today);
@@ -800,22 +846,24 @@ async function sendBriefing() {
     prompt: `Heute ist ${today}.\nTermine heute:\n${eventsText}\n\nOffene Todos:\n${todosText}\n\nLeads je Projekt (rohe Daten):\n${blocks.join('\n\n')}` });
   await recordUsage(briefingRouted, briefingUsage);
   await sendTelegram(mem.chatId, text);
+  return { chatId: mem.chatId, summary: 'Morning-Briefing per Telegram zugestellt.' };
 }
 
 async function sendMarketingMorningReport() {
-  if (String(process.env.MARKETING_MORNING_REPORT_ENABLED || '').toLowerCase() !== 'true') return;
-  const mem = await loadMemory(); if (!mem.chatId) return;
+  const mem = await loadMemory(); if (!mem.chatId) throw new Error('Telegram-Chat-ID fehlt. IVA muss zuerst einmal in Telegram angeschrieben werden.');
   const report = await createMarketingReport({ period: 'morning' });
   await sendTelegram(mem.chatId, report.text);
+  return { chatId: mem.chatId, reportId: report.id || '', summary: 'Marketing-Morgenreport per Telegram zugestellt.' };
 }
 
 async function sendWeeklyOpportunityPitch() {
   const settings = await getOpportunitySettings();
-  if (!settings.weeklyEnabled || !process.env.APIFY_TOKEN) return;
-  const mem = await loadMemory();
-  if (!mem.chatId) return;
+  if (!settings.weeklyEnabled) return { status: 'skipped', summary: 'Wochenlauf ist im Chancenradar-Suchprofil ausgeschaltet.' };
+  if (!process.env.APIFY_TOKEN) return { status: 'blocked', summary: 'Chancenradar kann ohne APIFY_TOKEN nicht automatisch laufen.', error: 'APIFY_TOKEN fehlt.' };
   const result = await runOpportunityScout({ trigger: 'weekly' });
-  await sendTelegram(mem.chatId, result.pitch);
+  const mem = await loadMemory();
+  if (mem.chatId) await sendTelegram(mem.chatId, result.pitch);
+  return { ...result, summary: mem.chatId ? 'Chancenradar abgeschlossen und Wochenpitch zugestellt.' : 'Chancenradar abgeschlossen; Telegram-Chat-ID fehlt.' };
 }
 
 app.post('/telegram', async (req, res) => {
@@ -899,6 +947,51 @@ app.post('/device-agent/:deviceId/commands/:commandId/complete', async (req, res
   } catch (error) { res.status(409).json({ error: error.message }); }
 });
 
+function schedulingStatus() {
+  const calendarWriteReady = String(process.env.SCHEDULING_CALENDAR_WRITE_READY || '').toLowerCase() === 'true';
+  const confirmationMailReady = String(process.env.SCHEDULING_MAIL_SEND_READY || '').toLowerCase() === 'true';
+  return {
+    previewReady: true,
+    liveReady: calendarWriteReady && confirmationMailReady,
+    calendarWriteReady,
+    confirmationMailReady,
+    calendarProvider: String(process.env.SCHEDULING_CALENDAR_PROVIDER || 'noch nicht verbunden'),
+    mailProvider: String(process.env.SCHEDULING_MAIL_PROVIDER || 'noch nicht verbunden'),
+  };
+}
+
+// Oeffentliche Buchungsseiten verwenden absichtlich keinen IVA-API-Token.
+// Nur ausdruecklich aktivierte Terminarten sind erreichbar; live geht erst nach
+// verifiziertem Kalender-Schreibzugriff und Bestätigungs-Mailkanal.
+app.get('/booking-api/:slug', async (req, res) => {
+  const appointmentType = await getAppointmentTypeBySlug(String(req.params.slug || ''));
+  if (!appointmentType) return res.status(404).json({ error: 'Terminlink nicht gefunden oder noch nicht aktiv.' });
+  res.json({ appointmentType, slots: await listAvailableSlots(appointmentType, { days: Math.min(Number(req.query?.days) || 21, 60) }) });
+});
+app.post('/booking-api/:slug', async (req, res) => {
+  try {
+    const result = await createBooking(String(req.params.slug || ''), req.body || {});
+    res.status(201).json({ ...result, icsUrl: `/booking-api/${encodeURIComponent(req.params.slug)}/bookings/${encodeURIComponent(result.booking.id)}.ics` });
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+
+// Der iMac meldet Workflow-Ergebnisse über seinen bereits eingerichteten,
+// ausschließlich im macOS-Schlüsselbund gespeicherten Gerätetoken. Dieser
+// enge Schreibweg akzeptiert nur Protokolle und keine sonstigen Projektfelder.
+app.post('/device-agent/:deviceId/project-workflow-runs', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try { res.status(201).json(await recordProjectWorkflowResult('heat-hero', req.body || {})); }
+  catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.get('/booking-api/:slug/bookings/:bookingId.ics', async (req, res) => {
+  const type = await getAppointmentTypeBySlug(String(req.params.slug || ''));
+  const booking = (await listBookings({ limit: 1000 })).find(item => item.id === req.params.bookingId && item.appointmentTypeId === type?.id);
+  if (!type || !booking) return res.status(404).send('Termin nicht gefunden.');
+  res.type('text/calendar; charset=utf-8').set('Content-Disposition', 'attachment; filename="IVA-Termin.ics"').send(createBookingIcs(booking, type));
+});
+
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type', 'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS' };
 app.use('/api', (req, res, next) => {
   res.set(CORS);
@@ -920,7 +1013,7 @@ function connector(id, label, ready, missing = [], detail = '') {
 }
 
 async function controlSnapshot() {
-  const [ops, qonektoResult, syncResult, voiceResult, knowledgeResult, opportunityResult, learningResult] = await Promise.all([
+  const [ops, qonektoResult, syncResult, voiceResult, knowledgeResult, opportunityResult, learningResult, automationsResult] = await Promise.all([
     operationsSummary(),
     qonektoStatus().catch(error => ({ configured: envReady('QONEKTO_MCP_TOKEN'), reachable: false, error: error.message })),
     crmQonektoSyncStatus().catch(error => ({ enabled: false, error: error.message })),
@@ -928,6 +1021,7 @@ async function controlSnapshot() {
     adviceKnowledgeStatus().catch(error => ({ total: 0, error: error.message })),
     opportunityRadarStatus().catch(error => ({ configured: false, ready: false, missing: ['APIFY_TOKEN'], error: error.message })),
     listVoiceLearning().catch(() => ({ improvementRequests: [] })),
+    automationSummary().catch(error => ({ enabled: 0, disabled: 0, running: 0, failedToday: 0, reports: 0, error: error.message })),
   ]);
   const marketing = marketingConnectorStatus();
   const metaWhatsApp = whatsappStatus();
@@ -956,7 +1050,9 @@ async function controlSnapshot() {
     ),
     connector('calendar', 'Kalender', CALENDARS.some(item => item.url), ['PRIVAT_GOOGLE_ICS_URL oder weitere ICS-URL'], `${CALENDARS.filter(item => item.url).length} Kalender verbunden.`),
     connector('mail', 'E-Mail-Eingang', loadMailAccounts().length > 0, ['MAIL_1_USER/MAIL_1_PASS oder MAIL_2_USER/MAIL_2_PASS'], `${loadMailAccounts().length} Postfaecher konfiguriert.`),
+    connector('report-email', 'Workflow-Reports per E-Mail', reportingStatus().ready, reportingStatus().missing, reportingStatus().ready ? `Versand über ${reportingStatus().provider} an ${reportingStatus().recipient}.` : 'Provider-Key und verifizierter Absender fehlen noch.'),
     connector('calendly', 'Calendly', envReady('CALENDLY_TOKEN'), ['CALENDLY_TOKEN'], 'Termine und Bucher.'),
+    connector('iva-scheduling', 'IVA-Terminbuchung', schedulingStatus().liveReady, ['SCHEDULING_CALENDAR_WRITE_READY=true', 'SCHEDULING_MAIL_SEND_READY=true'], schedulingStatus().liveReady ? 'Eigene Terminlinks live.' : 'Terminarten im Vorschaumodus; Live-Schaltung bis zum Ende-zu-Ende-Test gesperrt.'),
     connector('fal-images', 'fal.ai Bildgenerierung', envReady('FAL_KEY'), ['FAL_KEY'], 'Bilder und Creatives fuer freigegebene Content-Plaene.'),
     ...marketing.connectors.filter(item => item.id !== 'whatsapp').map(item => connector(`marketing-${item.id}`, item.label, item.configured, item.requires || [], item.capabilities?.join(' · ') || '')),
     connector('whatsapp-meta', 'WhatsApp Business · Meta', metaWhatsApp.configured, ['WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID', 'WHATSAPP_VERIFY_TOKEN', 'WHATSAPP_APP_SECRET', 'WHATSAPP_GRAPH_VERSION'], metaWhatsApp.configured ? 'Ein- und Ausgang bereit.' : 'Live-Kanal noch nicht komplett.'),
@@ -979,6 +1075,7 @@ async function controlSnapshot() {
     generatedAt: new Date().toISOString(),
     agents,
     operations: ops,
+    automations: automationsResult,
     connectors: {
       ready: uniqueConnectors.filter(item => item.ready).length,
       total: uniqueConnectors.length,
@@ -990,6 +1087,7 @@ async function controlSnapshot() {
       voice: voiceResult,
       adviceKnowledge: knowledgeResult,
       opportunityRadar: opportunityResult,
+      reporting: reportingStatus(),
     },
     buildBacklog: (learningResult.improvementRequests || []).filter(item => !['done', 'rejected'].includes(item.status)).slice(-30).reverse(),
   };
@@ -1002,6 +1100,13 @@ app.get('/api/control/status', async (_req, res) => {
 app.get('/api/control/runs', async (req, res) => res.json(await listAgentRuns({ limit: req.query?.limit, status: String(req.query?.status || ''), agentId: String(req.query?.agentId || '') })));
 app.get('/api/control/approvals', async (req, res) => res.json(await listApprovals({ limit: req.query?.limit, status: String(req.query?.status || '') })));
 app.get('/api/control/audit', async (req, res) => res.json(await listAudit({ limit: req.query?.limit, category: String(req.query?.category || '') })));
+app.get('/api/automations', async (_req, res) => res.json(await listAutomations()));
+app.patch('/api/automations/:id', async (req, res) => {
+  try { res.json(await setAutomationEnabled(req.params.id, req.body?.enabled === true)); }
+  catch (error) { res.status(404).json({ error: error.message }); }
+});
+app.get('/api/automations/runs', async (req, res) => res.json(await listAutomationRuns({ automationId: String(req.query?.automationId || ''), status: String(req.query?.status || ''), limit: req.query?.limit, since: String(req.query?.since || '') })));
+app.get('/api/automation-reports', async (req, res) => res.json(await listAutomationReports({ type: String(req.query?.type || ''), limit: req.query?.limit })));
 app.get('/api/projects', async (_req, res) => res.json(await listProjects()));
 app.get('/api/projects/:id', async (req, res) => {
   const project = await getProject(req.params.id);
@@ -1080,6 +1185,44 @@ app.post('/api/devices/:deviceId/commands', async (req, res) => {
     res.status(202).json({ queued: true, command });
   } catch (error) { res.status(400).json({ error: error.message }); }
 });
+app.patch('/api/projects/:id/automations/:automationId', async (req, res) => {
+  try {
+    const existingProject = await getProject(req.params.id);
+    const existingAutomation = existingProject?.automations?.find(item => item.id === req.params.automationId);
+    if (!existingProject || !existingAutomation) return res.status(404).json({ error: 'not found' });
+    if (!existingAutomation.toggleAvailable) return res.status(409).json({ error: 'Dieser Workflow ist noch nicht ausführbar und kann deshalb nicht eingeschaltet werden.' });
+    if (req.params.automationId === 'workflow-protocol-summaries') {
+      await Promise.all([
+        setAutomationEnabled('project-protocol-daily', req.body?.enabled === true),
+        setAutomationEnabled('project-protocol-weekly', req.body?.enabled === true),
+        setAutomationEnabled('project-protocol-cleanup', req.body?.enabled === true),
+      ]);
+    }
+    const project = await setProjectAutomationEnabled(req.params.id, req.params.automationId, req.body?.enabled === true);
+    res.status(project ? 200 : 404).json(project || { error: 'not found' });
+  } catch (error) { res.status(409).json({ error: error.message }); }
+});
+app.get('/api/projects/:id/protocols', async (req, res) => {
+  const project = await getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: 'not found' });
+  await syncProjectRunLog(project);
+  await ensureProjectProtocolSummaries(project.id);
+  res.json(await listProjectProtocols(project.id));
+});
+app.get('/api/projects/:id/protocols/:type/:fileId', async (req, res) => {
+  const project = await getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: 'not found' });
+  const file = await getProjectProtocol(project.id, req.params.type, req.params.fileId);
+  if (!file) return res.status(404).json({ error: 'protocol not found' });
+  if (req.query.download === '1') res.setHeader('Content-Disposition', `attachment; filename="${file.fileName}"`);
+  res.json(file);
+});
+app.post('/api/projects/:id/workflow-runs', async (req, res) => {
+  const project = await getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: 'not found' });
+  try { res.status(201).json(await recordProjectWorkflowResult(project.id, req.body || {})); }
+  catch (error) { res.status(400).json({ error: error.message }); }
+});
 app.get('/api/leads', async (_req, res) => res.json(await fetchAllLeads()));
 app.get('/api/crm-qonekto-sync/status', async (_req, res) => res.json(await crmQonektoSyncStatus()));
 app.post('/api/crm-qonekto-sync/run', async (req, res) => {
@@ -1112,6 +1255,23 @@ app.get('/api/mails/klassifiziert', async (req, res) => {
 });
 app.get('/api/calendar', async (_req, res) => res.json(fmtEvents(await getEventsRaw(7))));
 app.get('/api/calendly', async (_req, res) => res.json(await getCalendlyEvents(14)));
+app.get('/api/scheduling/status', (_req, res) => res.json(schedulingStatus()));
+app.get('/api/scheduling/types', async (_req, res) => res.json(await listAppointmentTypes()));
+app.post('/api/scheduling/types', async (req, res) => {
+  try { res.status(201).json(await createAppointmentType(req.body || {})); }
+  catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.patch('/api/scheduling/types/:id', async (req, res) => {
+  try {
+    const type = await updateAppointmentType(req.params.id, req.body || {}, { allowActivation: schedulingStatus().liveReady });
+    res.status(type ? 200 : 404).json(type || { error: 'not found' });
+  } catch (error) { res.status(409).json({ error: error.message }); }
+});
+app.get('/api/scheduling/types/:id/slots', async (req, res) => {
+  const type = (await listAppointmentTypes()).find(item => item.id === req.params.id);
+  res.status(type ? 200 : 404).json(type ? await listAvailableSlots(type, { days: Math.min(Number(req.query?.days) || 14, 60) }) : { error: 'not found' });
+});
+app.get('/api/scheduling/bookings', async (req, res) => res.json(await listBookings({ limit: req.query?.limit })));
 app.get('/api/todos', async (_req, res) => { const m = await loadMemory(); res.json((m.todos || []).filter(t => !t.done)); });
 app.post('/api/todos', async (req, res) => { const m = await loadMemory(); m.todos = m.todos || []; m.todos.push({ text: req.body?.text || '', done: false, ts: Date.now() }); await saveMemory(m); res.json({ ok: true }); });
 app.post('/api/todos/toggle', async (req, res) => { const m = await loadMemory(); const t = (m.todos || []).find(t => t.ts === req.body?.ts); if (t) { t.done = !t.done; await saveMemory(m); } res.json({ ok: true }); });
@@ -1452,6 +1612,30 @@ app.post('/api/workspaces/:id/notes', async (req, res) => {
   const workspace = await workspaces.addWorkspaceNote(req.params.id, req.body?.text || '', req.body?.source || 'manual');
   res.status(workspace ? 200 : 404).json(workspace || { error: 'not found' });
 });
+app.post('/api/workspaces/:id/meetings', async (req, res) => {
+  try {
+    const result = await workspaces.addWorkspaceMeeting(req.params.id, req.body || {});
+    res.status(result ? (result.duplicate ? 200 : 201) : 404).json(result || { error: 'not found' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.patch('/api/workspaces/:id/meetings/:meetingId', async (req, res) => {
+  try {
+    const result = await workspaces.updateWorkspaceMeeting(req.params.id, req.params.meetingId, req.body || {});
+    res.status(result ? 200 : 404).json(result || { error: 'not found' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/workspaces/:id/follow-up-drafts', async (req, res) => {
+  try {
+    const result = await workspaces.createWorkspaceFollowUpDraft(req.params.id, req.body || {});
+    res.status(result ? 201 : 404).json(result || { error: 'not found' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.patch('/api/workspaces/:id/follow-up-drafts/:draftId', async (req, res) => {
+  try {
+    const result = await workspaces.updateWorkspaceFollowUpDraft(req.params.id, req.params.draftId, req.body || {});
+    res.status(result ? 200 : 404).json(result || { error: 'not found' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 app.post('/api/workspaces/:id/files', express.raw({ type: '*/*', limit: '25mb' }), async (req, res) => {
   try {
     const file = await workspaces.storeWorkspaceFile(req.params.id, {
@@ -1741,6 +1925,11 @@ app.patch('/api/opportunities/settings', async (req, res) => {
 });
 app.get('/api/opportunities/runs', async (req, res) => res.json(await listOpportunityRuns({ limit: req.query?.limit || 30 })));
 app.get('/api/opportunities', async (req, res) => res.json(await listOpportunities({ status: req.query?.status || '', limit: req.query?.limit || 100 })));
+app.get('/api/opportunities/link-checks', async (req, res) => res.json(await listOpportunityLinkChecks({ mode: req.query?.mode || '', limit: req.query?.limit || 30 })));
+app.post('/api/opportunities/check-link', async (req, res) => {
+  try { res.status(201).json(await checkOpportunityLink(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message, linkCheck: e.linkCheck || null }); }
+});
 app.get('/api/opportunities/:id', async (req, res) => {
   const item = await getOpportunity(req.params.id);
   res.status(item ? 200 : 404).json(item || { error: 'not found' });
@@ -1864,18 +2053,83 @@ async function setBotCommands() {
   catch (e) { console.error('setMyCommands-Fehler:', e); }
 }
 
-cron.schedule('0 7 * * *', sendBriefing, { timezone: 'Europe/Berlin' });
-cron.schedule('10 7 * * *', () => { void sendMarketingMorningReport().catch(error => console.error('Marketing-Morgenreport:', error.message)); }, { timezone: 'Europe/Berlin' });
-cron.schedule('30 8 * * 1', () => { void sendWeeklyOpportunityPitch().catch(error => console.error('Chancenradar-Wochenpitch:', error.message)); }, { timezone: 'Europe/Berlin' });
-cron.schedule('*/5 * * * *', () => {
-  void syncStrategyCustomersToQonekto().catch(error => console.error('CRM-Qonekto-Sync:', error.message));
-}, { timezone: 'Europe/Berlin' });
-if (String(process.env.CRM_QONEKTO_SYNC_ENABLED || '').toLowerCase() === 'true') {
-  const firstCrmSync = setTimeout(() => {
-    void syncStrategyCustomersToQonekto().catch(error => console.error('CRM-Qonekto-Erstsync:', error.message));
-  }, 30_000);
-  firstCrmSync.unref?.();
+async function syncProjectRunLog(project) {
+  for (const run of project.runLog || []) {
+    await recordProjectWorkflowResult(project.id, {
+      runId: run.id,
+      workflowId: run.automationId,
+      workflowName: project.automations?.find(item => item.id === run.automationId)?.name || run.automationId,
+      status: run.status,
+      startedAt: run.executedAt,
+      completedAt: run.executedAt,
+      summary: run.summary,
+      metrics: { customerCount: run.customerCount, attachmentCount: run.attachmentCount, scope: run.scope },
+      artifacts: [],
+    });
+  }
 }
+
+async function updateProjectProtocolSummaries(options = {}) {
+  const projects = await listProjects();
+  for (const project of projects.filter(item => item.protocolPolicy?.enabled)) {
+    await syncProjectRunLog(project);
+    await ensureProjectProtocolSummaries(project.id, {
+      ...options,
+      expectedWorkflows: project.protocolPolicy?.expectedWorkflows || [],
+    });
+  }
+}
+
+const automationRunner = createAutomationOrchestrator({
+  'report-email-daily': async ({ now }) => {
+    const report = await buildAutomationReport('daily', now);
+    const delivery = await deliverReportEmail(report);
+    return { reportKey: report.key, delivery, summary: delivery.duplicate ? 'Tagesreport war bereits per E-Mail zugestellt.' : `Tagesreport per E-Mail an ${reportingStatus().recipient} zugestellt.` };
+  },
+  'report-email-weekly': async ({ now }) => {
+    const report = await buildAutomationReport('weekly', now);
+    const delivery = await deliverReportEmail(report);
+    return { reportKey: report.key, delivery, summary: delivery.duplicate ? 'Wochenreport war bereits per E-Mail zugestellt.' : `Wochenreport per E-Mail an ${reportingStatus().recipient} zugestellt.` };
+  },
+  'daily-briefing': async () => sendBriefing(),
+  'marketing-morning-report': async () => sendMarketingMorningReport(),
+  'report-telegram-morning': async ({ now }) => {
+    const mem = await loadMemory();
+    if (!mem.chatId) return { status: 'blocked', summary: 'Workflow-Report nicht versandt: Telegram-Chat-ID fehlt.', error: 'Telegram-Chat-ID fehlt.' };
+    const daily = await buildAutomationReport('daily', now);
+    const deliveries = [await deliverReportTelegram(daily, { chatId: mem.chatId, sendTelegram })];
+    if (isMondayInBerlin(now)) {
+      const weekly = await buildAutomationReport('weekly', now);
+      deliveries.push(await deliverReportTelegram(weekly, { chatId: mem.chatId, sendTelegram }));
+    }
+    return { deliveries, summary: `Separater Workflow-Report per Telegram geprüft (${deliveries.filter(item => item.delivered).length} neu zugestellt).` };
+  },
+  'opportunity-weekly': async () => sendWeeklyOpportunityPitch(),
+  'crm-qonekto-sync': async () => {
+    const result = await syncStrategyCustomersToQonekto();
+    if (!result.enabled) return { status: 'blocked', summary: 'CRM-Qonekto-Sync ist durch die Integrationsfreigabe blockiert.', error: result.reason || 'CRM_QONEKTO_SYNC_ENABLED ist nicht aktiv.', ...result };
+    return { ...result, summary: `CRM-Qonekto-Abgleich abgeschlossen: ${result.processed || result.checked || 0} Datensätze geprüft.` };
+  },
+  'project-protocol-daily': async () => { await updateProjectProtocolSummaries({ finalizeDaily: true }); return { summary: 'Projekt-Tagesprotokolle finalisiert.' }; },
+  'project-protocol-weekly': async () => { await updateProjectProtocolSummaries({ finalizeWeekly: true }); return { summary: 'Projekt-Wochenprotokolle finalisiert.' }; },
+  'project-protocol-cleanup': async () => { const result = await cleanupExpiredProjectProtocols(); return { result, summary: 'Abgelaufene Projektprotokolle bereinigt.' }; },
+});
+
+for (const automation of AUTOMATION_DEFINITIONS) {
+  cron.schedule(automation.cron, () => {
+    void automationRunner.runAutomation(automation.id, { trigger: 'schedule' })
+      .catch(error => console.error(`Automation ${automation.id}:`, error.message));
+  }, { timezone: 'Europe/Berlin' });
+}
+
+const firstAutomationCatchUp = setTimeout(() => {
+  void automationRunner.runDueAutomations().catch(error => console.error('Automation-Catch-up:', error.message));
+}, 20_000);
+firstAutomationCatchUp.unref?.();
+const automationCatchUpInterval = setInterval(() => {
+  void automationRunner.runDueAutomations().catch(error => console.error('Automation-Catch-up:', error.message));
+}, 15 * 60 * 1000);
+automationCatchUpInterval.unref?.();
 const __dirnameIva = path.dirname(fileURLToPath(import.meta.url));
 app.use(express.static(path.join(__dirnameIva, 'public')));
 app.get('/cockpit', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'cockpit.html')));
@@ -1883,6 +2137,8 @@ app.get('/workspace', (_req, res) => res.sendFile(path.join(__dirnameIva, 'publi
 app.get('/pv-calculator', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'pv-calculator.html')));
 app.get('/pv-schnellrechner', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'pv-calculator.html')));
 app.get('/customers', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'customers.html')));
+app.get('/scheduling', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'scheduling.html')));
+app.get('/book/:slug', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'booking.html')));
 app.get('/advice', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'advice.html')));
 app.get('/whatsapp', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'whatsapp.html')));
 app.get('/marketing', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'marketing.html')));

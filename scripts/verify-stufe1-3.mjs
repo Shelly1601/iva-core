@@ -28,7 +28,7 @@ const { researchSkill } = await import('../skills/research.js');
 
 const BASELINE = [
   'createTodo', 'completeTodo', 'remember',
-  'getCalendar', 'getCalendly',
+  'getCalendar', 'getCalendly', 'getIvaAppointmentTypes', 'createIvaAppointmentTypeDraft',
   'getMails',
   'getLeads', 'findHeatHeroLeads', 'importCrmCustomerFile', 'updateHeatHeroLeadStatus',
   'listCampaigns', 'createCampaign', 'analyzeReferences', 'analyzeCampaign', 'generateImage', 'generateContent', 'listBrands', 'createBrand', 'updateBrand',
@@ -64,6 +64,7 @@ console.log('\n[2] Skill-Registry - Tool-Namen 1:1 mit Baseline');
 const deps = {
   loadMemory: async () => ({}), saveMemory: async () => {},
   getEventsRaw: async () => [], getCalendlyEvents: async () => ({ count: 0, events: [] }), fmtEvents: () => [],
+  listAppointmentTypes: async () => [], createAppointmentType: async input => ({ ...input, active: false }),
   loadMailAccounts: () => [], fetchInbox: async () => [],
   fetchAllLeads: async () => [],
   searchHeatHeroLeads: async () => ({ count: 0, leads: [] }),

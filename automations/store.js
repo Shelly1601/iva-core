@@ -1,0 +1,201 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+
+const DATA_DIR = process.env.DATA_DIR || '/data';
+const FILE = `${DATA_DIR}/automation-control.json`;
+const RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
+let writeQueue = Promise.resolve();
+
+export const AUTOMATION_DEFINITIONS = Object.freeze([
+  { id: 'report-email-daily', name: 'Täglicher Workflow-Report per E-Mail', category: 'Reporting', schedule: 'Täglich · 06:45 Uhr', cron: '45 6 * * *', cadence: 'daily', hour: 6, minute: 45, defaultEnabled: true, maxSlotAttempts: 3, timeoutMs: 30_000, description: 'Fasst die automatischen Läufe des Vortags zusammen und sendet sie an Nadines IVA-Postfach.' },
+  { id: 'report-email-weekly', name: 'Wöchentlicher Workflow-Report per E-Mail', category: 'Reporting', schedule: 'Montag · 06:50 Uhr', cron: '50 6 * * 1', cadence: 'weekly', weekday: 1, hour: 6, minute: 50, defaultEnabled: true, maxSlotAttempts: 3, timeoutMs: 30_000, description: 'Sendet genau einen Wochenreport je Kalenderwoche; erfolgreiche Zustellungen werden persistent dedupliziert.' },
+  { id: 'daily-briefing', name: 'IVA Morning-Briefing', category: 'Kommunikation', schedule: 'Täglich · 07:00 Uhr', cron: '0 7 * * *', cadence: 'daily', hour: 7, minute: 0, defaultEnabled: true, maxSlotAttempts: 2, timeoutMs: 120_000, description: 'Termine, Todos und CRM-Handlungsbedarf als täglicher Telegram-Überblick.' },
+  { id: 'marketing-morning-report', name: 'Marketing-Morgenreport', category: 'Marketing', schedule: 'Täglich · 07:10 Uhr', cron: '10 7 * * *', cadence: 'daily', hour: 7, minute: 10, defaultEnabled: true, maxSlotAttempts: 2, timeoutMs: 60_000, description: 'Erzeugt den aktuellen Marketing-Entscheidungsreport und stellt ihn separat per Telegram zu.' },
+  { id: 'report-telegram-morning', name: 'Workflow-Report morgens per Telegram', category: 'Reporting', schedule: 'Täglich · 07:20 Uhr', cron: '20 7 * * *', cadence: 'daily', hour: 7, minute: 20, defaultEnabled: true, maxSlotAttempts: 3, timeoutMs: 30_000, description: 'Sendet einen eigenen kompakten Betriebsreport, getrennt vom normalen Morning-Briefing.' },
+  { id: 'opportunity-weekly', name: 'Chancenradar-Wochenlauf', category: 'Chancenradar', schedule: 'Montag · 08:30 Uhr', cron: '30 8 * * 1', cadence: 'weekly', weekday: 1, hour: 8, minute: 30, defaultEnabled: true, maxSlotAttempts: 2, timeoutMs: 300_000, description: 'Sammelt öffentliche Signale, bewertet Chancen und sendet den Wochenpitch höchstens einmal je Kalenderwoche.' },
+  { id: 'crm-qonekto-sync', name: 'CRM → Qonekto Abgleich', category: 'Kunden & CRM', schedule: 'Alle 5 Minuten', cron: '*/5 * * * *', cadence: 'interval', intervalMinutes: 5, defaultEnabled: false, maxSlotAttempts: 1, timeoutMs: 180_000, description: 'Gleicht freigegebene Strategiegespräch-Kunden über den bestehenden engen Qonekto-Automationsweg ab.' },
+  { id: 'project-protocol-daily', name: 'Projekt-Tagesprotokolle', category: 'Projekte', schedule: 'Täglich · 23:55 Uhr', cron: '55 23 * * *', cadence: 'daily', hour: 23, minute: 55, defaultEnabled: true, maxSlotAttempts: 3, timeoutMs: 120_000, description: 'Verdichtet die gemeldeten Workflow-Ergebnisse zu Tagesprotokollen und markiert fehlende Läufe.' },
+  { id: 'project-protocol-weekly', name: 'Projekt-Wochenprotokolle', category: 'Projekte', schedule: 'Sonntag · 23:58 Uhr', cron: '58 23 * * 0', cadence: 'weekly', weekday: 0, hour: 23, minute: 58, defaultEnabled: true, maxSlotAttempts: 3, timeoutMs: 120_000, description: 'Finalisiert den Wochenüberblick genau einmal je Kalenderwoche.' },
+  { id: 'project-protocol-cleanup', name: 'Protokoll-Aufbewahrung bereinigen', category: 'Projekte', schedule: 'Täglich · 00:20 Uhr', cron: '20 0 * * *', cadence: 'daily', hour: 0, minute: 20, defaultEnabled: true, maxSlotAttempts: 3, timeoutMs: 120_000, description: 'Entfernt abgelaufene Tages- und Wochenprotokolle nach den hinterlegten Fristen.' },
+]);
+
+const clean = (value, max = 2000) => String(value ?? '').trim().slice(0, max);
+const clone = value => structuredClone(value);
+
+function compactResult(value) {
+  if (!value || typeof value !== 'object') return {};
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized.length <= 12_000) return JSON.parse(serialized);
+    return { truncated: true, preview: serialized.slice(0, 11_500) };
+  } catch {
+    return { truncated: true, preview: '[Ergebnis konnte nicht serialisiert werden]' };
+  }
+}
+
+function emptyStore() {
+  return { version: 1, overrides: {}, runs: [], reports: [], deliveries: [] };
+}
+
+async function load() {
+  try {
+    const parsed = JSON.parse(await fs.readFile(FILE, 'utf8'));
+    return {
+      ...emptyStore(), ...parsed, version: 1,
+      overrides: parsed.overrides && typeof parsed.overrides === 'object' ? parsed.overrides : {},
+      runs: Array.isArray(parsed.runs) ? parsed.runs : [],
+      reports: Array.isArray(parsed.reports) ? parsed.reports : [],
+      deliveries: Array.isArray(parsed.deliveries) ? parsed.deliveries : [],
+    };
+  } catch { return emptyStore(); }
+}
+
+async function save(store) {
+  await fs.mkdir(DATA_DIR, { recursive: true, mode: 0o700 });
+  const temporary = `${FILE}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  await fs.writeFile(temporary, `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
+  await fs.rename(temporary, FILE);
+}
+
+async function mutate(action) {
+  let result;
+  const job = writeQueue.catch(() => {}).then(async () => {
+    const store = await load();
+    result = await action(store);
+    const cutoff = Date.now() - RETENTION_MS;
+    store.runs = store.runs.filter(item => Date.parse(item.startedAt || 0) >= cutoff).slice(-5000);
+    store.reports = store.reports.filter(item => Date.parse(item.createdAt || 0) >= cutoff).slice(-500);
+    store.deliveries = store.deliveries.filter(item => Date.parse(item.createdAt || 0) >= cutoff).slice(-3000);
+    await save(store);
+  });
+  writeQueue = job.catch(() => {});
+  await job;
+  return result;
+}
+
+export function automationDefinition(id) {
+  return AUTOMATION_DEFINITIONS.find(item => item.id === clean(id, 100)) || null;
+}
+
+export async function listAutomations() {
+  const store = await load();
+  return AUTOMATION_DEFINITIONS.map(definition => {
+    const override = store.overrides[definition.id] || {};
+    const runs = store.runs.filter(item => item.automationId === definition.id);
+    const lastRun = runs.slice().sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))[0] || null;
+    return { ...clone(definition), enabled: override.enabled ?? definition.defaultEnabled, updatedAt: override.updatedAt || '', lastRun: lastRun ? clone(lastRun) : null };
+  });
+}
+
+export async function getAutomation(id) {
+  return (await listAutomations()).find(item => item.id === clean(id, 100)) || null;
+}
+
+export async function setAutomationEnabled(id, enabled) {
+  const definition = automationDefinition(id);
+  if (!definition) throw new Error('Automation nicht gefunden.');
+  return mutate(store => {
+    const now = new Date().toISOString();
+    store.overrides[definition.id] = { ...(store.overrides[definition.id] || {}), enabled: enabled === true, updatedAt: now };
+    return { ...clone(definition), enabled: enabled === true, updatedAt: now };
+  });
+}
+
+export async function beginAutomationRun(automationId, input = {}) {
+  const definition = automationDefinition(automationId);
+  if (!definition) throw new Error('Automation nicht gefunden.');
+  return mutate(store => {
+    const slotKey = clean(input.slotKey, 160);
+    const sameSlot = store.runs.filter(item => item.automationId === definition.id && slotKey && item.slotKey === slotKey);
+    const existing = sameSlot.find(item => ['running', 'completed'].includes(item.status));
+    if (existing) return { duplicate: true, exhausted: false, run: clone(existing) };
+    if (sameSlot.length >= Number(definition.maxSlotAttempts || 1)) {
+      return { duplicate: true, exhausted: true, run: clone(sameSlot.sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))[0]) };
+    }
+    const now = new Date().toISOString();
+    const run = {
+      id: crypto.randomUUID(), automationId: definition.id, automationName: definition.name,
+      slotKey, trigger: clean(input.trigger || 'schedule', 80), attempt: sameSlot.length + 1,
+      status: 'running', summary: '', error: '', startedAt: now, completedAt: '', durationMs: null,
+    };
+    store.runs.push(run);
+    return { duplicate: false, exhausted: false, run: clone(run) };
+  });
+}
+
+export async function finishAutomationRun(runId, input = {}) {
+  return mutate(store => {
+    const run = store.runs.find(item => item.id === clean(runId, 100));
+    if (!run) return null;
+    const completedAt = new Date().toISOString();
+    run.status = ['completed', 'failed', 'blocked', 'skipped'].includes(input.status) ? input.status : 'completed';
+    run.summary = clean(input.summary || 'Lauf abgeschlossen.', 4000);
+    run.error = run.status === 'failed' || run.status === 'blocked' ? clean(input.error, 1200) : '';
+    run.result = compactResult(input.result);
+    run.completedAt = completedAt;
+    run.durationMs = Math.max(0, Date.parse(completedAt) - Date.parse(run.startedAt));
+    return clone(run);
+  });
+}
+
+export async function listAutomationRuns({ automationId = '', status = '', limit = 100, since = '' } = {}) {
+  const store = await load();
+  return store.runs
+    .filter(item => !automationId || item.automationId === automationId)
+    .filter(item => !status || item.status === status)
+    .filter(item => !since || String(item.startedAt) >= String(since))
+    .sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))
+    .slice(0, Math.max(1, Math.min(1000, Number(limit) || 100))).map(clone);
+}
+
+export async function saveAutomationReport(input = {}) {
+  return mutate(store => {
+    const key = clean(input.key, 220);
+    const existing = store.reports.find(item => item.key === key);
+    if (existing) return clone(existing);
+    const report = {
+      id: crypto.randomUUID(), key, type: input.type === 'weekly' ? 'weekly' : 'daily', periodKey: clean(input.periodKey, 100),
+      title: clean(input.title, 300), text: clean(input.text, 30_000), html: clean(input.html, 80_000),
+      counts: input.counts && typeof input.counts === 'object' ? clone(input.counts) : {}, createdAt: new Date().toISOString(),
+    };
+    store.reports.push(report);
+    return clone(report);
+  });
+}
+
+export async function listAutomationReports({ type = '', limit = 30 } = {}) {
+  const store = await load();
+  return store.reports.filter(item => !type || item.type === type)
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+    .slice(0, Math.max(1, Math.min(200, Number(limit) || 30))).map(clone);
+}
+
+export async function successfulDelivery(dedupeKey) {
+  const key = clean(dedupeKey, 260);
+  return clone((await load()).deliveries.find(item => item.dedupeKey === key && item.status === 'delivered') || null);
+}
+
+export async function recordAutomationDelivery(input = {}) {
+  return mutate(store => {
+    const item = {
+      id: crypto.randomUUID(), dedupeKey: clean(input.dedupeKey, 260), reportKey: clean(input.reportKey, 220),
+      channel: clean(input.channel, 50), recipient: clean(input.recipient, 320), provider: clean(input.provider, 80),
+      status: input.status === 'delivered' ? 'delivered' : 'failed', providerId: clean(input.providerId, 300),
+      error: clean(input.error, 1200), createdAt: new Date().toISOString(),
+    };
+    store.deliveries.push(item);
+    return clone(item);
+  });
+}
+
+export async function automationSummary() {
+  const [automations, runs, reports] = await Promise.all([listAutomations(), listAutomationRuns({ limit: 1000 }), listAutomationReports({ limit: 100 })]);
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date());
+  return {
+    enabled: automations.filter(item => item.enabled).length,
+    disabled: automations.filter(item => !item.enabled).length,
+    running: runs.filter(item => item.status === 'running').length,
+    failedToday: runs.filter(item => item.status === 'failed' && new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date(item.startedAt)) === today).length,
+    reports: reports.length,
+  };
+}

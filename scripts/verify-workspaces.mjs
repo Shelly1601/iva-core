@@ -40,6 +40,7 @@ try {
     name: 'musterabrechnung.pdf', mime: 'application/pdf', kind: 'payroll-sample', buffer: Buffer.from('%PDF-payroll'),
   });
   assert.equal(payroll.kind, 'payroll-sample');
+  assert.equal(payroll.category, 'general');
 
   const list = await store.listWorkspaces({ mode: 'energie' });
   assert.equal(list.length, 1);
@@ -77,11 +78,38 @@ try {
   assert.equal(importedAgain.notes.length, 2, 'CRM-Notizen werden ergänzt und dedupliziert');
   assert.equal((await store.listWorkspaces({ mode: 'kunde' })).length, 1);
 
+  await assert.rejects(
+    store.addWorkspaceMeeting(customer.id, { title: 'Ohne Einwilligung', internalSummary: 'Test' }),
+    /Einwilligung/,
+  );
+  const meetingResult = await store.addWorkspaceMeeting(customer.id, {
+    source: 'plaud', externalId: 'plaud-rec-1', title: 'Strategiegespräch', occurredAt: '2026-08-13T10:00:00.000Z',
+    internalSummary: 'Die Ruhestandsplanung wurde besprochen.', customerSummary: 'Wir haben Ihre Ruhestandsplanung und die nächsten Schritte besprochen.',
+    decisions: ['Versorgungslücke berechnen'], actionItems: ['Unterlagen bis Freitag bereitstellen'],
+    consent: { granted: true, method: 'mündlich vor Gespräch' },
+  });
+  assert.equal(meetingResult.duplicate, false);
+  assert.equal(meetingResult.meeting.source, 'plaud');
+  const duplicateMeeting = await store.addWorkspaceMeeting(customer.id, {
+    source: 'plaud', externalId: 'plaud-rec-1', title: 'Doppelt', internalSummary: 'Doppelt',
+    consent: { granted: true },
+  });
+  assert.equal(duplicateMeeting.duplicate, true, 'PLAUD-Aufnahmen werden über die externe ID dedupliziert');
+
+  const draftResult = await store.createWorkspaceFollowUpDraft(customer.id, { meetingIds: [meetingResult.meeting.id] });
+  assert.equal(draftResult.draft.status, 'draft');
+  assert.equal(draftResult.draft.to, 'mara@example.test');
+  assert.match(draftResult.draft.body, /Ruhestandsplanung/);
+  assert.match(draftResult.draft.body, /Unterlagen bis Freitag/);
+  const editedDraft = await store.updateWorkspaceFollowUpDraft(customer.id, draftResult.draft.id, { subject: 'Unser Gespräch', status: 'opened' });
+  assert.equal(editedDraft.draft.subject, 'Unser Gespräch');
+  assert.equal(editedDraft.draft.status, 'opened');
+
   const deleted = await store.deleteWorkspace(customer.id, { mode: 'kunde' });
   assert.equal(deleted.id, customer.id);
   assert.equal(await store.getWorkspace(customer.id), null);
   assert.equal((await store.listWorkspaces({ mode: 'kunde' })).length, 0);
-  console.log('PASS workspaces: CRUD, verschachtelte Daten, Notizen, Dateien und Musterabrechnungs-Upload');
+  console.log('PASS workspaces: CRUD, Notizen, Dateien, Meetings und Follow-up-Entwürfe');
 } finally {
   await fs.rm(testDir, { recursive: true, force: true });
 }

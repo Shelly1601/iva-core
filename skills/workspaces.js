@@ -32,7 +32,33 @@ export function workspacesSkill({ workspaces }) {
       parameters: z.object({ id: z.string(), text: z.string(), source: z.string().optional() }),
       execute: async ({ id, text, source }) => await workspaces.addWorkspaceNote(id, text, source || 'iva-chat'),
     }),
+    addWorkspaceMeeting: tool({
+      description: 'Ordnet ein bereits ausgewertetes PLAUD-, Live-Coach- oder manuelles Gespraech einer IVA-Kundenakte zu. Nur nutzen, wenn die Einwilligung vor dem Gespraech dokumentiert wurde. Roh-Audio wird hier nicht gespeichert.',
+      parameters: z.object({
+        id: z.string(),
+        source: z.enum(['plaud', 'live-coach', 'manual']),
+        externalId: z.string().optional(),
+        title: z.string(),
+        occurredAt: z.string().optional(),
+        internalSummary: z.string(),
+        customerSummary: z.string(),
+        decisions: z.array(z.string()).optional(),
+        actionItems: z.array(z.string()).optional(),
+        objections: z.array(z.string()).optional(),
+        consentGranted: z.boolean(),
+        consentMethod: z.string().optional(),
+      }),
+      execute: async ({ id, consentGranted, consentMethod, ...meeting }) => await workspaces.addWorkspaceMeeting(id, {
+        ...meeting,
+        consent: { granted: consentGranted, method: consentMethod || 'Durch Nadine vor dem Gespräch bestätigt' },
+      }),
+    }),
+    createCustomerFollowUpDraft: tool({
+      description: 'Erstellt aus einer oder mehreren geprueften Meeting-Zusammenfassungen einen Kunden-Follow-up-Entwurf. Das Werkzeug versendet niemals selbst.',
+      parameters: z.object({ id: z.string(), meetingIds: z.array(z.string()).min(1), to: z.string().email().optional(), subject: z.string().optional() }),
+      execute: async input => await workspaces.createWorkspaceFollowUpDraft(input.id, input),
+    }),
   };
 }
 
-export const workspacesSkillMeta = { id: 'workspaces', toolNames: ['listWorkspaces', 'getWorkspace', 'createWorkspace', 'addWorkspaceNote'] };
+export const workspacesSkillMeta = { id: 'workspaces', toolNames: ['listWorkspaces', 'getWorkspace', 'createWorkspace', 'addWorkspaceNote', 'addWorkspaceMeeting', 'createCustomerFollowUpDraft'] };

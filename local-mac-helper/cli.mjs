@@ -48,6 +48,14 @@ import {
   attachFundingDraftMarker,
   createJsonFundingStateStore,
 } from './funding-batches.mjs';
+import {
+  buildManufacturerOperationsReport,
+  classifyManufacturerLeadAddress,
+  getManufacturerLeadReadiness,
+  loadManufacturerLeadConfig,
+  loadManufacturerLeadState,
+  recordManufacturerOperation,
+} from './manufacturer-lead-operations.mjs';
 
 async function readJson(filePath) {
   if (!filePath) throw new Error('Pfad zu einer JSON-Datei fehlt.');
@@ -80,6 +88,24 @@ const batchService = new FundingBatchService({
 
 async function main() {
   const [command, filePath, confirmation, extra] = process.argv.slice(2);
+  if (command === 'manufacturer-lead-readiness') {
+    const config = await loadManufacturerLeadConfig(filePath);
+    return console.log(JSON.stringify(getManufacturerLeadReadiness(config), null, 2));
+  }
+  if (command === 'manufacturer-lead-classify') {
+    if (!filePath) throw new Error('Adresse für die Gebietsprüfung fehlt.');
+    const config = await loadManufacturerLeadConfig(confirmation);
+    return console.log(JSON.stringify(classifyManufacturerLeadAddress(filePath, config), null, 2));
+  }
+  if (command === 'manufacturer-operation-record') {
+    if (confirmation !== '--commit') throw new Error('Hersteller-/Wattfox-Ergebnis wurde nicht gespeichert. Zum Bestätigen --commit anhängen.');
+    return console.log(JSON.stringify(await recordManufacturerOperation(await readJson(filePath)), null, 2));
+  }
+  if (command === 'manufacturer-operations-report') {
+    const state = await loadManufacturerLeadState();
+    const days = Number(confirmation || 1);
+    return console.log(JSON.stringify(buildManufacturerOperationsReport(state, { endDate: filePath, days }), null, 2));
+  }
   if (command === 'doctor') return console.log(JSON.stringify({
     outlook: await diagnoseOutlook(),
     pipedrive: await diagnosePipedriveChrome(),
@@ -220,6 +246,10 @@ async function main() {
   }
   console.log(`IVA Mac Helper
 
+  node local-mac-helper/cli.mjs manufacturer-lead-readiness [konfiguration.json]
+  node local-mac-helper/cli.mjs manufacturer-lead-classify "Adresse" [konfiguration.json]
+  node local-mac-helper/cli.mjs manufacturer-operation-record /pfad/ergebnis.json --commit
+  node local-mac-helper/cli.mjs manufacturer-operations-report [JJJJ-MM-TT] [tage]
   node local-mac-helper/cli.mjs doctor
   node local-mac-helper/cli.mjs direct-sales-roster-status
   node local-mac-helper/cli.mjs sync-direct-sales-roster --commit

@@ -164,6 +164,30 @@ export function climateSpeedBonusRate(now = new Date()) {
   return 0;
 }
 
+function validDateValue(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(`${String(value).slice(0, 10)}T12:00:00+02:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatPercent(value) {
+  return `${round(value, 2).toLocaleString('de-DE')} %`;
+}
+
+export function buildKfw458NoteSummary(result = {}) {
+  const units = Math.max(1, Math.floor(numberValue(result.units) || 1));
+  const bonuses = result.bonuses || {};
+  const child = result.eligibleMinorChild === true ? 'ja (+10.000 EUR Einkommensgrenze)' : 'nein';
+  const income = bonuses.income > 0 ? formatPercent(bonuses.income) : 'nein';
+  const climate = bonuses.climateSpeed > 0 ? formatPercent(bonuses.climateSpeed) : 'nein';
+  const components = `Grund ${formatPercent(bonuses.base || 0)} | Einkommen ${income} | Kind u18: ${child} | Klimageschwindigkeit ${climate}`;
+  if (units > 1 && result.selfUsed === true) {
+    return `${formatPercent(result.buildingBaseRate || 0)} Gesamtgebäude / ${formatPercent(result.selfUsedUnitRate || 0)} selbst genutzte WE - ${components}${result.unitRateCapped ? ` | gedeckelt auf ${formatPercent(result.maximumUnitRate)}` : ''}`;
+  }
+  const displayedRate = result.selfUsed === true ? result.selfUsedUnitRate : result.buildingBaseRate;
+  return `${formatPercent(displayedRate || 0)} - ${components}${result.unitRateCapped ? ` | gedeckelt auf ${formatPercent(result.maximumUnitRate)}` : ''}`;
+}
+
 export function calculateKfw458Funding(input = {}, now = new Date()) {
   const units = Math.max(1, Math.floor(numberValue(input.units) || 1));
   const projectCosts = Math.max(0, numberValue(input.projectCosts) || 0);
@@ -174,39 +198,84 @@ export function calculateKfw458Funding(input = {}, now = new Date()) {
   const incomeBonus = selfUsed ? incomeBonusRate(input.householdIncome, input.eligibleMinorChild === true) : 0;
   const baseBonus = privateOwner ? 30 : 0;
   const uncappedRate = baseBonus + climateBonus + incomeBonus;
-  const rate = Math.min(80, uncappedRate);
+  const maximumUnitRate = incomeBonus === 40 ? 80 : 70;
+  const selfUsedUnitRate = selfUsed ? Math.min(maximumUnitRate, uncappedRate) : baseBonus;
+  const unitRateCapped = selfUsed && selfUsedUnitRate < uncappedRate;
   const costCap = eligibleCostCap(units);
   const eligibleCosts = Math.min(projectCosts, costCap);
-  const amount = round(eligibleCosts * rate / 100, 2);
+  const buildingBaseRate = baseBonus;
+  const buildingBaseGrant = round(eligibleCosts * buildingBaseRate / 100, 2);
+  const buildingStructure = input.buildingStructure === 'weg' ? 'weg' : 'unpartitioned';
+  const ownershipShareRaw = numberValue(input.ownershipSharePercent);
+  const ownershipShare = ownershipShareRaw !== null && ownershipShareRaw > 0 ? ownershipShareRaw / 100 : null;
+  let selfUsedUnitEligibleCosts = 0;
+  if (selfUsed) {
+    if (units === 1) selfUsedUnitEligibleCosts = eligibleCosts;
+    else if (buildingStructure === 'weg' && ownershipShare !== null) {
+      selfUsedUnitEligibleCosts = Math.min(eligibleCosts * ownershipShare, costCap / units);
+    } else if (buildingStructure === 'unpartitioned') {
+      selfUsedUnitEligibleCosts = eligibleCosts / units;
+    }
+  }
+  const additionalUnitRate = Math.max(0, selfUsedUnitRate - buildingBaseRate);
+  const selfUsedUnitAdditionalGrant = round(selfUsedUnitEligibleCosts * additionalUnitRate / 100, 2);
+  const amount = round(buildingBaseGrant + selfUsedUnitAdditionalGrant, 2);
+  const effectiveBuildingRate = eligibleCosts > 0 ? round(amount / eligibleCosts * 100, 2) : 0;
   const blockers = [];
   const checks = [];
+  const applicationDate = validDateValue(input.applicationDate);
+  const currentRulesStart = new Date('2026-07-21T00:00:00+02:00');
+  if (!applicationDate) blockers.push('Antragsdatum fehlt; der KfW-Regelstand kann nicht sicher zugeordnet werden.');
+  else if (applicationDate < currentRulesStart) blockers.push('Für Anträge bis einschließlich 20.07.2026 muss das frühere KfW-Regelwerk separat berechnet werden.');
+  else checks.push('Regelstand ab 21.07.2026 anhand des Antragsdatums bestätigt.');
   if (!privateOwner) blockers.push('Programm 458 richtet sich hier an private Eigentümerinnen und Eigentümer von Wohngebäuden.');
   else checks.push('Private Eigentümerschaft angegeben.');
   if (ageYears === null) blockers.push('Alter des bestehenden Wohngebäudes bzw. Datum der Bauanzeige fehlt.');
   else if (ageYears < 5) blockers.push('Bauantrag/Bauanzeige des bestehenden Wohngebäudes muss zum Antragszeitpunkt mindestens fünf Jahre zurückliegen.');
   else checks.push('Mindestalter des bestehenden Gebäudes erfüllt.');
   if (projectCosts <= 0) blockers.push('Förderfähige Projektkosten fehlen.');
+  if (input.eligibleCostsConfirmedByBza !== true) blockers.push('Die förderfähigen Kosten sind noch nicht durch BzA/Fachunternehmen oder Energieeffizienz-Expertin/-Experten bestätigt.');
+  else checks.push('Förderfähige Kosten laut BzA bestätigt.');
+  if (selfUsed && units > 1 && buildingStructure === 'weg' && ownershipShare === null) {
+    blockers.push('Für den Zusatzantrag in einer WEG fehlt der Miteigentumsanteil.');
+  }
   if (input.contractConditional !== true) blockers.push('Der Liefer-/Leistungsvertrag muss die Förderzusage als aufschiebende oder auflösende Bedingung enthalten.');
   if (input.applicationBeforeStart !== true) blockers.push('Der Antrag muss vor Vorhabenbeginn gestellt werden.');
   if (input.hydraulicBalancingPlanned !== true) blockers.push('Hydraulischer Abgleich bzw. die geforderte Optimierung der Heizungsanlage ist noch nicht bestätigt.');
   const effectiveDate = now.toISOString().slice(0, 10);
-  return {
+  const result = {
     status: blockers.length ? 'precheck-incomplete' : 'precheck-positive',
     rulesVersion: FUNDING_RULES_VERSION,
     rulesAsOf: '2026-07-21',
     calculatedAt: new Date().toISOString(),
     effectiveDate,
+    applicationDate: applicationDate ? applicationDate.toISOString().slice(0, 10) : null,
     units,
+    selfUsed,
+    eligibleMinorChild: input.eligibleMinorChild === true,
+    buildingStructure,
+    ownershipSharePercent: ownershipShareRaw,
     projectCosts,
     eligibleCostCap: costCap,
     eligibleCosts,
     bonuses: { base: baseBonus, climateSpeed: climateBonus, income: incomeBonus },
     uncappedRate,
-    rate,
+    maximumUnitRate,
+    unitRateCapped,
+    buildingBaseRate,
+    selfUsedUnitRate,
+    additionalUnitRate,
+    effectiveBuildingRate,
+    rate: units > 1 ? effectiveBuildingRate : selfUsedUnitRate,
+    buildingBaseGrant,
+    selfUsedUnitEligibleCosts: round(selfUsedUnitEligibleCosts, 2),
+    selfUsedUnitAdditionalGrant,
     estimatedGrant: amount,
     blockers,
     checks,
     notice: 'Unverbindlicher Förder-Vorcheck, keine Förderzusage. IVA verwendet den ausgewiesenen KfW-Regelstand; vor Antragstellung sind das aktuelle Merkblatt und die Bestätigung zum Antrag durch Fachunternehmen oder Energieeffizienz-Expertin/-Experten maßgeblich.',
     sources: ENERGY_SOURCES.funding,
   };
+  result.noteSummary = buildKfw458NoteSummary(result);
+  return result;
 }

@@ -30,6 +30,7 @@ assert.equal(climateSpeedBonusRate(new Date('2028-08-02T12:00:00+02:00')), 0);
 const funding = calculateKfw458Funding({
   applicantType: 'private-owner', selfUsed: true, existingBuildingAgeYears: 10, units: 1,
   projectCosts: 30_000, householdIncome: 25_000, eligibleMinorChild: false, climateBonusEligible: true,
+  applicationDate: '2026-08-03', eligibleCostsConfirmedByBza: true,
   contractConditional: true, applicationBeforeStart: true, hydraulicBalancingPlanned: true,
 }, new Date('2026-08-03T12:00:00+02:00'));
 assert.equal(funding.status, 'precheck-positive');
@@ -37,5 +38,47 @@ assert.equal(funding.rate, 80);
 assert.equal(funding.eligibleCosts, 28_000);
 assert.equal(funding.estimatedGrant, 22_400);
 assert.equal(funding.bonuses.climateSpeed, 16);
+assert.match(funding.noteSummary, /^80 % - Grund 30 %/);
+
+const rentedMfh = calculateKfw458Funding({
+  applicantType: 'private-owner', selfUsed: false, existingBuildingAgeYears: 76, units: 3,
+  projectCosts: 41_170.55, applicationDate: '2026-08-10', eligibleCostsConfirmedByBza: true,
+  contractConditional: true, applicationBeforeStart: true, hydraulicBalancingPlanned: true,
+}, new Date('2026-08-14T12:00:00+02:00'));
+assert.equal(rentedMfh.eligibleCostCap, 58_000);
+assert.equal(rentedMfh.buildingBaseRate, 30);
+assert.equal(rentedMfh.estimatedGrant, 12_351.17);
+assert.equal(rentedMfh.effectiveBuildingRate, 30);
+assert.match(rentedMfh.noteSummary, /^30 % - Grund 30 %/);
+
+const selfUsedMfh = calculateKfw458Funding({
+  applicantType: 'private-owner', selfUsed: true, existingBuildingAgeYears: 40, units: 3,
+  projectCosts: 58_000, householdIncome: 25_000, eligibleMinorChild: false, climateBonusEligible: true,
+  applicationDate: '2026-08-10', eligibleCostsConfirmedByBza: true,
+  contractConditional: true, applicationBeforeStart: true, hydraulicBalancingPlanned: true,
+}, new Date('2026-08-14T12:00:00+02:00'));
+assert.equal(selfUsedMfh.selfUsedUnitEligibleCosts, 19_333.33);
+assert.equal(selfUsedMfh.selfUsedUnitRate, 80);
+assert.equal(selfUsedMfh.selfUsedUnitAdditionalGrant, 9_666.67);
+assert.equal(selfUsedMfh.estimatedGrant, 27_066.67);
+assert.match(selfUsedMfh.noteSummary, /^30 % Gesamtgebäude \/ 80 % selbst genutzte WE/);
+
+const cappedAtSeventy = calculateKfw458Funding({
+  applicantType: 'private-owner', selfUsed: true, existingBuildingAgeYears: 40, units: 1,
+  projectCosts: 28_000, householdIncome: 35_000, eligibleMinorChild: false, climateBonusEligible: true,
+  applicationDate: '2026-08-10', eligibleCostsConfirmedByBza: true,
+  contractConditional: true, applicationBeforeStart: true, hydraulicBalancingPlanned: true,
+}, new Date('2026-08-14T12:00:00+02:00'));
+assert.equal(cappedAtSeventy.uncappedRate, 76);
+assert.equal(cappedAtSeventy.selfUsedUnitRate, 70);
+assert.equal(cappedAtSeventy.estimatedGrant, 19_600);
+
+const oldRulesBlocked = calculateKfw458Funding({
+  applicantType: 'private-owner', selfUsed: false, existingBuildingAgeYears: 40, units: 1,
+  projectCosts: 28_000, applicationDate: '2026-07-20', eligibleCostsConfirmedByBza: true,
+  contractConditional: true, applicationBeforeStart: true, hydraulicBalancingPlanned: true,
+}, new Date('2026-08-14T12:00:00+02:00'));
+assert.equal(oldRulesBlocked.status, 'precheck-incomplete');
+assert.match(oldRulesBlocked.blockers.join(' '), /frühere KfW-Regelwerk/);
 
 console.log('PASS Energie: Heizlast-Vorplanung, Pflichtfelder und KfW-458-Regelstand');

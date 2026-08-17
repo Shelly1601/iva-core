@@ -25,19 +25,31 @@ function profileUrl(h) {
 export async function scrapeInstagram(handle, { resultsLimit = 30 } = {}) {
   const token = process.env.APIFY_TOKEN;
   if (!token) throw new Error('APIFY_TOKEN fehlt');
+  const limit = Math.max(1, Math.min(100, Number(resultsLimit) || 30));
   const body = {
     directUrls: [profileUrl(handle)],
     resultsType: 'posts',
-    resultsLimit,
+    resultsLimit: limit,
     addParentData: false,
   };
-  const r = await fetch(`${APIFY_URL}?token=${encodeURIComponent(token)}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!r.ok) throw new Error(`Apify ${r.status}: ${(await r.text()).slice(0, 200)}`);
-  return await r.json(); // Array von Post-Objekten
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 105_000);
+  try {
+    const query = new URLSearchParams({ token, timeout: '100', clean: 'true', limit: String(limit) });
+    const r = await fetch(`${APIFY_URL}?${query}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!r.ok) throw new Error(`Apify ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    const data = await r.json();
+    if (!Array.isArray(data)) throw new Error('Apify lieferte kein Dataset-Array');
+    return data; // Array von Post-Objekten
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('Apify-Zeitlimit erreicht');
+    throw error;
+  } finally { clearTimeout(timer); }
 }
 
 // Verdichtet rohe Posts zu Kennzahlen + Top-Beispielen (spart Tokens, schaerft die Muster).

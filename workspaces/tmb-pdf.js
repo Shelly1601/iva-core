@@ -275,7 +275,10 @@ export async function createTmbPdf(workspace, { readFile } = {}) {
   if (funding) {
     compactFields([
       ['KfW-Regelstand', funding.rulesAsOf],
-      ['Fördersatz im Vorcheck', `${clean(funding.rate, '0')} %`],
+      ['Förderübersicht', funding.noteSummary || `${clean(funding.rate, '0')} %`],
+      ['Grundförderung Gesamtgebäude', `${clean(funding.buildingBaseRate, '0')} %`],
+      ['Fördersatz selbst genutzte WE', funding.selfUsed ? `${clean(funding.selfUsedUnitRate, '0')} %` : 'nicht anwendbar'],
+      ['Effektiver Satz Gesamtgebäude', `${clean(funding.effectiveBuildingRate ?? funding.rate, '0')} %`],
       ['Förderfähige Kosten im Vorcheck', asEuro(funding.eligibleCosts)],
       ['Rechnerischer Zuschuss', asEuro(funding.estimatedGrant)],
       ['Offene Voraussetzungen', funding.blockers?.length ? funding.blockers.join(' | ') : 'Keine offenen Eingaben im IVA-Vorcheck'],

@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "enabled": false,
+  "mode": "observe-only",
+  "activation": {
+    "passwordsRotated": false,
+    "correctIMacConfirmed": false,
+    "outlookPrepared": false,
+    "browserTabsPrepared": false,
+    "enteAuthPrepared": false,
+    "dryRunApproved": false
+  },
+  "territories": {
+    "acceptedPostalCodes": [],
+    "acceptedPostalCodePrefixes": [],
+    "acceptedCities": [],
+    "excludedPostalCodes": [],
+    "outsideAreaAction": "manual"
+  },
+  "accounts": {
+    "heatHeroEmail": "n.sell@heat-hero.com"
+  },
+  "portals": {
+    "panasonic": {
+      "name": "Panasonic ProMatch",
+      "url": "https://promatch.panasonicproclub.com/#/page/login",
+      "mailSenderContains": "Promatch Support",
+      "mailSubjectContains": "neue Kundenanfrage",
+      "requiresOtp": true
+    },
+    "bosch": {
+      "name": "Bosch/Thernovo",
+      "url": "https://bosch-de-home.thernovo.com/home",
+      "requiresOtp": false
+    },
+    "heatHeroCrm": {
+      "url": "https://heathero.app/alle-leads"
+    }
+  },
+  "enteAuth": {
+    "entryName": "ProMatch",
+    "account": "n.sell@heat-hero.com",
+    "forbiddenAccountMarkers": [
+      "A.Lausig"
+    ]
+  },
+  "wattfox": {
+    "senderContains": "Datenschutz@Wattfox",
+    "subjectContains": "Bestätigung des Widerrufs",
+    "folderPath": [
+      "Posteingang",
+      "Lisa Wattfox",
+      "Regler"
+    ],
+    "crmUpdatesAllowed": false
+  },
+  "reporting": {
+    "channel": "codex-task",
+    "outputDirectory": "outputs/hersteller-leads",
+    "weeklyReportDay": "FRIDAY"
+  }
+}

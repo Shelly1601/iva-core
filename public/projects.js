@@ -66,7 +66,28 @@ function operationalSections(project) {
   const automations = project.automations || [];
   const phases = project.phases || [];
   const areas = project.areas || [];
-  return `${automations.length ? `<section class="card"><h2>Automationen und Automatismen</h2><div class="muted">Was läuft, was pausiert ist und was als Nächstes gebaut wird.</div><div class="metrics"><div class="metric"><b>${automations.filter(item => item.status === 'active').length}</b><small>aktiv</small></div><div class="metric"><b>${automations.filter(item => item.status === 'prepared').length}</b><small>vorbereitet</small></div><div class="metric"><b>${automations.filter(item => item.status === 'paused').length}</b><small>pausiert</small></div><div class="metric"><b>${automations.filter(item => item.status === 'planned').length}</b><small>geplant</small></div></div><div class="automation-grid">${automations.map(item => `<article class="automation"><div class="head"><h3>${esc(item.name)}</h3><span class="badge ${esc(item.status)}">${esc(label(item.status))}</span></div><p>${esc(item.purpose)}</p><div class="meta"><div><span>Zeitplan</span><b>${esc(item.schedule)}</b></div><div><span>Ausführung</span><b>${esc(item.execution)}</b></div></div><div class="rule"><b>Sicherheitsregel:</b> ${esc(item.safety)}</div><div class="next"><b>Nächster Schritt:</b> ${esc(item.nextStep)}</div></article>`).join('')}</div></section>` : ''}${phases.length ? `<section class="card"><h2>Projektphasen</h2>${phases.map(item => `<div class="road"><strong>${esc(item.phase)}</strong><div><b>${esc(item.name)}</b><small>${esc(item.result)}</small></div><span class="badge ${esc(item.status)}">${esc(label(item.status))}</span></div>`).join('')}</section>` : ''}${areas.length ? `<section class="card"><h2>Unterbereiche</h2><div class="item-grid">${areas.map(item => `<article class="item"><div class="head"><h3>${esc(item.name)}</h3><span class="badge ${esc(item.status)}">${esc(label(item.status))}</span></div><p>${esc(item.summary)}</p><div class="next"><b>Nächster Schritt:</b> ${esc(item.nextStep)}</div></article>`).join('')}</div></section>` : ''}`;
+  return `${automations.length ? `<section class="card"><h2>Automationen und Workflows</h2><div class="muted">Jeden ausführbaren Ablauf hier direkt an- oder ausschalten. Details bleiben standardmäßig zugeklappt.</div><div class="metrics"><div class="metric"><b>${automations.filter(item => item.enabled).length}</b><small>eingeschaltet</small></div><div class="metric"><b>${automations.filter(item => item.toggleAvailable && !item.enabled).length}</b><small>ausgeschaltet</small></div><div class="metric"><b>${automations.filter(item => item.status === 'prepared').length}</b><small>vorbereitet</small></div><div class="metric"><b>${automations.filter(item => item.status === 'planned').length}</b><small>geplant</small></div></div><div class="automation-grid">${automations.map(item => `<article class="automation"><div class="automation-top"><div><h3>${esc(item.name)}</h3><span class="badge ${esc(item.status)}">${esc(item.enabled ? 'An' : item.toggleAvailable ? 'Aus' : label(item.status))}</span></div><label class="switch" title="${esc(item.toggleAvailable ? 'Workflow an- oder ausschalten' : 'Noch nicht ausführbar')}"><input type="checkbox" data-project-automation="${esc(item.id)}" ${item.enabled ? 'checked' : ''} ${item.toggleAvailable ? '' : 'disabled'}><span class="slider"></span></label></div><details class="automation-details"><summary>Details anzeigen</summary><p>${esc(item.purpose)}</p><div class="meta"><div><span>Zeitplan</span><b>${esc(item.schedule)}</b></div><div><span>Ausführung</span><b>${esc(item.execution)}</b></div></div><div class="rule"><b>Sicherheitsregel:</b> ${esc(item.safety)}</div><div class="next"><b>Nächster Schritt:</b> ${esc(item.nextStep)}</div></details></article>`).join('')}</div></section>` : ''}${phases.length ? `<section class="card"><h2>Projektphasen</h2><div class="muted">Roadmap und aktueller Stand.</div>${phases.map(item => `<div class="road"><strong>${esc(item.phase)}</strong><div><b>${esc(item.name)}</b><small>${esc(item.result)}</small></div><span class="badge ${esc(item.status)}">${esc(label(item.status))}</span></div>`).join('')}</section>` : ''}${areas.length ? `<section class="card"><h2>Unterbereiche</h2><div class="muted">Arbeitsbereiche, Verantwortung und nächste Schritte.</div><div class="item-grid">${areas.map(item => `<article class="item"><div class="head"><h3>${esc(item.name)}</h3><span class="badge ${esc(item.status)}">${esc(label(item.status))}</span></div><p>${esc(item.summary)}</p><div class="next"><b>Nächster Schritt:</b> ${esc(item.nextStep)}</div></article>`).join('')}</div></section>` : ''}`;
+}
+
+function collapseProjectSections() {
+  document.querySelectorAll('#content > section.card').forEach(section => {
+    const heading = section.querySelector('h2');
+    if (!heading) return;
+    const title = heading.textContent;
+    const subtitle = section.querySelector('.muted')?.textContent || '';
+    const details = document.createElement('details');
+    details.className = 'card project-disclosure';
+    const summary = document.createElement('summary');
+    summary.innerHTML = `<div class="summary-copy"><h2>${esc(title)}</h2>${subtitle ? `<div class="muted">${esc(subtitle)}</div>` : ''}</div>`;
+    const body = document.createElement('div');
+    body.className = 'disclosure-body';
+    heading.remove();
+    const subtitleNode = [...section.querySelectorAll('.muted')].find(node => node.textContent === subtitle);
+    if (subtitleNode) subtitleNode.remove();
+    while (section.firstChild) body.appendChild(section.firstChild);
+    details.append(summary, body);
+    section.replaceWith(details);
+  });
 }
 
 function bindProjectActions() {
@@ -74,6 +95,7 @@ function bindProjectActions() {
   $('newFolder').onclick = openFolderDialog;
   document.querySelectorAll('[data-folder-id]').forEach(button => { button.onclick = () => { state.activeFolderId = button.dataset.folderId; render(); }; });
   document.querySelectorAll('[data-open-file]').forEach(button => { button.onclick = () => openFile(button.dataset.openFile); });
+  document.querySelectorAll('[data-project-automation]').forEach(input => { input.onchange = () => toggleProjectAutomation(input); });
   const dropzone = $('dropzone');
   dropzone.onclick = () => { if (!state.uploading) $('fileInput').click(); };
   ['dragenter', 'dragover'].forEach(type => dropzone.addEventListener(type, event => { event.preventDefault(); dropzone.classList.add('drag'); }));
@@ -97,7 +119,23 @@ function render() {
   $('description').textContent = project.description || 'Projektakte für Ideen, Absprachen und Dokumente.';
   const objective = project.objective || project.description;
   $('content').innerHTML = `${notesSection(project)}${objective ? `<section class="hero"><div class="eyebrow">Zielbild</div><h2>${esc(objective)}</h2></section>` : ''}${archiveSection(project)}${operationalSections(project)}`;
+  collapseProjectSections();
   bindProjectActions();
+}
+
+async function toggleProjectAutomation(input) {
+  if (!state.current) return;
+  input.disabled = true;
+  try {
+    const project = await api(`/api/projects/${encodeURIComponent(state.current.id)}/automations/${encodeURIComponent(input.dataset.projectAutomation)}`, { method: 'PATCH', body: { enabled: input.checked } });
+    replaceProject(project);
+    render();
+    showToast(`Workflow ${input.checked ? 'eingeschaltet' : 'ausgeschaltet'}.`);
+  } catch (error) {
+    input.checked = !input.checked;
+    input.disabled = false;
+    showToast(error.message, true);
+  }
 }
 
 function selectProject(id) {

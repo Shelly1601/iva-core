@@ -250,9 +250,13 @@
         <h2>KfW-458-Fördercheck <span class="badge">Stand 21.07.2026</span></h2>
         <div class="fields">
           <div class="field"><label>Antragsteller</label><select id="fundingApplicantType"><option value="private-owner">Private Eigentümerin / privater Eigentümer</option><option value="other">Andere Rechtsform</option></select></div>
+          <div class="field"><label>Antragsdatum</label><input id="fundingApplicationDate" type="date"></div>
           <div class="field"><label>Gebäudealter in Jahren</label><input id="existingBuildingAgeYears" inputmode="numeric"></div>
           <div class="field"><label>Förderfähige Projektkosten in €</label><input id="fundingProjectCosts" inputmode="decimal"></div>
+          <div class="field"><label>Eigentumsform</label><select id="fundingBuildingStructure"><option value="unpartitioned">Ungeteiltes Gebäude / MFH</option><option value="weg">Wohnungseigentümergemeinschaft (WEG)</option></select></div>
+          <div class="field"><label>Miteigentumsanteil in % (nur WEG)</label><input id="fundingOwnershipSharePercent" inputmode="decimal"></div>
           <div class="field"><label>Zu versteuerndes Haushaltsjahreseinkommen in €</label><input id="householdIncome" inputmode="decimal"></div>
+          <label class="check"><input type="checkbox" id="eligibleCostsConfirmedByBza"><span>Förderfähige Kosten laut BzA bestätigt</span></label>
           <label class="check"><input type="checkbox" id="fundingSelfUsed"><span>Wohneinheit wird selbst genutzt</span></label>
           <label class="check"><input type="checkbox" id="eligibleMinorChild"><span>Förderfähiges minderjähriges Kind im Haushalt</span></label>
           <label class="check"><input type="checkbox" id="climateBonusEligible"><span>Klimageschwindigkeitsbonus nach Vorprüfung möglich</span></label>

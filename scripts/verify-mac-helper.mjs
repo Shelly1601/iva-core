@@ -47,6 +47,7 @@ import {
   parseFundingDocumentPages,
 } from '../local-mac-helper/funding-document-extractor.mjs';
 import {
+  IVA_PIPEDRIVE_NOTE_SIGNATURE,
   PIPEDRIVE_FILE_POLICY,
   applyPipedriveFundingFieldUpdates,
   assertPipedriveFileActionAllowed,
@@ -208,7 +209,9 @@ const kfwInformationNote = renderPipedriveFundingInformationNote({
 });
 assert.match(kfwInformationNote.content, /E-Mail-Adresse/);
 assert.match(kfwInformationNote.content, /Passwort/);
-assert.match(kfwInformationNote.content, /\(Notiz von Nadine\)<\/p>$/);
+assert.match(kfwInformationNote.content, /\(Notiz von IVA im Auftrag von Nadine\)<\/p>$/);
+assert.equal(IVA_PIPEDRIVE_NOTE_SIGNATURE, '(Notiz von IVA im Auftrag von Nadine)');
+assert.doesNotMatch(kfwInformationNote.content, /<p>\(Notiz von Nadine\)<\/p>$/);
 assert.doesNotMatch(kfwInformationNote.content, /IVA-(?:FUNDING|KFW)-/);
 assert.throws(() => renderPipedriveFundingInformationNote({
   heading: 'KfW-Kontobestätigung',

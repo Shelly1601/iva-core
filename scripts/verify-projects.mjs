@@ -11,6 +11,7 @@ const {
   getProject,
   listProjects,
   readProjectFile,
+  setProjectAutomationEnabled,
   storeProjectFile,
   updateProject,
 } = await import('../projects/store.js');
@@ -27,8 +28,12 @@ const heat = projects.find(item => item.id === 'heat-hero');
 check('Heat Hero vorhanden', heat);
 check('Projektphasen sichtbar', heat.phases.length === 5);
 check('Automationen sichtbar', heat.automations.length >= 6);
-check('Planbar aktiv', heat.automations.some(item => item.id === 'planbar-weekly' && item.status === 'active'));
-check('Herstellerlauf pausiert', heat.automations.some(item => item.id === 'manufacturer-daily' && item.status === 'paused'));
+check('Planbar aktiv', heat.automations.some(item => item.id === 'planbar-weekly-export' && item.status === 'active' && item.enabled));
+check('Herstellerlauf pausiert', heat.automations.some(item => item.id === 'manufacturer-leads-wattfox' && item.status === 'paused' && !item.enabled));
+const disabledHeat = await setProjectAutomationEnabled('heat-hero', 'planbar-weekly-export', false);
+check('Projektworkflow lässt sich ausschalten', disabledHeat.automations.some(item => item.id === 'planbar-weekly-export' && item.status === 'paused' && !item.enabled));
+const enabledHeat = await setProjectAutomationEnabled('heat-hero', 'planbar-weekly-export', true);
+check('Projektworkflow lässt sich wieder einschalten', enabledHeat.automations.some(item => item.id === 'planbar-weekly-export' && item.status === 'active' && item.enabled));
 await updateProject('heat-hero', { status: 'active', files: [{ storageName: 'injected' }] });
 const updatedHeat = await getProject('heat-hero');
 check('Projektupdate bleibt gespeichert', updatedHeat.status === 'active');
@@ -65,6 +70,8 @@ check('Plus für neue Projektakten vorhanden', html.includes('＋ Neues Projekt'
 check('Notizen stehen in der Projektakte bereit', js.includes('Notizen, Ideen & Absprachen') && js.includes('/notes'));
 check('Ordner, Unterordner und Mehrfachupload vorhanden', html.includes('multiple') && js.includes('/folders') && js.includes('parentId'));
 check('Papierkorb löscht nur die Projektakte', js.includes('Projektdateien werden entfernt') && js.includes("method: 'DELETE'"));
+check('Projektbereiche sind standardmäßig zugeklappt', html.includes('project-disclosure') && js.includes('collapseProjectSections'));
+check('Projektworkflows haben echte Ein-Aus-Schalter', html.includes('.switch{') && js.includes('class="switch"') && js.includes('data-project-automation') && js.includes("method: 'PATCH'"));
 
 console.log(failures ? `${failures} Fehler` : 'Projektakten erfolgreich verifiziert.');
 process.exit(failures ? 1 : 0);

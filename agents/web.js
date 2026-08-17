@@ -270,7 +270,7 @@ async function extractPdf(buf) {
   }
 }
 
-async function fetchAndExtract(rawUrl) {
+export async function fetchAndExtract(rawUrl) {
   const url = stripTrackingParams(rawUrl);
   const r = await fetchWithRedirects(url);
   if (r.error) return { url, error: r.error };

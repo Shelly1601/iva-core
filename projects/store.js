@@ -7,187 +7,484 @@ const STORE_FILE = path.join(DATA_DIR, 'projects.json');
 const PROJECT_FILES_DIR = path.join(DATA_DIR, 'project-files');
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const PROJECT_STATUSES = new Set(['idea', 'planned', 'prepared', 'active', 'paused', 'complete']);
-const ITEM_STATUSES = new Set(['idea', 'planned', 'foundation', 'prepared', 'active', 'paused', 'blocked', 'complete']);
+const AREA_STATUSES = new Set(['idea', 'planned', 'foundation', 'prepared', 'active', 'blocked', 'complete']);
+const AUTOMATION_STATUSES = new Set(['planned', 'prepared', 'active', 'paused', 'blocked']);
 let writeQueue = Promise.resolve();
 
-export const HEAT_HERO_PROJECT = {
+const HEAT_HERO_PROJECT = {
   id: 'heat-hero',
   name: 'Heat Hero',
   company: 'Heat Hero',
   category: 'Vertrieb · Wärmepumpen · Photovoltaik',
   status: 'planned',
-  description: 'Zentrale Projektakte für Innendienstvertrieb, Hersteller-Leads, Energieplanung, Angebot und operative Automationen.',
-  objective: 'HeatHero CRM bleibt die führende Vertriebsquelle. IVA verbindet Leadübernahme, digitale Kundenaufnahme, TMB, technische Planung, Angebot und Herstellerrückmeldung ohne doppelte Dateneingabe.',
-  areas: [
-    { id: 'inside-sales', name: 'Innendienstvertrieb', status: 'planned', summary: 'Geführter digitaler Beratungsprozess vom Lead bis zum Abschluss.', nextStep: 'Kundenlink und Live-Aufnahme im Videocall bauen.' },
-    { id: 'customer-capture', name: 'Kundenaufnahme im Videocall', status: 'foundation', summary: 'Grundriss, Maße, Fotos, Heizkörper und Gebäudedaten in einer Fallakte erfassen.', nextStep: 'Foto-/Maßprüfung und Live-Fortschritt ergänzen.' },
-    { id: 'energy', name: 'TMB, 3D und Energieplanung', status: 'foundation', summary: 'TMB, Räume, Heizlast, Leitungsweg, PV und technische Machbarkeit.', nextStep: '3D-Review und fachlich abgenommene Heizlast-Engine ergänzen.' },
-    { id: 'sales-coach', name: 'KI-Sales-Coach', status: 'planned', summary: 'Bestätigte Gesprächsdaten als belegte TMB-Feldvorschläge.', nextStep: 'Quelle, Zeitstempel, Confidence und Beraterbestätigung verbinden.' },
-    { id: 'quote', name: 'Angebots-KI', status: 'planned', summary: 'Geprüfte Fallakte plus Preislisten und Stücklistenregeln ergeben ein Angebot.', nextStep: 'Preislisten und Beispielangebote versioniert aufnehmen.' },
-    { id: 'manufacturer-leads', name: 'Panasonic- und Bosch-Leads', status: 'prepared', summary: 'Leads nach Gebiet übernehmen und im CRM anlegen.', nextStep: 'Passwörter rotieren, Gebiete eintragen und Trockenlauf durchführen.' },
-    { id: 'manufacturer-feedback', name: 'Hersteller-Rückmeldungen', status: 'planned', summary: 'Belegte CRM-Fortschritte in Herstellerportale zurückmelden.', nextStep: 'Portalstatus aufnehmen und Mapping freigeben.' },
-    { id: 'wattfox', name: 'Wattfox und Regler', status: 'prepared', summary: 'Rückmeldungen täglich auswerten und wöchentlich abgleichen.', nextStep: 'Outlook-Ordnerzugriff auf dem iMac testen.' },
-    { id: 'planbar', name: 'Planbar und Herstellerlisten', status: 'active', summary: 'Sechs-Wochen-Liste und Hersteller-PDFs freitags erzeugen.', nextStep: 'Produktiven Lauf und Sendelog kontrollieren.' },
+  description: 'Zentrale Projektakte für den digitalen Innendienstvertrieb, Hersteller-Leads, Kundenaufnahme, Energieplanung, Angebotsprozess und operative Automationen.',
+  objective: 'Interne Vertriebsteams arbeiten ausschließlich im HeatHero CRM und in einer gemeinsamen IVA-Fallakte. Kunden werden im Videotermin geführt aufgenommen; geprüfte Daten fließen ohne Doppelarbeit in TMB, Planung, Angebot und Herstellerrückmeldung.',
+  principles: [
+    'HeatHero CRM bleibt führend für Lead und Vertriebsfortschritt.',
+    'Pro Kunde gibt es eine gemeinsame Energie-Fallakte statt mehrerer Datenkopien.',
+    'Der Kunde wird durch kleine, verständliche Schritte geführt; komplexe Selbstauskunft wird vermieden.',
+    'Automatik verarbeitet nur belegte Daten. Unklare Angaben werden sichtbar nachgefragt.',
+    'Heizlast und Angebot werden deterministisch gerechnet und fachlich freigegeben, nicht frei von einem Sprachmodell geschätzt.',
   ],
-  phases: [
-    { phase: 1, name: 'Geführte Kundenaufnahme', status: 'planned', result: 'Kundenlink, Videocall-Cockpit, Fotoaufgaben, Maße und Live-Vollständigkeit.' },
-    { phase: 2, name: 'Sales Coach → TMB', status: 'planned', result: 'Gesprächsdaten werden als belegte Feldvorschläge vorbereitet.' },
-    { phase: 3, name: '3D und technische Engine', status: 'planned', result: 'Bestätigter Grundriss, Leitungsweg und fachlich abgenommene Heizlast.' },
-    { phase: 4, name: 'Angebots-KI', status: 'planned', result: 'Versionierte Kalkulation aus Preislisten und geprüfter Fallakte.' },
-    { phase: 5, name: 'CRM-/Herstellerkreislauf', status: 'prepared', result: 'Fortschrittsabgleich zwischen CRM, Panasonic, Bosch und Reporting.' },
+  protocolPolicy: {
+    enabled: true,
+    folderName: 'Workflow-Protokolle',
+    dailyFolder: 'taeglich',
+    weeklyFolder: 'woechentlich',
+    dailyRetentionDays: 7,
+    weeklyRetentionDays: 30,
+    dailySchedule: 'Täglich · 23:55 Uhr',
+    weeklySchedule: 'Sonntag · 23:58 Uhr',
+    cleanupSchedule: 'Täglich · 00:20 Uhr',
+    expectedWorkflows: [
+      { workflowId: 'funding-monitor', workflowName: 'Fördermonitor und Pipedrive-Nachlauf', cadence: 'daily', weekday: null },
+      { workflowId: 'planbar-weekly-export', workflowName: 'Planbar-Kundenliste und Hersteller-PDFs', cadence: 'weekly', weekday: 5 },
+    ],
+    note: 'Jede Datei zeigt Typ, Aufbewahrungsdauer und konkretes automatisches Löschdatum als Tags.',
+  },
+  areas: [
+    {
+      id: 'inside-sales', name: 'Innendienstvertrieb', status: 'planned', owner: 'Heat Hero',
+      summary: 'Geführter digitaler Beratungsprozess vom Lead bis zum Abschluss, optimiert für ältere Kundinnen und Kunden.',
+      nextStep: 'MVP für Vorbereitung und geführte Live-Aufnahme im Videocall bauen.',
+    },
+    {
+      id: 'customer-capture', name: 'Kundenaufnahme im Videocall', status: 'foundation', owner: 'IVA Energie',
+      summary: 'Grundriss, Maße, maximal zehn geführte Fotos, Heizkörper, Gebäude- und Heizungsdaten direkt in einer Fallakte erfassen und live prüfen.',
+      nextStep: 'Kundenlink ohne Login, Live-Fortschritt und Foto-/Maß-Qualitätsprüfung ergänzen.',
+    },
+    {
+      id: 'energy-planning', name: 'TMB, 3D und Energieplanung', status: 'foundation', owner: 'IVA Energie',
+      summary: 'TMB, Räume, Heizkörper, Heizlast, Leitungsweg, Wanddurchbrüche, PV und technische Machbarkeit zusammenführen.',
+      nextStep: '3D-Grundriss-Review, Leitungswegmodell und normgerecht abgenommene Heizlast-Engine ergänzen.',
+    },
+    {
+      id: 'sales-coach', name: 'KI-Sales-Coach und Gesprächsdaten', status: 'planned', owner: 'IVA Sales',
+      summary: 'Gespräch mit Einwilligung begleiten, bestätigte Angaben strukturiert vorschlagen und offene TMB-Punkte live anzeigen.',
+      nextStep: 'Feldvorschläge mit Quelle, Zeitstempel, Confidence und ausdrücklicher Beraterbestätigung entwickeln.',
+    },
+    {
+      id: 'quote-agent', name: 'Angebots-KI', status: 'planned', owner: 'IVA Energie',
+      summary: 'Aus geprüfter Fallakte, Stückliste, Preislisten und freigegebenen Kalkulationsregeln ein nachvollziehbares Angebot erzeugen.',
+      nextStep: 'Preislisten und repräsentative Beispielangebote versioniert aufnehmen und Kalkulationsregeln fachlich abnehmen.',
+    },
+    {
+      id: 'manufacturer-leads', name: 'Panasonic- und Bosch-Leads', status: 'prepared', owner: 'IVA Operations',
+      summary: 'Hersteller-Leads gebietsabhängig übernehmen, im HeatHero CRM anlegen und Vertriebszuordnung kontrollieren.',
+      nextStep: 'Passwörter rotieren, Gebiete eintragen, iMac vorbereiten und Trockenlauf durchführen.',
+    },
+    {
+      id: 'manufacturer-feedback', name: 'Hersteller-Rückmeldungen', status: 'planned', owner: 'IVA Operations',
+      summary: 'Belegte CRM-Fortschritte automatisch in Panasonic und Bosch zurückmelden – Schnittstelle ohne offizielle Schnittstelle.',
+      nextStep: 'Portalstatus rein lesend aufnehmen und je Hersteller mit CRM-Ereignissen mappen.',
+    },
+    {
+      id: 'wattfox', name: 'Wattfox und Regler', status: 'prepared', owner: 'IVA Operations',
+      summary: 'Widerrufsbestätigungen und Regler-Rückmeldungen täglich auswerten, wöchentlich abgleichen und offen gebliebene Fälle melden.',
+      nextStep: 'Ordnerzugriff auf dem iMac testen; CRM-Statusänderungen bleiben vorerst gesperrt.',
+    },
+    {
+      id: 'planbar', name: 'Planbar und Herstellerlisten', status: 'active', owner: 'IVA Operations',
+      summary: 'Zehn-Wochen-Kundenliste und Hersteller-PDFs freitags erzeugen, vollständig prüfen und an Angelo senden.',
+      nextStep: 'Jeden Lauf mit Zeitraum, Umfang, Anhängen und Versandprüfung im Projektprotokoll dokumentieren.',
+    },
+    {
+      id: 'mac-automations', name: 'iMac-Automationen', status: 'prepared', owner: 'IVA Operations',
+      summary: 'Lokale Browser-/Outlook-Abläufe mit Readiness-Prüfungen, Dublettenschutz und Tagesreport betreiben.',
+      nextStep: 'Richtigen iMac bestätigen und jeden Schreibweg einzeln testen.',
+    },
+  ],
+  process: [
+    { id: 'lead', name: '1. Lead übernehmen', outcome: 'Hersteller-/Plattform-ID ist fest mit der HeatHero-CRM-ID verknüpft.', gate: 'Eindeutige Identität, Gebiet und Dublettenprüfung.' },
+    { id: 'preflight', name: '2. Termin vorbereiten', outcome: 'Kunde erhält einen einfachen Link und legt Zollstock, Grundriss und Verbrauchsnachweis bereit.', gate: 'Keine Pflicht-App, kein kompliziertes Konto, große Einzelschritte.' },
+    { id: 'video', name: '3. Geführter Videotermin', outcome: 'Berater führt den Kunden durch Räume, Heizraum, Außenstandort, Elektro und Leitungsweg.', gate: 'Live-Vorschau zeigt sofort unscharfe, falsche oder fehlende Bilder und Maße.' },
+    { id: 'review', name: '4. Datenprüfung', outcome: 'Aussagen, Fotos, Maße und Grundriss sind in einer Fallakte zusammengeführt.', gate: 'Grün/Gelb/Rot je Feld; gelbe und rote Punkte müssen geklärt werden.' },
+    { id: 'calculation', name: '5. Technische Planung', outcome: 'Räume, Heizkörper, Heizlast, Aufstellort, Rohrmeter, Wanddurchbrüche und PV-Variante sind nachvollziehbar berechnet.', gate: 'Deterministische Rechenengine, Regelversion und fachliche Freigabe.' },
+    { id: 'offer', name: '6. Angebot im Gespräch', outcome: 'Freigegebene Stückliste und Preise erzeugen eine transparente Angebotsvariante.', gate: 'Preisstand, Marge, Pflichtpositionen und technische Plausibilität bestätigt.' },
+    { id: 'sync', name: '7. Rückmeldung und Nachlauf', outcome: 'CRM-Status, offene Unterlagen und Herstellerfortschritt bleiben synchron.', gate: 'Nur belegte, verifizierte Statuswechsel; keine Rückstufung oder Vermutung.' },
+  ],
+  qualityGates: [
+    { level: 'green', name: 'Automatisch verwendbar', rule: 'Pflichtfeld vorhanden, Quelle eindeutig, technisch plausibel und gegebenenfalls vom Berater bestätigt.' },
+    { level: 'yellow', name: 'Im Gespräch klären', rule: 'Angabe ist lesbar, aber unvollständig, widersprüchlich oder nur aus einer schwachen Quelle abgeleitet.' },
+    { level: 'red', name: 'Planung blockiert', rule: 'Pflichtfoto/Grundmaß fehlt, Identität unklar, Berechnung unvollständig oder sicherheitsrelevanter Widerspruch vorhanden.' },
   ],
   automations: [
-    { id: 'planbar-weekly', name: 'Planbar-Kundenliste und Hersteller-PDFs', status: 'active', schedule: 'Freitag · 18:00 Uhr', execution: 'iMac · Chrome und Outlook', purpose: 'Sechs kommende Kalenderwochen aufbereiten und geprüft an Angelo senden.', safety: 'Kein Versand bei falschen Empfängern, unvollständigen Anlagen oder Doppelversand.', nextStep: 'Ersten produktiven Lauf kontrollieren.' },
-    { id: 'manufacturer-daily', name: 'Panasonic-/Bosch-Leads und Wattfox', status: 'paused', schedule: 'Täglich · 21:00 Uhr', execution: 'iMac · Outlook, Chrome und Ente Auth', purpose: 'Leads übernehmen, CRM-Anlage und Vertriebszuordnung prüfen sowie Wattfox auswerten.', safety: 'Keine Schreibaktion ohne Gebiete, Passwortwechsel, bestätigten iMac und Trockenlauf.', nextStep: 'Readiness vollständig herstellen und Trockenlauf freigeben.' },
-    { id: 'manufacturer-feedback', name: 'CRM-Fortschritt an Hersteller', status: 'planned', schedule: 'Geplant: täglich nach dem Leadlauf', execution: 'HeatHero CRM → Herstellerportale', purpose: 'Belegte CRM-Fortschritte ohne Double Handling zurückmelden.', safety: 'Nur feste IDs, erlaubte Vorwärtsübergänge und sichtbare Portalverifikation.', nextStep: 'Panasonic-/Bosch-Statuslisten aufnehmen und mappen.' },
-    { id: 'customer-preflight', name: 'Kundenvorbereitung', status: 'planned', schedule: 'Geplant: nach Terminbuchung', execution: 'IVA-Kundenlink', purpose: 'Zollstock, Grundriss und Verbrauchsnachweis vor dem Videotermin vorbereiten.', safety: 'Kein kompliziertes Konto; nur notwendige Unterlagen.', nextStep: 'Kundenlink und Live-Fortschritt bauen.' },
-    { id: 'sales-coach-tmb', name: 'Sales Coach → TMB', status: 'planned', schedule: 'Geplant: im Videotermin', execution: 'IVA Sales Coach und Energie-Fallakte', purpose: 'Bestätigte Aussagen als TMB-Feldvorschläge übernehmen.', safety: 'Einwilligung und Beraterbestätigung für technische Pflichtwerte.', nextStep: 'Transkript, Feldvorschläge und Qualitätsgates verbinden.' },
-    { id: 'quote-generation', name: 'Angebot aus Energie-Fallakte', status: 'planned', schedule: 'Geplant: auf Knopfdruck', execution: 'IVA Angebots-KI', purpose: 'Aus Planung, Stückliste und Preislisten ein Angebot erzeugen.', safety: 'Nur bei grünen Pflichtgates und gültigem Preisstand.', nextStep: 'Preislisten und Kalkulationsregeln aufnehmen.' },
+    {
+      id: 'workflow-protocol-summaries',
+      name: 'Workflow-Protokolle und Ergebnisübersichten',
+      status: 'active',
+      schedule: 'Täglich · 23:55 Uhr; wöchentlich Sonntag · 23:58 Uhr',
+      execution: 'IVA Core · Projektakte Heat Hero',
+      purpose: 'Ergebnisse aller angebundenen Workflows in Tages- und Wochenprotokollen zusammenfassen und als Dateien im Projektordner bereitstellen.',
+      safety: 'Tagesdateien werden nach 7 Tagen, Wochendateien nach 30 Tagen automatisch gelöscht; Typ und Löschdatum stehen sichtbar als Tags an jeder Datei.',
+      nextStep: 'Weitere Workflow-Quellen über den einheitlichen Ergebnis-Endpunkt anbinden und fehlende Meldungen als Lücke anzeigen.',
+    },
+    {
+      id: 'planbar-weekly-export',
+      name: 'Planbar-Kundenliste und Hersteller-PDFs',
+      status: 'active',
+      schedule: 'Freitag · 18:00 Uhr',
+      execution: 'iMac · Chrome und Outlook',
+      purpose: 'Zehn kommende Kalenderwochen aus Planbar aufbereiten, Gesamt-XLSX und Hersteller-PDFs prüfen und an Angelo senden.',
+      safety: 'Kein Versand bei fehlender Anmeldung, unvollständigen Dateien, falschem Absender/Empfänger oder erkanntem Doppelversand.',
+      nextStep: 'Nächsten Freitagslauf über zehn Wochen ausführen und im Projektprotokoll verifizieren.',
+    },
+    {
+      id: 'funding-monitor',
+      name: 'Fördermonitor und Pipedrive-Nachlauf',
+      status: 'active',
+      schedule: 'Täglich · 23:00 Uhr',
+      execution: 'iMac · Outlook, Pipedrive und lokaler IVA-Helfer',
+      purpose: 'Förderfälle vollständig neu lesen, eingegangene Unterlagen zuordnen und sichere Entwürfe beziehungsweise Nachfassaktionen vorbereiten.',
+      safety: 'Abgelaufene Pipedrive-Sitzungen werden neu geladen und erneut geprüft. Fremde Notizen werden nie geändert oder gelöscht; Fehler werden ohne CRM-Folgeaktion protokolliert.',
+      nextStep: 'Jeden Lauf automatisch an das zentrale Tages- und Wochenprotokoll melden.',
+    },
+    {
+      id: 'manufacturer-leads-wattfox',
+      name: 'Panasonic-/Bosch-Leads und Wattfox',
+      status: 'paused',
+      schedule: 'Täglich · 21:00 Uhr; freitags zusätzlicher Wochenabgleich',
+      execution: 'iMac · Outlook, Chrome und Ente Auth',
+      purpose: 'Hersteller-Leads nach Gebiet prüfen, angenommene Leads in HeatHero CRM anlegen, Vertriebszuordnung kontrollieren und Wattfox-Rückmeldungen auswerten.',
+      safety: 'Ohne Passwortwechsel, Gebiete, bestätigten iMac, Readiness-Prüfung und Trockenlauf keinerlei Schreibaktion.',
+      nextStep: 'Passwörter rotieren, Gebiete eintragen, Ente Auth auf dem iMac prüfen und Trockenlauf freigeben.',
+    },
+    {
+      id: 'manufacturer-feedback-sync',
+      name: 'CRM-Fortschritt an Panasonic und Bosch',
+      status: 'planned',
+      schedule: 'Geplant: täglich nach dem Leadlauf',
+      execution: 'HeatHero CRM → iMac → Herstellerportale',
+      purpose: 'Belegte CRM-Fortschritte ohne doppeltes Eintragen in die Herstellerportale zurückmelden.',
+      safety: 'Nur feste CRM-/Hersteller-ID-Zuordnung, erlaubte Vorwärtsübergänge und sichtbare Portalverifikation; keine Statusvermutung.',
+      nextStep: 'Reale Statuslisten in beiden Portalen aufnehmen und Mapping fachlich freigeben.',
+    },
+    {
+      id: 'customer-preflight',
+      name: 'Kundenvorbereitung vor dem Videotermin',
+      status: 'planned',
+      schedule: 'Geplant: automatisch nach Terminbuchung',
+      execution: 'IVA Kundenlink · Smartphone oder Desktop',
+      purpose: 'Kunden mit Zollstock, Grundriss und Verbrauchsnachweis vorbereiten und Dokumente direkt der Fallakte zuordnen.',
+      safety: 'Kein kompliziertes Konto; nur notwendige Unterlagen und dokumentierte Einwilligung.',
+      nextStep: 'Einfachen Kundenlink und Live-Fortschritt für den Innendienst bauen.',
+    },
+    {
+      id: 'sales-coach-tmb',
+      name: 'Sales Coach → TMB-Feldvorschläge',
+      status: 'planned',
+      schedule: 'Geplant: während des freigegebenen Videotermins',
+      execution: 'IVA Sales Coach und Energie-Fallakte',
+      purpose: 'Bestätigte Gesprächsangaben mit Quelle, Zeitstempel und Confidence in die TMB-Vorbereitung übernehmen.',
+      safety: 'Nur nach dokumentierter Einwilligung; technische Pflichtwerte benötigen Beraterbestätigung.',
+      nextStep: 'Live-Transkript mit Feldvorschlägen und Grün/Gelb/Rot-Prüfung verbinden.',
+    },
+    {
+      id: 'quote-generation',
+      name: 'Angebot aus geprüfter Energie-Fallakte',
+      status: 'planned',
+      schedule: 'Geplant: auf Knopfdruck im Kundengespräch',
+      execution: 'IVA Angebots-KI',
+      purpose: 'Aus technischer Planung, Stückliste und versionierten Preislisten ein nachvollziehbares Angebot erzeugen.',
+      safety: 'Nur bei grünen Pflichtgates, gültigem Preisstand und freigegebenen Kalkulationsregeln.',
+      nextStep: 'Preislisten und repräsentative Beispielangebote versioniert aufnehmen.',
+    },
+  ],
+  runLog: [
+    {
+      id: 'planbar-2026-08-13-kw34-39',
+      automationId: 'planbar-weekly-export',
+      executedAt: '2026-08-13T13:22:00+02:00',
+      scheduledFor: '2026-08-14',
+      status: 'sent-and-verified',
+      scope: 'KW 34–39 / 2026',
+      summary: 'Regulärer Freitagslauf einen Tag vorgezogen: 62 Baustellen, Gesamt-XLSX und Hersteller-PDFs versandt und im Gesendet-Ordner geprüft.',
+      sender: 'n.sell@heat-hero.com',
+      recipient: 'a.keller@heat-hero.com',
+      attachmentCount: 10,
+      customerCount: 62,
+      details: 'Für Freitag war danach kein Doppelversand mehr erforderlich.',
+    },
+    {
+      id: 'planbar-2026-08-15-kw34-43',
+      automationId: 'planbar-weekly-export',
+      executedAt: '2026-08-15T16:15:00+02:00',
+      scheduledFor: '2026-08-15',
+      status: 'sent-and-verified',
+      scope: 'KW 34–43 / 2026',
+      summary: 'Korrigierter Zehn-Wochen-Lauf: 65 Baustellen, Gesamt-XLSX und neun Hersteller-PDFs versandt und im Gesendet-Ordner geprüft.',
+      sender: 'n.sell@heat-hero.com',
+      recipient: 'a.keller@heat-hero.com',
+      attachmentCount: 10,
+      customerCount: 65,
+      details: 'KW 42 und KW 43 enthalten keine Baustellen; Urlaub, Nicht verfügbar und Blocker wurden ausgeschlossen.',
+    },
+  ],
+  existingCapabilities: [
+    'Gemeinsame IVA-Energie-Fallakte mit Kunden-, Gebäude-, Heizungs-, Elektro-, Hydraulik- und PV-Daten.',
+    'Dynamische TMB-Foto-Checkliste und kategorisierte Dateiablage.',
+    'Räume mit mehreren Heizkörpern sowie editierbare technische Felder.',
+    'TMB-PDF und transparente Heizlast-Vorplanung mit sichtbaren Datenlücken.',
+    'HeatHero-CRM-Lesezugang und vorbereitete lokale Hersteller-/Outlook-Automationen.',
+  ],
+  missingCapabilities: [
+    'Kundenlink ohne Login mit betreutem Live-Modus im Videocall.',
+    'Automatische Qualitätsprüfung für Fotos, Typenschilder, Maßbezug und Perspektive.',
+    'Grundriss-Erkennung mit bestätigbarem 3D-Modell und Leitungsweg/Wanddurchbrüchen.',
+    'Sales-Coach-Transkript zu TMB-Feldvorschlägen mit Quelle und Bestätigung.',
+    'Fachlich abgenommene DIN-Heizlast- und Auslegungsengine.',
+    'Versionierte Preislisten, Stücklistenregeln und Angebotsgenerator.',
+    'Pipedrive-/HeatHero-Prozessauslöser und verifizierte Herstellerrückmeldung.',
+  ],
+  roadmap: [
+    { phase: 1, name: 'Geführte Kundenaufnahme', status: 'next', result: 'Kundenlink, Videocall-Cockpit, zehn Fotoaufgaben, Maße und Live-Vollständigkeit.' },
+    { phase: 2, name: 'Sales Coach → TMB', status: 'planned', result: 'Gesprächsdaten werden als belegte Feldvorschläge vorbereitet und vom Berater bestätigt.' },
+    { phase: 3, name: '3D und technische Engine', status: 'planned', result: 'Bestätigter Grundriss, Heizkörper, Leitungsweg und fachlich abgenommene Heizlast/Auslegung.' },
+    { phase: 4, name: 'Angebots-KI', status: 'planned', result: 'Versionierte Kalkulation aus Preislisten, Stückliste und geprüfter Fallakte.' },
+    { phase: 5, name: 'CRM-/Herstellerkreislauf', status: 'prepared', result: 'Automatischer Fortschrittsabgleich zwischen CRM, Panasonic, Bosch und Reporting.' },
   ],
 };
 
-function clone(value) { return JSON.parse(JSON.stringify(value)); }
-function clean(value, max = 5000) { return String(value ?? '').trim().slice(0, max); }
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function clean(value, max = 5000) {
+  return String(value ?? '').trim().slice(0, max);
+}
+
 function projectFileDir(projectId) {
   const safeId = clean(projectId, 100);
   if (!/^[a-z0-9][a-z0-9_-]{0,99}$/i.test(safeId)) throw new Error('Ungültige Projekt-ID.');
   return path.join(PROJECT_FILES_DIR, safeId);
 }
+
 function iso(value) {
   const parsed = new Date(value || Date.now());
   return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
 }
+
 function normalizeNote(note = {}) {
-  return {
-    id: clean(note.id, 100) || crypto.randomUUID(),
-    text: clean(note.text, 12000),
-    source: clean(note.source, 80) || 'manual',
-    createdAt: iso(note.createdAt),
-  };
+  return { id: clean(note.id, 100) || crypto.randomUUID(), text: clean(note.text, 12_000), source: clean(note.source, 80) || 'manual', createdAt: iso(note.createdAt) };
 }
+
 function normalizeFolder(folder = {}) {
-  return {
-    id: clean(folder.id, 100) || crypto.randomUUID(),
-    name: clean(folder.name, 180) || 'Neuer Ordner',
-    parentId: clean(folder.parentId, 100) || null,
-    createdAt: iso(folder.createdAt),
-  };
+  return { id: clean(folder.id, 100) || crypto.randomUUID(), name: clean(folder.name, 180) || 'Neuer Ordner', parentId: clean(folder.parentId, 100) || null, createdAt: iso(folder.createdAt) };
 }
+
 function normalizeFile(file = {}) {
   return {
-    id: clean(file.id, 100) || crypto.randomUUID(),
-    name: clean(file.name, 240) || 'Dokument',
-    mime: clean(file.mime, 160) || 'application/octet-stream',
-    bytes: Math.max(0, Number(file.bytes) || 0),
-    sha256: clean(file.sha256, 128),
-    folderId: clean(file.folderId, 100) || null,
-    storageName: clean(file.storageName, 300),
-    createdAt: iso(file.createdAt),
+    id: clean(file.id, 100) || crypto.randomUUID(), name: clean(file.name, 240) || 'Dokument',
+    mime: clean(file.mime, 160) || 'application/octet-stream', bytes: Math.max(0, Number(file.bytes) || 0),
+    sha256: clean(file.sha256, 128), folderId: clean(file.folderId, 100) || null,
+    storageName: clean(file.storageName, 300), createdAt: iso(file.createdAt),
   };
 }
-function normalizeItem(item = {}, fallback = {}) {
-  const phaseId = item.phase != null || fallback.phase != null ? `phase-${clean(item.phase ?? fallback.phase, 20)}` : '';
+
+function seedProjects() {
+  return [clone(HEAT_HERO_PROJECT)];
+}
+
+function normalizeArea(area = {}, fallback = {}) {
+  const id = clean(area.id || fallback.id, 100) || crypto.randomUUID();
   return {
-    ...clone(fallback), ...clone(item),
-    id: phaseId || clean(item.id || fallback.id, 100) || crypto.randomUUID(),
-    name: clean(item.name || fallback.name, 220) || 'Neuer Eintrag',
-    status: ITEM_STATUSES.has(item.status) ? item.status : (ITEM_STATUSES.has(fallback.status) ? fallback.status : 'planned'),
+    id,
+    name: clean(area.name || fallback.name, 180) || 'Neuer Bereich',
+    status: AREA_STATUSES.has(area.status) ? area.status : (AREA_STATUSES.has(fallback.status) ? fallback.status : 'planned'),
+    owner: clean(area.owner || fallback.owner, 160),
+    summary: clean(area.summary || fallback.summary, 3000),
+    nextStep: clean(area.nextStep || fallback.nextStep, 2000),
   };
 }
-function mergeById(input = [], fallback = []) {
-  const key = item => item?.phase != null ? `phase-${item.phase}` : item?.id;
-  const ids = [...new Set([...fallback, ...input].map(key).filter(Boolean))];
-  return ids.map(id => normalizeItem(input.find(item => key(item) === id) || {}, fallback.find(item => key(item) === id) || {}));
+
+function normalizeAutomation(automation = {}, fallback = {}) {
+  const status = AUTOMATION_STATUSES.has(automation.status) ? automation.status : (AUTOMATION_STATUSES.has(fallback.status) ? fallback.status : 'planned');
+  const runnable = ['active', 'paused'].includes(status);
+  return {
+    id: clean(automation.id || fallback.id, 100) || crypto.randomUUID(),
+    name: clean(automation.name || fallback.name, 220) || 'Neue Automation',
+    status,
+    enabled: runnable && (typeof automation.enabled === 'boolean' ? automation.enabled : (typeof fallback.enabled === 'boolean' ? fallback.enabled : status === 'active')),
+    toggleAvailable: runnable,
+    schedule: clean(automation.schedule || fallback.schedule, 300),
+    execution: clean(automation.execution || fallback.execution, 300),
+    purpose: clean(automation.purpose || fallback.purpose, 3000),
+    safety: clean(automation.safety || fallback.safety, 3000),
+    nextStep: clean(automation.nextStep || fallback.nextStep, 2000),
+  };
 }
+
+function normalizeRunLogEntry(entry = {}, fallback = {}) {
+  return {
+    id: clean(entry.id || fallback.id, 140) || crypto.randomUUID(),
+    automationId: clean(entry.automationId || fallback.automationId, 140),
+    executedAt: clean(entry.executedAt || fallback.executedAt, 80),
+    scheduledFor: clean(entry.scheduledFor || fallback.scheduledFor, 80),
+    status: clean(entry.status || fallback.status, 100) || 'recorded',
+    scope: clean(entry.scope || fallback.scope, 300),
+    summary: clean(entry.summary || fallback.summary, 3000),
+    sender: clean(entry.sender || fallback.sender, 320),
+    recipient: clean(entry.recipient || fallback.recipient, 320),
+    attachmentCount: Number.isFinite(Number(entry.attachmentCount ?? fallback.attachmentCount)) ? Number(entry.attachmentCount ?? fallback.attachmentCount) : 0,
+    customerCount: Number.isFinite(Number(entry.customerCount ?? fallback.customerCount)) ? Number(entry.customerCount ?? fallback.customerCount) : 0,
+    details: clean(entry.details || fallback.details, 3000),
+  };
+}
+
 function normalizeProject(input = {}, fallback = {}) {
+  const areas = Array.isArray(input.areas) ? input.areas : (fallback.areas || []);
+  const inputAutomations = Array.isArray(input.automations) ? input.automations : [];
+  const fallbackAutomations = Array.isArray(fallback.automations) ? fallback.automations : [];
+  const automationIds = new Set([...fallbackAutomations, ...inputAutomations].map(item => item?.id).filter(Boolean));
+  const automations = [...automationIds].map(id => normalizeAutomation(
+    inputAutomations.find(item => item?.id === id) || {},
+    fallbackAutomations.find(item => item?.id === id) || {},
+  ));
+  const inputRunLog = Array.isArray(input.runLog) ? input.runLog : [];
+  const fallbackRunLog = Array.isArray(fallback.runLog) ? fallback.runLog : [];
+  const runLogIds = new Set([...fallbackRunLog, ...inputRunLog].map(item => item?.id).filter(Boolean));
+  const runLog = [...runLogIds].map(id => normalizeRunLogEntry(
+    inputRunLog.find(item => item?.id === id) || {},
+    fallbackRunLog.find(item => item?.id === id) || {},
+  )).sort((left, right) => String(right.executedAt).localeCompare(String(left.executedAt)));
   const notes = Array.isArray(input.notes) ? input.notes : (fallback.notes || []);
   const folders = Array.isArray(input.folders) ? input.folders : (fallback.folders || []);
   const files = Array.isArray(input.files) ? input.files : (fallback.files || []);
   return {
-    ...clone(fallback), ...clone(input),
+    ...clone(fallback),
     id: clean(input.id || fallback.id, 100) || crypto.randomUUID(),
     name: clean(input.name || fallback.name, 180) || 'Neues Projekt',
-    company: clean(input.company ?? fallback.company, 180),
-    category: clean(input.category ?? fallback.category, 220) || 'Projekt',
-    description: clean(input.description ?? fallback.description, 4000),
-    objective: clean(input.objective ?? fallback.objective, 4000),
+    company: clean(input.company || fallback.company, 180),
+    category: clean(input.category || fallback.category, 240),
     status: PROJECT_STATUSES.has(input.status) ? input.status : (PROJECT_STATUSES.has(fallback.status) ? fallback.status : 'planned'),
-    areas: mergeById(Array.isArray(input.areas) ? input.areas : [], fallback.areas || []),
-    phases: mergeById(Array.isArray(input.phases) ? input.phases : [], fallback.phases || []),
-    automations: mergeById(Array.isArray(input.automations) ? input.automations : [], fallback.automations || []),
+    description: clean(input.description || fallback.description, 5000),
+    objective: clean(input.objective || fallback.objective, 5000),
+    principles: (Array.isArray(input.principles) ? input.principles : (fallback.principles || [])).map(item => clean(item, 2000)).filter(Boolean).slice(0, 100),
+    areas: areas.map(area => normalizeArea(area, (fallback.areas || []).find(item => item.id === area?.id) || {})).slice(0, 100),
+    process: clone(Array.isArray(input.process) ? input.process : (fallback.process || [])),
+    qualityGates: clone(Array.isArray(input.qualityGates) ? input.qualityGates : (fallback.qualityGates || [])),
+    phases: clone(Array.isArray(input.phases)
+      ? input.phases
+      : (fallback.phases || input.roadmap || fallback.roadmap || [])),
+    automations,
+    runLog,
+    protocolPolicy: {
+      enabled: input.protocolPolicy?.enabled ?? fallback.protocolPolicy?.enabled ?? false,
+      folderName: clean(input.protocolPolicy?.folderName || fallback.protocolPolicy?.folderName, 180) || 'Workflow-Protokolle',
+      dailyFolder: clean(input.protocolPolicy?.dailyFolder || fallback.protocolPolicy?.dailyFolder, 100) || 'taeglich',
+      weeklyFolder: clean(input.protocolPolicy?.weeklyFolder || fallback.protocolPolicy?.weeklyFolder, 100) || 'woechentlich',
+      dailyRetentionDays: Math.max(1, Math.min(365, Number(input.protocolPolicy?.dailyRetentionDays ?? fallback.protocolPolicy?.dailyRetentionDays ?? 7))),
+      weeklyRetentionDays: Math.max(1, Math.min(365, Number(input.protocolPolicy?.weeklyRetentionDays ?? fallback.protocolPolicy?.weeklyRetentionDays ?? 30))),
+      dailySchedule: clean(input.protocolPolicy?.dailySchedule || fallback.protocolPolicy?.dailySchedule, 180),
+      weeklySchedule: clean(input.protocolPolicy?.weeklySchedule || fallback.protocolPolicy?.weeklySchedule, 180),
+      cleanupSchedule: clean(input.protocolPolicy?.cleanupSchedule || fallback.protocolPolicy?.cleanupSchedule, 180),
+      expectedWorkflows: (Array.isArray(input.protocolPolicy?.expectedWorkflows)
+        ? input.protocolPolicy.expectedWorkflows
+        : (fallback.protocolPolicy?.expectedWorkflows || [])).map(item => ({
+          workflowId: clean(item?.workflowId, 140),
+          workflowName: clean(item?.workflowName, 240),
+          cadence: item?.cadence === 'weekly' ? 'weekly' : 'daily',
+          weekday: Number.isInteger(Number(item?.weekday)) ? Number(item.weekday) : null,
+        })).filter(item => item.workflowId).slice(0, 100),
+      note: clean(input.protocolPolicy?.note || fallback.protocolPolicy?.note, 1000),
+    },
+    existingCapabilities: (Array.isArray(input.existingCapabilities) ? input.existingCapabilities : (fallback.existingCapabilities || [])).map(item => clean(item, 3000)).filter(Boolean).slice(0, 200),
+    missingCapabilities: (Array.isArray(input.missingCapabilities) ? input.missingCapabilities : (fallback.missingCapabilities || [])).map(item => clean(item, 3000)).filter(Boolean).slice(0, 200),
+    roadmap: clone(Array.isArray(input.roadmap) ? input.roadmap : (fallback.roadmap || [])),
     notes: notes.map(normalizeNote).filter(note => note.text),
     folders: folders.map(normalizeFolder),
     files: files.map(normalizeFile).filter(file => file.storageName),
   };
 }
+
 function publicProject(project) {
   const output = clone(project);
   output.files = (output.files || []).map(({ storageName, ...file }) => file);
   return output;
 }
+
 async function loadStore() {
   try {
     const parsed = JSON.parse(await fs.readFile(STORE_FILE, 'utf8'));
-    const saved = Array.isArray(parsed?.projects) ? parsed.projects : [];
+    const storedProjects = Array.isArray(parsed?.projects) ? parsed.projects : [];
     const deletedProjectIds = Array.isArray(parsed?.deletedProjectIds)
       ? [...new Set(parsed.deletedProjectIds.map(id => clean(id, 100)).filter(Boolean))]
       : [];
-    const projects = saved.filter(item => !deletedProjectIds.includes(clean(item?.id, 100))).map(item => normalizeProject(item));
-    if (!deletedProjectIds.includes('heat-hero') && !projects.some(item => item.id === 'heat-hero')) {
-      projects.unshift(normalizeProject({}, HEAT_HERO_PROJECT));
-    } else {
-      const index = projects.findIndex(item => item.id === 'heat-hero');
-      if (index >= 0) projects[index] = normalizeProject(projects[index], HEAT_HERO_PROJECT);
-    }
+    const seeds = seedProjects();
+    const projects = seeds.filter(seed => !deletedProjectIds.includes(seed.id)).map(seed => normalizeProject(storedProjects.find(item => item.id === seed.id) || {}, seed));
+    for (const item of storedProjects.filter(item => !deletedProjectIds.includes(item.id) && !seeds.some(seed => seed.id === item.id))) projects.push(normalizeProject(item));
     return { version: 2, deletedProjectIds, projects };
-  } catch { return { version: 2, deletedProjectIds: [], projects: [normalizeProject({}, HEAT_HERO_PROJECT)] }; }
+  } catch {
+    return { version: 2, deletedProjectIds: [], projects: seedProjects().map(seed => normalizeProject({}, seed)) };
+  }
 }
+
 async function saveStore(store) {
   await fs.mkdir(DATA_DIR, { recursive: true });
   const temporary = `${STORE_FILE}.${process.pid}.tmp`;
   await fs.writeFile(temporary, `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
   await fs.rename(temporary, STORE_FILE);
 }
+
 async function mutate(fn) {
   let result;
-  const job = writeQueue.catch(() => {}).then(async () => { const store = await loadStore(); result = await fn(store); await saveStore(store); });
+  const job = writeQueue.catch(() => {}).then(async () => {
+    const store = await loadStore();
+    result = await fn(store);
+    await saveStore(store);
+  });
   writeQueue = job.catch(() => {});
   await job;
   return result;
 }
+
 export async function listProjects() {
-  return (await loadStore()).projects.map(publicProject).sort((a, b) => a.name.localeCompare(b.name, 'de'));
+  const store = await loadStore();
+  return store.projects.map(publicProject).sort((a, b) => a.name.localeCompare(b.name, 'de'));
 }
+
 export async function getProject(id) {
-  const item = (await loadStore()).projects.find(project => project.id === clean(id, 100));
-  return item ? publicProject(item) : null;
+  const project = (await loadStore()).projects.find(item => item.id === clean(id, 100));
+  return project ? publicProject(project) : null;
 }
+
 export async function createProject(input = {}) {
   return mutate(store => {
-    const project = normalizeProject({ ...input, id: undefined, notes: [], folders: [], files: [], areas: [], phases: [], automations: [] });
+    const project = normalizeProject({ ...input, id: undefined, notes: [], folders: [], files: [] });
+    if (store.projects.some(item => item.id === project.id)) throw new Error('Projekt-ID ist bereits vorhanden.');
     store.projects.push(project);
     store.deletedProjectIds = (store.deletedProjectIds || []).filter(id => id !== project.id);
     return publicProject(project);
   });
 }
+
 export async function updateProject(id, patch = {}) {
   return mutate(store => {
     const index = store.projects.findIndex(item => item.id === clean(id, 100));
     if (index < 0) return null;
     const current = store.projects[index];
-    store.projects[index] = normalizeProject({
-      ...current,
-      ...patch,
-      id: current.id,
-      notes: current.notes,
-      folders: current.folders,
-      files: current.files,
-    }, current);
+    store.projects[index] = normalizeProject({ ...current, ...patch, id: current.id, notes: current.notes, folders: current.folders, files: current.files }, current);
     return publicProject(store.projects[index]);
   });
 }
+
+export async function setProjectAutomationEnabled(projectId, automationId, enabled) {
+  return mutate(store => {
+    const projectIndex = store.projects.findIndex(item => item.id === clean(projectId, 100));
+    if (projectIndex < 0) return null;
+    const project = store.projects[projectIndex];
+    const itemIndex = (project.automations || []).findIndex(item => item.id === clean(automationId, 100));
+    if (itemIndex < 0) throw new Error('Projekt-Workflow nicht gefunden.');
+    const item = project.automations[itemIndex];
+    if (!['active', 'paused'].includes(item.status)) throw new Error('Dieser Workflow ist noch nicht ausführbar und kann deshalb nicht eingeschaltet werden.');
+    project.automations[itemIndex] = { ...item, enabled: enabled === true, status: enabled === true ? 'active' : 'paused' };
+    store.projects[projectIndex] = normalizeProject(project, project);
+    return publicProject(store.projects[projectIndex]);
+  });
+}
+
 export async function addProjectNote(id, text, source = 'manual') {
-  const noteText = clean(text, 12000);
+  const noteText = clean(text, 12_000);
   if (!noteText) throw new Error('Bitte zuerst eine Notiz eingeben.');
   return mutate(store => {
     const project = store.projects.find(item => item.id === clean(id, 100));
@@ -196,6 +493,7 @@ export async function addProjectNote(id, text, source = 'manual') {
     return publicProject(project);
   });
 }
+
 export async function createProjectFolder(id, input = {}) {
   const name = clean(input.name, 180);
   const parentId = clean(input.parentId, 100) || null;
@@ -203,15 +501,14 @@ export async function createProjectFolder(id, input = {}) {
   return mutate(store => {
     const project = store.projects.find(item => item.id === clean(id, 100));
     if (!project) return null;
-    if (parentId && !(project.folders || []).some(folder => folder.id === parentId)) {
-      throw new Error('Der übergeordnete Ordner wurde nicht gefunden.');
-    }
+    if (parentId && !(project.folders || []).some(folder => folder.id === parentId)) throw new Error('Der übergeordnete Ordner wurde nicht gefunden.');
     const duplicate = (project.folders || []).some(folder => folder.parentId === parentId && folder.name.localeCompare(name, 'de', { sensitivity: 'base' }) === 0);
     if (duplicate) throw new Error('In diesem Ordner gibt es bereits einen Ordner mit diesem Namen.');
     project.folders = [...(project.folders || []), normalizeFolder({ name, parentId })];
     return publicProject(project);
   });
 }
+
 export async function storeProjectFile(id, { name, mime, folderId, buffer }) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error('Die Datei ist leer.');
   if (buffer.length > MAX_FILE_BYTES) throw new Error('Die Datei ist größer als 25 MB.');
@@ -220,26 +517,18 @@ export async function storeProjectFile(id, { name, mime, folderId, buffer }) {
   return mutate(async store => {
     const project = store.projects.find(item => item.id === clean(id, 100));
     if (!project) return null;
-    if (requestedFolderId && !(project.folders || []).some(folder => folder.id === requestedFolderId)) {
-      throw new Error('Der Zielordner wurde nicht gefunden.');
-    }
+    if (requestedFolderId && !(project.folders || []).some(folder => folder.id === requestedFolderId)) throw new Error('Der Zielordner wurde nicht gefunden.');
     const extension = path.extname(safeName).replace(/[^a-z0-9.]/gi, '').slice(0, 16);
     const storageName = `${crypto.randomUUID()}${extension}`;
     const projectDir = projectFileDir(project.id);
     await fs.mkdir(projectDir, { recursive: true });
     await fs.writeFile(path.join(projectDir, storageName), buffer, { mode: 0o600 });
-    const file = normalizeFile({
-      name: safeName,
-      mime,
-      bytes: buffer.length,
-      sha256: crypto.createHash('sha256').update(buffer).digest('hex'),
-      folderId: requestedFolderId,
-      storageName,
-    });
+    const file = normalizeFile({ name: safeName, mime, bytes: buffer.length, sha256: crypto.createHash('sha256').update(buffer).digest('hex'), folderId: requestedFolderId, storageName });
     project.files = [...(project.files || []), file];
     return publicProject({ ...project, files: [file] }).files[0];
   });
 }
+
 export async function readProjectFile(id, fileId) {
   const project = (await loadStore()).projects.find(item => item.id === clean(id, 100));
   const file = project?.files?.find(item => item.id === clean(fileId, 100));
@@ -249,6 +538,7 @@ export async function readProjectFile(id, fileId) {
   if (!filePath.startsWith(`${projectDir}${path.sep}`)) return null;
   return { meta: publicProject({ files: [file] }).files[0], buffer: await fs.readFile(filePath) };
 }
+
 export async function deleteProject(id) {
   const projectId = clean(id, 100);
   const deleted = await mutate(store => {
@@ -263,3 +553,5 @@ export async function deleteProject(id) {
   if (projectDir.startsWith(`${PROJECT_FILES_DIR}${path.sep}`)) await fs.rm(projectDir, { recursive: true, force: true });
   return deleted;
 }
+
+export { HEAT_HERO_PROJECT };

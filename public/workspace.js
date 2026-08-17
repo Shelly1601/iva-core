@@ -856,7 +856,9 @@ function collectEnergyData() {
     calculation: current?.data?.calculation || { status: 'not-started' },
     funding: {
       applicantType: val('fundingApplicantType') || 'private-owner', selfUsed: checked('fundingSelfUsed'),
-      existingBuildingAgeYears: val('existingBuildingAgeYears'), projectCosts: val('fundingProjectCosts'),
+      applicationDate: val('fundingApplicationDate'), existingBuildingAgeYears: val('existingBuildingAgeYears'), projectCosts: val('fundingProjectCosts'),
+      buildingStructure: val('fundingBuildingStructure') || 'unpartitioned', ownershipSharePercent: val('fundingOwnershipSharePercent'),
+      eligibleCostsConfirmedByBza: checked('eligibleCostsConfirmedByBza'),
       householdIncome: val('householdIncome'), eligibleMinorChild: checked('eligibleMinorChild'),
       climateBonusEligible: checked('climateBonusEligible'), contractConditional: checked('contractConditional'),
       applicationBeforeStart: checked('applicationBeforeStart'), hydraulicBalancingPlanned: checked('hydraulicBalancingPlanned'),
@@ -931,8 +933,22 @@ function renderFundingResult(result = null) {
   heading.textContent = result.status === 'precheck-positive' ? 'Förder-Vorcheck vollständig' : 'Förder-Vorcheck mit offenen Punkten';
   const euro = value => Number(value || 0).toLocaleString('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
   const grid = document.createElement('div'); grid.className = 'calc-grid';
-  grid.append(calcValue('Fördersatz', `${result.rate || 0} %`), calcValue('Förderfähige Kosten', euro(result.eligibleCosts)), calcValue('Rechnerischer Zuschuss', euro(result.estimatedGrant)));
+  if (Number(result.units || 1) > 1 && result.selfUsed) {
+    grid.append(
+      calcValue('Gesamtgebäude', `${result.buildingBaseRate || 0} % Grundförderung`),
+      calcValue('Selbst genutzte WE', `${result.selfUsedUnitRate || 0} %`),
+      calcValue('Effektiv gesamt', `${result.effectiveBuildingRate || 0} %`),
+      calcValue('Förderfähige Kosten', euro(result.eligibleCosts)),
+      calcValue('Rechnerischer Zuschuss', euro(result.estimatedGrant)),
+    );
+  } else {
+    grid.append(calcValue('Fördersatz', `${result.rate || 0} %`), calcValue('Förderfähige Kosten', euro(result.eligibleCosts)), calcValue('Rechnerischer Zuschuss', euro(result.estimatedGrant)));
+  }
   root.append(heading, grid);
+  if (result.noteSummary) {
+    const summary = document.createElement('div'); summary.className = 'hint'; summary.style.marginTop = '10px'; summary.textContent = result.noteSummary;
+    root.appendChild(summary);
+  }
   if (result.blockers?.length) {
     const list = document.createElement('div'); list.className = 'knowledge-hits'; list.style.marginTop = '10px';
     for (const blocker of result.blockers) { const line = document.createElement('div'); line.className = 'knowledge-hit'; line.textContent = blocker; list.appendChild(line); }
@@ -1014,8 +1030,10 @@ function applyEnergy(data = {}) {
     freeSlots: electrical.freeSlots, cabinetNotes: electrical.cabinetNotes, upgradeNeeded: electrical.upgradeNeeded || 'unknown',
     pvPower: pv.power, batteryCapacity: pv.batteryCapacity, reviewedBy: declaration.reviewedBy,
     reviewedAt: declaration.reviewedAt, declarationNotes: declaration.notes,
-    fundingApplicantType: funding.applicantType || 'private-owner', existingBuildingAgeYears: funding.existingBuildingAgeYears,
-    fundingProjectCosts: funding.projectCosts, householdIncome: funding.householdIncome,
+    fundingApplicantType: funding.applicantType || 'private-owner', fundingApplicationDate: funding.applicationDate,
+    existingBuildingAgeYears: funding.existingBuildingAgeYears, fundingProjectCosts: funding.projectCosts,
+    fundingBuildingStructure: funding.buildingStructure || 'unpartitioned', fundingOwnershipSharePercent: funding.ownershipSharePercent,
+    householdIncome: funding.householdIncome,
   };
   for (const [id, value] of Object.entries(fields)) setVal(id, value);
   setChecked('protectedBuilding', site.protectedBuilding);
@@ -1026,6 +1044,7 @@ function applyEnergy(data = {}) {
   setChecked('batteryPresent', pv.batteryPresent);
   setChecked('solarThermal', pv.solarThermal);
   setChecked('reviewed', declaration.reviewed);
+  setChecked('eligibleCostsConfirmedByBza', funding.eligibleCostsConfirmedByBza);
   setChecked('fundingSelfUsed', funding.selfUsed);
   setChecked('eligibleMinorChild', funding.eligibleMinorChild);
   setChecked('climateBonusEligible', funding.climateBonusEligible);

@@ -3,6 +3,8 @@ import fs from 'fs/promises';
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const FILE = DATA_DIR + '/opportunity-radar.json';
 const STATUSES = new Set(['new', 'watch', 'validate', 'rejected', 'selected']);
+const LINK_CHECK_MODES = new Set(['iva-integration', 'business']);
+const LINK_CHECK_STATUSES = new Set(['complete', 'failed']);
 let mutationQueue = Promise.resolve();
 
 const DEFAULT_SETTINGS = Object.freeze({
@@ -20,7 +22,7 @@ const DEFAULT_SETTINGS = Object.freeze({
 });
 
 function emptyStore() {
-  return { version: 1, settings: { ...DEFAULT_SETTINGS }, runs: [], opportunities: [], handoffs: [] };
+  return { version: 2, settings: { ...DEFAULT_SETTINGS }, runs: [], opportunities: [], handoffs: [], linkChecks: [] };
 }
 
 const clean = (value, max = 1000) => String(value || '').trim().slice(0, max);
@@ -33,10 +35,12 @@ async function load() {
     return {
       ...emptyStore(),
       ...data,
+      version: 2,
       settings: { ...DEFAULT_SETTINGS, ...(data.settings || {}) },
       runs: Array.isArray(data.runs) ? data.runs : [],
       opportunities: Array.isArray(data.opportunities) ? data.opportunities : [],
       handoffs: Array.isArray(data.handoffs) ? data.handoffs : [],
+      linkChecks: Array.isArray(data.linkChecks) ? data.linkChecks : [],
     };
   } catch {
     return emptyStore();
@@ -187,6 +191,57 @@ export async function listOpportunityRuns({ limit = 30 } = {}) {
   return (await load()).runs.slice().sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt))).slice(0, Math.max(1, Math.min(200, finite(limit, 30))));
 }
 
+function normalizedLinkCheck(input = {}) {
+  const now = new Date().toISOString();
+  const assessment = input.assessment && typeof input.assessment === 'object' ? input.assessment : {};
+  const stringList = (values, maxItems = 10, maxLength = 500) => (Array.isArray(values) ? values : [])
+    .map(value => clean(value, maxLength)).filter(Boolean).slice(0, maxItems);
+  return {
+    id: clean(input.id, 80) || id('link'),
+    mode: LINK_CHECK_MODES.has(input.mode) ? input.mode : 'business',
+    status: LINK_CHECK_STATUSES.has(input.status) ? input.status : 'complete',
+    url: clean(input.url, 1500),
+    finalUrl: clean(input.finalUrl, 1500),
+    sourceType: clean(input.sourceType, 80),
+    sourceTitle: clean(input.sourceTitle, 300),
+    sourceExcerpt: clean(input.sourceExcerpt, 1800),
+    error: clean(input.error, 800),
+    assessment: {
+      headline: clean(assessment.headline, 240),
+      verdict: clean(assessment.verdict, 80),
+      score: Math.max(0, Math.min(100, finite(assessment.score))),
+      summary: clean(assessment.summary, 1800),
+      whatItIs: clean(assessment.whatItIs, 1200),
+      evidence: stringList(assessment.evidence, 10, 600),
+      assumptions: stringList(assessment.assumptions, 10, 600),
+      fit: stringList(assessment.fit, 10, 600),
+      gaps: stringList(assessment.gaps, 10, 600),
+      risks: stringList(assessment.risks, 10, 600),
+      costsAndEffort: clean(assessment.costsAndEffort, 1000),
+      nextTest: clean(assessment.nextTest, 1200),
+      recommendedArea: clean(assessment.recommendedArea, 120),
+    },
+    createdAt: clean(input.createdAt, 60) || now,
+  };
+}
+
+export async function recordOpportunityLinkCheck(input = {}) {
+  return mutate(async data => {
+    const item = normalizedLinkCheck(input);
+    data.linkChecks.push(item);
+    data.linkChecks = data.linkChecks.slice(-300);
+    return { ...item, assessment: { ...item.assessment } };
+  });
+}
+
+export async function listOpportunityLinkChecks({ mode = '', limit = 30 } = {}) {
+  const data = await load();
+  return data.linkChecks
+    .filter(item => !mode || item.mode === mode)
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+    .slice(0, Math.max(1, Math.min(200, finite(limit, 30))));
+}
+
 export async function prepareOpportunityHandoff(opportunityId) {
   return mutate(async data => {
     const opportunity = data.opportunities.find(item => item.id === opportunityId);
@@ -215,6 +270,7 @@ export async function opportunityRadarCounts() {
     highPotential: data.opportunities.filter(item => finite(item.score) >= 75).length,
     validation: data.opportunities.filter(item => item.status === 'validate').length,
     runs: data.runs.length,
+    linkChecks: data.linkChecks.length,
     pendingHandoffs: data.handoffs.filter(item => item.status === 'awaiting-confirmation').length,
   };
 }
