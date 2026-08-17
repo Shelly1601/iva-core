@@ -3,7 +3,7 @@ const token = () => localStorage.getItem('iva_token') || '';
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const lines = value => String(value || '').split(/\n|,/).map(item => item.trim().replace(/^#/, '')).filter(Boolean);
 const money = value => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(Number(value) || 0);
-let state = { status: null, settings: null, opportunities: [], linkChecks: [], filter: '' };
+let state = { status: null, marketResearchStatus: null, settings: null, opportunities: [], linkChecks: [], marketAnalyses: [], watchSources: [], filter: '' };
 
 async function api(path, options = {}) {
   const response = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token(), ...(options.headers || {}) } });
@@ -20,7 +20,7 @@ function setBusy(button, busy, text) {
 function renderMetrics() {
   const counts = state.status?.counts || {};
   const cards = [
-    ['Ideen', counts.opportunities || 0], ['≥ 75 Punkte', counts.highPotential || 0], ['Im Test', counts.validation || 0], ['Scans', counts.runs || 0], ['Link-Checks', counts.linkChecks || 0], ['Übergaben offen', counts.pendingHandoffs || 0],
+    ['Ideen', counts.opportunities || 0], ['≥ 75 Punkte', counts.highPotential || 0], ['Im Test', counts.validation || 0], ['Scans', counts.runs || 0], ['Link-Checks', counts.linkChecks || 0], ['Marktanalysen', counts.marketAnalyses || 0], ['Radar-Quellen', counts.watchSources || 0], ['Übergaben offen', counts.pendingHandoffs || 0],
   ];
   $('metrics').innerHTML = cards.map(([label, value]) => `<div class="metric"><b>${esc(value)}</b><small>${esc(label)}</small></div>`).join('');
 }
@@ -108,11 +108,57 @@ function renderLinkHistory() {
   $('linkHistory').innerHTML = items.length ? `<div class="eyebrow">Letzte Link-Checks</div>` + items.map(item => `<div class="history-item"><div><button class="filter" data-history-id="${esc(item.id)}">${esc(item.assessment?.headline || item.sourceTitle || (item.status === 'failed' ? 'Fehlgeschlagener Check' : 'Link-Check'))}</button> <small>${esc(modeLabel(item.mode))}</small></div><small>${item.status === 'complete' ? `${esc(item.assessment?.score || 0)}/100 · ${esc(verdictLabel(item.assessment?.verdict))}` : esc(item.error)}</small></div>`).join('') : '';
 }
 
+const marketTypeLabel = value => ({ instagram: 'Instagram', website: 'Webseite', newsletter: 'Newsletter', youtube: 'YouTube', linkedin: 'LinkedIn', podcast: 'Podcast', other: 'Weitere Quelle' })[value] || value;
+const cadenceLabel = value => ({ weekly: 'wöchentlich', monthly: 'monatlich', quarterly: 'vierteljährlich' })[value] || value;
+const watchIdentity = source => `${source?.type || 'other'}:${String(source?.handle || source?.url || '').toLowerCase()}`;
+const watched = source => state.watchSources.some(item => watchIdentity(item) === watchIdentity(source));
+
+function findMarketSource(id) {
+  for (const analysis of state.marketAnalyses || []) {
+    const source = (analysis.sources || []).find(item => item.id === id);
+    if (source) return { ...source, analysisId: analysis.id };
+  }
+  return state.watchSources.find(item => item.id === id) || null;
+}
+
+function marketSourceCard(source) {
+  const isWatched = watched(source);
+  return `<details class="market-source"><summary><div><div class="market-source-title"><span class="tag">${esc(marketTypeLabel(source.type))}</span><b>${esc(source.name)}</b></div><div class="muted">${esc(source.reason || 'Beobachtungswert wird noch genauer geprüft.')}</div></div><div class="market-source-score">${esc(source.score || 0)}</div></summary><div class="market-source-body">
+    <div class="actions"><a class="source" href="${esc(source.url)}" target="_blank" rel="noopener">Quelle öffnen</a><span class="tag ${source.monitoringValue === 'high' ? '' : 'warn'}">${esc(cadenceLabel(source.cadence))} prüfen</span>${source.sampleSize ? `<span class="tag">${esc(source.sampleSize)} Inhalte geprüft</span>` : ''}</div>
+    <div class="section"><b>Stärken</b>${listHtml(source.strengths)}</div><div class="section"><b>Themen & Muster</b>${listHtml([...(source.topics || []), ...(source.contentPatterns || [])])}</div><div class="section"><b>Beleglage</b>${listHtml(source.evidence)}</div>
+    <button class="btn ${isWatched ? 'danger' : 'primary'}" data-watch-source="${esc(source.id)}" data-watch-enabled="${isWatched ? 'false' : 'true'}">${isWatched ? 'Nicht mehr regelmäßig prüfen' : 'Regelmäßig beobachten'}</button>
+  </div></details>`;
+}
+
+function renderMarketResearch() {
+  if (!$('marketState').textContent) {
+    const marketStatus = state.marketResearchStatus || {};
+    $('marketState').textContent = marketStatus.ready
+      ? `Websuche bereit${marketStatus.instagramDetailReady ? ' · Instagram-Detailprüfung bereit' : ' · Instagram-Details derzeit nur aus Suchsignalen'}.`
+      : `Für neue Marktanalysen fehlt noch: ${(marketStatus.missing || []).join(', ') || marketStatus.error || 'Research-Konfiguration'}.`;
+  }
+  const latest = state.marketAnalyses?.[0];
+  if (!latest) {
+    $('marketResults').innerHTML = '<div class="empty">Noch keine Marktanalyse. Gib ein Thema ein und lass IVA sinnvolle Beobachtungsquellen suchen.</div>';
+  } else if (latest.status === 'failed') {
+    $('marketResults').innerHTML = `<div class="notice"><b>Letzte Marktanalyse nicht abgeschlossen:</b> ${esc(latest.error)}</div>`;
+  } else {
+    $('marketResults').innerHTML = `<div class="market-overview"><div class="market-result-head"><div><span class="tag">${esc(latest.region)} · ${esc(latest.language)}</span><h3>${esc(latest.topic)}</h3><div class="summary">${esc(latest.summary)}</div></div><div class="market-source-score">${esc(latest.sources?.length || 0)} Quellen</div></div>
+      ${latest.marketPatterns?.length ? `<div class="section"><b>Erkannte Marktmuster</b>${listHtml(latest.marketPatterns)}</div>` : ''}
+      ${latest.blindSpots?.length ? `<div class="section"><b>Blinde Flecken</b>${listHtml(latest.blindSpots)}</div>` : ''}
+      <div class="market-source-grid">${(latest.sources || []).map(marketSourceCard).join('')}</div>
+      <div class="market-analysis-history">${state.marketAnalyses.length} gespeicherte Marktanalyse${state.marketAnalyses.length === 1 ? '' : 'n'} · Die neueste wird angezeigt.</div></div>`;
+  }
+  $('watchSourceList').innerHTML = state.watchSources.length
+    ? state.watchSources.map(source => `<span class="watch-pill"><a href="${esc(source.url)}" target="_blank" rel="noopener">${esc(source.type === 'instagram' ? '@' + source.handle : source.name)}</a><button title="Nicht mehr regelmäßig prüfen" data-watch-source="${esc(source.id)}" data-watch-enabled="false">×</button></span>`).join('')
+    : '<span class="muted">Noch keine feste Radar-Quelle ausgewählt.</span>';
+}
+
 async function loadAll({ fill = true } = {}) {
   try {
-    const [status, settings, opportunities, linkChecks] = await Promise.all([api('/api/opportunities/status'), api('/api/opportunities/settings'), api('/api/opportunities?limit=200'), api('/api/opportunities/link-checks?limit=20')]);
-    state = { ...state, status, settings, opportunities, linkChecks };
-    renderMetrics(); renderStatus(); if (fill) fillSettings(); renderOpportunities(); renderLinkHistory();
+    const [status, marketResearchStatus, settings, opportunities, linkChecks, marketAnalyses, watchSources] = await Promise.all([api('/api/opportunities/status'), api('/api/opportunities/market-research/status'), api('/api/opportunities/settings'), api('/api/opportunities?limit=200'), api('/api/opportunities/link-checks?limit=20'), api('/api/opportunities/market-analyses?limit=20'), api('/api/opportunities/watch-sources')]);
+    state = { ...state, status, marketResearchStatus, settings, opportunities, linkChecks, marketAnalyses, watchSources };
+    renderMetrics(); renderStatus(); if (fill) fillSettings(); renderOpportunities(); renderLinkHistory(); renderMarketResearch();
   } catch (error) {
     $('statusNotice').textContent = `Laden fehlgeschlagen: ${error.message}. Falls IVA geschützt ist, API-Token im Cockpit speichern.`;
   }
@@ -130,7 +176,7 @@ $('saveSettings').addEventListener('click', async () => {
 });
 
 $('runScout').addEventListener('click', async () => {
-  const button = $('runScout'); setBusy(button, true, 'Instagram wird geprüft …');
+  const button = $('runScout'); setBusy(button, true, 'Quellen werden geprüft …');
   try {
     const result = await api('/api/opportunities/scout', { method: 'POST', body: '{}' });
     const warningText = result.warnings?.length ? ` ${result.warnings.length} Teilquelle(n) waren nicht erreichbar; der Lauf wurde mit den übrigen Quellen beendet.` : '';
@@ -156,6 +202,36 @@ document.querySelectorAll('[data-link-mode]').forEach(button => button.addEventL
     await loadAll({ fill: false }).catch(() => {});
   } finally { setBusy(button, false); buttons.forEach(item => { item.disabled = false; }); }
 }));
+
+$('runMarketResearch').addEventListener('click', async () => {
+  const topic = $('marketTopic').value.trim();
+  if (!topic) { $('marketState').textContent = 'Bitte zuerst ein Thema eingeben.'; $('marketTopic').focus(); return; }
+  const button = $('runMarketResearch');
+  setBusy(button, true, 'Markt wird analysiert …');
+  $('marketState').textContent = 'IVA sucht Profile und Webseiten, liest Stichproben und bewertet den regelmäßigen Beobachtungswert. Das kann einige Minuten dauern.';
+  try {
+    const result = await api('/api/opportunities/market-research', { method: 'POST', body: JSON.stringify({ topic, keywords: lines($('marketKeywords').value), region: $('marketRegion').value, language: $('marketLanguage').value }) });
+    $('marketState').textContent = `${result.sources?.length || 0} sinnvolle Beobachtungsquellen gefunden. Wähle aus, welche in die regelmäßigen Läufe sollen.`;
+    await loadAll({ fill: false });
+  } catch (error) {
+    $('marketState').textContent = error.message;
+    await loadAll({ fill: false }).catch(() => {});
+  } finally { setBusy(button, false); }
+});
+
+async function toggleWatchSource(button) {
+  const source = findMarketSource(button.dataset.watchSource);
+  if (!source) return;
+  setBusy(button, true, 'Speichert …');
+  try {
+    await api('/api/opportunities/watch-sources', { method: 'PUT', body: JSON.stringify({ source, enabled: button.dataset.watchEnabled === 'true' }) });
+    await loadAll({ fill: false });
+    $('marketState').textContent = button.dataset.watchEnabled === 'true' ? 'Quelle in die regelmäßigen Radar-Läufe übernommen.' : 'Quelle aus den regelmäßigen Läufen entfernt.';
+  } catch (error) { $('marketState').textContent = error.message; setBusy(button, false); }
+}
+
+$('marketResults').addEventListener('click', event => { const button = event.target.closest('[data-watch-source]'); if (button) void toggleWatchSource(button); });
+$('watchSourceList').addEventListener('click', event => { const button = event.target.closest('[data-watch-source]'); if (button) void toggleWatchSource(button); });
 
 $('linkHistory').addEventListener('click', event => {
   const button = event.target.closest('[data-history-id]'); if (!button) return;

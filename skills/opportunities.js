@@ -1,7 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 
-export function opportunitiesSkill({ listOpportunities, runOpportunityScout, checkOpportunityLink, prepareOpportunityHandoff }) {
+export function opportunitiesSkill({ listOpportunities, runOpportunityScout, checkOpportunityLink, runOpportunityMarketResearch, listOpportunityWatchSources, prepareOpportunityHandoff }) {
   return {
     listOpportunities: tool({
       description: 'Listet IVAs quellengepruefte Chancenideen, nach Potenzial-Score sortiert. Scores sind Priorisierung, keine Einkommensgarantie.',
@@ -21,6 +21,22 @@ export function opportunitiesSkill({ listOpportunities, runOpportunityScout, che
       }),
       execute: async ({ url, mode }) => await checkOpportunityLink({ url, mode }),
     }),
+    researchOpportunityMarket: tool({
+      description: 'Recherchiert zu einem Thema passende Instagram-Profile, Fachwebseiten und weitere öffentliche Quellen, bewertet deren Content- und Beobachtungswert und speichert die Marktanalyse. Die regelmäßige Beobachtung wird erst nach separater Quellenauswahl aktiv.',
+      parameters: z.object({
+        topic: z.string().min(2).max(240),
+        keywords: z.array(z.string().min(1).max(120)).max(12).optional(),
+        region: z.string().max(120).optional(),
+        language: z.string().max(80).optional(),
+        confirmed: z.boolean().describe('true nur wenn Nadine die aktuelle kostenpflichtige Web-/Instagram-Recherche ausdrücklich angefordert hat'),
+      }),
+      execute: async ({ confirmed, ...input }) => confirmed ? await runOpportunityMarketResearch(input) : ({ ok: false, error: 'Bitte die aktuelle Marktanalyse zuerst ausdrücklich bestätigen.' }),
+    }),
+    listOpportunityWatchSources: tool({
+      description: 'Listet die von Nadine ausgewählten Profile und Webseiten, auf die der regelmäßige Chancenradar zusätzlich schaut. Die freie Neuentdeckung bleibt parallel aktiv.',
+      parameters: z.object({}),
+      execute: async () => ({ sources: await listOpportunityWatchSources() }),
+    }),
     prepareOpportunityHandoff: tool({
       description: 'Bereitet fuer eine ausgewaehlte Chancenidee die Uebergabe an Marketing-, Kurs-, Web- oder Sales-Agent vor. Startet noch keine Umsetzung; gibt eine exakte Bestaetigungsformel zurueck.',
       parameters: z.object({ opportunityId: z.string() }),
@@ -29,4 +45,4 @@ export function opportunitiesSkill({ listOpportunities, runOpportunityScout, che
   };
 }
 
-export const opportunitiesSkillMeta = { id: 'opportunities', toolNames: ['listOpportunities', 'runOpportunityScout', 'checkOpportunityLink', 'prepareOpportunityHandoff'] };
+export const opportunitiesSkillMeta = { id: 'opportunities', toolNames: ['listOpportunities', 'runOpportunityScout', 'checkOpportunityLink', 'researchOpportunityMarket', 'listOpportunityWatchSources', 'prepareOpportunityHandoff'] };

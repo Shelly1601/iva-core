@@ -5,6 +5,8 @@ const FILE = DATA_DIR + '/opportunity-radar.json';
 const STATUSES = new Set(['new', 'watch', 'validate', 'rejected', 'selected']);
 const LINK_CHECK_MODES = new Set(['iva-integration', 'business']);
 const LINK_CHECK_STATUSES = new Set(['complete', 'failed']);
+const MARKET_SOURCE_TYPES = new Set(['instagram', 'website', 'newsletter', 'youtube', 'linkedin', 'podcast', 'other']);
+const MARKET_ANALYSIS_STATUSES = new Set(['complete', 'failed']);
 let mutationQueue = Promise.resolve();
 
 const DEFAULT_SETTINGS = Object.freeze({
@@ -22,12 +24,21 @@ const DEFAULT_SETTINGS = Object.freeze({
 });
 
 function emptyStore() {
-  return { version: 2, settings: { ...DEFAULT_SETTINGS }, runs: [], opportunities: [], handoffs: [], linkChecks: [] };
+  return { version: 3, settings: { ...DEFAULT_SETTINGS }, runs: [], opportunities: [], handoffs: [], linkChecks: [], marketAnalyses: [], watchSources: [] };
 }
 
 const clean = (value, max = 1000) => String(value || '').trim().slice(0, max);
 const uniq = values => [...new Set((Array.isArray(values) ? values : []).map(value => clean(value, 120).replace(/^#/, '')).filter(Boolean))];
 const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+
+function publicHttpUrl(value) {
+  try {
+    const url = new URL(clean(value, 1500));
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return '';
+    url.hash = '';
+    return url.toString();
+  } catch { return ''; }
+}
 
 async function load() {
   try {
@@ -35,12 +46,14 @@ async function load() {
     return {
       ...emptyStore(),
       ...data,
-      version: 2,
+      version: 3,
       settings: { ...DEFAULT_SETTINGS, ...(data.settings || {}) },
       runs: Array.isArray(data.runs) ? data.runs : [],
       opportunities: Array.isArray(data.opportunities) ? data.opportunities : [],
       handoffs: Array.isArray(data.handoffs) ? data.handoffs : [],
       linkChecks: Array.isArray(data.linkChecks) ? data.linkChecks : [],
+      marketAnalyses: Array.isArray(data.marketAnalyses) ? data.marketAnalyses : [],
+      watchSources: Array.isArray(data.watchSources) ? data.watchSources : [],
     };
   } catch {
     return emptyStore();
@@ -200,7 +213,7 @@ function normalizedLinkCheck(input = {}) {
     id: clean(input.id, 80) || id('link'),
     mode: LINK_CHECK_MODES.has(input.mode) ? input.mode : 'business',
     status: LINK_CHECK_STATUSES.has(input.status) ? input.status : 'complete',
-    url: clean(input.url, 1500),
+    url: publicHttpUrl(input.url),
     finalUrl: clean(input.finalUrl, 1500),
     sourceType: clean(input.sourceType, 80),
     sourceTitle: clean(input.sourceTitle, 300),
@@ -242,6 +255,96 @@ export async function listOpportunityLinkChecks({ mode = '', limit = 30 } = {}) 
     .slice(0, Math.max(1, Math.min(200, finite(limit, 30))));
 }
 
+function stringList(values, maxItems = 12, maxLength = 500) {
+  return (Array.isArray(values) ? values : []).map(value => clean(value, maxLength)).filter(Boolean).slice(0, maxItems);
+}
+
+function normalizedMarketSource(input = {}) {
+  return {
+    id: clean(input.id, 100) || id('source'),
+    name: clean(input.name, 240) || clean(input.handle, 120) || 'Quelle',
+    type: MARKET_SOURCE_TYPES.has(input.type) ? input.type : 'other',
+    url: publicHttpUrl(input.url),
+    handle: clean(input.handle, 120).replace(/^@/, ''),
+    score: Math.max(0, Math.min(100, Math.round(finite(input.score)))),
+    reason: clean(input.reason, 1600),
+    strengths: stringList(input.strengths),
+    topics: stringList(input.topics),
+    contentPatterns: stringList(input.contentPatterns),
+    evidence: stringList(input.evidence),
+    cadence: ['weekly', 'monthly', 'quarterly'].includes(input.cadence) ? input.cadence : 'monthly',
+    monitoringValue: ['high', 'medium', 'low'].includes(input.monitoringValue) ? input.monitoringValue : 'medium',
+    sampleSize: Math.max(0, Math.min(500, Math.round(finite(input.sampleSize)))),
+    latestObservedAt: clean(input.latestObservedAt, 80),
+  };
+}
+
+function normalizedMarketAnalysis(input = {}) {
+  const now = new Date().toISOString();
+  return {
+    id: clean(input.id, 100) || id('market'),
+    status: MARKET_ANALYSIS_STATUSES.has(input.status) ? input.status : 'complete',
+    topic: clean(input.topic, 240),
+    keywords: stringList(input.keywords, 20, 120),
+    region: clean(input.region, 120) || 'DACH',
+    language: clean(input.language, 80) || 'Deutsch',
+    summary: clean(input.summary, 3000),
+    marketPatterns: stringList(input.marketPatterns, 15, 800),
+    blindSpots: stringList(input.blindSpots, 15, 800),
+    nextQueries: stringList(input.nextQueries, 15, 300),
+    sources: (Array.isArray(input.sources) ? input.sources : []).map(normalizedMarketSource).filter(source => source.url).slice(0, 30),
+    searchQueries: stringList(input.searchQueries, 12, 500),
+    warnings: stringList(input.warnings, 20, 800),
+    error: clean(input.error, 1200),
+    createdAt: clean(input.createdAt, 80) || now,
+  };
+}
+
+export async function recordOpportunityMarketAnalysis(input = {}) {
+  return mutate(async data => {
+    const analysis = normalizedMarketAnalysis(input);
+    data.marketAnalyses.push(analysis);
+    data.marketAnalyses = data.marketAnalyses.slice(-100);
+    return structuredClone(analysis);
+  });
+}
+
+export async function listOpportunityMarketAnalyses({ limit = 20 } = {}) {
+  return (await load()).marketAnalyses.slice()
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+    .slice(0, Math.max(1, Math.min(100, finite(limit, 20))))
+    .map(item => structuredClone(item));
+}
+
+function sourceIdentity(source = {}) {
+  return `${clean(source.type, 40)}:${clean(source.handle || source.url, 1500).toLocaleLowerCase('de-DE')}`;
+}
+
+export async function setOpportunityWatchSource(input = {}, enabled = true) {
+  const source = normalizedMarketSource(input);
+  if (!source.url) throw new Error('Die Beobachtungsquelle braucht eine öffentliche URL.');
+  return mutate(async data => {
+    const identity = sourceIdentity(source);
+    const existingIndex = data.watchSources.findIndex(item => sourceIdentity(item) === identity);
+    if (enabled !== true) {
+      if (existingIndex >= 0) data.watchSources.splice(existingIndex, 1);
+      return { enabled: false, source };
+    }
+    const now = new Date().toISOString();
+    const watched = { ...(existingIndex >= 0 ? data.watchSources[existingIndex] : {}), ...source, id: existingIndex >= 0 ? data.watchSources[existingIndex].id : id('watch'), analysisId: clean(input.analysisId, 100), monitoredAt: existingIndex >= 0 ? data.watchSources[existingIndex].monitoredAt : now, updatedAt: now };
+    if (existingIndex >= 0) data.watchSources[existingIndex] = watched;
+    else data.watchSources.push(watched);
+    data.watchSources = data.watchSources.slice(-100);
+    return { enabled: true, source: structuredClone(watched) };
+  });
+}
+
+export async function listOpportunityWatchSources() {
+  return (await load()).watchSources.slice()
+    .sort((a, b) => finite(b.score) - finite(a.score) || String(b.updatedAt).localeCompare(String(a.updatedAt)))
+    .map(item => structuredClone(item));
+}
+
 export async function prepareOpportunityHandoff(opportunityId) {
   return mutate(async data => {
     const opportunity = data.opportunities.find(item => item.id === opportunityId);
@@ -271,6 +374,8 @@ export async function opportunityRadarCounts() {
     validation: data.opportunities.filter(item => item.status === 'validate').length,
     runs: data.runs.length,
     linkChecks: data.linkChecks.length,
+    marketAnalyses: data.marketAnalyses.length,
+    watchSources: data.watchSources.length,
     pendingHandoffs: data.handoffs.filter(item => item.status === 'awaiting-confirmation').length,
   };
 }

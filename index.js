@@ -97,10 +97,13 @@ import { createTmbPdf } from './workspaces/tmb-pdf.js';
 import {
   getOpportunity,
   getOpportunitySettings,
+  listOpportunityMarketAnalyses,
+  listOpportunityWatchSources,
   listOpportunities,
   listOpportunityLinkChecks,
   listOpportunityRuns,
   prepareOpportunityHandoff,
+  setOpportunityWatchSource,
   updateOpportunity,
   updateOpportunitySettings,
   upsertOpportunity,
@@ -108,6 +111,7 @@ import {
 import { formatWeeklyPitch, scoreOpportunity } from './opportunities/score.js';
 import { opportunityRadarStatus, runOpportunityScout } from './opportunities/scout.js';
 import { checkOpportunityLink } from './opportunities/link-check.js';
+import { opportunityMarketResearchStatus, runOpportunityMarketResearch } from './opportunities/market-research.js';
 import { evaluateCapability, listCapabilityReviews } from './capabilities/evaluator.js';
 import { assessKnowledgeSourceCandidate, knowledgeLibraryStatus, listKnowledgeLibrary } from './knowledge/library.js';
 import { createCandidateSearchPlan, createInterviewGuide, screenResumeAgainstCriteria } from './recruiting/assistant.js';
@@ -652,7 +656,7 @@ const ALL_SKILLS = {
   research:  researchSkill({ askArchitect }),
   workspaces: workspacesSkill({ workspaces }),
   advice:    adviceSkill({ publicAdviceCatalog, listAdviceKnowledge }),
-  opportunities: opportunitiesSkill({ listOpportunities, runOpportunityScout, checkOpportunityLink, prepareOpportunityHandoff }),
+  opportunities: opportunitiesSkill({ listOpportunities, runOpportunityScout, checkOpportunityLink, runOpportunityMarketResearch, listOpportunityWatchSources, prepareOpportunityHandoff }),
   accounting: accountingSkill({ listAccountingEntities, listAccountingDocuments, getAccountingDocument, accountingSummary }),
   energyTariffs: energyTariffsSkill({ workspaces, energyTariffStatus, prepareWorkspaceEnergyTariffRequest }),
   selfImprovement: selfImprovementSkill({ savePronunciationCorrection, saveCommunicationPreference, captureImprovementRequest, listVoiceLearning }),
@@ -1929,6 +1933,20 @@ app.get('/api/opportunities/link-checks', async (req, res) => res.json(await lis
 app.post('/api/opportunities/check-link', async (req, res) => {
   try { res.status(201).json(await checkOpportunityLink(req.body || {})); }
   catch (e) { res.status(400).json({ error: e.message, linkCheck: e.linkCheck || null }); }
+});
+app.get('/api/opportunities/market-research/status', (_req, res) => {
+  try { res.json(opportunityMarketResearchStatus()); }
+  catch (e) { res.status(500).json({ ready: false, error: e.message }); }
+});
+app.get('/api/opportunities/market-analyses', async (req, res) => res.json(await listOpportunityMarketAnalyses({ limit: req.query?.limit || 20 })));
+app.post('/api/opportunities/market-research', async (req, res) => {
+  try { res.status(201).json(await runOpportunityMarketResearch(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message, marketAnalysis: e.marketAnalysis || null }); }
+});
+app.get('/api/opportunities/watch-sources', async (_req, res) => res.json(await listOpportunityWatchSources()));
+app.put('/api/opportunities/watch-sources', async (req, res) => {
+  try { res.json(await setOpportunityWatchSource(req.body?.source || {}, req.body?.enabled === true)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.get('/api/opportunities/:id', async (req, res) => {
   const item = await getOpportunity(req.params.id);

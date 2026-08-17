@@ -355,6 +355,15 @@ async function tavilySearch(query, { limit = 5, includeDomains, excludeDomains, 
   } finally { clearTimeout(id); }
 }
 
+// Schlanker, deterministischer Suchzugang fuer interne Module, die erst
+// Kandidaten sammeln und anschliessend Originalseiten selbst lesen. Snippets
+// bleiben Hinweise und werden nicht als verifizierte Belege ausgegeben.
+export async function searchWebCandidates(query, options = {}) {
+  const result = await tavilySearch(query, options);
+  if (result.error) throw new Error(result.error.message || 'Websuche nicht verfügbar.');
+  return result.results || [];
+}
+
 // ---------------------------------------------------------------------------
 // Schemas
 // ---------------------------------------------------------------------------

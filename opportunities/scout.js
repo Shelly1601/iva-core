@@ -1,9 +1,11 @@
 import { generateText } from 'ai';
+import { fetchAndExtract } from '../agents/web.js';
 import { chooseModel, recordUsage, checkBudget } from '../core/router.js';
 import { scrapeInstagram } from '../marketing/analyze.js';
 import {
   createOpportunityRun,
   getOpportunitySettings,
+  listOpportunityWatchSources,
   listOpportunityRuns,
   opportunityRadarCounts,
   updateOpportunity,
@@ -133,6 +135,12 @@ function sourceExcerpt(post, index) {
   };
 }
 
+function rotateSources(values = [], count = 1, seed = 0) {
+  if (!values.length || count <= 0) return [];
+  const start = Math.abs(seed) % values.length;
+  return Array.from({ length: Math.min(count, values.length) }, (_, index) => values[(start + index) % values.length]);
+}
+
 function parseJson(text) {
   const cleanText = String(text || '').replace(/```json|```/gi, '').trim();
   try { return JSON.parse(cleanText); } catch {}
@@ -145,9 +153,9 @@ async function synthesizeOpportunities(posts, settings) {
   const evidence = posts.slice(0, settings.maxSourcesPerRun).map(sourceExcerpt);
   const routed = chooseModel({ task: 'marketing-intelligence' });
   await checkBudget(routed);
-  const system = `Du bist IVAs Chancen-Analyst. Du sichtest reale Instagram-Signale, aber du glaubst weder Einkommensversprechen noch Reichweite blind. Finde maximal 8 eigenstaendig umsetzbare, legale Geschaeftsmodelle, bei denen KI den Aufwand deutlich senken kann. Keine Kopie fremder Inhalte, kein Spam, keine MLM-/Trading-/Gluecksspiel-/Krypto-Schnellreich-Ideen, keine Dark Patterns. "Passiv" bedeutet hier: nach einem realistischen Aufbau mit begrenzter laufender Pflege, niemals ohne Arbeit.
+  const system = `Du bist IVAs Chancen-Analyst. Du sichtest reale öffentliche Instagram- und Web-Signale, aber du glaubst weder Einkommensversprechen noch Reichweite blind. Finde maximal 8 eigenstaendig umsetzbare, legale Geschaeftsmodelle, bei denen KI den Aufwand deutlich senken kann. Keine Kopie fremder Inhalte, kein Spam, keine MLM-/Trading-/Gluecksspiel-/Krypto-Schnellreich-Ideen, keine Dark Patterns. "Passiv" bedeutet hier: nach einem realistischen Aufbau mit begrenzter laufender Pflege, niemals ohne Arbeit.
 
-Arbeite AUSSCHLIESSLICH mit den gelieferten Quellen. Instagram-Posts und Creator-Profile sind Entdeckungssignale, keine Produkt-, Preis-, Lizenz- oder Wirksamkeitsbelege. Mehrere Posts, die nur denselben Hype wiederholen, sind noch kein Marktnachweis. Umsatz- oder Einkommensangaben sind unbestaetigte Claims. Jede Chance braucht einen kleinen bezahlbaren 7-Tage-Validierungstest und vor jeder Tool-/Agenten-Integration zusaetzlich IVAs Capability-Gate mit offizieller Primarquelle.
+Arbeite AUSSCHLIESSLICH mit den gelieferten Quellen. Instagram-Posts, Creator-Profile und fremde Webseiten sind Entdeckungssignale, keine Produkt-, Preis-, Lizenz- oder Wirksamkeitsbelege. Mehrere Quellen, die nur denselben Hype wiederholen, sind noch kein Marktnachweis. Umsatz- oder Einkommensangaben sind unbestaetigte Claims. Jede Chance braucht einen kleinen bezahlbaren 7-Tage-Validierungstest und vor jeder Tool-/Agenten-Integration zusaetzlich IVAs Capability-Gate mit offizieller Primarquelle.
 
 Antworte ausschließlich als valides JSON ohne Markdown:
 {"ideas":[{"title":"","summary":"","customer":"","offer":"","monetization":"","aiLeverage":"","firstValidation":"","evidence":"","evidenceLimits":"","risks":"","saturation":"","setupHours":0,"ongoingHoursPerWeek":0,"initialBudgetEur":0,"revenueClaim":"nur falls Quelle einen Claim nennt, dann ausdrücklich unbestätigt","recommendedAgent":"marketing|course|web|sales|energy|other","sourceRefs":[1],"ratings":{"demandEvidence":0,"monetizationClarity":0,"automationFit":0,"lowOngoingEffort":0,"speedToValidate":0,"nadineFit":0,"evidenceQuality":0,"defensibility":0,"platformRisk":0,"legalRisk":0,"saturationRisk":0,"hypeRisk":0}}],"discardedSignals":[{"signal":"","reason":""}]}
@@ -182,6 +190,7 @@ Alle Ratings sind ganze Zahlen von 0 bis 10. NadineFit bewertet Synergien mit Fi
 
 async function executeOpportunityScout({ trigger = 'manual' } = {}) {
   const settings = await getOpportunitySettings();
+  const watchSources = await listOpportunityWatchSources();
   const run = await createOpportunityRun({ trigger });
   try {
     if (!process.env.APIFY_TOKEN) throw new Error('APIFY_TOKEN fehlt. Ohne echten Instagram-Datenzugang wird kein Wochenranking erfunden.');
@@ -200,23 +209,45 @@ async function executeOpportunityScout({ trigger = 'manual' } = {}) {
     // nur zwei davon, damit der bestehende Wochenlauf nicht unbemerkt teuer wird.
     const week = Math.floor(Date.now() / (7 * 24 * 60 * 60 * 1000));
     const curatedRotation = [0, 1].map(offset => CURATED_DISCOVERY_ACCOUNTS[(week + offset) % CURATED_DISCOVERY_ACCOUNTS.length]);
-    const seedAccounts = [...new Set([...settings.seedAccounts.slice(0, 3), ...curatedRotation])].slice(0, 5);
+    const watchedAccounts = rotateSources(watchSources.filter(source => source.type === 'instagram' && source.handle), 2, week).map(source => source.handle);
+    const watchedAccountSet = new Set(watchedAccounts.map(value => value.toLowerCase()));
+    const seedAccounts = [...new Set([...settings.seedAccounts.slice(0, 2), ...watchedAccounts, ...curatedRotation])].slice(0, 6);
     for (const account of seedAccounts) {
       try {
         const posts = await withRetry(
           () => scrapeInstagram(account, { resultsLimit: Math.max(8, Math.min(20, Math.floor(settings.maxSourcesPerRun / 4))) }),
           { attempts: 2, timeoutMs: 110_000, label: `Instagram @${account}` },
         );
-        sourcePosts.push(...posts.map(post => normalizePost(post, 'seed-account')));
+        const kind = watchedAccountSet.has(String(account).toLowerCase()) ? 'watch-account' : 'seed-account';
+        sourcePosts.push(...posts.map(post => normalizePost(post, kind)));
       } catch (error) {
         sourceWarnings.push({ source: `@${account}`, error: clean(error.message, 500) });
         console.warn(`Chancenradar Instagram ${account}: ${error.message}`);
       }
     }
-    const posts = dedupePosts(sourcePosts)
-      .sort((a, b) => (b.views || b.likes + b.comments) - (a.views || a.likes + a.comments))
-      .slice(0, settings.maxSourcesPerRun);
-    if (!posts.length) throw new Error('Instagram lieferte fuer die hinterlegten Quellen keine verwertbaren Posts');
+    const watchedWebSources = rotateSources(watchSources.filter(source => source.type !== 'instagram' && source.url), 4, week);
+    for (const source of watchedWebSources) {
+      try {
+        const page = await fetchAndExtract(source.url);
+        if (page?.error) throw new Error(page.error.message || page.error.code || 'Quelle nicht lesbar');
+        sourcePosts.push({
+          url: page.finalUrl || page.url || source.url,
+          account: source.name || source.url,
+          caption: clean(page.text, 1600),
+          likes: 0, comments: 0, views: 0,
+          timestamp: clean(page.publishedAt, 80),
+          hashtags: [], sourceKind: 'watch-web',
+        });
+      } catch (error) {
+        sourceWarnings.push({ source: source.name || source.url, error: clean(error.message, 500) });
+      }
+    }
+    const deduped = dedupePosts(sourcePosts);
+    const watchedSignals = deduped.filter(post => String(post.sourceKind).startsWith('watch-'));
+    const discoverySignals = deduped.filter(post => !String(post.sourceKind).startsWith('watch-'))
+      .sort((a, b) => (b.views || b.likes + b.comments) - (a.views || a.likes + a.comments));
+    const posts = dedupePosts([...watchedSignals, ...discoverySignals]).slice(0, settings.maxSourcesPerRun);
+    if (!posts.length) throw new Error('Die hinterlegten Instagram- und Webquellen lieferten keine verwertbaren Signale');
     const synthesized = await synthesizeOpportunities(posts, settings);
     const saved = [];
     for (const idea of synthesized.ideas) {
@@ -266,17 +297,19 @@ export async function runOpportunityScout(options = {}) {
 }
 
 export async function opportunityRadarStatus() {
-  const [settings, counts, runs] = await Promise.all([getOpportunitySettings(), opportunityRadarCounts(), listOpportunityRuns({ limit: 1 })]);
+  const [settings, counts, runs, watchSources] = await Promise.all([getOpportunitySettings(), opportunityRadarCounts(), listOpportunityRuns({ limit: 1 }), listOpportunityWatchSources()]);
   const model = opportunityModelStatus();
   const missing = [...(!process.env.APIFY_TOKEN ? ['APIFY_TOKEN'] : []), ...model.missing];
   return {
     configured: missing.length === 0,
     ready: missing.length === 0,
-    provider: `Apify · öffentliche Instagram-Signale · ${model.modelId || 'Auswertungsmodell nicht bereit'}`,
+    provider: `Apify · öffentliche Instagram- und Websignale · ${model.modelId || 'Auswertungsmodell nicht bereit'}`,
     model,
     weekly: { enabled: settings.weeklyEnabled, schedule: 'Montag 08:30 · Europe/Berlin', telegram: Boolean(process.env.TELEGRAM_BOT_TOKEN) },
     safeguards: ['Instagram nur als Entdeckungssignal', 'offizielle Primarquelle vor Integration', 'keine Einkommensgarantie', 'Kosten-/Zeit-Caps', 'keine automatische Umsetzung'],
     curatedDiscoveryAccounts: CURATED_DISCOVERY_ACCOUNTS,
+    watchedSources: watchSources.length,
+    discoveryMode: 'Beobachtungsquellen plus freie Hashtag- und Creator-Entdeckung',
     lastRun: runs[0] || null,
     missing,
     counts,

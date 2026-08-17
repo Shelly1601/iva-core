@@ -10,16 +10,20 @@ delete process.env.APIFY_TOKEN;
 const { scoreOpportunity, formatWeeklyPitch } = await import('../opportunities/score.js');
 const {
   getOpportunitySettings,
+  listOpportunityMarketAnalyses,
   listOpportunityLinkChecks,
+  listOpportunityWatchSources,
   listOpportunities,
   opportunityRadarCounts,
   prepareOpportunityHandoff,
+  setOpportunityWatchSource,
   updateOpportunity,
   updateOpportunitySettings,
   upsertOpportunity,
 } = await import('../opportunities/store.js');
 const { opportunityRadarStatus, scrapeInstagramHashtags } = await import('../opportunities/scout.js');
 const { checkOpportunityLink, normalizeLinkCheckMode } = await import('../opportunities/link-check.js');
+const { opportunityMarketResearchStatus, runOpportunityMarketResearch } = await import('../opportunities/market-research.js');
 
 const defaults = await getOpportunitySettings();
 assert.equal(defaults.weeklyEnabled, true);
@@ -80,6 +84,43 @@ assert.equal(linkChecks.length, 2);
 assert.equal(linkChecks[0].status, 'failed');
 assert.equal((await opportunityRadarCounts()).linkChecks, 2);
 
+const marketAnalysis = await runOpportunityMarketResearch({ topic: 'Betriebliche Krankenversicherung', keywords: ['Mitarbeiterbindung', 'Benefits'], region: 'DACH', language: 'Deutsch' }, {
+  search: async () => [
+    { title: 'bKV Praxis', url: 'https://www.instagram.com/bkvpraxis/', snippet: 'Praxisnahe Beiträge für Arbeitgeber.' },
+    { title: 'Benefits Fachportal', url: 'https://example.com/benefits', snippet: 'Analysen und Leitfäden zu Benefits.' },
+  ],
+  scrape: async () => [
+    { url: 'https://www.instagram.com/p/bkv1/', caption: 'Drei Fehler bei der bKV-Einführung', likesCount: 120, commentsCount: 14, videoViewCount: 2200, timestamp: '2026-08-12T08:00:00.000Z', type: 'Video' },
+    { url: 'https://www.instagram.com/p/bkv2/', caption: 'So kommunizieren Arbeitgeber Benefits', likesCount: 90, commentsCount: 9, timestamp: '2026-08-10T08:00:00.000Z', type: 'Sidecar' },
+  ],
+  fetchSource: async url => ({ url, finalUrl: url, title: 'Benefits Fachportal', contentType: 'html', publishedAt: '2026-08-11', text: 'Regelmäßige Fachanalysen zu Mitarbeiterbindung, Fehlzeiten und Benefits für Arbeitgeber.' }),
+  analyze: async (_request, candidates) => {
+    assert.equal(candidates.length, 2);
+    assert.equal(candidates[0].detail.sampleSize, 2);
+    assert.match(candidates[1].detail.text, /Mitarbeiterbindung/);
+    return {
+      summary: 'Zwei wiederkehrend sinnvolle Quellen mit unterschiedlichen Stärken.',
+      topSources: [
+        { sourceRef: 1, displayName: 'bKV Praxis', score: 88, reason: 'Konkrete, aktuelle Praxisbeispiele.', strengths: ['Praxisnähe'], topics: ['bKV'], contentPatterns: ['Fehlerlisten'], evidence: ['Zwei echte Beiträge geprüft'], cadence: 'weekly', monitoringValue: 'high' },
+        { sourceRef: 2, displayName: 'Benefits Fachportal', score: 79, reason: 'Unabhängige Fachanalysen.', strengths: ['Tiefe'], topics: ['Benefits'], contentPatterns: ['Leitfäden'], evidence: ['Originalseite gelesen'], cadence: 'monthly', monitoringValue: 'high' },
+      ],
+      marketPatterns: ['Praxisbeispiele und Arbeitgeberkommunikation dominieren.'], blindSpots: ['Wenig belastbare ROI-Daten.'], nextQueries: ['bKV Fehlzeiten Studie'],
+    };
+  },
+});
+assert.equal(marketAnalysis.status, 'complete');
+assert.equal(marketAnalysis.sources.length, 2);
+assert.equal((await listOpportunityMarketAnalyses({ limit: 10 })).length, 1);
+await setOpportunityWatchSource({ ...marketAnalysis.sources[0], analysisId: marketAnalysis.id }, true);
+await setOpportunityWatchSource({ ...marketAnalysis.sources[1], analysisId: marketAnalysis.id }, true);
+assert.equal((await listOpportunityWatchSources()).length, 2);
+await setOpportunityWatchSource(marketAnalysis.sources[1], false);
+assert.deepEqual((await listOpportunityWatchSources()).map(source => source.handle), ['bkvpraxis']);
+assert.equal((await opportunityRadarCounts()).marketAnalyses, 1);
+assert.equal((await opportunityRadarCounts()).watchSources, 1);
+await assert.rejects(() => setOpportunityWatchSource({ name: 'Unsicher', type: 'website', url: 'javascript:alert(1)' }, true), /öffentliche URL/);
+await assert.rejects(() => runOpportunityMarketResearch({ topic: '' }, { search: async () => [] }), /Thema/);
+
 const originalFetch = globalThis.fetch;
 process.env.APIFY_TOKEN = 'test-token';
 let actorRequest;
@@ -107,5 +148,19 @@ delete process.env.GEMINI_API_KEY;
 const missingModelStatus = await opportunityRadarStatus();
 assert.equal(missingModelStatus.ready, false);
 assert.deepEqual(missingModelStatus.missing, ['GEMINI_API_KEY']);
+
+process.env.GEMINI_API_KEY = 'test-gemini-key';
+delete process.env.TAVILY_API_KEY;
+assert.deepEqual(opportunityMarketResearchStatus().missing, ['TAVILY_API_KEY']);
+
+const html = await fs.readFile(new URL('../public/opportunities.html', import.meta.url), 'utf8');
+const js = await fs.readFile(new URL('../public/opportunities.js', import.meta.url), 'utf8');
+const scoutSource = await fs.readFile(new URL('../opportunities/scout.js', import.meta.url), 'utf8');
+assert.match(html, /Marktanalyse & Quellenradar/);
+assert.match(js, /\/api\/opportunities\/market-research/);
+assert.match(js, /Regelmäßig beobachten/);
+assert.match(scoutSource, /watch-account/);
+assert.match(scoutSource, /watch-web/);
+assert.match(scoutSource, /curatedRotation/);
 
 console.log('IVA Chancenradar: OK');
