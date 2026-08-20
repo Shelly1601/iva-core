@@ -989,6 +989,21 @@ app.post('/device-agent/:deviceId/project-workflow-runs', async (req, res) => {
   try { res.status(201).json(await recordProjectWorkflowResult('heat-hero', req.body || {})); }
   catch (error) { res.status(400).json({ error: error.message }); }
 });
+
+// Der lokale iMac-Lauf braucht vor dem Start ausschließlich die beiden
+// projektbezogenen Ein-/Aus-Schalter. Der Endpunkt gibt bewusst keine
+// Projektnotizen, Dateien oder sonstigen internen Daten preis; Änderungen
+// bleiben weiterhin über die geschützte Projektakte authentifiziert.
+app.get('/public-api/projects/heat-hero/automation-flags', async (_req, res) => {
+  try {
+    const project = await getProject('heat-hero');
+    const allowedIds = new Set(['kfw-approval-morning', 'montage-required-fields-morning']);
+    const automations = Object.fromEntries((project?.automations || [])
+      .filter(item => allowedIds.has(item.id))
+      .map(item => [item.id, { enabled: item.enabled === true, status: item.status }]));
+    res.set('Cache-Control', 'no-store').json({ projectId: 'heat-hero', automations });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
 app.get('/booking-api/:slug/bookings/:bookingId.ics', async (req, res) => {
   const type = await getAppointmentTypeBySlug(String(req.params.slug || ''));
   const booking = (await listBookings({ limit: 1000 })).find(item => item.id === req.params.bookingId && item.appointmentTypeId === type?.id);
