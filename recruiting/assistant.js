@@ -2,7 +2,7 @@ const clean = (value, max = 20_000) => String(value ?? '').trim().slice(0, max);
 const list = (value, max = 30) => [...new Set((Array.isArray(value) ? value : []).map(item => clean(item, 160)).filter(Boolean))].slice(0, max);
 
 function normalized(value) {
-  return clean(value, 50_000).toLocaleLowerCase('de-DE').normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  return clean(value, 50_000).toLocaleLowerCase('de-DE').replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss').normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
 }
 
 function evidenceFor(text, criterion) {
@@ -17,18 +17,39 @@ function evidenceFor(text, criterion) {
 
 export function createCandidateSearchPlan(input = {}) {
   const mustHave = list(input.mustHave); const niceToHave = list(input.niceToHave);
-  const quoted = values => values.map(item => item.includes(' ') ? `"${item}"` : item).join(' AND ');
-  const booleanQuery = [quoted(mustHave), niceToHave.length ? `(${niceToHave.map(item => item.includes(' ') ? `"${item}"` : item).join(' OR ')})` : ''].filter(Boolean).join(' AND ');
+  if (!mustHave.length) throw new Error('Mindestens ein Muss-Kriterium fehlt');
+  const role = clean(input.role, 200);
+  const titles = list(input.titles, 12);
+  const excludedTerms = list(input.excludedTerms, 12);
+  const quote = item => item.includes(' ') ? `"${item}"` : item;
+  const roleTerms = titles.length ? titles : [role].filter(Boolean);
+  const orGroup = values => values.length > 1 ? `(${values.map(quote).join(' OR ')})` : values.map(quote).join('');
+  const criterionTerm = value => orGroup(clean(value, 180).split('|').map(item => item.trim()).filter(Boolean));
+  const exclusion = excludedTerms.slice(0, 3).map(item => `NOT ${quote(item)}`);
+  const chunks = [];
+  for (let index = 0; index < mustHave.length; index += 2) {
+    chunks.push([...(roleTerms.length ? [orGroup(roleTerms.slice(0, 4))] : []), ...mustHave.slice(index, index + 2).map(criterionTerm), ...exclusion].filter(Boolean).join(' AND '));
+  }
+  const queries = [...new Set(chunks.filter(Boolean))].slice(0, 5).map((query, index) => ({
+    id: `search-${index + 1}`,
+    label: index === 0 ? 'Kernsuche' : `Ergaenzung ${index + 1}`,
+    query,
+    url: `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(query)}`,
+  }));
+  const booleanQuery = queries[0]?.query || role;
   return {
-    role: clean(input.role, 200),
-    mode: 'manual-linkedin-recruiter-search',
+    role,
+    mode: 'manual-linkedin-free-search',
     booleanQuery,
+    queries,
+    naturalLanguageQuery: [role, mustHave.length ? `mit ${mustHave.join(', ')}` : '', input.locations?.length ? `in ${list(input.locations, 10).join(' oder ')}` : '', clean(input.remote, 50)].filter(Boolean).join(' '),
     filters: {
       location: list(input.locations, 10), remote: clean(input.remote, 50), languages: list(input.languages, 10),
       seniority: list(input.seniority, 10), industries: list(input.industries, 15),
     },
-    reviewSequence: ['Must-haves durch Belegstelle pruefen', 'Wechselmotivation im Gespraech klaeren', 'Nice-to-haves getrennt bewerten', 'Konditionen und Verfuegbarkeit klaeren'],
-    guardrails: ['Keine automatisierte LinkedIn-Profilabfrage ohne offiziellen Zugang', 'Kein Massen-Outreach', 'Keine Bewertung geschuetzter oder nicht jobrelevanter Merkmale'],
+    reviewSequence: ['LinkedIn-Suche manuell oeffnen', 'Interessante Profile per Link oder offizieller PDF uebernehmen', 'Must-haves durch Belegstelle pruefen', 'Wechselmotivation im Gespraech klaeren', 'Nice-to-haves getrennt bewerten'],
+    guardrails: ['Keine automatisierte LinkedIn-Profilabfrage', 'Kein Massen-Outreach', 'Keine Bewertung geschuetzter oder nicht jobrelevanter Merkmale', 'LinkedIn-Limits und Plattformregeln beachten'],
+    notice: 'Kostenloser Modus: IVA bereitet die Suche vor. Auswahl und Profilaufruf erfolgen manuell in LinkedIn; IVA liest keine Profile automatisiert aus.',
   };
 }
 

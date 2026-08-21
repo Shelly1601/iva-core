@@ -115,6 +115,21 @@ import { opportunityMarketResearchStatus, runOpportunityMarketResearch } from '.
 import { evaluateCapability, listCapabilityReviews } from './capabilities/evaluator.js';
 import { assessKnowledgeSourceCandidate, knowledgeLibraryStatus, listKnowledgeLibrary } from './knowledge/library.js';
 import { createCandidateSearchPlan, createInterviewGuide, screenResumeAgainstCriteria } from './recruiting/assistant.js';
+import {
+  createRecruitingCandidate,
+  createRecruitingRole,
+  deleteRecruitingCandidate,
+  deleteRecruitingRole,
+  getRecruitingCandidate,
+  getRecruitingRole,
+  listRecruitingCandidates,
+  listRecruitingRoles,
+  readRecruitingCandidateDocument,
+  recruitingSummary,
+  storeRecruitingCandidateDocument,
+  updateRecruitingCandidate,
+  updateRecruitingRole,
+} from './recruiting/store.js';
 import { calculateHeatLoad, calculateKfw458Funding, ENERGY_SOURCES } from './workspaces/energy-calculations.js';
 import { calculateHeatPumpElectricity, calculatePvPrice, pvPriceCatalog } from './workspaces/pv-price-calculator.js';
 import {
@@ -2033,6 +2048,66 @@ app.post('/api/knowledge-library/assess', (req, res) => {
 });
 
 // --- Recruiting: Vorbereitung und Belegpruefung, ohne autonomes Sourcing/Entscheiden ---
+app.get('/api/recruiting/status', async (_req, res) => res.json(await recruitingSummary()));
+app.get('/api/recruiting/roles', async (_req, res) => res.json(await listRecruitingRoles()));
+app.get('/api/recruiting/roles/:id', async (req, res) => {
+  const role = await getRecruitingRole(req.params.id);
+  res.status(role ? 200 : 404).json(role || { error: 'not found' });
+});
+app.post('/api/recruiting/roles', async (req, res) => {
+  try { res.status(201).json(await createRecruitingRole(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.patch('/api/recruiting/roles/:id', async (req, res) => {
+  try {
+    const role = await updateRecruitingRole(req.params.id, req.body || {});
+    res.status(role ? 200 : 404).json(role || { error: 'not found' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/recruiting/roles/:id', async (req, res) => {
+  try {
+    const role = await deleteRecruitingRole(req.params.id);
+    res.status(role ? 200 : 404).json(role ? { ok: true, deletedId: role.id } : { error: 'not found' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/api/recruiting/candidates', async (req, res) => res.json(await listRecruitingCandidates({ roleId: String(req.query?.roleId || ''), status: String(req.query?.status || '') })));
+app.get('/api/recruiting/candidates/:id', async (req, res) => {
+  const candidate = await getRecruitingCandidate(req.params.id);
+  res.status(candidate ? 200 : 404).json(candidate || { error: 'not found' });
+});
+app.post('/api/recruiting/roles/:id/candidates', async (req, res) => {
+  try {
+    const candidate = await createRecruitingCandidate(req.params.id, req.body || {});
+    res.status(candidate ? 201 : 404).json(candidate || { error: 'not found' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.patch('/api/recruiting/candidates/:id', async (req, res) => {
+  try {
+    const candidate = await updateRecruitingCandidate(req.params.id, req.body || {});
+    res.status(candidate ? 200 : 404).json(candidate || { error: 'not found' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/recruiting/candidates/:id', async (req, res) => {
+  try {
+    const candidate = await deleteRecruitingCandidate(req.params.id);
+    res.status(candidate ? 200 : 404).json(candidate ? { ok: true, deletedId: candidate.id } : { error: 'not found' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/recruiting/candidates/:id/document', express.raw({ type: ['application/pdf', 'text/plain', 'application/octet-stream'], limit: '10mb' }), async (req, res) => {
+  try {
+    const candidate = await storeRecruitingCandidateDocument(req.params.id, { name: req.query?.name, mime: req.query?.mime || req.headers['content-type'], buffer: req.body });
+    res.status(candidate ? 201 : 404).json(candidate || { error: 'not found' });
+  } catch (e) { res.status(e?.type === 'entity.too.large' ? 413 : 400).json({ error: e.message }); }
+});
+app.get('/api/recruiting/candidates/:id/document', async (req, res) => {
+  try {
+    const file = await readRecruitingCandidateDocument(req.params.id);
+    if (!file) return res.status(404).json({ error: 'not found' });
+    res.set('Content-Type', file.meta.mime || 'application/octet-stream');
+    res.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(file.meta.name)}`);
+    res.send(file.buffer);
+  } catch { res.status(404).json({ error: 'not found' }); }
+});
 app.post('/api/recruiting/search-plan', (req, res) => {
   try { res.json(createCandidateSearchPlan(req.body || {})); }
   catch (e) { res.status(400).json({ error: e.message }); }
@@ -2299,6 +2374,7 @@ app.get('/opportunities', (_req, res) => res.sendFile(path.join(__dirnameIva, 'p
 app.get('/voice-lab', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'voice-lab.html')));
 app.get('/control', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'control.html')));
 app.get('/projects', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'projects.html')));
+app.get('/recruiting', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'recruiting.html')));
 app.get('/health/qonekto', async (_req, res) => {
   const status = await qonektoStatus();
   if (status.reachable) {

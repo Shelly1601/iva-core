@@ -37,7 +37,8 @@ assert.equal(sourceCandidate.mayEnterRetrieval, true);
 
 const search = createCandidateSearchPlan({ role: 'Sales Manager', mustHave: ['B2B Vertrieb', 'CRM'], niceToHave: ['Energie'], locations: ['Bremen'] });
 assert.match(search.booleanQuery, /B2B Vertrieb/);
-assert.equal(search.mode, 'manual-linkedin-recruiter-search');
+assert.equal(search.mode, 'manual-linkedin-free-search');
+assert.ok(search.queries.every(item => item.url.startsWith('https://www.linkedin.com/search/results/people/')));
 
 const screening = screenResumeAgainstCriteria({
   role: 'Sales Manager',

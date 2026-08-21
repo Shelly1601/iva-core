@@ -4,9 +4,10 @@ import { z } from 'zod';
 export function recruitingSkill({ createCandidateSearchPlan, screenResumeAgainstCriteria, createInterviewGuide }) {
   return {
     createCandidateSearchPlan: tool({
-      description: 'Erstellt aus einem Stellenprofil eine belegbare manuelle LinkedIn-Recruiter-Suche mit Suchbegriffen, Filtern und Pruefreihenfolge. Ruft keine Profile ab und verschickt nichts.',
+      description: 'Erstellt aus einem Stellenprofil mehrere kostenlose manuelle LinkedIn-Personensuchen mit Suchbegriffen, Links, Filtern und Pruefreihenfolge. Ruft keine Profile ab und verschickt nichts.',
       parameters: z.object({
         role: z.string(), mustHave: z.array(z.string()).min(1), niceToHave: z.array(z.string()).optional(),
+        titles: z.array(z.string()).optional(), excludedTerms: z.array(z.string()).optional(),
         locations: z.array(z.string()).optional(), remote: z.string().optional(), languages: z.array(z.string()).optional(),
         seniority: z.array(z.string()).optional(), industries: z.array(z.string()).optional(),
       }),
