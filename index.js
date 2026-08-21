@@ -195,7 +195,7 @@ import {
 import { createAutomationOrchestrator } from './automations/orchestrator.js';
 import {
   buildAutomationReport,
-  deliverReportEmail,
+  deliverReportEmailWithTelegramFallback,
   deliverReportTelegram,
   isMondayInBerlin,
   reportingStatus,
@@ -2116,13 +2116,21 @@ async function updateProjectProtocolSummaries(options = {}) {
 const automationRunner = createAutomationOrchestrator({
   'report-email-daily': async ({ now }) => {
     const report = await buildAutomationReport('daily', now);
-    const delivery = await deliverReportEmail(report);
-    return { reportKey: report.key, delivery, summary: delivery.duplicate ? 'Tagesreport war bereits per E-Mail zugestellt.' : `Tagesreport per E-Mail an ${reportingStatus().recipient} zugestellt.` };
+    const mem = await loadMemory();
+    const delivery = await deliverReportEmailWithTelegramFallback(report, { chatId: mem.chatId, sendTelegram });
+    const summary = delivery.deliveredChannel === 'email'
+      ? `Tagesreport per E-Mail an ${reportingStatus().recipient} geprüft.`
+      : `E-Mail-Zustellung fehlgeschlagen; Tagesreport ersatzweise per Telegram zugestellt. Grund: ${delivery.emailError}`;
+    return { reportKey: report.key, delivery, summary };
   },
   'report-email-weekly': async ({ now }) => {
     const report = await buildAutomationReport('weekly', now);
-    const delivery = await deliverReportEmail(report);
-    return { reportKey: report.key, delivery, summary: delivery.duplicate ? 'Wochenreport war bereits per E-Mail zugestellt.' : `Wochenreport per E-Mail an ${reportingStatus().recipient} zugestellt.` };
+    const mem = await loadMemory();
+    const delivery = await deliverReportEmailWithTelegramFallback(report, { chatId: mem.chatId, sendTelegram });
+    const summary = delivery.deliveredChannel === 'email'
+      ? `Wochenreport per E-Mail an ${reportingStatus().recipient} geprüft.`
+      : `E-Mail-Zustellung fehlgeschlagen; Wochenreport ersatzweise per Telegram zugestellt. Grund: ${delivery.emailError}`;
+    return { reportKey: report.key, delivery, summary };
   },
   'daily-briefing': async () => sendBriefing(),
   'marketing-morning-report': async () => sendMarketingMorningReport(),

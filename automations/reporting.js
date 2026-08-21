@@ -6,7 +6,7 @@ import {
 } from './store.js';
 
 const TIME_ZONE = 'Europe/Berlin';
-const DEFAULT_RECIPIENT = 'Nadine.iva.inbox@gmail.com';
+const DEFAULT_RECIPIENT = 'n.sell@heat-hero.com';
 
 function localParts(value = new Date()) {
   const parts = new Intl.DateTimeFormat('en-GB', {
@@ -55,16 +55,50 @@ function countsFor(runs) {
   return counts;
 }
 
+export function collapseAutomationRunAttempts(runs) {
+  const groups = new Map();
+  for (const run of runs) {
+    const key = run.slotKey || run.id;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(run);
+  }
+  return [...groups.values()].map(attempts => {
+    const ordered = attempts.slice().sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt)));
+    const completed = ordered.find(item => item.status === 'completed');
+    const selected = completed || ordered.at(-1);
+    return { ...selected, attemptCount: ordered.length };
+  }).sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt)));
+}
+
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 }
 
-function reportLines(runs) {
-  if (!runs.length) return ['- Keine automatischen Läufe protokolliert.'];
+function statusLabel(status) {
+  return ({ completed: 'Erfolgreich durchgelaufen', failed: 'Fehler', blocked: 'Blockiert', skipped: 'Übersprungen', running: 'Läuft noch' })[status]
+    || String(status || 'Unbekannt');
+}
+
+function reportSections(runs) {
+  if (!runs.length) return ['Keine automatischen Läufe protokolliert.'];
   return runs.map(run => {
-    const marker = run.status === 'completed' ? 'OK' : run.status === 'failed' ? 'FEHLER' : run.status.toUpperCase();
-    return `- ${marker}: ${run.automationName} – ${run.summary || 'ohne Zusammenfassung'}`;
+    const attempts = Number(run.attemptCount || 1) > 1 ? ` · ${run.attemptCount} Versuche, als ein Lauf gezählt` : '';
+    const detail = run.summary === 'Automatischer Lauf fehlgeschlagen.' && run.error
+      ? `${run.summary} Grund: ${run.error}`
+      : (run.summary || 'Ohne Zusammenfassung.');
+    return `**${run.automationName}**\nStatus: ${statusLabel(run.status)}${attempts}\nErgebnis: ${detail}`;
   });
+}
+
+export function formatAutomationReportText({ title, counts, runs }) {
+  const overview = [
+    `**${title}**`,
+    `Läufe: ${counts.total}`,
+    `Erfolgreich: ${counts.completed}`,
+    `Fehler: ${counts.failed}`,
+    `Blockiert: ${counts.blocked}`,
+  ].join('\n');
+  return [overview, ...reportSections(runs)].join('\n\n');
 }
 
 export function reportingStatus() {
@@ -83,25 +117,16 @@ export async function buildAutomationReport(type = 'daily', now = new Date()) {
   const normalizedType = type === 'weekly' ? 'weekly' : 'daily';
   const periodKey = normalizedType === 'weekly' ? previousIsoWeek(now) : shiftLocalDate(now, -1);
   const allRuns = await listAutomationRuns({ limit: 1000 });
-  const runs = allRuns
+  const runs = collapseAutomationRunAttempts(allRuns
     .filter(run => normalizedType === 'weekly' ? runIsoWeek(run) === periodKey : runLocalDate(run) === periodKey)
-    .sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt)));
+    .sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt))));
   const counts = countsFor(runs);
   const label = normalizedType === 'weekly' ? `Wochenreport ${periodKey}` : `Tagesreport ${periodKey}`;
   const title = `IVA Workflow-${label}`;
-  const lines = [
-    `**${title}**`,
-    '',
-    `- Läufe: ${counts.total}`,
-    `- Erfolgreich: ${counts.completed}`,
-    `- Fehler: ${counts.failed}`,
-    `- Blockiert: ${counts.blocked}`,
-    '',
-    ...reportLines(runs),
-  ];
+  const text = formatAutomationReportText({ title, counts, runs });
   const tableRows = runs.map(run => `<tr><td>${escapeHtml(run.automationName)}</td><td>${escapeHtml(run.status)}</td><td>${escapeHtml(run.summary || '–')}</td></tr>`).join('');
   const html = `<!doctype html><html lang="de"><body style="font-family:Arial,sans-serif;color:#16233b"><h2>${escapeHtml(title)}</h2><p><b>${counts.completed}</b> erfolgreich · <b>${counts.failed}</b> Fehler · <b>${counts.blocked}</b> blockiert · ${counts.total} insgesamt</p><table cellpadding="8" cellspacing="0" border="1" style="border-collapse:collapse;border-color:#d8e1ef;width:100%"><thead><tr><th align="left">Workflow</th><th align="left">Status</th><th align="left">Ergebnis</th></tr></thead><tbody>${tableRows || '<tr><td colspan="3">Keine automatischen Läufe protokolliert.</td></tr>'}</tbody></table><p style="color:#62708a;font-size:12px">Automatisch erstellt von IVA · Zeitzone Europe/Berlin</p></body></html>`;
-  return saveAutomationReport({ key: `workflow-report:${normalizedType}:${periodKey}`, type: normalizedType, periodKey, title, text: lines.join('\n'), html, counts });
+  return saveAutomationReport({ key: `workflow-report:${normalizedType}:${periodKey}`, type: normalizedType, periodKey, title, text, html, counts });
 }
 
 async function requestWithRetry(url, options, fetchImpl) {
@@ -175,6 +200,23 @@ export async function deliverReportTelegram(report, { chatId, sendTelegram }) {
   } catch (error) {
     await recordAutomationDelivery({ dedupeKey, reportKey: report.key, channel: 'telegram', recipient: chatId, provider: 'telegram', status: 'failed', error: error.message });
     throw error;
+  }
+}
+
+export async function deliverReportEmailWithTelegramFallback(report, { chatId, sendTelegram, fetchImpl = fetch } = {}) {
+  try {
+    const email = await deliverReportEmail(report, { fetchImpl });
+    return { preferredChannel: 'email', deliveredChannel: 'email', email, telegram: null, emailError: '' };
+  } catch (error) {
+    const emailError = String(error?.message || 'Unbekannter E-Mail-Fehler.').slice(0, 800);
+    if (!chatId) throw new Error(`E-Mail-Report fehlgeschlagen (${emailError}); Telegram-Chat-ID für den Ersatzversand fehlt.`);
+    const fallbackReport = {
+      ...report,
+      key: `${report.key}:email-fallback`,
+      text: `**E-Mail-Zustellung fehlgeschlagen**\nDer Report an ${reportingStatus().recipient} konnte nicht per E-Mail zugestellt werden.\nGrund: ${emailError}\n\n${report.text}`,
+    };
+    const telegram = await deliverReportTelegram(fallbackReport, { chatId, sendTelegram });
+    return { preferredChannel: 'email', deliveredChannel: 'telegram', email: null, telegram, emailError };
   }
 }
 
