@@ -39,8 +39,8 @@ const EXPECTED_TASKS_TO_MODELS = {
   route: 'anthropic:claude-haiku-4-5-20251001',
   knowledge: 'anthropic:claude-sonnet-4-6',
   classification: 'anthropic:claude-haiku-4-5-20251001',
-  'marketing-assist': 'google:gemini-2.0-flash',
-  'marketing-market': 'google:gemini-2.0-flash',
+  'marketing-assist': 'google:gemini-3.6-flash',
+  'marketing-market': 'google:gemini-3.6-flash',
 };
 
 let fails = 0;

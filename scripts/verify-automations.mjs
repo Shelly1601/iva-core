@@ -24,6 +24,7 @@ check('Zentrale Automationsliste ist vorhanden', initial.length >= 10);
 check('CRM-Sync startet sicherheitshalber ausgeschaltet', initial.find(item => item.id === 'crm-qonekto-sync')?.enabled === false);
 check('E-Mail-Reports sind der aktive Hauptkanal', initial.filter(item => item.id.startsWith('report-email-')).every(item => item.enabled === true));
 check('Separater Telegram-Report startet ohne Doppelzustellung ausgeschaltet', initial.find(item => item.id === 'report-telegram-morning')?.enabled === false);
+check('Monatlicher Integrations-Check-up ist standardmäßig aktiv', initial.find(item => item.id === 'integration-checkup-monthly')?.enabled === true);
 await store.setAutomationEnabled('crm-qonekto-sync', true);
 check('Schalter wird persistent gespeichert', (await store.getAutomation('crm-qonekto-sync')).enabled === true);
 
@@ -56,6 +57,8 @@ check('Konfigurationsblocker wird nicht dreimal wiederholt', blockedFirst.run?.s
 
 const weeklyDefinition = initial.find(item => item.id === 'project-protocol-weekly');
 check('Verpasster Sonntagslauf behält montags denselben Wochenslot', automationSlotKey(weeklyDefinition, new Date('2026-08-17T08:00:00+02:00')).endsWith('2026-W33'));
+const monthlyDefinition = initial.find(item => item.id === 'integration-checkup-monthly');
+check('Monatlicher Check-up hat genau einen Slot je Kalendermonat', automationSlotKey(monthlyDefinition, new Date('2026-08-22T08:00:00+02:00')).endsWith('2026-08'));
 
 const report = await buildAutomationReport('weekly', fixedNow);
 check('Wochenreport hat eine stabile Perioden-ID', report.key === 'workflow-report:weekly:2026-W33');

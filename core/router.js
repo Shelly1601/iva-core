@@ -12,18 +12,20 @@
 // Vor dem Call optional:
 //   checkBudget(routed);   // wirft, wenn Monatsbudget hart ueberschritten
 import fs from 'fs/promises';
+import fsSync from 'node:fs';
 import { anthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const USAGE_FILE = DATA_DIR + '/model-usage.json';
+const INTEGRATION_CHECKUP_FILE = DATA_DIR + '/integration-checkup.json';
 
 // Grobe EUR-Preise pro 1 Mio. Tokens. Dienen NUR der Budget-Anzeige, nicht
 // der Abrechnung. Bei Provider-Preisaenderungen hier zentral pflegbar.
 const MODELS = {
   'anthropic:claude-sonnet-4-6':          { provider: 'anthropic', id: 'claude-sonnet-4-6',          eurPerMTokIn: 2.75, eurPerMTokOut: 13.80 },
   'anthropic:claude-haiku-4-5-20251001':  { provider: 'anthropic', id: 'claude-haiku-4-5-20251001',  eurPerMTokIn: 0.75, eurPerMTokOut:  3.68 },
-  'google:gemini-2.0-flash':              { provider: 'google',    id: 'gemini-2.0-flash',           eurPerMTokIn: 0.09, eurPerMTokOut:  0.37 },
+  'google:gemini-3.6-flash':              { provider: 'google',    id: 'gemini-3.6-flash',           eurPerMTokIn: 0.09, eurPerMTokOut:  0.37 },
 };
 
 // Task-Profile: 1:1 die heute im Code verwendeten Modelle. KEIN Verhaltens-
@@ -35,9 +37,9 @@ const TASK_DEFAULTS = {
   knowledge:          'anthropic:claude-sonnet-4-6',
   classification:     'anthropic:claude-haiku-4-5-20251001',
   whatsapp:           'anthropic:claude-haiku-4-5-20251001',
-  'marketing-assist': 'google:gemini-2.0-flash',
-  'marketing-market': 'google:gemini-2.0-flash',
-  'marketing-intelligence': 'google:gemini-2.0-flash',
+  'marketing-assist': 'google:gemini-3.6-flash',
+  'marketing-market': 'google:gemini-3.6-flash',
+  'marketing-intelligence': 'google:gemini-3.6-flash',
 };
 
 // Safety-Level pro Task-Profil (fuer Stufe 4 vorbereitet).
@@ -67,15 +69,43 @@ function googleClient() {
 // Format: '<provider>:<model-id>' (muss in MODELS registriert sein).
 function envKeyFor(task) { return 'IVA_MODEL_' + String(task).toUpperCase().replace(/-/g, '_'); }
 
+function loadRuntimeOverrides() {
+  try {
+    const parsed = JSON.parse(fsSync.readFileSync(INTEGRATION_CHECKUP_FILE, 'utf8'));
+    return parsed?.modelOverrides && typeof parsed.modelOverrides === 'object' ? parsed.modelOverrides : {};
+  } catch { return {}; }
+}
+
+let runtimeModelOverrides = loadRuntimeOverrides();
+
+function dynamicModelConfig(key) {
+  const [provider, id] = String(key || '').split(':', 2);
+  if (provider === 'google' && /^gemini-[a-z0-9.-]+$/i.test(id || '')) {
+    return { provider, id, eurPerMTokIn: 0.09, eurPerMTokOut: 0.37 };
+  }
+  if (provider === 'anthropic' && /^claude-[a-z0-9.-]+$/i.test(id || '')) {
+    return { provider, id, eurPerMTokIn: 2.75, eurPerMTokOut: 13.80 };
+  }
+  return null;
+}
+
+function modelConfig(key) { return MODELS[key] || dynamicModelConfig(key); }
+
+export function setRuntimeModelOverrides(overrides = {}) {
+  runtimeModelOverrides = overrides && typeof overrides === 'object' ? { ...overrides } : {};
+}
+
 function resolveModelKey(task) {
   const envKey = envKeyFor(task);
   const override = process.env[envKey];
   if (override) {
-    if (!MODELS[override]) {
+    if (!modelConfig(override)) {
       throw new Error(`Router: unbekanntes Modell "${override}" in ${envKey}. Erlaubt: ${Object.keys(MODELS).join(', ')}`);
     }
     return override;
   }
+  const runtimeOverride = runtimeModelOverrides[task];
+  if (runtimeOverride && modelConfig(runtimeOverride)) return runtimeOverride;
   const def = TASK_DEFAULTS[task];
   if (!def) throw new Error(`Router: unbekanntes Task-Profil "${task}". Erlaubt: ${Object.keys(TASK_DEFAULTS).join(', ')}`);
   return def;
@@ -86,7 +116,7 @@ function resolveModelKey(task) {
 //   { task, key, provider, modelId, safetyLevel, model } - "model" ist direkt in generateText({model: ...}) verwendbar.
 export function chooseModel({ task }) {
   const key = resolveModelKey(task);
-  const cfg = MODELS[key];
+  const cfg = modelConfig(key);
   let model;
   if (cfg.provider === 'anthropic') model = anthropic(cfg.id);
   else if (cfg.provider === 'google') model = googleClient()(cfg.id);
@@ -137,7 +167,7 @@ export async function currentSpendEUR(monthKey = currentMonthKey()) {
 // Nach jedem LLM-Call aufrufen. usage = { promptTokens, completionTokens } (AI-SDK-Shape).
 export async function recordUsage(routed, usage) {
   if (!routed || !usage) return;
-  const cfg = MODELS[routed.key];
+  const cfg = modelConfig(routed.key);
   if (!cfg) return;
   const tin = Number(usage.promptTokens || 0);
   const tout = Number(usage.completionTokens || 0);

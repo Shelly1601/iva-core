@@ -216,6 +216,7 @@ import {
   setAutomationEnabled,
 } from './automations/store.js';
 import { createAutomationOrchestrator } from './automations/orchestrator.js';
+import { formatCheckupTelegram, getIntegrationCheckupStatus, runIntegrationCheckup } from './maintenance/checkup.js';
 import {
   buildAutomationReport,
   deliverReportEmailWithTelegramFallback,
@@ -2332,6 +2333,12 @@ const automationRunner = createAutomationOrchestrator({
     return { deliveries, summary: `Separater Workflow-Report per Telegram geprüft (${deliveries.filter(item => item.delivered).length} neu zugestellt).` };
   },
   'opportunity-weekly': async () => sendWeeklyOpportunityPitch(),
+  'integration-checkup-monthly': async () => {
+    const result = await runIntegrationCheckup();
+    const mem = await loadMemory();
+    if (mem.chatId) await sendTelegram(mem.chatId, formatCheckupTelegram(result));
+    return { ...result, summary: `${result.summary}${mem.chatId ? ' Telegram-Bericht zugestellt.' : ' Telegram-Chat-ID fehlt; Ergebnis im Cockpit gespeichert.'}` };
+  },
   'crm-qonekto-sync': async () => {
     const result = await syncStrategyCustomersToQonekto();
     if (!result.enabled) return { status: 'blocked', summary: 'CRM-Qonekto-Sync ist durch die Integrationsfreigabe blockiert.', error: result.reason || 'CRM_QONEKTO_SYNC_ENABLED ist nicht aktiv.', ...result };
@@ -2340,6 +2347,15 @@ const automationRunner = createAutomationOrchestrator({
   'project-protocol-daily': async () => { await updateProjectProtocolSummaries({ finalizeDaily: true }); return { summary: 'Projekt-Tagesprotokolle finalisiert.' }; },
   'project-protocol-weekly': async () => { await updateProjectProtocolSummaries({ finalizeWeekly: true }); return { summary: 'Projekt-Wochenprotokolle finalisiert.' }; },
   'project-protocol-cleanup': async () => { const result = await cleanupExpiredProjectProtocols(); return { result, summary: 'Abgelaufene Projektprotokolle bereinigt.' }; },
+});
+
+app.get('/api/integration-checkup', async (_req, res) => {
+  try { res.json(await getIntegrationCheckupStatus()); }
+  catch (error) { res.status(500).json({ error: error.message }); }
+});
+app.post('/api/integration-checkup/run', async (_req, res) => {
+  try { res.json(await automationRunner.runAutomation('integration-checkup-monthly', { trigger: 'manual', slotKey: `integration-checkup-monthly:manual:${Date.now()}` })); }
+  catch (error) { res.status(500).json({ error: error.message }); }
 });
 
 for (const automation of AUTOMATION_DEFINITIONS) {

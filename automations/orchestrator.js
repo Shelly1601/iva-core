@@ -45,6 +45,7 @@ function lastWeeklyOccurrence(definition, parts) {
 
 export function automationSlotKey(definition, now = new Date()) {
   const parts = localParts(now);
+  if (definition.cadence === 'monthly') return `${definition.id}:monthly:${parts.year}-${parts.month}`;
   if (definition.cadence === 'weekly') return `${definition.id}:weekly:${isoWeekKey(lastWeeklyOccurrence(definition, parts))}`;
   if (definition.cadence === 'interval') {
     const minute = Math.floor(Number(parts.minute) / Number(definition.intervalMinutes || 5)) * Number(definition.intervalMinutes || 5);
@@ -58,6 +59,10 @@ function isDue(definition, now) {
   const parts = localParts(now);
   const minutes = Number(parts.hour) * 60 + Number(parts.minute);
   const scheduled = Number(definition.hour || 0) * 60 + Number(definition.minute || 0);
+  if (definition.cadence === 'monthly') {
+    const day = Number(parts.day);
+    return day > Number(definition.day || 1) || (day === Number(definition.day || 1) && minutes >= scheduled);
+  }
   if (definition.cadence === 'weekly') return true;
   return minutes >= scheduled;
 }
