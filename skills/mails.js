@@ -2,7 +2,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 
-export function mailsSkill({ loadMailAccounts, fetchInbox }) {
+export function mailsSkill({ loadMailAccounts, fetchInbox, fetchAllMailSources }) {
   return {
     getMails: tool({
       description: 'Liest die neuesten E-Mails. Optional aus einem benannten Ordner wie "Regler" und/oder nur aus einem bestimmten Konto. Feld "bereich" = Firma (aus Empfaenger).',
@@ -12,6 +12,10 @@ export function mailsSkill({ loadMailAccounts, fetchInbox }) {
         konto: z.string().min(1).optional(),
       }),
       execute: async ({ proKonto, ordner, konto }) => {
+        if (typeof fetchAllMailSources === 'function') {
+          const mails = await fetchAllMailSources(proKonto || 12, ordner || 'INBOX', konto || '');
+          return { count: mails.filter(x => !x.fehler).length, ordner: ordner || 'INBOX', mails };
+        }
         let all = [];
         let accounts = loadMailAccounts();
         if (konto) {

@@ -142,6 +142,14 @@ import { crmQonektoSyncStatus, normalizeCrmLeadForIvaWorkspace, runCrmQonektoSyn
 import { buildNameSearchVariants, resolveLeadName } from './crm/name-matching.js';
 import { suggestGermanAddresses } from './integrations/address-autocomplete.js';
 import {
+  completeGoogleGmailOAuth,
+  createGoogleGmailAuthUrl,
+  googleGmailStatus,
+  listGoogleGmailLabels,
+  listGoogleGmailMessages,
+  probeGoogleGmail,
+} from './integrations/google-gmail.js';
+import {
   attachLumitCustomerPackage,
   calculateLumitPriceQuote,
   createLumitServicedApplication,
@@ -383,6 +391,53 @@ async function fetchInbox(acc, limit, folder = 'INBOX') {
     }
   } finally { lock.release(); await client.logout(); }
   return out.reverse();
+}
+
+async function fetchGoogleGmailInbox(limit, folder = 'INBOX') {
+  const mailbox = String(folder || 'INBOX').trim() || 'INBOX';
+  const query = mailbox.toUpperCase() === 'INBOX' ? 'in:inbox' : `label:"${mailbox.replace(/"/g, '\\"')}"`;
+  const result = await listGoogleGmailMessages({ limit, query });
+  return result.messages.map(message => {
+    const addresses = [message.to, message.deliveredTo, message.from].filter(Boolean).join(', ');
+    return {
+      konto: 'IVA Gmail API',
+      ordner: mailbox,
+      bereich: bereichFor(addresses),
+      an: [message.to, message.deliveredTo].filter(Boolean).join(', '),
+      von: message.from,
+      von_name: '',
+      betreff: message.subject,
+      datum: message.date || null,
+      ungelesen: (message.labelIds || []).includes('UNREAD'),
+      snippet: message.snippet || '',
+      gmail_id: message.id,
+      gmail_labels: message.labelIds || [],
+    };
+  });
+}
+
+async function fetchAllMailSources(limit = 15, folder = 'INBOX', konto = '') {
+  const needle = String(konto || '').trim().toLowerCase();
+  const allowedGoogleAccount = String(process.env.GMAIL_ALLOWED_ACCOUNT || '').trim().toLowerCase();
+  const googleStatus = await googleGmailStatus().catch(() => ({ ready: false }));
+  let all = [];
+
+  const wantsGoogle = !needle || `iva gmail api ${allowedGoogleAccount}`.includes(needle);
+  if (googleStatus.ready && wantsGoogle) {
+    try { all = all.concat(await fetchGoogleGmailInbox(limit, folder)); }
+    catch (error) { all.push({ konto: 'IVA Gmail API', ordner: folder, fehler: error.message }); }
+  }
+
+  let accounts = loadMailAccounts();
+  if (googleStatus.ready && allowedGoogleAccount) {
+    accounts = accounts.filter(acc => String(acc.user || '').trim().toLowerCase() !== allowedGoogleAccount);
+  }
+  if (needle) accounts = accounts.filter(acc => `${acc.label} ${acc.user}`.toLowerCase().includes(needle));
+  for (const acc of accounts) {
+    try { all = all.concat(await fetchInbox(acc, limit, folder)); }
+    catch (error) { all.push({ konto: acc.label, ordner: folder, fehler: error.message }); }
+  }
+  return all;
 }
 
 async function fetchLeads(src) {
@@ -650,7 +705,7 @@ ${learnedCommunication}`;
 const ALL_SKILLS = {
   memory:    memorySkill({ loadMemory, saveMemory }),
   calendar:  calendarSkill({ getEventsRaw, getCalendlyEvents, fmtEvents, listAppointmentTypes, createAppointmentType }),
-  mails:     mailsSkill({ loadMailAccounts, fetchInbox }),
+  mails:     mailsSkill({ loadMailAccounts, fetchInbox, fetchAllMailSources }),
   crm:       crmSkill({ fetchAllLeads, searchHeatHeroLeads, updateHeatHeroLeadStatus, importCrmCustomerFile }),
   marketing: marketingSkill({ campaigns, brands, analyzeReferences, generateImage, generateContent }),
   research:  researchSkill({ askArchitect }),
@@ -1011,6 +1066,41 @@ app.get('/booking-api/:slug/bookings/:bookingId.ics', async (req, res) => {
   res.type('text/calendar; charset=utf-8').set('Content-Disposition', 'attachment; filename="IVA-Termin.ics"').send(createBookingIcs(booking, type));
 });
 
+// Google leitet nach der ausdruecklichen Gmail-Freigabe auf diesen oeffentlichen
+// Callback zurueck. Ein kurzlebiger, verschluesselt gespeicherter State schuetzt
+// vor fremden oder wiederholten Callback-Anfragen. Zugangsdaten erscheinen nie
+// in HTML, Logs oder der URL.
+app.get('/oauth/google/start', async (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.redirect(await createGoogleGmailAuthUrl()); }
+  catch (error) {
+    console.error('Google-Gmail OAuth-Start:', error.message);
+    res.status(503).type('text/plain').send('Die Google-Gmail-Verbindung ist noch nicht vollstaendig konfiguriert.');
+  }
+});
+app.get('/oauth/google/callback', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (req.query?.error) return res.status(400).type('text/plain').send('Die Google-Freigabe wurde nicht erteilt.');
+  try {
+    const result = await completeGoogleGmailOAuth({ code: String(req.query?.code || ''), state: String(req.query?.state || '') });
+    const heatHeroCount = Number(result.probe?.heatHeroMessages30d || 0);
+    const fundingCount = Number(result.probe?.fundingMessages30d || 0);
+    res.type('html').send(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>IVA Gmail verbunden</title><style>body{font:16px system-ui;max-width:720px;margin:64px auto;padding:0 24px;color:#172033}h1{color:#137333}.box{padding:20px;border:1px solid #d7dee8;border-radius:12px;background:#f8fafc}li{margin:10px 0}</style></head><body><h1>IVA Gmail ist verbunden</h1><div class="box"><p>Die Gmail-API ist erreichbar und der dauerhafte Zugriff wurde verschluesselt gespeichert.</p><ul><li>Heat-Hero-Nachrichten der letzten 30 Tage: <strong>${heatHeroCount}</strong></li><li>Foerderungs-Nachrichten der letzten 30 Tage: <strong>${fundingCount}</strong></li><li>Gmail-Labels erkannt: <strong>${Number(result.probe?.labels || 0)}</strong></li></ul></div><p>Dieses Fenster kann jetzt geschlossen werden.</p></body></html>`);
+  } catch (error) {
+    console.error('Google-Gmail OAuth-Callback:', error.message);
+    res.status(400).type('text/plain').send('Die Google-Gmail-Verbindung konnte nicht abgeschlossen werden. Bitte den Vorgang erneut starten.');
+  }
+});
+app.get('/health/google-gmail', async (_req, res) => {
+  const status = await googleGmailStatus();
+  res.set('Cache-Control', 'no-store').status(status.ready ? 200 : 503).json({
+    configured: status.configured,
+    authorized: status.authorized,
+    ready: status.ready,
+    lastCheckedAt: status.lastProbe?.checkedAt || null,
+  });
+});
+
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type', 'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS' };
 app.use('/api', (req, res, next) => {
   res.set(CORS);
@@ -1032,7 +1122,7 @@ function connector(id, label, ready, missing = [], detail = '') {
 }
 
 async function controlSnapshot() {
-  const [ops, qonektoResult, syncResult, voiceResult, knowledgeResult, opportunityResult, learningResult, automationsResult] = await Promise.all([
+  const [ops, qonektoResult, syncResult, voiceResult, knowledgeResult, opportunityResult, learningResult, automationsResult, googleGmailResult] = await Promise.all([
     operationsSummary(),
     qonektoStatus().catch(error => ({ configured: envReady('QONEKTO_MCP_TOKEN'), reachable: false, error: error.message })),
     crmQonektoSyncStatus().catch(error => ({ enabled: false, error: error.message })),
@@ -1041,6 +1131,7 @@ async function controlSnapshot() {
     opportunityRadarStatus().catch(error => ({ configured: false, ready: false, missing: ['APIFY_TOKEN'], error: error.message })),
     listVoiceLearning().catch(() => ({ improvementRequests: [] })),
     automationSummary().catch(error => ({ enabled: 0, disabled: 0, running: 0, failedToday: 0, reports: 0, error: error.message })),
+    googleGmailStatus().catch(error => ({ configured: false, authorized: false, ready: false, missing: ['Google-Gmail-Verbindung'], error: error.message })),
   ]);
   const marketing = marketingConnectorStatus();
   const metaWhatsApp = whatsappStatus();
@@ -1069,6 +1160,7 @@ async function controlSnapshot() {
     ),
     connector('calendar', 'Kalender', CALENDARS.some(item => item.url), ['PRIVAT_GOOGLE_ICS_URL oder weitere ICS-URL'], `${CALENDARS.filter(item => item.url).length} Kalender verbunden.`),
     connector('mail', 'E-Mail-Eingang', loadMailAccounts().length > 0, ['MAIL_1_USER/MAIL_1_PASS oder MAIL_2_USER/MAIL_2_PASS'], `${loadMailAccounts().length} Postfaecher konfiguriert.`),
+    connector('google-gmail', 'Google Gmail API', googleGmailResult.ready, googleGmailResult.missing || ['Google-Gmail einmal freigeben'], googleGmailResult.ready ? 'Direkter, bildschirmloser Gmail-Zugriff aktiv.' : 'OAuth ist vorbereitet; die einmalige Kontofreigabe fehlt noch.'),
     connector('report-email', 'Workflow-Reports per E-Mail', reportingStatus().ready, reportingStatus().missing, reportingStatus().ready ? `Versand über ${reportingStatus().provider} an ${reportingStatus().recipient}.` : 'Provider-Key und verifizierter Absender fehlen noch.'),
     connector('calendly', 'Calendly', envReady('CALENDLY_TOKEN'), ['CALENDLY_TOKEN'], 'Termine und Bucher.'),
     connector('iva-scheduling', 'IVA-Terminbuchung', schedulingStatus().liveReady, ['SCHEDULING_CALENDAR_WRITE_READY=true', 'SCHEDULING_MAIL_SEND_READY=true'], schedulingStatus().liveReady ? 'Eigene Terminlinks live.' : 'Terminarten im Vorschaumodus; Live-Schaltung bis zum Ende-zu-Ende-Test gesperrt.'),
@@ -1107,6 +1199,7 @@ async function controlSnapshot() {
       adviceKnowledge: knowledgeResult,
       opportunityRadar: opportunityResult,
       reporting: reportingStatus(),
+      googleGmail: googleGmailResult,
     },
     buildBacklog: (learningResult.improvementRequests || []).filter(item => !['done', 'rejected'].includes(item.status)).slice(-30).reverse(),
   };
@@ -1252,14 +1345,32 @@ app.post('/api/crm-qonekto-sync/run', async (req, res) => {
     res.status(502).json({ error: error.message });
   }
 });
-app.get('/api/mails', async (_req, res) => { let all = []; for (const acc of loadMailAccounts()) { try { all = all.concat(await fetchInbox(acc, 15)); } catch (e) {} } res.json(all); });
+app.get('/api/mails', async (_req, res) => res.json(await fetchAllMailSources(15)));
+app.get('/api/google-gmail/status', async (req, res) => {
+  try { res.json(await googleGmailStatus({ probe: req.query?.probe === '1' })); }
+  catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.get('/api/google-gmail/labels', async (_req, res) => {
+  try { res.json({ labels: await listGoogleGmailLabels() }); }
+  catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.get('/api/google-gmail/messages', async (req, res) => {
+  try {
+    res.json(await listGoogleGmailMessages({
+      limit: req.query?.limit,
+      query: String(req.query?.q || 'in:inbox'),
+      includeBody: req.query?.body === '1',
+    }));
+  } catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.post('/api/google-gmail/probe', async (_req, res) => {
+  try { res.json(await probeGoogleGmail()); }
+  catch (error) { res.status(502).json({ error: error.message }); }
+});
 app.get('/api/mails/klassifiziert', async (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query?.limit) || 15, 1), 50);
   try {
-    let mails = [];
-    for (const acc of loadMailAccounts()) {
-      try { mails = mails.concat(await fetchInbox(acc, limit)); } catch (e) { /* Account-Fehler ignorieren, andere weiter */ }
-    }
+    const mails = await fetchAllMailSources(limit);
     if (mails.length === 0) return res.json({ ergebnisse: [], _meta: { hinweis: 'keine Mails geladen (Konten / IMAP?)' } });
     const out = await klassifiziereMailBatch(mails);
     // Ergebnis fuer Traceability persistieren (letzter Lauf ueberschreibt).
