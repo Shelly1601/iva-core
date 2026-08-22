@@ -95,7 +95,29 @@ export function selectFirstFreePlanbarResource({ resources, bookings = [], start
   throw new Error('In der gewünschten Kalenderwoche ist keine zulässige Ressource vollständig von Montag bis Freitag frei.');
 }
 
+export function buildPipedriveCompletion({ year, week, currentStage, visibleStages }) {
+  isoWeekRange(year, week);
+  if (!Array.isArray(visibleStages) || visibleStages.length < 2) {
+    throw new Error('Die sichtbare Pipedrive-Phasenleiste ist unvollständig.');
+  }
+
+  const currentKey = normalizedText(currentStage);
+  const currentIndex = visibleStages.findIndex(stage => normalizedText(stage) === currentKey);
+  if (currentIndex < 0) throw new Error('Die aktuelle Pipedrive-Phase ist in der sichtbaren Phasenleiste nicht eindeutig belegt.');
+  if (currentIndex >= visibleStages.length - 1) throw new Error('Die aktuelle Pipedrive-Phase ist bereits die letzte sichtbare Phase.');
+
+  return {
+    fieldName: 'Einbautermin Kalenderwoche',
+    fieldValue: `KW${Number(week)}`,
+    sourceStage: String(visibleStages[currentIndex]).trim(),
+    targetStage: String(visibleStages[currentIndex + 1]).trim(),
+    allowAutomaticDealTitleWeekSuffix: true,
+  };
+}
+
 export const CUSTOMER_SCHEDULING_RULES = Object.freeze({
   excludedResources: [...EXCLUDED_RESOURCE_KEYS],
   allowedSourceStages: [...ALLOWED_SOURCE_STAGES],
+  pipedriveWeekField: 'Einbautermin Kalenderwoche',
+  allowAutomaticDealTitleWeekSuffix: true,
 });

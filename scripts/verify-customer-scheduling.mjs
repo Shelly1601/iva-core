@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   assertSchedulableSourceStage,
+  buildPipedriveCompletion,
   buildPlanbarCustomer,
   isExcludedPlanbarResource,
   isoWeekRange,
@@ -62,4 +63,28 @@ assert.throws(() => selectFirstFreePlanbarResource({
   endDateExclusive: '2026-09-26',
 }), /keine zulässige Ressource/);
 
-console.log('PASS Kunde terminieren: KW, Quellen-Gate, HH-Kunde, Ausschlüsse und erste freie Ressource');
+assert.deepEqual(buildPipedriveCompletion({
+  year: 2026,
+  week: 39,
+  currentStage: 'Montage einplanen',
+  visibleStages: [
+    'Montage einplanen',
+    'Montage Terminiert, RG+AB senden',
+    'Zahlungseingang prüfen',
+  ],
+}), {
+  fieldName: 'Einbautermin Kalenderwoche',
+  fieldValue: 'KW39',
+  sourceStage: 'Montage einplanen',
+  targetStage: 'Montage Terminiert, RG+AB senden',
+  allowAutomaticDealTitleWeekSuffix: true,
+});
+
+assert.throws(() => buildPipedriveCompletion({
+  year: 2026,
+  week: 39,
+  currentStage: 'Zahlungseingang prüfen',
+  visibleStages: ['Montage einplanen', 'Zahlungseingang prüfen'],
+}), /letzte sichtbare Phase/);
+
+console.log('PASS Kunde terminieren: KW, Quellen-Gate, HH-Kunde, Ausschlüsse, Ressource und Pipedrive-Abschluss');

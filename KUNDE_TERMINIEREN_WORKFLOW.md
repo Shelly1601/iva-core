@@ -1,6 +1,6 @@
 # Workflow „Kunde terminieren“
 
-Stand: 22. August 2026 · Version 1
+Stand: 22. August 2026 · Version 2
 
 ## Trigger und Ziel
 
@@ -8,7 +8,7 @@ Der Workflow startet auf Nadines Zuruf, zum Beispiel: **„Kunde terminieren: St
 
 ## 1. Verbindliche Quellen und Vorprüfung
 
-1. Pipedrive bleibt vollständig **rein lesend**.
+1. Pipedrive bleibt bis zur erfolgreich rückgeprüften Planbar-Anlage **rein lesend**. Erst der definierte Abschluss in Abschnitt 4 darf den Deal verändern.
 2. Der Deal muss entweder in **„Förderung beantragen“** oder in der live sichtbaren Stufe **„Montage einplanen“** liegen. „Montage terminieren“ ist Nadines gleichbedeutender Kurzname dafür.
 3. Identität nur bei eindeutiger Übereinstimmung von Kundenname und Deal verwenden. Vorhandene Adresse, E-Mail und Telefonnummer werden aus der belegten Kontaktperson gelesen.
 4. Auftragsnummer und Leistungsbeschreibung werden nach `PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md` ermittelt. Die Auftragsnummer stammt **immer aus dem sichtbaren Inhalt des unterschriebenen Angebots**. Deal-Titel, Pipedrive-Auftragsfeld und Dateiname sind dafür niemals maßgeblich. Original und unterschriebene Fassung werden abgeglichen; kann der Inhalt der unterschriebenen Fassung nicht sicher gelesen werden, blockiert das den Planbar-Schreibschritt.
@@ -34,10 +34,19 @@ Der Workflow startet auf Nadines Zuruf, zum Beispiel: **„Kunde terminieren: St
 4. Gibt es keine vollständig freie zulässige Ressource, wird nichts angelegt und der Fall mit den belegten Kalenderdaten gemeldet.
 5. Der Termin erhält den vorhandenen oder neu angelegten Planbar-Kunden, die belegte Auftragsnummer und die nach dem Vervollständigungs-Workflow erzeugte Kurzbeschreibung.
 
-## 4. Sicherheits- und Abschlussprüfung
+## 4. Pipedrive-Abschluss
+
+1. Erst wenn Kunde und Montagetermin in Planbar gespeichert und sichtbar rückgeprüft sind, wird der zugehörige Pipedrive-Deal verändert.
+2. Im linken Bereich **Dealinfo** das Feld **„Einbautermin Kalenderwoche“** auf `KW` direkt gefolgt von der zweistelligen oder einstelligen ISO-Kalenderwoche setzen, zum Beispiel `KW39`, und speichern.
+3. Danach den Deal oben in der sichtbaren Phasenleiste **genau eine Phase nach rechts** verschieben. Die Zielphase wird aus der aktuell sichtbaren Reihenfolge ermittelt und nicht geraten. Im geprüften Fall führte `Montage einplanen` zu `Montage Terminiert, RG+AB senden`.
+4. Pipedrive darf die Kalenderwoche dabei automatisch an den Deal-Titel anhängen. Ein Titel wie `… SOL LIVINGKW39` ist gewollt und wird nicht zurückkorrigiert.
+5. Feldwert, ausgewählte Phase und gegebenenfalls automatisch ergänzter Deal-Titel werden nach den Schreibschritten sichtbar rückgeprüft. Ist die aktuelle Phase bereits die letzte sichtbare Phase, wird nicht verschoben und der Fall gemeldet.
+6. Das Eintragen der Kalenderwoche und der Phasenwechsel sind externe Schreibaktionen und werden unmittelbar vor der Ausführung gemeinsam bestätigt.
+
+## 5. Sicherheits- und Abschlussprüfung
 
 - Keine Teilanlage: Ohne eindeutige Identität, vollständige Kontaktdaten, widerspruchsfreie Auftragsnummer und belegte Beschreibung wird weder Kunde noch Termin gespeichert.
 - Direkt vor dem Speichern Zeitraum, Ressource, Kunde, Auftragsnummer und Beschreibung erneut prüfen.
 - Nach dem Speichern Planbar neu laden und Kundenstammdaten, Ressource, Montag–Freitag-Zeitraum, Auftragsnummer und Beschreibung sichtbar rückprüfen.
-- Das Ergebnis nennt knapp Kunde, KW, Ressource und Verifikationsstatus. Personenbezogene Kontaktdaten werden nicht im Bericht wiederholt.
+- Das Ergebnis nennt knapp Kunde, KW, Ressource, Pipedrive-Zielphase und Verifikationsstatus. Personenbezogene Kontaktdaten werden nicht im Bericht wiederholt.
 - Neue Regeln werden versioniert in diesem Dokument und in den automatisierten Prüfungen ergänzt.
