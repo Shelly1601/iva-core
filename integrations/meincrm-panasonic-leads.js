@@ -1,5 +1,5 @@
 const DEFAULT_REST_BASE = 'https://qqyoqshjwpkmerilhjus.supabase.co/rest/v1';
-const PANASONIC_SOURCE = 'Panasonic';
+const PANASONIC_SOURCE = 'heathero-intern';
 const SALES_ADVISOR = Object.freeze({
   name: 'Vertrieb Innendienst',
   email: 'n.sell@heat-hero.com',

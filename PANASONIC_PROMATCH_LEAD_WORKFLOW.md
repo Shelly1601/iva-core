@@ -1,4 +1,4 @@
-# Panasonic-ProMatch-Leads → Heat Hero in Mein CRM
+# Panasonic-ProMatch-Leads → Mein CRM
 
 Status: **aktiv**. Täglicher Lauf um 10:00 Uhr (Europe/Berlin), mit Bericht nach jedem Lauf.
 
@@ -10,8 +10,8 @@ Status: **aktiv**. Täglicher Lauf um 10:00 Uhr (Europe/Berlin), mit Bericht nac
 - Portal: ausschließlich `https://promatch.panasonicproclub.com/`
 - ProMatch-Konto: `n.sell@heat-hero.com`
 - Ente Auth: unterer Eintrag `phvaceu-prod / Panasonic`, niemals der A.-Lausig-Eintrag
-- CRM: aktive Heat-Hero-Projektdatenbank in Mein CRM
-- Quelle: `Panasonic`
+- CRM: Mein CRM; die große angebundene Heat-Hero-Datenbank darf verwendet werden
+- Quelle exakt: `heathero-intern`
 - Fachberater/VP: `Vertrieb Innendienst`
 
 Passwörter, API-Schlüssel und Einmalcodes werden weder gespeichert noch protokolliert.
@@ -25,7 +25,7 @@ Passwörter, API-Schlüssel und Einmalcodes werden weder gespeichert noch protok
 5. Kontaktdaten, ProMatch-ID und IMP-Anfragenummer vollständig erfassen.
 6. Leads gesammelt über `POST /api/crm/panasonic-leads/import` an IVA übergeben. Der Endpunkt ist durch den vorhandenen IVA-Bearer-Token geschützt.
 7. IVA prüft vor jeder Anlage auf ProMatch-ID, E-Mail und Telefonnummer. Ein eindeutiger Treffer wird als Dublette zurückgegeben und nicht erneut angelegt.
-8. Neue Datensätze werden ausschließlich in die aktive Heat-Hero-Projektdatenbank geschrieben, mit Status `neu`, Quelle `Panasonic` und Fachberater `Vertrieb Innendienst`.
+8. Neue Datensätze werden mit Quelle `heathero-intern` und Fachberater/VP `Vertrieb Innendienst` gespeichert. Die große angebundene Heat-Hero-Datenbank darf dafür verwendet werden; entscheidend ist die exakte Quelle.
 9. Pro Lead muss die API-Antwort entweder `created` mit CRM-ID oder `duplicate` mit vorhandener CRM-ID enthalten. Bei fachlichem Fehler erfolgt keine manuelle UI-Ausweichanlage.
 10. Ist ein Portal-Lead bereits angenommen, aber noch nicht im CRM, wird nur der CRM-Import nachgeholt.
 

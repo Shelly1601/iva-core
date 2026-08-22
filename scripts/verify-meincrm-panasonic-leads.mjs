@@ -32,7 +32,7 @@ const result = await importPanasonicLeadsToMeinCrm([
 
 assert.equal(result.created, 1);
 assert.equal(result.duplicates, 1);
-assert.equal(result.source, 'Panasonic');
+assert.equal(result.source, 'heathero-intern');
 assert.equal(result.advisor.id, 77);
 assert.equal(meinCrmPanasonicPolicy.advisor.email, 'n.sell@heat-hero.com');
 
@@ -40,7 +40,7 @@ const advisorInsert = calls.find(call => call.url.includes('/vertriebler') && ca
 assert.deepEqual(advisorInsert.body, { name: 'Vertrieb Innendienst', email: 'n.sell@heat-hero.com', user_id: '7ef67f00-25a1-4bfd-8f42-a8aaecb31b75' });
 
 const leadInsert = calls.find(call => call.url.includes('/leads') && call.method === 'POST');
-assert.equal(leadInsert.body.quelle, 'Panasonic');
+assert.equal(leadInsert.body.quelle, 'heathero-intern');
 assert.equal(leadInsert.body.project_id, '2e8f1cf6-4579-4d07-8c65-5b1ac4e954a8');
 assert.equal(leadInsert.body.assigned_user_id, '7ef67f00-25a1-4bfd-8f42-a8aaecb31b75');
 assert.equal(leadInsert.body.fachberater_id, 77);
@@ -101,7 +101,7 @@ assert.equal(dedicatedResult.created, 1);
 assert.equal(dedicatedResult.projectScope, 'heat-hero-external-database');
 assert.equal(dedicatedResult.advisor.id, 67);
 const dedicatedLeadInsert = dedicatedCalls.find(call => call.url.includes('/leads') && call.method === 'POST');
-assert.equal(dedicatedLeadInsert.body.quelle, 'Panasonic');
+assert.equal(dedicatedLeadInsert.body.quelle, 'heathero-intern');
 assert.equal(dedicatedLeadInsert.body.status_detail, 'neu');
 assert.equal(dedicatedLeadInsert.body.vp_id, 67);
 assert.equal(dedicatedLeadInsert.body.fachberater, 'Vertrieb Innendienst');
