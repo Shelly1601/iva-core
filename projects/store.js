@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
-import { buildPlanbarSchedulingExtras } from '../operations/customer-scheduling.js';
+import { buildPlanbarSchedulingExtras, normalizePlanbarCapacitySnapshot } from '../operations/customer-scheduling.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const STORE_FILE = path.join(DATA_DIR, 'projects.json');
@@ -51,6 +51,24 @@ const HEAT_HERO_PROJECT = {
       { workflowId: 'planbar-weekly-export', workflowName: 'Planbar-Kundenliste und Hersteller-PDFs', cadence: 'weekly', weekday: 5 },
     ],
     note: 'Jede Datei zeigt Typ, Aufbewahrungsdauer und konkretes automatisches Löschdatum als Tags.',
+  },
+  planbarCapacity: {
+    updatedAt: '2026-08-22T15:48:00.000Z',
+    source: 'Planbar · sichtbare Blöcke „Geblockt für Kunde ENTER“',
+    excludedResources: ['Dawid Service', 'Antonio Lausic'],
+    weeks: [
+      { isoYear: 2026, week: 35, freeSlots: 0 },
+      { isoYear: 2026, week: 36, freeSlots: 1 },
+      { isoYear: 2026, week: 37, freeSlots: 7 },
+      { isoYear: 2026, week: 38, freeSlots: 5 },
+      { isoYear: 2026, week: 39, freeSlots: 7 },
+      { isoYear: 2026, week: 40, freeSlots: 4 },
+      { isoYear: 2026, week: 41, freeSlots: 2 },
+      { isoYear: 2026, week: 42, freeSlots: 5 },
+      { isoYear: 2026, week: 43, freeSlots: 4 },
+      { isoYear: 2026, week: 44, freeSlots: 1 },
+      { isoYear: 2026, week: 45, freeSlots: 1 },
+    ],
   },
   areas: [
     {
@@ -490,6 +508,11 @@ function normalizeProject(input = {}, fallback = {}) {
       : (fallback.phases || input.roadmap || fallback.roadmap || [])),
     automations,
     runLog,
+    planbarCapacity: normalizePlanbarCapacitySnapshot(
+      Array.isArray(input.planbarCapacity?.weeks) && input.planbarCapacity.weeks.length
+        ? input.planbarCapacity
+        : fallback.planbarCapacity,
+    ),
     protocolPolicy: {
       enabled: input.protocolPolicy?.enabled ?? fallback.protocolPolicy?.enabled ?? false,
       folderName: clean(input.protocolPolicy?.folderName || fallback.protocolPolicy?.folderName, 180) || 'Workflow-Protokolle',
@@ -603,7 +626,7 @@ export async function updateProject(id, patch = {}) {
     const index = store.projects.findIndex(item => item.id === clean(id, 100));
     if (index < 0) return null;
     const current = store.projects[index];
-    store.projects[index] = normalizeProject({ ...current, ...patch, id: current.id, logo: current.logo, notes: current.notes, customerSchedulingRequests: current.customerSchedulingRequests, folders: current.folders, files: current.files }, current);
+    store.projects[index] = normalizeProject({ ...current, ...patch, id: current.id, logo: current.logo, notes: current.notes, customerSchedulingRequests: current.customerSchedulingRequests, planbarCapacity: current.planbarCapacity, folders: current.folders, files: current.files }, current);
     return publicProject(store.projects[index]);
   });
 }
@@ -656,6 +679,17 @@ export async function addCustomerSchedulingRequest(id, input = {}) {
       additionalInfo: input.additionalInfo,
     });
     project.customerSchedulingRequests = [request, ...(project.customerSchedulingRequests || [])].slice(0, 100);
+    return publicProject(project);
+  });
+}
+
+export async function updatePlanbarCapacity(id, input = {}) {
+  const snapshot = normalizePlanbarCapacitySnapshot(input);
+  if (!snapshot.weeks.length) throw new Error('Mindestens eine gültige Kalenderwoche ist erforderlich.');
+  return mutate(store => {
+    const project = store.projects.find(item => item.id === clean(id, 100));
+    if (!project) return null;
+    project.planbarCapacity = snapshot;
     return publicProject(project);
   });
 }

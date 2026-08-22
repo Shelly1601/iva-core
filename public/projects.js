@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id);
 const TOKEN_KEY = 'iva_token';
-const state = { projects: [], current: null, activeFolderId: 'all', uploading: false, logoUrls: new Map() };
+const state = { projects: [], current: null, activeFolderId: 'all', capacityOffset: 0, uploading: false, logoUrls: new Map() };
 
 function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
 function esc(value) { return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
@@ -39,13 +39,28 @@ function schedulingWeekOptions() {
   return options.join('');
 }
 
+function planbarCapacityOverview(project) {
+  const snapshot = project.planbarCapacity;
+  const allWeeks = Array.isArray(snapshot?.weeks) ? snapshot.weeks : [];
+  if (!allWeeks.length) return '<div class="capacity-overview"><div class="muted">Freie Planbar-Plätze wurden noch nicht eingelesen.</div></div>';
+  const size = 4;
+  const maxOffset = Math.max(0, allWeeks.length - size);
+  const offset = Math.max(0, Math.min(maxOffset, state.capacityOffset));
+  const weeks = allWeeks.slice(offset, offset + size);
+  const total = weeks.reduce((sum, item) => sum + Number(item.freeSlots || 0), 0);
+  const next = allWeeks.find(item => Number(item.freeSlots) > 0);
+  const range = weeks.length ? `KW ${weeks[0].week}–${weeks.at(-1).week}` : '';
+  const cards = weeks.map(item => `<div class="capacity-week${item.freeSlots > 0 ? ' has-slots' : ''}"><span>KW ${esc(item.week)}</span><strong>${esc(item.freeSlots)}</strong><small>${item.freeSlots === 1 ? 'freier Platz' : 'freie Plätze'}</small></div>`).join('');
+  return `<div class="capacity-overview"><div class="capacity-head"><div><div class="eyebrow">Freie Montageplätze</div><div class="capacity-summary"><strong>${esc(total)} freie Plätze</strong> in ${esc(range)}${next ? ` · nächster freier Termin: <b>KW ${esc(next.week)}/${esc(next.isoYear)}</b>` : ''}</div></div><div class="capacity-nav"><button id="capacityPrev" type="button" aria-label="Vier Wochen zurück" ${offset === 0 ? 'disabled' : ''}>←</button><button id="capacityNext" type="button" aria-label="Vier Wochen weiter" ${offset === maxOffset ? 'disabled' : ''}>→</button></div></div><div class="capacity-grid">${cards}</div><div class="capacity-source">Stand ${esc(formatDate(snapshot.updatedAt))} · gezählt werden nur „Geblockt für Kunde ENTER“ · ohne Dawid Service und Antonio Lausic</div></div>`;
+}
+
 function customerSchedulingSection(project) {
   if (project.id !== 'heat-hero') return '';
   const latest = (project.customerSchedulingRequests || [])[0];
   const latestSummary = latest
     ? `Zuletzt vorgemerkt: <b>${esc(latest.customerName)}</b> · KW ${esc(latest.week)}/${esc(latest.isoYear)} · Material vorher: ${latest.materialDeliverySpace ? 'Ja' : 'Nein'} · geschützt: ${latest.theftWeatherProtected ? 'Ja' : 'Nein'}${latest.additionalInfo ? ' · Zusatzinfo vorhanden' : ''}`
     : 'Noch kein Kunde vorgemerkt.';
-  return `<section class="workflow-launcher" aria-labelledby="customerSchedulingTitle"><div class="workflow-launcher-head"><div><div class="eyebrow">Direkt oben · operativer Workflow</div><h2 id="customerSchedulingTitle">Kunde terminieren</h2><div class="muted">Kundenname, Kalenderwoche und Materialannahme erfassen. IVA übernimmt die Angaben später in die Planbar-Beschreibung.</div></div><span class="workflow-tag">Planbar + Pipedrive</span></div><form class="schedule-form" id="customerSchedulingForm"><label><span>Kundenname</span><input id="scheduleCustomerName" name="customerName" maxlength="220" autocomplete="off" required placeholder="Vorname Nachname"></label><label><span>Kalenderwoche</span><select id="scheduleWeek" name="week" required>${schedulingWeekOptions()}</select></label><button class="btn primary" type="submit">Workflow vorbereiten</button><div class="schedule-checks"><label class="schedule-check"><input id="scheduleMaterialDeliverySpace" type="checkbox"><span class="schedule-question">Hat der Kunde Platz, Material einige Tage vor Montagebeginn anzunehmen?</span><span class="schedule-answer" data-answer-for="scheduleMaterialDeliverySpace">Nein</span></label><label class="schedule-check"><input id="scheduleTheftWeatherProtected" type="checkbox"><span class="schedule-question">Diebstahl- und wettersicher?</span><span class="schedule-answer" data-answer-for="scheduleTheftWeatherProtected">Nein</span></label></div><label class="schedule-extra"><span>Zusatzinfo · optional</span><textarea id="scheduleAdditionalInfo" maxlength="2000" placeholder="Nur ausfüllen, wenn diese Information zusätzlich in Planbar stehen soll."></textarea></label></form><div class="schedule-latest">${latestSummary}</div></section>`;
+  return `<section class="workflow-launcher" aria-labelledby="customerSchedulingTitle"><div class="workflow-launcher-head"><div><div class="eyebrow">Direkt oben · operativer Workflow</div><h2 id="customerSchedulingTitle">Kunde terminieren</h2><div class="muted">Kundenname, Kalenderwoche und Materialannahme erfassen. IVA übernimmt die Angaben später in die Planbar-Beschreibung.</div></div><span class="workflow-tag">Planbar + Pipedrive</span></div>${planbarCapacityOverview(project)}<form class="schedule-form" id="customerSchedulingForm"><label><span>Kundenname</span><input id="scheduleCustomerName" name="customerName" maxlength="220" autocomplete="off" required placeholder="Vorname Nachname"></label><label><span>Kalenderwoche</span><select id="scheduleWeek" name="week" required>${schedulingWeekOptions()}</select></label><button class="btn primary" type="submit">Workflow vorbereiten</button><div class="schedule-checks"><label class="schedule-check"><input id="scheduleMaterialDeliverySpace" type="checkbox"><span class="schedule-question">Hat der Kunde Platz, Material einige Tage vor Montagebeginn anzunehmen?</span><span class="schedule-answer" data-answer-for="scheduleMaterialDeliverySpace">Nein</span></label><label class="schedule-check"><input id="scheduleTheftWeatherProtected" type="checkbox"><span class="schedule-question">Diebstahl- und wettersicher?</span><span class="schedule-answer" data-answer-for="scheduleTheftWeatherProtected">Nein</span></label></div><label class="schedule-extra"><span>Zusatzinfo · optional</span><textarea id="scheduleAdditionalInfo" maxlength="2000" placeholder="Nur ausfüllen, wenn diese Information zusätzlich in Planbar stehen soll."></textarea></label></form><div class="schedule-latest">${latestSummary}</div></section>`;
 }
 
 function forgetProjectLogo(projectId) {
@@ -171,6 +186,14 @@ function collapseProjectSections() {
 }
 
 function bindProjectActions() {
+  const capacityPrev = $('capacityPrev');
+  const capacityNext = $('capacityNext');
+  if (capacityPrev) capacityPrev.onclick = () => { state.capacityOffset = Math.max(0, state.capacityOffset - 4); render(); };
+  if (capacityNext) capacityNext.onclick = () => {
+    const maxOffset = Math.max(0, (state.current?.planbarCapacity?.weeks?.length || 0) - 4);
+    state.capacityOffset = Math.min(maxOffset, state.capacityOffset + 4);
+    render();
+  };
   const schedulingForm = $('customerSchedulingForm');
   if (schedulingForm) {
     schedulingForm.onsubmit = requestCustomerScheduling;
@@ -254,6 +277,7 @@ async function toggleProjectAutomation(input) {
 function selectProject(id) {
   state.current = state.projects.find(project => project.id === id) || state.projects[0] || null;
   state.activeFolderId = 'all';
+  state.capacityOffset = 0;
   if (state.current) history.replaceState({}, '', `/projects?id=${encodeURIComponent(state.current.id)}`);
   else history.replaceState({}, '', '/projects');
   render();

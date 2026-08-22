@@ -33,10 +33,10 @@
 
 ## Pipedrive- und Dokumentprüfung
 
-1. Pipedrive wird nur lesend verwendet. Den Kunden eindeutig finden und das unterschriebene Angebot öffnen.
-2. Auftragsnummer beziehungsweise Angebotsnummer aus dem unterschriebenen Angebot übernehmen. Bei mehreren oder widersprüchlichen Nummern keine Änderung durchführen.
+1. Pipedrive wird nur lesend verwendet. Den Kunden eindeutig finden und dealweit nach dem Angebot suchen. Dateien, deren Name oder Beschreibung ausdrücklich `unterschriebenes Angebot` nennt, haben Vorrang.
+2. Auftragsnummer beziehungsweise Angebotsnummer aus dem unterschriebenen Angebot übernehmen. Wird trotz vollständiger Suche kein unterschriebenes Angebot gefunden, darf ersatzweise eine PDF verwendet werden, deren Angebotsnummer eindeutig mit der Nummer im Deal und dem Kunden übereinstimmt. Bei mehreren oder widersprüchlichen Nummern keine Änderung durchführen.
 3. Das unterschriebene Angebot visuell auf vollständig durchgestrichene Positionen sowie die Auswahl der Speichervariante prüfen. Bei `Variante A` (zwei Einzelspeicher) und `Variante B` (Kombispeicher) gilt ein sichtbares Häkchen als Auswahl.
-4. Über die eindeutige Auftrags-/Angebotsnummer das zugehörige Original-PDF in Pipedrive öffnen. Original und unterschriebene Fassung müssen zum selben Vorgang gehören.
+4. Über die eindeutige Auftrags-/Angebotsnummer das zugehörige Original-PDF in Pipedrive öffnen. Original und unterschriebene Fassung müssen zum selben Vorgang gehören. Im erlaubten Ersatzfall ist die eindeutig nummerngleiche PDF selbst der fachliche Beleg; das bloße Fehlen einer sichtbaren Unterschrift blockiert den Fall dann nicht.
 5. Die unterschriebene Fassung ist für vollständig gestrichene Positionen und die sichtbare Auswahl zwischen `Variante A` und `Variante B` maßgeblich. Sonstige handschriftliche Randnotizen oder Markierungen sind für die Planbar-Beschreibung irrelevant, solange sie keine vollständige Position streichen und keine Speichervariante ändern. Ist bei keiner Speichervariante ein Häkchen gesetzt, wird aus handschriftlichen Notizen keine Auswahl abgeleitet; anschließend gilt die reguläre Speicher-/TMB-Logik. Nur eine unleserliche oder widersprüchliche Änderung an einer ganzen Position oder an der Speicherwahl blockiert den Fall.
 
 ## Beschreibung bilden
@@ -52,10 +52,20 @@
 - Enthält das Angebot nur einen Warmwasserspeicher, zusätzlich `Pufferspeicher` aufnehmen.
 - Enthält das Angebot nur einen Pufferspeicher, zusätzlich `Warmwasserspeicher` aufnehmen.
 - Sind Warmwasser- und Pufferspeicher bereits enthalten, nichts ergänzen.
-- Ist keiner von beiden enthalten, die TMB für den vollständigen Keller-/Transportweg einschließlich aller relevanten Türen prüfen:
-  - Nur wenn sämtliche benötigten Maße eindeutig **größer als 1,80 m Höhe und größer als 70 cm Breite** sind, `Kombispeicher` ergänzen.
-  - Ist mindestens ein belegtes Maß nicht größer als eine der Grenzen, `zwei Einzelspeicher` ergänzen.
-  - Fehlen Maße oder sind sie widersprüchlich/mehrdeutig, keine Speicherart raten. Die Speicherangabe bleibt dann offen; der übrige eindeutig belegte Fall wird trotzdem vervollständigt und die fehlende Speicherangabe unter `Manuell prüfen` gemeldet.
+- Ist keiner von beiden enthalten und ist keine Variante A/B sichtbar ausgewählt, die TMB prüfen:
+  - Die Standhöhe am endgültigen Aufstellort ist das vorrangige Höhenmaß. Bei mindestens **1,80 m Standhöhe** ist ein `Kombispeicher` grundsätzlich möglich; unter 1,80 m werden `zwei Einzelspeicher` ergänzt.
+  - Eine niedrigere Türhöhe ist für sich allein kein Ausschlussgrund, weil der Speicher durch die Tür gekippt werden kann. Sie darf deshalb nicht zur Einstufung `zwei Einzelspeicher` führen.
+  - Die Breite des vollständigen Transportwegs einschließlich relevanter Türen bleibt zu prüfen. Nur bei eindeutig mehr als **70 cm** an allen Engstellen darf `Kombispeicher` ergänzt werden.
+  - Fehlen Standhöhe oder Transportbreite oder sind sie widersprüchlich/mehrdeutig, keine Speicherart raten. Die Speicherangabe bleibt dann offen; der übrige eindeutig belegte Fall wird trotzdem vervollständigt und die fehlende Speicherangabe unter `Manuell prüfen` gemeldet.
+
+## Mobile Übersicht freier Planbar-Plätze
+
+1. Bei aktivem Projekt-Schalter wird nach dem einmaligen Planbar-Neuladen zusätzlich eine Kapazitätsaufnahme für die kommenden zwölf Kalenderwochen erstellt.
+2. Als freier Montageplatz zählt ausschließlich ein im sichtbaren Kalender vorhandener Block mit dem exakten Text `Geblockt für Kunde ENTER`. Leere Zellen, Urlaub, Service-Termine oder sonstige Annahmen zählen nicht.
+3. Die Ressourcen `Dawid Service` und `Antonio Lausic` sowie erkennbare Schreibvarianten dieser Namen werden vollständig ausgeschlossen. Ihre Termine oder Blöcke dürfen weder eine freie Kapazität erzeugen noch die Wochenzahl beeinflussen.
+4. Für jede geprüfte Kalenderwoche wird auch der Wert `0` gespeichert. Der lokale iMac-Lauf übermittelt Zeitstempel, ISO-Jahr, KW und Anzahl über den freigegebenen Geräte-Endpunkt an die Heat-Hero-Projektakte.
+5. IVA zeigt oberhalb von `Kunde terminieren` immer vier Kalenderwochen, deren Summe, die nächste KW mit mindestens einem freien Platz und Pfeile für frühere beziehungsweise spätere Vier-Wochen-Fenster. Quelle, Aktualisierungszeit und beide ausgeschlossenen Ressourcen bleiben sichtbar.
+6. Ist Planbar unklar, nicht eingeloggt oder der Kalender nicht vollständig sichtbar, wird kein neuer Kapazitätsstand veröffentlicht; der letzte verifizierte Stand bleibt mit seinem Zeitstempel sichtbar.
 
 ## Planbar-Kundenstammdaten vervollständigen
 

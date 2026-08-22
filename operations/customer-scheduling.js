@@ -50,6 +50,46 @@ export function isExcludedPlanbarResource(name) {
   return EXCLUDED_RESOURCE_KEYS.has(normalizedText(name));
 }
 
+export function normalizePlanbarCapacitySnapshot(input = {}) {
+  const byWeek = new Map();
+  for (const item of (Array.isArray(input.weeks) ? input.weeks : [])) {
+    const isoYear = Number(item?.isoYear);
+    const week = Number(item?.week);
+    const freeSlots = Number(item?.freeSlots);
+    if (!Number.isInteger(isoYear) || isoYear < 2000 || isoYear > 2100) continue;
+    if (!Number.isInteger(week) || week < 1 || week > 53) continue;
+    if (!Number.isInteger(freeSlots) || freeSlots < 0 || freeSlots > 500) continue;
+    byWeek.set(`${isoYear}-${week}`, { isoYear, week, freeSlots });
+  }
+  const weeks = [...byWeek.values()].sort((left, right) => left.isoYear - right.isoYear || left.week - right.week);
+  const parsedUpdatedAt = new Date(input.updatedAt || Date.now());
+  return {
+    updatedAt: Number.isNaN(parsedUpdatedAt.getTime()) ? new Date().toISOString() : parsedUpdatedAt.toISOString(),
+    source: 'Planbar · sichtbare Blöcke „Geblockt für Kunde ENTER“',
+    excludedResources: ['Dawid Service', 'Antonio Lausic'],
+    weeks,
+  };
+}
+
+export function planbarCapacityWindow(snapshot = {}, { offset = 0, size = 4 } = {}) {
+  const normalized = normalizePlanbarCapacitySnapshot(snapshot);
+  const safeSize = Math.max(1, Math.min(12, Number(size) || 4));
+  const maxOffset = Math.max(0, normalized.weeks.length - safeSize);
+  const safeOffset = Math.max(0, Math.min(maxOffset, Number(offset) || 0));
+  const weeks = normalized.weeks.slice(safeOffset, safeOffset + safeSize);
+  return {
+    ...normalized,
+    offset: safeOffset,
+    size: safeSize,
+    maxOffset,
+    weeks,
+    totalFreeSlots: weeks.reduce((sum, item) => sum + item.freeSlots, 0),
+    nextAvailable: normalized.weeks.find(item => item.freeSlots > 0) || null,
+    hasPrevious: safeOffset > 0,
+    hasNext: safeOffset < maxOffset,
+  };
+}
+
 export function assertSchedulableSourceStage(stage) {
   if (!ALLOWED_SOURCE_STAGES.has(normalizedText(stage))) {
     throw new Error('Der Deal liegt weder in „Förderung beantragen“ noch in „Montage einplanen/terminieren“.');

@@ -84,6 +84,7 @@ import {
   setProjectAutomationEnabled,
   storeProjectFile,
   storeProjectLogo,
+  updatePlanbarCapacity,
   updateProject,
 } from './projects/store.js';
 import {
@@ -1066,6 +1067,14 @@ app.post('/device-agent/:deviceId/project-workflow-runs', async (req, res) => {
   catch (error) { res.status(400).json({ error: error.message }); }
 });
 
+app.post('/device-agent/:deviceId/planbar-capacity', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try { res.status(200).json(await updatePlanbarCapacity('heat-hero', req.body || {})); }
+  catch (error) { res.status(400).json({ error: error.message }); }
+});
+
 // Die lokalen iMac-Läufe brauchen vor dem Start ausschließlich ihre
 // projektbezogenen Ein-/Aus-Schalter. Der Endpunkt gibt bewusst keine
 // Projektnotizen, Dateien oder sonstigen internen Daten preis; Änderungen
@@ -1244,6 +1253,10 @@ app.get('/api/projects', async (_req, res) => res.json(await listProjects()));
 app.get('/api/projects/:id', async (req, res) => {
   const project = await getProject(req.params.id);
   res.status(project ? 200 : 404).json(project || { error: 'not found' });
+});
+app.get('/api/projects/:id/planbar-capacity', async (req, res) => {
+  const project = await getProject(req.params.id);
+  res.status(project ? 200 : 404).json(project?.planbarCapacity || { error: 'not found' });
 });
 app.post('/api/projects', async (req, res) => {
   try { res.status(201).json(await createProject(req.body || {})); }

@@ -6,6 +6,8 @@ import {
   buildPlanbarCustomer,
   isExcludedPlanbarResource,
   isoWeekRange,
+  normalizePlanbarCapacitySnapshot,
+  planbarCapacityWindow,
   selectFirstFreePlanbarResource,
 } from '../operations/customer-scheduling.js';
 
@@ -19,6 +21,28 @@ assert.equal(isExcludedPlanbarResource('David Service'), true);
 assert.equal(isExcludedPlanbarResource('Antonio Lausic'), true);
 assert.equal(isExcludedPlanbarResource('Antonio Lausitsch'), true);
 assert.equal(isExcludedPlanbarResource('Infinity Solution 2'), false);
+
+const capacity = normalizePlanbarCapacitySnapshot({
+  updatedAt: '2026-08-22T15:48:00.000Z',
+  excludedResources: ['beliebig'],
+  weeks: [
+    { isoYear: 2026, week: 35, freeSlots: 0 },
+    { isoYear: 2026, week: 36, freeSlots: 1 },
+    { isoYear: 2026, week: 37, freeSlots: 7 },
+    { isoYear: 2026, week: 38, freeSlots: 5 },
+    { isoYear: 2026, week: 39, freeSlots: 7 },
+    { isoYear: 2026, week: 39, freeSlots: 6 },
+    { isoYear: 2026, week: 54, freeSlots: 99 },
+  ],
+});
+assert.deepEqual(capacity.excludedResources, ['Dawid Service', 'Antonio Lausic']);
+assert.equal(capacity.weeks.length, 5);
+assert.equal(capacity.weeks.at(-1).freeSlots, 6, 'doppelte KW wird idempotent durch den letzten Wert ersetzt');
+const firstWindow = planbarCapacityWindow(capacity);
+assert.equal(firstWindow.totalFreeSlots, 13);
+assert.deepEqual(firstWindow.nextAvailable, { isoYear: 2026, week: 36, freeSlots: 1 });
+assert.equal(firstWindow.hasNext, true);
+assert.deepEqual(planbarCapacityWindow(capacity, { offset: 4 }).weeks.map(item => item.week), [36, 37, 38, 39], 'letztes Fenster bleibt vier Wochen breit');
 
 assert.equal(assertSchedulableSourceStage('Förderung beantragen'), true);
 assert.equal(assertSchedulableSourceStage('Montage einplanen'), true);
