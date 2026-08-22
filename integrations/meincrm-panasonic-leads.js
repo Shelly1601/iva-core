@@ -17,6 +17,10 @@ function phoneKey(value) {
   return clean(value, 80).replace(/\D/g, '');
 }
 
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clean(value, 100));
+}
+
 function safeErrorText(text) {
   try {
     const parsed = JSON.parse(text);
@@ -152,6 +156,11 @@ export async function importPanasonicLeadsToMeinCrm(inputs, options = {}) {
   }
 
   const leads = inputs.map(normalizeLead);
+  // Das Heat-Hero-Projekt laeuft in Mein CRM teils noch als dedizierte
+  // Projektdatenbank mit einer alten numerischen Projektkennung. In diesem
+  // Modus gehoert bereits die gesamte Datenbank zu Heat Hero und die neue
+  // UUID-Spalte project_id bleibt – wie bei den vorhandenen Leads – leer.
+  const scopedProjectId = isUuid(projectId) ? projectId : null;
   const portalIds = new Set();
   for (const lead of leads) {
     if (portalIds.has(lead.promatchId)) throw new Error(`Doppelte ProMatch-ID im Import: ${lead.promatchId}`);
@@ -164,7 +173,7 @@ export async function importPanasonicLeadsToMeinCrm(inputs, options = {}) {
 
   const existing = await restRequest({
     restBase, serviceKey, fetchImpl, table: 'leads',
-    query: { project_id: `eq.${projectId}`, select: 'id,name,email,telefon,notizen', limit: 1000 },
+    query: { ...(scopedProjectId ? { project_id: `eq.${scopedProjectId}` } : {}), select: 'id,name,email,telefon,notizen', limit: 1000 },
   }) || [];
 
   const results = [];
@@ -186,7 +195,7 @@ export async function importPanasonicLeadsToMeinCrm(inputs, options = {}) {
       quelle: PANASONIC_SOURCE,
       status_detail: 'neuer lead',
       notizen: buildNotes(lead),
-      project_id: projectId,
+      ...(scopedProjectId ? { project_id: scopedProjectId } : {}),
       assigned_user_id: advisorId,
       fachberater_id: advisorId,
       fachberater_name: SALES_ADVISOR.name,
@@ -199,7 +208,8 @@ export async function importPanasonicLeadsToMeinCrm(inputs, options = {}) {
   }
 
   return {
-    projectId,
+    projectId: scopedProjectId,
+    projectScope: scopedProjectId ? 'project_id' : 'dedicated-database',
     source: PANASONIC_SOURCE,
     advisor: { id: advisorId, name: SALES_ADVISOR.name, email: SALES_ADVISOR.email },
     created: results.filter(result => result.status === 'created').length,

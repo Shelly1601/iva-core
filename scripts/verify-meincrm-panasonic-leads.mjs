@@ -27,7 +27,7 @@ const result = await importPanasonicLeadsToMeinCrm([
     promatchId: 'abcdef0123456789abcdef0123456789', impRequestId: 'REQ-2', details: 'Rückruf abends',
   },
 ], {
-  serviceKey: 'service-test-key', projectId: 'heat-hero-project', restBase: 'https://example.invalid/rest/v1', fetchImpl: fetchStub,
+  serviceKey: 'service-test-key', projectId: '2e8f1cf6-4579-4d07-8c65-5b1ac4e954a8', restBase: 'https://example.invalid/rest/v1', fetchImpl: fetchStub,
 });
 
 assert.equal(result.created, 1);
@@ -41,7 +41,7 @@ assert.deepEqual(advisorInsert.body, { name: 'Vertrieb Innendienst', email: 'n.s
 
 const leadInsert = calls.find(call => call.url.includes('/leads') && call.method === 'POST');
 assert.equal(leadInsert.body.quelle, 'Panasonic');
-assert.equal(leadInsert.body.project_id, 'heat-hero-project');
+assert.equal(leadInsert.body.project_id, '2e8f1cf6-4579-4d07-8c65-5b1ac4e954a8');
 assert.equal(leadInsert.body.assigned_user_id, 77);
 assert.equal(leadInsert.body.fachberater_id, 77);
 assert.equal(leadInsert.body.fachberater_name, 'Vertrieb Innendienst');
@@ -64,10 +64,12 @@ const splitDbResult = await importPanasonicLeadsToMeinCrm([{
   name: 'Getrennte Datenbank', email: 'split@example.de', telefon: '+491703333333',
   promatchId: '22222222222222222222222222222222', details: 'Profil liegt zentral',
 }], {
-  serviceKey: 'service-test-key', projectId: 'heat-hero-project', restBase: 'https://example.invalid/rest/v1', fetchImpl: splitDbFetchStub,
+  serviceKey: 'service-test-key', projectId: '3', restBase: 'https://example.invalid/rest/v1', fetchImpl: splitDbFetchStub,
 });
 assert.equal(splitDbResult.created, 1);
 assert.equal(splitDbResult.advisor.id, 88);
+assert.equal(splitDbResult.projectId, null);
+assert.equal(splitDbResult.projectScope, 'dedicated-database');
 
 await assert.rejects(
   () => importPanasonicLeadsToMeinCrm([], { serviceKey: 'x', projectId: 'y', fetchImpl: fetchStub }),
