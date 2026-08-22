@@ -49,6 +49,26 @@ assert.equal('anrede' in leadInsert.body, false);
 assert.equal('kundentyp' in leadInsert.body, false);
 assert.match(leadInsert.body.notizen, /abcdef0123456789abcdef0123456789/);
 
+const splitDbResponses = [
+  { ok: true, status: 200, body: [] },
+  { ok: false, status: 404, body: { message: "Could not find the table 'public.profiles' in the schema cache" } },
+  { ok: true, status: 201, body: [{ id: 88, name: 'Vertrieb Innendienst', email: 'n.sell@heat-hero.com' }] },
+  { ok: true, status: 200, body: [] },
+  { ok: true, status: 201, body: [{ id: 102 }] },
+];
+async function splitDbFetchStub() {
+  const response = splitDbResponses.shift();
+  return { ok: response.ok, status: response.status, text: async () => JSON.stringify(response.body) };
+}
+const splitDbResult = await importPanasonicLeadsToMeinCrm([{
+  name: 'Getrennte Datenbank', email: 'split@example.de', telefon: '+491703333333',
+  promatchId: '22222222222222222222222222222222', details: 'Profil liegt zentral',
+}], {
+  serviceKey: 'service-test-key', projectId: 'heat-hero-project', restBase: 'https://example.invalid/rest/v1', fetchImpl: splitDbFetchStub,
+});
+assert.equal(splitDbResult.created, 1);
+assert.equal(splitDbResult.advisor.id, 88);
+
 await assert.rejects(
   () => importPanasonicLeadsToMeinCrm([], { serviceKey: 'x', projectId: 'y', fetchImpl: fetchStub }),
   /1 bis 100 Leads/,

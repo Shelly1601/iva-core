@@ -103,10 +103,19 @@ async function ensureSalesAdvisor({ restBase, serviceKey, fetchImpl }) {
   }) || [];
   if (reps.length > 1) throw new Error('Mein CRM: Vertrieb Innendienst ist mehrfach angelegt.');
 
-  const profiles = await restRequest({
-    restBase, serviceKey, fetchImpl, table: 'profiles',
-    query: { select: 'id,email', email: `ilike.${SALES_ADVISOR.email}`, limit: 2 },
-  }) || [];
+  let profiles = [];
+  try {
+    profiles = await restRequest({
+      restBase, serviceKey, fetchImpl, table: 'profiles',
+      query: { select: 'id,email', email: `ilike.${SALES_ADVISOR.email}`, limit: 2 },
+    }) || [];
+  } catch (error) {
+    // Manche Mein-CRM-Projekte halten Nutzerprofile in der zentralen App-
+    // Datenbank und ausschließlich Leads/Vertriebler in der Projektdatenbank.
+    // In diesem Fall bleibt die eindeutige E-Mail-Verknüpfung erhalten; nur
+    // die optionale user_id kann dort nicht gesetzt werden.
+    if (!/profiles HTTP 404|public\.profiles/i.test(error.message)) throw error;
+  }
   if (profiles.length > 1) throw new Error('Mein CRM: Nutzerprofil Vertrieb Innendienst ist nicht eindeutig.');
   const userId = profiles[0]?.id || null;
 
