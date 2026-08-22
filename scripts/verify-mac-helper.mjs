@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import {
   FUNDING_DOCUMENTS,
   FUNDING_PRIMARY_RECIPIENT_EMAIL,
@@ -460,5 +460,11 @@ try {
   else process.env.IVA_MAC_HELPER_DATA_DIR = previousDataRoot;
   await rm(cleanupTestRoot, { recursive: true, force: true });
 }
+
+const workflowWindowSource = await readFile(new URL('../local-mac-helper/workflow-window.mjs', import.meta.url), 'utf8');
+assert.match(workflowWindowSource, /keepDisplayAwake:\s*true/);
+assert.match(workflowWindowSource, /sleepDisplays:\s*true/);
+assert.match(workflowWindowSource, /caffeinate', \['-dimsu'/);
+assert.ok(workflowWindowSource.indexOf("spawn('/usr/bin/caffeinate'") < workflowWindowSource.indexOf('const task = spawn(options.command'));
 
 console.log('PASS IVA Mac Helper: sichere Förder-Prüfläufe, Outlook-Entwürfe, Batch-Rückgängig und gesperrte Versand-/Pipedrive-Aktionen.');
