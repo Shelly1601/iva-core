@@ -11,6 +11,7 @@ import { diagnoseOutlook } from './outlook.mjs';
 import { diagnosePipedriveChrome } from './chrome-pipedrive.mjs';
 import { diagnoseWhatsAppMac } from './whatsapp-mac.mjs';
 import { runMacUiBridge } from './macos-ui.mjs';
+import { collectPlanbarSearchIndex } from './planbar.mjs';
 
 const execFileAsync = promisify(execFile);
 export const IMAC_DEVICE_ID = 'imac-nadine';
@@ -103,6 +104,17 @@ async function executeDeviceCommand(command) {
     for (const review of reviews) counts[review.status] = (counts[review.status] || 0) + 1;
     return { total: reviews.length, counts, latestAt: reviews[0]?.updatedAt || reviews[0]?.createdAt || null };
   }
+  if (command.action === 'planbar.search.refresh') {
+    const snapshot = await collectPlanbarSearchIndex();
+    const stored = await request(`/device-agent/${IMAC_DEVICE_ID}/planbar-search-index`, { method: 'POST', body: snapshot });
+    return {
+      updatedAt: stored.updatedAt,
+      appointmentCount: stored.appointmentCount,
+      rangeStart: stored.rangeStart,
+      rangeEndExclusive: stored.rangeEndExclusive,
+      readOnly: true,
+    };
+  }
   if (command.action === 'app.open') return openApplication(command.payload?.app);
   throw new Error('Der iMac hat diesen Befehl nicht in seiner lokalen Positivliste.');
 }
@@ -134,7 +146,7 @@ export function imacDeviceAgentPolicy() {
     deviceId: IMAC_DEVICE_ID,
     keychainService: KEYCHAIN_SERVICE,
     arbitraryShellCommands: false,
-    allowedActions: ['computer.status', 'funding.monitor.status', 'funding.monitor.run', 'funding.reviews.list', 'app.open'],
+    allowedActions: ['computer.status', 'funding.monitor.status', 'funding.monitor.run', 'funding.reviews.list', 'planbar.search.refresh', 'app.open'],
     allowedApps: Object.keys(APP_ALLOWLIST),
   });
 }

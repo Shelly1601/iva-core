@@ -34,6 +34,7 @@ import { capabilityReviewSkill } from './skills/capability-review.js';
 import { knowledgeLibrarySkill } from './skills/knowledge-library.js';
 import { recruitingSkill } from './skills/recruiting.js';
 import { deviceControlSkill } from './skills/device-control.js';
+import { planbarSkill } from './skills/planbar.js';
 import { listAgents, routeAgent } from './agents/registry.js';
 import { marketAnalysis } from './marketing/market.js';
 import { fetchMetaAdsInsights, marketingConnectorStatus } from './marketing/connectors.js';
@@ -87,6 +88,11 @@ import {
   updatePlanbarCapacity,
   updateProject,
 } from './projects/store.js';
+import {
+  getPlanbarSearchIndex,
+  replacePlanbarSearchIndex,
+  searchPlanbarAppointments,
+} from './operations/planbar-search.js';
 import {
   ACCOUNTING_CATEGORIES,
   accountingSummary,
@@ -742,6 +748,7 @@ const ALL_SKILLS = {
   knowledgeLibrary: knowledgeLibrarySkill({ listKnowledgeLibrary, knowledgeLibraryStatus, assessKnowledgeSourceCandidate }),
   recruiting: recruitingSkill({ createCandidateSearchPlan, screenResumeAgainstCriteria, createInterviewGuide }),
   deviceControl: deviceControlSkill({ enqueueDeviceCommand, deviceCommandStatus }),
+  planbar:    planbarSkill({ searchPlanbarAppointments }),
   qonekto:   null, // wird pro Anfrage mit der echten sessionId erzeugt
 };
 
@@ -1075,6 +1082,14 @@ app.post('/device-agent/:deviceId/planbar-capacity', async (req, res) => {
   catch (error) { res.status(400).json({ error: error.message }); }
 });
 
+app.post('/device-agent/:deviceId/planbar-search-index', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try { res.status(200).json(await replacePlanbarSearchIndex(req.body || {})); }
+  catch (error) { res.status(400).json({ error: error.message }); }
+});
+
 // Die lokalen iMac-Läufe brauchen vor dem Start ausschließlich ihre
 // projektbezogenen Ein-/Aus-Schalter. Der Endpunkt gibt bewusst keine
 // Projektnotizen, Dateien oder sonstigen internen Daten preis; Änderungen
@@ -1257,6 +1272,29 @@ app.get('/api/projects/:id', async (req, res) => {
 app.get('/api/projects/:id/planbar-capacity', async (req, res) => {
   const project = await getProject(req.params.id);
   res.status(project ? 200 : 404).json(project?.planbarCapacity || { error: 'not found' });
+});
+app.get('/api/projects/:id/planbar-search', async (req, res) => {
+  if (req.params.id !== 'heat-hero') return res.status(404).json({ error: 'not found' });
+  try {
+    res.json(await searchPlanbarAppointments({
+      query: req.query?.query,
+      weeks: req.query?.weeks,
+      fromDate: req.query?.fromDate,
+    }));
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.get('/api/projects/:id/planbar-search-index', async (req, res) => {
+  if (req.params.id !== 'heat-hero') return res.status(404).json({ error: 'not found' });
+  try {
+    const index = await getPlanbarSearchIndex();
+    res.json({
+      updatedAt: index.updatedAt,
+      source: index.source,
+      rangeStart: index.rangeStart || null,
+      rangeEndExclusive: index.rangeEndExclusive || null,
+      appointmentCount: index.appointmentCount,
+    });
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 app.post('/api/projects', async (req, res) => {
   try { res.status(201).json(await createProject(req.body || {})); }

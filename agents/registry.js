@@ -3,7 +3,7 @@
 // gemeinsamen IVA-Core. Der Router waehlt deterministisch; unbekannte oder
 // deaktivierte Agenten fallen sicher auf IVA Standard zurueck.
 
-const STANDARD_SKILLS = ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'qonekto', 'lumit', 'capabilityReview', 'knowledgeLibrary', 'recruiting', 'deviceControl'];
+const STANDARD_SKILLS = ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'qonekto', 'lumit', 'capabilityReview', 'knowledgeLibrary', 'recruiting', 'deviceControl', 'planbar'];
 
 export const AGENTS = {
   'iva-standard': {
@@ -18,7 +18,7 @@ export const AGENTS = {
     description: 'Kundenakten, CRM, Qonekto/blau direkt, Termine, Mails, Dokumente und Servicevorgaenge.',
     rolePrompt: 'Arbeite als Kunden- und Backoffice-Agent. Qonekto/blau direkt ist fachliche Stammdatenquelle. Lies zuerst, vermeide Dubletten und bereite jede Aenderung nur ueber den vorgesehenen Bestaetigungsweg vor. Bei LUMIT gilt zwingend: Onlineabschluss ueber Agentur 162-58556, Vermittlernummer 009T7N pruefen, danach servicierter Antrag, Mail an den Mannheimer-Poolservice, Dokument in die Blau-direkt-Kundenakte und Uebergabe an Hauswertschutz. Fordere die Police ausschliesslich digital ueber den Vermittler an, behaupte diesen Versandweg aber erst nach Bestaetigung durch Mannheimer/blau direkt. Nach Policeneingang: nichts automatisch an den Kunden senden; erst Hauswertschutz-Pruefung, kompaktes Markenpaket mit unveraenderter Originalpolice und lesbarer Vertrags-/Preisaufteilung, dann ausdrueckliche Freigabe.',
     knowledgeSources: ['crm', 'qonekto', 'mails', 'calendar', 'workspaces', 'lumit-workflow'],
-    allowedSkills: ['memory', 'calendar', 'mails', 'crm', 'workspaces', 'qonekto', 'lumit', 'selfImprovement'], modelProfile: 'chat', safetyDefault: 'operational', color: 'blue',
+    allowedSkills: ['memory', 'calendar', 'mails', 'crm', 'workspaces', 'qonekto', 'lumit', 'selfImprovement', 'planbar'], modelProfile: 'chat', safetyDefault: 'operational', color: 'blue',
   },
   'iva-finance': {
     id: 'iva-finance', name: 'Beratung & Fachpruefung', shortName: 'Beratung', enabled: true,
@@ -75,6 +75,7 @@ export const AGENTS = {
 };
 
 const ROUTES = [
+  { agentId: 'iva-customer', reason: 'Planbar-Suche erkannt', pattern: /\b(planbar|plantafel)\b/i },
   { agentId: 'iva-accounting', reason: 'Buchhaltung erkannt', pattern: /\b(buchhaltung|beleg|rechnung|eür|steuerberater|umsatzsteuer|vorsteuer|bewirtung)\b/i },
   { agentId: 'iva-customer', reason: 'LUMIT-Antrag/Backoffice erkannt', pattern: /\b(lumit|mannheimer|servicierter antrag|mdpool)\b/i },
   { agentId: 'iva-energy', reason: 'Energie/Vor-Ort erkannt', pattern: /\b(tmb|wärmepumpe|waermepumpe|heizlast|heizkörper|heizkoerper|photovoltaik|\bpv\b|förderrechner|foerderrechner|energieplan|grundriss|stromtarif|gasvertrag|gastarif|energypartner|tarifrechner)\b/i },

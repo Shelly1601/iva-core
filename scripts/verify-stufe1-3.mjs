@@ -102,9 +102,11 @@ eq('  iva-knowledge enabled', AGENTS['iva-knowledge'].enabled, true);
 eq('  iva-recruiting enabled', AGENTS['iva-recruiting'].enabled, true);
 eq('  getAgent(disabled) -> iva-standard (kein Aktivierungs-Bypass)', getAgent('iva-builder').id, 'iva-standard');
 eq('  getAgent(unbekannt) -> iva-standard', getAgent('does-not-exist').id, 'iva-standard');
-eq('  iva-standard allowedSkills', getAgent('iva-standard').allowedSkills, ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'qonekto', 'lumit', 'capabilityReview', 'knowledgeLibrary', 'recruiting', 'deviceControl']);
+eq('  iva-standard allowedSkills', getAgent('iva-standard').allowedSkills, ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'qonekto', 'lumit', 'capabilityReview', 'knowledgeLibrary', 'recruiting', 'deviceControl', 'planbar']);
 eq('  LUMIT routet zu Kunden/Backoffice', routeAgent('LUMIT als servicierter Antrag anlegen').agent.id, 'iva-customer');
 truthy('  Kunden-Agent besitzt LUMIT-Skill', getAgent('iva-customer').allowedSkills.includes('lumit'));
+eq('  Planbar-Anfrage routet zu Kunden/Backoffice', routeAgent('Suche Schneider in Planbar').agent.id, 'iva-customer');
+truthy('  Kunden-Agent besitzt Planbar-Skill', getAgent('iva-customer').allowedSkills.includes('planbar'));
 eq('  Recruiting-Anfrage routet zum Recruiting-Agent', routeAgent('Bitte Lebenslauf fuer das Vorstellungsgespraech pruefen').agent.id, 'iva-recruiting');
 eq('  iva-standard modelProfile', getAgent('iva-standard').modelProfile, 'chat');
 

@@ -39,6 +39,9 @@ try {
   assert.equal(completed.status, 'completed');
   assert.equal((await deviceCommandStatus(command.id)).result.online, true);
   assert.equal((await listDeviceCommands({ deviceId: IVA_IMAC_DEVICE_ID })).length, 1);
+  const planbarCommand = await enqueueDeviceCommand({ action: 'planbar.search.refresh', requestedBy: 'test' });
+  assert.equal(planbarCommand.action, 'planbar.search.refresh');
+  assert.deepEqual(planbarCommand.payload, {});
   await assert.rejects(enqueueDeviceCommand({ action: 'shell.run', payload: { command: 'rm -rf /' } }), /nicht freigegeben/);
   await assert.rejects(enqueueDeviceCommand({ action: 'app.open', payload: { app: 'Terminal' } }), /nicht freigegeben/);
 

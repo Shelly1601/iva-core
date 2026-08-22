@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id);
 const TOKEN_KEY = 'iva_token';
-const state = { projects: [], current: null, activeFolderId: 'all', capacityOffset: 0, uploading: false, logoUrls: new Map() };
+const state = { projects: [], current: null, activeFolderId: 'all', capacityOffset: 0, uploading: false, planbarRefreshing: false, logoUrls: new Map() };
 
 function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
 function esc(value) { return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
@@ -54,13 +54,17 @@ function planbarCapacityOverview(project) {
   return `<div class="capacity-overview"><div class="capacity-head"><div><div class="eyebrow">Freie Montageplätze</div><div class="capacity-summary"><strong>${esc(total)} freie Plätze</strong> in ${esc(range)}${next ? ` · nächster freier Termin: <b>KW ${esc(next.week)}/${esc(next.isoYear)}</b>` : ''}</div></div><div class="capacity-nav"><button id="capacityPrev" type="button" aria-label="Vier Wochen zurück" ${offset === 0 ? 'disabled' : ''}>←</button><button id="capacityNext" type="button" aria-label="Vier Wochen weiter" ${offset === maxOffset ? 'disabled' : ''}>→</button></div></div><div class="capacity-grid">${cards}</div><div class="capacity-source">Stand ${esc(formatDate(snapshot.updatedAt))} · gezählt werden nur „Geblockt für Kunde ENTER“ · ohne Dawid Service und Antonio Lausic</div></div>`;
 }
 
+function planbarSearchPanel() {
+  return `<section class="planbar-search" aria-labelledby="planbarSearchTitle"><div class="planbar-search-head"><div><div class="eyebrow">Schnell finden · rein lesend</div><h3 id="planbarSearchTitle">Planbar-Suche</h3><div class="muted">Kundenname, Hersteller oder Stichwort eingeben – IVA zeigt KW, sichtbaren Zeitraum und aktuelles Team.</div></div><button class="btn" id="refreshPlanbarSearch" type="button">↻ Planbar aktualisieren</button></div><form class="planbar-search-form" id="planbarSearchForm"><label><span>Name, Hersteller oder Stichwort</span><input id="planbarSearchQuery" maxlength="220" autocomplete="off" required placeholder="z. B. Schneider oder Cuderos"></label><label><span>Zeitraum</span><select id="planbarSearchWeeks"><option value="0">gesamter Datenstand</option><option value="3">nächste 3 Wochen</option><option value="6">nächste 6 Wochen</option><option value="12">nächste 12 Wochen</option></select></label><div class="planbar-search-actions"><button class="btn primary" type="submit">Suchen</button></div></form><div class="planbar-search-results" id="planbarSearchResults"><div class="planbar-search-empty">Suchbegriff eingeben oder den Planbar-Stand aktualisieren.</div></div><div class="planbar-search-meta" id="planbarSearchMeta"></div></section>`;
+}
+
 function customerSchedulingSection(project) {
   if (project.id !== 'heat-hero') return '';
   const latest = (project.customerSchedulingRequests || [])[0];
   const latestSummary = latest
     ? `Zuletzt vorgemerkt: <b>${esc(latest.customerName)}</b> · KW ${esc(latest.week)}/${esc(latest.isoYear)} · Material vorher: ${latest.materialDeliverySpace ? 'Ja' : 'Nein'} · geschützt: ${latest.theftWeatherProtected ? 'Ja' : 'Nein'}${latest.additionalInfo ? ' · Zusatzinfo vorhanden' : ''}`
     : 'Noch kein Kunde vorgemerkt.';
-  return `<section class="workflow-launcher" aria-labelledby="customerSchedulingTitle"><div class="workflow-launcher-head"><div><div class="eyebrow">Direkt oben · operativer Workflow</div><h2 id="customerSchedulingTitle">Kunde terminieren</h2><div class="muted">Kundenname, Kalenderwoche und Materialannahme erfassen. IVA übernimmt die Angaben später in die Planbar-Beschreibung.</div></div><span class="workflow-tag">Planbar + Pipedrive</span></div>${planbarCapacityOverview(project)}<form class="schedule-form" id="customerSchedulingForm"><label><span>Kundenname</span><input id="scheduleCustomerName" name="customerName" maxlength="220" autocomplete="off" required placeholder="Vorname Nachname"></label><label><span>Kalenderwoche</span><select id="scheduleWeek" name="week" required>${schedulingWeekOptions()}</select></label><button class="btn primary" type="submit">Workflow vorbereiten</button><div class="schedule-checks"><label class="schedule-check"><input id="scheduleMaterialDeliverySpace" type="checkbox"><span class="schedule-question">Hat der Kunde Platz, Material einige Tage vor Montagebeginn anzunehmen?</span><span class="schedule-answer" data-answer-for="scheduleMaterialDeliverySpace">Nein</span></label><label class="schedule-check"><input id="scheduleTheftWeatherProtected" type="checkbox"><span class="schedule-question">Diebstahl- und wettersicher?</span><span class="schedule-answer" data-answer-for="scheduleTheftWeatherProtected">Nein</span></label></div><label class="schedule-extra"><span>Zusatzinfo · optional</span><textarea id="scheduleAdditionalInfo" maxlength="2000" placeholder="Nur ausfüllen, wenn diese Information zusätzlich in Planbar stehen soll."></textarea></label></form><div class="schedule-latest">${latestSummary}</div></section>`;
+  return `<section class="workflow-launcher" aria-labelledby="customerSchedulingTitle"><div class="workflow-launcher-head"><div><div class="eyebrow">Direkt oben · operativer Workflow</div><h2 id="customerSchedulingTitle">Kunde terminieren</h2><div class="muted">Kundenname, Kalenderwoche und Materialannahme erfassen. IVA übernimmt die Angaben später in die Planbar-Beschreibung.</div></div><span class="workflow-tag">Planbar + Pipedrive</span></div>${planbarCapacityOverview(project)}${planbarSearchPanel()}<form class="schedule-form" id="customerSchedulingForm"><label><span>Kundenname</span><input id="scheduleCustomerName" name="customerName" maxlength="220" autocomplete="off" required placeholder="Vorname Nachname"></label><label><span>Kalenderwoche</span><select id="scheduleWeek" name="week" required>${schedulingWeekOptions()}</select></label><button class="btn primary" type="submit">Workflow vorbereiten</button><div class="schedule-checks"><label class="schedule-check"><input id="scheduleMaterialDeliverySpace" type="checkbox"><span class="schedule-question">Hat der Kunde Platz, Material einige Tage vor Montagebeginn anzunehmen?</span><span class="schedule-answer" data-answer-for="scheduleMaterialDeliverySpace">Nein</span></label><label class="schedule-check"><input id="scheduleTheftWeatherProtected" type="checkbox"><span class="schedule-question">Diebstahl- und wettersicher?</span><span class="schedule-answer" data-answer-for="scheduleTheftWeatherProtected">Nein</span></label></div><label class="schedule-extra"><span>Zusatzinfo · optional</span><textarea id="scheduleAdditionalInfo" maxlength="2000" placeholder="Nur ausfüllen, wenn diese Information zusätzlich in Planbar stehen soll."></textarea></label></form><div class="schedule-latest">${latestSummary}</div></section>`;
 }
 
 function forgetProjectLogo(projectId) {
@@ -204,6 +208,10 @@ function bindProjectActions() {
       sync();
     });
   }
+  const planbarSearchForm = $('planbarSearchForm');
+  if (planbarSearchForm) planbarSearchForm.onsubmit = searchPlanbar;
+  const refreshPlanbarSearchButton = $('refreshPlanbarSearch');
+  if (refreshPlanbarSearchButton) refreshPlanbarSearchButton.onclick = refreshPlanbarSearch;
   $('editBrand').onclick = openBrandDialog;
   $('addNote').onclick = addNote;
   $('newFolder').onclick = openFolderDialog;
@@ -257,6 +265,79 @@ async function requestCustomerScheduling(event) {
     showToast(`${customerName} für KW ${week}/${isoYear} an IVA übergeben.`);
   } catch (error) { showToast(error.message, true); }
   finally { if (submit && document.body.contains(submit)) submit.disabled = false; }
+}
+
+function formatPlanbarDate(value) {
+  if (!value) return '';
+  return new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(`${value}T12:00:00`));
+}
+
+function planbarEndDate(value) {
+  if (!value) return '';
+  const date = new Date(`${value}T12:00:00`);
+  date.setDate(date.getDate() - 1);
+  return new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(date);
+}
+
+function renderPlanbarSearchResults(result) {
+  const container = $('planbarSearchResults');
+  const meta = $('planbarSearchMeta');
+  if (!container || !meta) return;
+  if (!result.indexedAppointments) {
+    container.innerHTML = '<div class="planbar-search-empty">Noch kein Planbar-Datenstand vorhanden. Bitte einmal „Planbar aktualisieren“ drücken.</div>';
+  } else if (!result.matches.length) {
+    container.innerHTML = `<div class="planbar-search-empty">Kein Treffer für „${esc(result.query)}“${result.weeks ? ` in den nächsten ${esc(result.weeks)} Wochen` : ''}.</div>`;
+  } else {
+    container.innerHTML = result.matches.map(item => `<article class="planbar-hit"><div class="planbar-hit-week">KW ${esc(item.week)}/${esc(item.isoYear)}</div><div><b>${esc(item.customerName)}</b><small>${esc(formatPlanbarDate(item.startDate))}–${esc(planbarEndDate(item.endDateExclusive))}${item.description ? ` · ${esc(item.description.slice(0, 180))}` : ''}</small></div><div class="planbar-hit-team">${esc(item.team)}</div></article>`).join('');
+  }
+  const freshness = result.stale ? ' · Stand älter als 36 Stunden – bitte aktualisieren' : '';
+  meta.textContent = result.indexedAppointments ? `Planbar-Stand ${formatDate(result.updatedAt)} · ${result.indexedAppointments} Termine eingelesen${freshness}` : '';
+}
+
+async function searchPlanbar(event) {
+  event?.preventDefault();
+  if (!state.current || state.current.id !== 'heat-hero') return;
+  const query = $('planbarSearchQuery').value.trim();
+  const weeks = Number($('planbarSearchWeeks').value) || 0;
+  const submit = event?.submitter;
+  if (submit) submit.disabled = true;
+  try {
+    const params = new URLSearchParams({ query });
+    if (weeks) params.set('weeks', String(weeks));
+    const result = await api(`/api/projects/heat-hero/planbar-search?${params}`);
+    renderPlanbarSearchResults(result);
+  } catch (error) {
+    if ($('planbarSearchResults')) $('planbarSearchResults').innerHTML = `<div class="planbar-search-empty">${esc(error.message)}</div>`;
+  } finally { if (submit) submit.disabled = false; }
+}
+
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+async function refreshPlanbarSearch() {
+  if (state.planbarRefreshing) return;
+  const button = $('refreshPlanbarSearch');
+  state.planbarRefreshing = true;
+  if (button) { button.disabled = true; button.textContent = 'Planbar wird gelesen …'; }
+  try {
+    const queued = await api('/api/devices/imac-nadine/commands', {
+      method: 'POST',
+      body: { action: 'planbar.search.refresh', requestedBy: 'projects-planbar-search', requestText: 'Planbar-Suchindex rein lesend aktualisieren' },
+    });
+    let command = queued.command;
+    for (let attempt = 0; attempt < 60 && !['completed', 'failed', 'expired'].includes(command.status); attempt += 1) {
+      await pause(2000);
+      command = (await api(`/api/devices/imac-nadine/commands/${encodeURIComponent(command.id)}`)).command;
+    }
+    if (command.status !== 'completed') throw new Error(command.error || 'Der iMac hat die Planbar-Aktualisierung nicht rechtzeitig abgeschlossen.');
+    const count = Number(command.result?.appointmentCount || 0);
+    showToast(`Planbar aktualisiert: ${count} Kundentermine eingelesen.`);
+    if ($('planbarSearchQuery')?.value.trim()) await searchPlanbar();
+    else if ($('planbarSearchMeta')) $('planbarSearchMeta').textContent = `Aktualisiert ${formatDate(command.result?.updatedAt)} · ${count} Termine eingelesen`;
+  } catch (error) { showToast(error.message, true); }
+  finally {
+    state.planbarRefreshing = false;
+    if (button && document.body.contains(button)) { button.disabled = false; button.textContent = '↻ Planbar aktualisieren'; }
+  }
 }
 
 async function toggleProjectAutomation(input) {
