@@ -41,10 +41,13 @@
 
 ## Beschreibung bilden
 
-- Nur die fett gedruckten Überschriften der tatsächlich beauftragten Positionen übernehmen. Erläuterungen, Unterzeilen, Mengen-/Preistext und sonstige Details unterhalb der Überschrift entfallen.
+- Grundsätzlich nur die fett gedruckten Überschriften der tatsächlich beauftragten Positionen übernehmen. Erläuterungen, Unterzeilen und Preise entfallen.
 - Optionale Positionen ohne eindeutigen Haken beziehungsweise ohne eindeutige Auswahl auslassen.
 - Die Wärmepumpe steht immer zuerst. Dafür genügt die kompakte Form `Leistung + Hersteller`, zum Beispiel `10 kW Panasonic` oder `15 kW Vaillant`; die genaue Modellbezeichnung wird weggelassen.
 - Die danach verbleibenden Positionen folgen in der belegten Angebotsreihenfolge. Dubletten werden nicht künstlich erzeugt.
+- Bei mengenabhängigen Zusatzpositionen die belegte Zahl und Einheit direkt hinter der Überschrift ergänzen, zum Beispiel `Extra Verrohrung 3 m`, `Extra Kabel 8 m` oder `Weitere Wanddurchbrüche 2 Stück`. Die Menge muss aus der beauftragten Position stammen; Dezimalnullen dürfen entfallen und `Stk` wird als `Stück` geschrieben. Preise und Rechenerläuterungen bleiben ausgeschlossen.
+- Für zusätzliche Heizkreise gilt abweichend: Bei genau einem Heizkreis nur `Zusätzlicher Heizkreis` schreiben. Bei mehreren die Zahl voranstellen und den korrekten Plural verwenden, zum Beispiel `3 zusätzliche Heizkreise`.
+- Pauschale Positionen ohne numerische Menge bleiben nur als Überschrift stehen. Fehlt bei einer mengenabhängigen Zusatzposition die eindeutige Zahl oder Einheit, nichts raten und den Fall blockieren.
 - Enthält das Angebot nur einen Warmwasserspeicher, zusätzlich `Pufferspeicher` aufnehmen.
 - Enthält das Angebot nur einen Pufferspeicher, zusätzlich `Warmwasserspeicher` aufnehmen.
 - Sind Warmwasser- und Pufferspeicher bereits enthalten, nichts ergänzen.
