@@ -5,7 +5,7 @@
 - Name: `Planbar Vervollständigung`
 - Ausführung: täglich um 08:00 Uhr, Zeitzone `Europe/Berlin`, lokal auf Nadines iMac.
 - Quelle: ausschließlich Nadines eigene Nachrichten vom vorherigen Kalendertag in der WhatsApp-Gruppe `Terminierungen Dispo` innerhalb der Community `Heat Hero GmbH`.
-- Ziel: den bereits von Nadine angelegten Planbar-Termin anhand von Kundenname und Kalenderwoche finden und ausschließlich die Felder **Auftragsnummer** und **Beschreibung** vervollständigen.
+- Ziel: den bereits von Nadine angelegten Planbar-Termin anhand von Kundenname und Kalenderwoche finden, **Auftragsnummer** und **Beschreibung** vervollständigen und beim eindeutig verknüpften Planbar-Kunden fehlende Stammdaten ergänzen.
 - Laufzeitlimit: maximal 20 Minuten. Während des Laufs bleibt das Display stabil an; danach wird es genau einmal ausgeschaltet. Keine Wiederholungs- oder Aufweckschleife außerhalb des nächsten regulären Laufs.
 
 ## Sichere Fallzuordnung
@@ -27,6 +27,7 @@
 - Liegt `data/planbar-completion-pending.json` mit `status: "pending"` vor, wird diese Liste vor den regulären WhatsApp-Nachrichten verarbeitet.
 - Sie ist eine ausdrückliche einmalige Nutzerfreigabe und ersetzt nur für die darin enthaltenen Kunden-/KW-Fälle die Prüfung „vorheriger Kalendertag“. Die Bilddateien und die strukturierte Warteschlange bilden gemeinsam den Eingangsbeleg.
 - Wärmepumpenangaben aus der Übergabeliste dienen ausschließlich als Such- und Plausibilitätshinweis. Auftragsnummer, beauftragte Positionen und Beschreibung werden weiterhin nur aus unterschriebenem Angebot, Original-PDF und gegebenenfalls TMB belegt.
+- Bei jedem Kunden aus dieser Übergabeliste muss im Planbar-Feld `Vorname` genau einmal das Präfix `HH ` vor dem eigentlichen Vornamen stehen, zum Beispiel `HH Hartmut`. Ein bereits vorhandenes `HH ` wird nicht verdoppelt.
 - Jeder Fall erhält nach der Bearbeitung einen eindeutigen Status und Zeitstempel. Abgeschlossene oder blockierte Einträge werden nicht erneut geschrieben. Wenn alle Einträge beendet sind, wird die Warteschlange auf `completed` gesetzt.
 - Nach Abschluss der Übergabeliste gilt wieder ausschließlich die tägliche WhatsApp-Quelle `Terminierungen Dispo`.
 
@@ -52,12 +53,21 @@
   - Ist mindestens ein belegtes Maß nicht größer als eine der Grenzen, `zwei Einzelspeicher` ergänzen.
   - Fehlen Maße oder sind sie widersprüchlich/mehrdeutig, keine Speicherart raten und den Fall ohne Planbar-Änderung als Blocker melden.
 
+## Planbar-Kundenstammdaten vervollständigen
+
+1. Ausschließlich den Kunden bearbeiten, der mit dem eindeutig zugeordneten bestehenden Termin verknüpft ist. Niemals einen neuen Kunden anlegen, Kunden zusammenführen oder einen anderen Datensatz auswählen.
+2. Bei Fällen aus der einmaligen Übergabeliste im Feld `Vorname` genau einmal `HH ` voranstellen. Nachname und Kundentyp nicht verändern.
+3. Fehlende Anschrift aus dem unterschriebenen Angebot beziehungsweise dem dazugehörigen Original-PDF übernehmen. Straße/Hausnummer, Postleitzahl und Ort müssen zum eindeutigen Pipedrive-Kontakt oder dessen Organisation passen.
+4. Fehlende E-Mail-Adresse und Telefonnummer aus dem eindeutigen Pipedrive-Kontakt übernehmen. Pipedrive bleibt dabei strikt lesend. Ein separates Mobilfeld nur befüllen, wenn es vollständig, eindeutig und ausdrücklich als Mobilnummer belegt ist.
+5. Bereits gefüllte, widersprüchliche Planbar-Werte nicht automatisch überschreiben. Bei Konflikten zwischen Planbar, Angebot und Pipedrive bleibt der betreffende Stammdatenwert unverändert und kommt in `Manuell prüfen`.
+6. Keine unnötigen Kontaktdaten in Bericht oder Laufprotokoll wiedergeben. Dort nur nennen, welche Felder ergänzt, unverändert gelassen oder blockiert wurden.
+
 ## Schreiben und Verifizieren
 
 1. Planbar-Seite vor der Bearbeitung einmal aktualisieren und den eingeloggten Zustand prüfen. Bei Bedarf ist die erneute Anmeldung mit den in Chrome gespeicherten Zugangsdaten freigegeben.
-2. Nur die bestehende Auftragsnummer und Beschreibung des eindeutig zugeordneten Termins ändern. Andere Felder und Termine bleiben unangetastet.
-3. Vor dem Speichern Kundenname, sichtbare KW, Auftragsnummer und Beschreibung nochmals gegen WhatsApp, Pipedrive, Angebot und gegebenenfalls TMB prüfen.
-4. Nach dem Speichern den Termin erneut öffnen und beide Zielwerte sichtbar verifizieren. Bei Abweichung keine weiteren Schreibversuche; Fehler dokumentieren.
+2. Am Termin ausschließlich Auftragsnummer und Beschreibung ändern. Beim eindeutig verknüpften Kunden dürfen zusätzlich nur `Vorname` für das Präfix `HH ` sowie fehlende Straße/Hausnummer, Postleitzahl, Ort, E-Mail, Telefon und bei eindeutigem Beleg Mobil ergänzt werden. Alle anderen Felder und Termine bleiben unangetastet.
+3. Vor dem Speichern Kundenname, sichtbare KW, Auftragsnummer, Beschreibung und alle vorgesehenen Stammdatenänderungen nochmals gegen WhatsApp, Pipedrive, Angebot und gegebenenfalls TMB prüfen.
+4. Nach jedem Speichern den Termin beziehungsweise die Kundenansicht erneut öffnen und alle geänderten Zielwerte sichtbar verifizieren. Bei Abweichung keine weiteren Schreibversuche; Fehler dokumentieren.
 5. Ein lokales Laufprotokoll verhindert die erneute Verarbeitung derselben WhatsApp-Nachricht beziehungsweise desselben Kunden-KW-Falls.
 
 ## Detaillierter Ergebnisbericht: E-Mail mit Telegram-Ersatz
@@ -68,7 +78,7 @@ Der Bericht enthält:
 
 - Laufdatum, Start-/Endzeit, betrachteten WhatsApp-Tag und Gesamtstatus;
 - die nur lesend erkannten Formatmuster der geprüften `HH`-Beispiele, ohne unnötige Kundendaten;
-- pro Fall Kundenname und KW, verwendete Quellen, eindeutigen Planbar-Treffer, geprüfte Dokumentarten, vorherige und neue Zielwerte sowie die tatsächlich ausgeführten Klicks/Änderungen;
+- pro Fall Kundenname und KW, verwendete Quellen, eindeutigen Planbar-Treffer, geprüfte Dokumentarten, vorherige und neue Terminwerte, geänderte Kundenstammdatenfelder ohne deren vollständige sensible Inhalte sowie die tatsächlich ausgeführten Klicks/Änderungen;
 - die sichtbare Kontrolle nach dem Speichern und jede Abweichung zwischen Soll und Ist;
 - konkrete Gründe für übersprungene oder blockierte Fälle;
 - Summen für gefunden, geändert, unverändert, übersprungen und blockiert;
