@@ -6,6 +6,12 @@ const DATA_DIR = process.env.DATA_DIR || '/data';
 const STORE_FILE = path.join(DATA_DIR, 'projects.json');
 const PROJECT_FILES_DIR = path.join(DATA_DIR, 'project-files');
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_LOGO_BYTES = 5 * 1024 * 1024;
+const LOGO_MIME_EXTENSIONS = new Map([
+  ['image/png', '.png'],
+  ['image/jpeg', '.jpg'],
+  ['image/webp', '.webp'],
+]);
 const PROJECT_STATUSES = new Set(['idea', 'planned', 'prepared', 'active', 'paused', 'complete']);
 const AREA_STATUSES = new Set(['idea', 'planned', 'foundation', 'prepared', 'active', 'blocked', 'complete']);
 const AUTOMATION_STATUSES = new Set(['planned', 'prepared', 'active', 'paused', 'blocked']);
@@ -279,6 +285,53 @@ function clean(value, max = 5000) {
   return String(value ?? '').trim().slice(0, max);
 }
 
+function normalizeWebsiteUrl(value) {
+  const raw = clean(value, 1200);
+  if (!raw) return '';
+  try {
+    const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || !url.hostname) throw new Error();
+    url.hash = '';
+    return url.toString();
+  } catch { throw new Error('Bitte eine gültige Website-Adresse eintragen.'); }
+}
+
+function normalizeInstagramUrl(value) {
+  const raw = clean(value, 1200);
+  if (!raw) return '';
+  const handle = raw.replace(/^@/, '').replace(/^\/+|\/+$/g, '');
+  const candidate = /^@?[a-z0-9._]{1,30}$/i.test(raw) ? `https://www.instagram.com/${handle}` : (/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+  try {
+    const url = new URL(candidate);
+    if (!/(^|\.)instagram\.com$/i.test(url.hostname) || url.username || url.password) throw new Error();
+    const profile = url.pathname.split('/').filter(Boolean)[0];
+    if (!profile || !/^[a-z0-9._]{1,30}$/i.test(profile)) throw new Error();
+    return `https://www.instagram.com/${profile}`;
+  } catch { throw new Error('Bitte ein gültiges Instagram-Profil oder einen @Namen eintragen.'); }
+}
+
+function normalizeLogo(logo) {
+  if (!logo || typeof logo !== 'object') return null;
+  const mime = clean(logo.mime, 100).toLowerCase();
+  const storageName = clean(logo.storageName, 300);
+  if (!LOGO_MIME_EXTENSIONS.has(mime) || !storageName || path.basename(storageName) !== storageName) return null;
+  return {
+    name: clean(logo.name, 240) || `Projektlogo${LOGO_MIME_EXTENSIONS.get(mime)}`,
+    mime,
+    bytes: Math.max(0, Number(logo.bytes) || 0),
+    sha256: clean(logo.sha256, 128),
+    storageName,
+    uploadedAt: iso(logo.uploadedAt),
+  };
+}
+
+function validLogoSignature(buffer, mime) {
+  if (mime === 'image/png') return buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (mime === 'image/jpeg') return buffer.length >= 4 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[buffer.length - 2] === 0xff && buffer[buffer.length - 1] === 0xd9;
+  if (mime === 'image/webp') return buffer.length >= 12 && buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP';
+  return false;
+}
+
 function projectFileDir(projectId) {
   const safeId = clean(projectId, 100);
   if (!/^[a-z0-9][a-z0-9_-]{0,99}$/i.test(safeId)) throw new Error('Ungültige Projekt-ID.');
@@ -382,6 +435,9 @@ function normalizeProject(input = {}, fallback = {}) {
     name: clean(input.name || fallback.name, 180) || 'Neues Projekt',
     company: clean(input.company || fallback.company, 180),
     category: clean(input.category || fallback.category, 240),
+    websiteUrl: normalizeWebsiteUrl(input.websiteUrl ?? fallback.websiteUrl),
+    instagramUrl: normalizeInstagramUrl(input.instagramUrl ?? fallback.instagramUrl),
+    logo: normalizeLogo(input.logo ?? fallback.logo),
     status: PROJECT_STATUSES.has(input.status) ? input.status : (PROJECT_STATUSES.has(fallback.status) ? fallback.status : 'planned'),
     description: clean(input.description || fallback.description, 5000),
     objective: clean(input.objective || fallback.objective, 5000),
@@ -426,6 +482,10 @@ function normalizeProject(input = {}, fallback = {}) {
 function publicProject(project) {
   const output = clone(project);
   output.files = (output.files || []).map(({ storageName, ...file }) => file);
+  if (output.logo) {
+    const { storageName, ...logo } = output.logo;
+    output.logo = logo;
+  }
   return output;
 }
 
@@ -485,7 +545,7 @@ export async function getProject(id) {
 
 export async function createProject(input = {}) {
   return mutate(store => {
-    const project = normalizeProject({ ...input, id: undefined, notes: [], folders: [], files: [] });
+    const project = normalizeProject({ ...input, id: undefined, logo: null, notes: [], folders: [], files: [] });
     if (store.projects.some(item => item.id === project.id)) throw new Error('Projekt-ID ist bereits vorhanden.');
     store.projects.push(project);
     store.deletedProjectIds = (store.deletedProjectIds || []).filter(id => id !== project.id);
@@ -498,7 +558,7 @@ export async function updateProject(id, patch = {}) {
     const index = store.projects.findIndex(item => item.id === clean(id, 100));
     if (index < 0) return null;
     const current = store.projects[index];
-    store.projects[index] = normalizeProject({ ...current, ...patch, id: current.id, notes: current.notes, folders: current.folders, files: current.files }, current);
+    store.projects[index] = normalizeProject({ ...current, ...patch, id: current.id, logo: current.logo, notes: current.notes, folders: current.folders, files: current.files }, current);
     return publicProject(store.projects[index]);
   });
 }
@@ -542,6 +602,63 @@ export async function createProjectFolder(id, input = {}) {
     project.folders = [...(project.folders || []), normalizeFolder({ name, parentId })];
     return publicProject(project);
   });
+}
+
+export async function storeProjectLogo(id, { name, mime, buffer } = {}) {
+  const safeMime = clean(mime, 100).split(';')[0].toLowerCase();
+  if (!LOGO_MIME_EXTENSIONS.has(safeMime)) throw new Error('Erlaubt sind PNG-, JPG- und WebP-Logos.');
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error('Die Logo-Datei ist leer.');
+  if (buffer.length > MAX_LOGO_BYTES) throw new Error('Das Logo ist größer als 5 MB.');
+  if (!validLogoSignature(buffer, safeMime)) throw new Error('Dateityp und Inhalt des Logos passen nicht zusammen.');
+  const projectId = clean(id, 100);
+  const extension = LOGO_MIME_EXTENSIONS.get(safeMime);
+  const storageName = `brand-logo-${crypto.randomUUID()}${extension}`;
+  const result = await mutate(async store => {
+    const project = store.projects.find(item => item.id === projectId);
+    if (!project) return null;
+    const projectDir = projectFileDir(project.id);
+    await fs.mkdir(projectDir, { recursive: true });
+    await fs.writeFile(path.join(projectDir, storageName), buffer, { mode: 0o600 });
+    const previousStorageName = project.logo?.storageName || '';
+    project.logo = normalizeLogo({
+      name: clean(name, 240) || `Projektlogo${extension}`,
+      mime: safeMime,
+      bytes: buffer.length,
+      sha256: crypto.createHash('sha256').update(buffer).digest('hex'),
+      storageName,
+      uploadedAt: new Date().toISOString(),
+    });
+    return { project: publicProject(project), previousStorageName };
+  });
+  if (!result) return null;
+  if (result.previousStorageName && result.previousStorageName !== storageName) {
+    await fs.rm(path.join(projectFileDir(projectId), result.previousStorageName), { force: true }).catch(() => {});
+  }
+  return result.project;
+}
+
+export async function readProjectLogo(id) {
+  const project = (await loadStore()).projects.find(item => item.id === clean(id, 100));
+  if (!project?.logo?.storageName) return null;
+  const projectDir = projectFileDir(project.id);
+  const filePath = path.join(projectDir, project.logo.storageName);
+  if (!filePath.startsWith(`${projectDir}${path.sep}`)) return null;
+  const { storageName, ...meta } = project.logo;
+  return { meta: clone(meta), buffer: await fs.readFile(filePath) };
+}
+
+export async function deleteProjectLogo(id) {
+  const projectId = clean(id, 100);
+  const result = await mutate(store => {
+    const project = store.projects.find(item => item.id === projectId);
+    if (!project) return null;
+    const storageName = project.logo?.storageName || '';
+    project.logo = null;
+    return { project: publicProject(project), storageName };
+  });
+  if (!result) return null;
+  if (result.storageName) await fs.rm(path.join(projectFileDir(projectId), result.storageName), { force: true }).catch(() => {});
+  return result.project;
 }
 
 export async function storeProjectFile(id, { name, mime, folderId, buffer }) {

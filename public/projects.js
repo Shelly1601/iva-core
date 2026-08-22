@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id);
 const TOKEN_KEY = 'iva_token';
-const state = { projects: [], current: null, activeFolderId: 'all', uploading: false };
+const state = { projects: [], current: null, activeFolderId: 'all', uploading: false, logoUrls: new Map() };
 
 function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
 function esc(value) { return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
@@ -8,6 +8,44 @@ function label(value) { return ({ idea: 'Idee', planned: 'Geplant', foundation: 
 function formatDate(value) { return value ? new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : ''; }
 function formatBytes(value) { const bytes = Number(value) || 0; if (bytes < 1024) return `${bytes} B`; if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`; return `${(bytes / 1024 ** 2).toFixed(1)} MB`; }
 function showToast(message, error = false) { const toast = $('toast'); toast.textContent = message; toast.className = `toast${error ? ' error' : ''}`; clearTimeout(showToast.timer); showToast.timer = setTimeout(() => toast.classList.add('hidden'), 3600); }
+function initials(value) { return String(value || 'P').split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toLocaleUpperCase('de-DE'); }
+function websiteLabel(value) { try { return new URL(value).hostname.replace(/^www\./, ''); } catch { return 'Website'; } }
+function instagramLabel(value) { try { return `@${new URL(value).pathname.split('/').filter(Boolean)[0] || 'Instagram'}`; } catch { return 'Instagram'; } }
+function projectLogo(project, large = false) {
+  const source = state.logoUrls.get(project.id);
+  return `<span class="project-logo${large ? ' brand-logo-large' : ''}">${source ? `<img src="${esc(source)}" alt="Logo ${esc(project.name)}">` : esc(initials(project.name))}</span>`;
+}
+
+function forgetProjectLogo(projectId) {
+  const existing = state.logoUrls.get(projectId);
+  if (existing) URL.revokeObjectURL(existing);
+  state.logoUrls.delete(projectId);
+}
+
+async function refreshProjectLogo(project) {
+  forgetProjectLogo(project.id);
+  if (!project.logo) return;
+  try {
+    const response = await fetch(`/api/projects/${encodeURIComponent(project.id)}/logo?v=${encodeURIComponent(project.logo.sha256 || '')}`, { headers: { Authorization: `Bearer ${token()}` } });
+    if (!response.ok) return;
+    state.logoUrls.set(project.id, URL.createObjectURL(await response.blob()));
+  } catch { /* Initialen bleiben als sichere Rückfallebene sichtbar. */ }
+}
+
+function logoMime(file) {
+  if (['image/png', 'image/jpeg', 'image/webp'].includes(file?.type)) return file.type;
+  const extension = String(file?.name || '').toLowerCase().split('.').pop();
+  return ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' })[extension] || '';
+}
+
+async function uploadProjectLogo(projectId, file) {
+  if (!file) return null;
+  if (file.size > 5 * 1024 * 1024) throw new Error('Das Logo ist größer als 5 MB.');
+  const mime = logoMime(file);
+  if (!mime) throw new Error('Bitte ein PNG-, JPG- oder WebP-Logo auswählen.');
+  const query = new URLSearchParams({ name: file.name, mime });
+  return api(`/api/projects/${encodeURIComponent(projectId)}/logo?${query}`, { method: 'POST', headers: { 'Content-Type': mime }, body: file });
+}
 
 async function api(path, options = {}) {
   const headers = { Authorization: `Bearer ${token()}`, ...(options.headers || {}) };
@@ -30,9 +68,19 @@ function replaceProject(project) {
 }
 
 function renderList() {
-  $('projectList').innerHTML = state.projects.map(project => `<div class="project-row"><button class="project-main ${state.current?.id === project.id ? 'active' : ''}" data-project-id="${esc(project.id)}"><b>${esc(project.name)}</b><small class="muted">${esc(label(project.status))}</small></button><button class="project-trash" data-delete-id="${esc(project.id)}" title="Projektakte löschen" aria-label="${esc(project.name)} löschen">🗑</button></div>`).join('');
+  $('projectList').innerHTML = state.projects.map(project => `<div class="project-row"><button class="project-main ${state.current?.id === project.id ? 'active' : ''}" data-project-id="${esc(project.id)}">${projectLogo(project)}<span class="project-copy"><b>${esc(project.name)}</b><small class="muted">${esc(project.websiteUrl ? websiteLabel(project.websiteUrl) : label(project.status))}</small></span></button><button class="project-trash" data-delete-id="${esc(project.id)}" title="Projektakte löschen" aria-label="${esc(project.name)} löschen">🗑</button></div>`).join('');
   document.querySelectorAll('[data-project-id]').forEach(button => { button.onclick = () => selectProject(button.dataset.projectId); });
   document.querySelectorAll('[data-delete-id]').forEach(button => { button.onclick = event => { event.stopPropagation(); removeProject(button.dataset.deleteId); }; });
+}
+
+function brandSection(project) {
+  const website = project.websiteUrl
+    ? `<a class="brand-link" href="${esc(project.websiteUrl)}" target="_blank" rel="noopener">↗ ${esc(websiteLabel(project.websiteUrl))}</a>`
+    : '<span class="brand-link missing">＋ Website fehlt</span>';
+  const instagram = project.instagramUrl
+    ? `<a class="brand-link" href="${esc(project.instagramUrl)}" target="_blank" rel="noopener">◎ ${esc(instagramLabel(project.instagramUrl))}</a>`
+    : '<span class="brand-link missing">＋ Instagram fehlt</span>';
+  return `<section class="brand-card">${projectLogo(project, true)}<div class="brand-info"><div class="eyebrow">Markenprofil</div><h2>${esc(project.name)}</h2><div class="muted brand-hint">${esc(project.description || 'Logo, Website und Social-Profil machen das Projekt auf einen Blick erkennbar.')}</div><div class="brand-links">${website}${instagram}</div></div><button class="btn brand-action" id="editBrand">Marke bearbeiten</button></section>`;
 }
 
 function folderTree(project) {
@@ -91,6 +139,7 @@ function collapseProjectSections() {
 }
 
 function bindProjectActions() {
+  $('editBrand').onclick = openBrandDialog;
   $('addNote').onclick = addNote;
   $('newFolder').onclick = openFolderDialog;
   document.querySelectorAll('[data-folder-id]').forEach(button => { button.onclick = () => { state.activeFolderId = button.dataset.folderId; render(); }; });
@@ -118,7 +167,7 @@ function render() {
   $('title').textContent = project.name;
   $('description').textContent = project.description || 'Projektakte für Ideen, Absprachen und Dokumente.';
   const objective = project.objective || project.description;
-  $('content').innerHTML = `${notesSection(project)}${objective ? `<section class="hero"><div class="eyebrow">Zielbild</div><h2>${esc(objective)}</h2></section>` : ''}${archiveSection(project)}${operationalSections(project)}`;
+  $('content').innerHTML = `${brandSection(project)}${notesSection(project)}${objective ? `<section class="hero"><div class="eyebrow">Zielbild</div><h2>${esc(objective)}</h2></section>` : ''}${archiveSection(project)}${operationalSections(project)}`;
   collapseProjectSections();
   bindProjectActions();
 }
@@ -149,6 +198,7 @@ function selectProject(id) {
 async function load() {
   try {
     state.projects = await api('/api/projects');
+    await Promise.all(state.projects.map(project => refreshProjectLogo(project)));
     const id = new URLSearchParams(location.search).get('id');
     state.current = state.projects.find(project => project.id === id) || state.projects[0] || null;
     render();
@@ -158,6 +208,63 @@ async function load() {
     $('status').className = 'status';
     $('status').textContent = error.message;
   }
+}
+
+function openBrandDialog() {
+  if (!state.current) return;
+  $('brandForm').reset();
+  $('brandName').value = state.current.name || '';
+  $('brandCategory').value = state.current.category || '';
+  $('brandWebsite').value = state.current.websiteUrl || '';
+  $('brandInstagram').value = state.current.instagramUrl || '';
+  $('brandDescription').value = state.current.description || '';
+  $('removeBrandLogo').classList.toggle('hidden', !state.current.logo);
+  $('brandDialog').showModal();
+  setTimeout(() => $('brandName').focus(), 0);
+}
+
+async function saveBrand(event) {
+  event.preventDefault();
+  if (!state.current) return;
+  const submit = event.submitter;
+  if (submit) submit.disabled = true;
+  try {
+    let project = await api(`/api/projects/${encodeURIComponent(state.current.id)}`, {
+      method: 'PATCH',
+      body: {
+        name: $('brandName').value.trim(),
+        category: $('brandCategory').value.trim(),
+        websiteUrl: $('brandWebsite').value.trim(),
+        instagramUrl: $('brandInstagram').value.trim(),
+        description: $('brandDescription').value.trim(),
+      },
+    });
+    const file = $('brandLogo').files[0];
+    let logoError = '';
+    if (file) {
+      try { project = await uploadProjectLogo(project.id, file); }
+      catch (error) { logoError = error.message; }
+    }
+    replaceProject(project);
+    state.projects.sort((a, b) => a.name.localeCompare(b.name, 'de'));
+    if (file && !logoError) await refreshProjectLogo(project);
+    $('brandDialog').close();
+    render();
+    showToast(logoError ? `Markenprofil gespeichert, Logo nicht übernommen: ${logoError}` : 'Markenprofil gespeichert.', Boolean(logoError));
+  } catch (error) { showToast(error.message, true); }
+  finally { if (submit) submit.disabled = false; }
+}
+
+async function removeBrandLogo() {
+  if (!state.current?.logo || !window.confirm('Logo aus diesem Projekt entfernen?')) return;
+  try {
+    const project = await api(`/api/projects/${encodeURIComponent(state.current.id)}/logo`, { method: 'DELETE' });
+    forgetProjectLogo(project.id);
+    replaceProject(project);
+    $('removeBrandLogo').classList.add('hidden');
+    render();
+    showToast('Logo entfernt.');
+  } catch (error) { showToast(error.message, true); }
 }
 
 async function addNote() {
@@ -238,6 +345,7 @@ async function removeProject(id) {
   if (!confirmed) return;
   try {
     await api(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    forgetProjectLogo(id);
     state.projects = state.projects.filter(item => item.id !== id);
     if (state.current?.id === id) state.current = state.projects[0] || null;
     state.activeFolderId = 'all';
@@ -253,16 +361,29 @@ $('saveToken').onclick = () => { localStorage.setItem(TOKEN_KEY, $('token').valu
 $('newProject').onclick = () => { $('projectForm').reset(); $('projectDialog').showModal(); setTimeout(() => $('projectName').focus(), 0); };
 $('projectForm').onsubmit = async event => {
   event.preventDefault();
+  const submit = event.submitter;
+  if (submit) submit.disabled = true;
   try {
     const description = $('projectDescription').value.trim();
-    const project = await api('/api/projects', { method: 'POST', body: { name: $('projectName').value.trim(), category: $('projectCategory').value.trim(), description, objective: description, status: 'idea' } });
+    let project = await api('/api/projects', { method: 'POST', body: { name: $('projectName').value.trim(), category: $('projectCategory').value.trim(), websiteUrl: $('projectWebsite').value.trim(), instagramUrl: $('projectInstagram').value.trim(), description, objective: description, status: 'idea' } });
+    const file = $('projectLogo').files[0];
+    let logoError = '';
+    if (file) {
+      try {
+        project = await uploadProjectLogo(project.id, file);
+        await refreshProjectLogo(project);
+      } catch (error) { logoError = error.message; }
+    }
     state.projects.push(project);
     state.projects.sort((a, b) => a.name.localeCompare(b.name, 'de'));
     $('projectDialog').close();
     selectProject(project.id);
-    showToast('Projektakte angelegt.');
+    showToast(logoError ? `Projekt angelegt, Logo nicht übernommen: ${logoError}` : 'Projektakte angelegt.', Boolean(logoError));
   } catch (error) { showToast(error.message, true); }
+  finally { if (submit) submit.disabled = false; }
 };
+$('brandForm').onsubmit = saveBrand;
+$('removeBrandLogo').onclick = removeBrandLogo;
 $('folderForm').onsubmit = createFolder;
 document.querySelectorAll('[data-close]').forEach(button => { button.onclick = () => $(button.dataset.close).close(); });
 $('fileInput').onchange = event => uploadFiles([...event.target.files]);

@@ -7,12 +7,15 @@ const {
   addProjectNote,
   createProject,
   createProjectFolder,
+  deleteProjectLogo,
   deleteProject,
   getProject,
   listProjects,
   readProjectFile,
+  readProjectLogo,
   setProjectAutomationEnabled,
   storeProjectFile,
+  storeProjectLogo,
   updateProject,
 } = await import('../projects/store.js');
 
@@ -43,8 +46,21 @@ const updatedHeat = await getProject('heat-hero');
 check('Projektupdate bleibt gespeichert', updatedHeat.status === 'active');
 check('Projektupdate kann Dateien nicht einschleusen', updatedHeat.files.length === 0);
 
-const project = await createProject({ name: 'Testprojekt', category: 'Test', description: 'Projektakte testen' });
+const project = await createProject({ name: 'Testprojekt', category: 'Test', description: 'Projektakte testen', websiteUrl: 'beispiel.de', instagramUrl: '@beispiel.marke' });
 check('Neues Projekt erhält sichere ID', /^[a-z0-9-]+$/i.test(project.id));
+check('Website und Instagram werden als Markenprofil normalisiert', project.websiteUrl === 'https://beispiel.de/' && project.instagramUrl === 'https://www.instagram.com/beispiel.marke');
+const logoInjection = await updateProject(project.id, { logo: { name: 'falsch.png', mime: 'image/png', storageName: '../../falsch.png' } });
+check('Projektupdate kann kein internes Logo einschleusen', logoInjection.logo === null);
+const logoBuffer = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+const withLogo = await storeProjectLogo(project.id, { name: 'marke.png', mime: 'image/png', buffer: logoBuffer });
+check('Projektlogo wird gespeichert und intern geschützt', withLogo.logo?.name === 'marke.png' && !Object.hasOwn(withLogo.logo, 'storageName'));
+const readLogo = await readProjectLogo(project.id);
+check('Projektlogo ist unverändert abrufbar', readLogo.meta.mime === 'image/png' && readLogo.buffer.equals(logoBuffer));
+const withoutLogo = await deleteProjectLogo(project.id);
+check('Projektlogo lässt sich entfernen', withoutLogo.logo === null && !(await readProjectLogo(project.id)));
+await storeProjectLogo(project.id, { name: 'marke.png', mime: 'image/png', buffer: logoBuffer });
+const invalidLogoRejected = await storeProjectLogo(project.id, { name: 'falsch.png', mime: 'image/png', buffer: Buffer.from('kein bild') }).then(() => false).catch(error => /Dateityp und Inhalt/.test(error.message));
+check('Falsche Logo-Dateien werden abgelehnt', invalidLogoRejected);
 const withNote = await addProjectNote(project.id, 'Idee und Absprache');
 check('Notiz wird gespeichert', withNote.notes.some(note => note.text === 'Idee und Absprache'));
 const withRoot = await createProjectFolder(project.id, { name: 'Unterlagen' });
@@ -76,6 +92,7 @@ check('Ordner, Unterordner und Mehrfachupload vorhanden', html.includes('multipl
 check('Papierkorb löscht nur die Projektakte', js.includes('Projektdateien werden entfernt') && js.includes("method: 'DELETE'"));
 check('Projektbereiche sind standardmäßig zugeklappt', html.includes('project-disclosure') && js.includes('collapseProjectSections'));
 check('Projektworkflows haben echte Ein-Aus-Schalter', html.includes('.switch{') && js.includes('class="switch"') && js.includes('data-project-automation') && js.includes("method: 'PATCH'"));
+check('Markenprofil mit Logo, Website und Instagram ist bedienbar', html.includes('Markenprofil bearbeiten') && html.includes('projectWebsite') && html.includes('projectInstagram') && html.includes('projectLogo') && js.includes('/logo') && js.includes('projectLogo(project)'));
 
 console.log(failures ? `${failures} Fehler` : 'Projektakten erfolgreich verifiziert.');
 process.exit(failures ? 1 : 0);

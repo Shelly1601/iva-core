@@ -73,12 +73,15 @@ import {
   addProjectNote,
   createProject,
   createProjectFolder,
+  deleteProjectLogo,
   deleteProject,
   getProject,
   listProjects,
   readProjectFile,
+  readProjectLogo,
   setProjectAutomationEnabled,
   storeProjectFile,
+  storeProjectLogo,
   updateProject,
 } from './projects/store.js';
 import {
@@ -1247,6 +1250,32 @@ app.post('/api/projects', async (req, res) => {
 app.patch('/api/projects/:id', async (req, res) => {
   try {
     const project = await updateProject(req.params.id, req.body || {});
+    res.status(project ? 200 : 404).json(project || { error: 'not found' });
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.post('/api/projects/:id/logo', express.raw({ type: ['image/png', 'image/jpeg', 'image/webp'], limit: '5mb' }), async (req, res) => {
+  try {
+    const project = await storeProjectLogo(req.params.id, {
+      name: req.query?.name,
+      mime: req.query?.mime || req.headers['content-type'],
+      buffer: req.body,
+    });
+    res.status(project ? 201 : 404).json(project || { error: 'not found' });
+  } catch (error) { res.status(error?.type === 'entity.too.large' ? 413 : 400).json({ error: error.message }); }
+});
+app.get('/api/projects/:id/logo', async (req, res) => {
+  try {
+    const logo = await readProjectLogo(req.params.id);
+    if (!logo) return res.status(404).json({ error: 'not found' });
+    res.set('Content-Type', logo.meta.mime);
+    res.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(logo.meta.name)}`);
+    res.set('Cache-Control', 'private, max-age=3600');
+    res.send(logo.buffer);
+  } catch { res.status(404).json({ error: 'not found' }); }
+});
+app.delete('/api/projects/:id/logo', async (req, res) => {
+  try {
+    const project = await deleteProjectLogo(req.params.id);
     res.status(project ? 200 : 404).json(project || { error: 'not found' });
   } catch (error) { res.status(400).json({ error: error.message }); }
 });
