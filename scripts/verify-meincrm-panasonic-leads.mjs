@@ -4,8 +4,8 @@ import { importPanasonicLeadsToMeinCrm, meinCrmPanasonicPolicy } from '../integr
 const calls = [];
 const responses = [
   [],
-  [{ id: 'profile-1', email: 'n.sell@heat-hero.com' }],
-  [{ id: 77, user_id: 'profile-1', name: 'Vertrieb Innendienst', email: 'n.sell@heat-hero.com' }],
+  [{ id: '7ef67f00-25a1-4bfd-8f42-a8aaecb31b75', email: 'n.sell@heat-hero.com' }],
+  [{ id: 77, user_id: '7ef67f00-25a1-4bfd-8f42-a8aaecb31b75', name: 'Vertrieb Innendienst', email: 'n.sell@heat-hero.com' }],
   [{ id: 5, name: 'Schon vorhanden', email: 'existing@example.de', telefon: '+491701111111', notizen: 'ProMatch-ID: 11111111111111111111111111111111' }],
   [{ id: 101 }],
 ];
@@ -37,12 +37,12 @@ assert.equal(result.advisor.id, 77);
 assert.equal(meinCrmPanasonicPolicy.advisor.email, 'n.sell@heat-hero.com');
 
 const advisorInsert = calls.find(call => call.url.includes('/vertriebler') && call.method === 'POST');
-assert.deepEqual(advisorInsert.body, { name: 'Vertrieb Innendienst', email: 'n.sell@heat-hero.com', user_id: 'profile-1' });
+assert.deepEqual(advisorInsert.body, { name: 'Vertrieb Innendienst', email: 'n.sell@heat-hero.com', user_id: '7ef67f00-25a1-4bfd-8f42-a8aaecb31b75' });
 
 const leadInsert = calls.find(call => call.url.includes('/leads') && call.method === 'POST');
 assert.equal(leadInsert.body.quelle, 'Panasonic');
 assert.equal(leadInsert.body.project_id, '2e8f1cf6-4579-4d07-8c65-5b1ac4e954a8');
-assert.equal(leadInsert.body.assigned_user_id, 77);
+assert.equal(leadInsert.body.assigned_user_id, '7ef67f00-25a1-4bfd-8f42-a8aaecb31b75');
 assert.equal(leadInsert.body.fachberater_id, 77);
 assert.equal(leadInsert.body.fachberater_name, 'Vertrieb Innendienst');
 assert.equal('anrede' in leadInsert.body, false);
@@ -56,8 +56,10 @@ const splitDbResponses = [
   { ok: true, status: 200, body: [] },
   { ok: true, status: 201, body: [{ id: 102 }] },
 ];
-async function splitDbFetchStub() {
+const splitDbCalls = [];
+async function splitDbFetchStub(url, options = {}) {
   const response = splitDbResponses.shift();
+  splitDbCalls.push({ url: String(url), method: options.method || 'GET', body: options.body ? JSON.parse(options.body) : null });
   return { ok: response.ok, status: response.status, text: async () => JSON.stringify(response.body) };
 }
 const splitDbResult = await importPanasonicLeadsToMeinCrm([{
@@ -70,6 +72,10 @@ assert.equal(splitDbResult.created, 1);
 assert.equal(splitDbResult.advisor.id, 88);
 assert.equal(splitDbResult.projectId, null);
 assert.equal(splitDbResult.projectScope, 'dedicated-database');
+const splitLeadInsert = splitDbCalls.find(call => call.url.includes('/leads') && call.method === 'POST');
+assert.equal('project_id' in splitLeadInsert.body, false);
+assert.equal('assigned_user_id' in splitLeadInsert.body, false);
+assert.equal(splitLeadInsert.body.fachberater_id, 88);
 
 await assert.rejects(
   () => importPanasonicLeadsToMeinCrm([], { serviceKey: 'x', projectId: 'y', fetchImpl: fetchStub }),

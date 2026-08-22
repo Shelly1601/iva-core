@@ -196,7 +196,7 @@ export async function importPanasonicLeadsToMeinCrm(inputs, options = {}) {
       status_detail: 'neuer lead',
       notizen: buildNotes(lead),
       ...(scopedProjectId ? { project_id: scopedProjectId } : {}),
-      assigned_user_id: advisorId,
+      ...(isUuid(advisor.user_id) ? { assigned_user_id: advisor.user_id } : {}),
       fachberater_id: advisorId,
       fachberater_name: SALES_ADVISOR.name,
     };
