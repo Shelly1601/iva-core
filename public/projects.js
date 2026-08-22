@@ -42,7 +42,10 @@ function schedulingWeekOptions() {
 function customerSchedulingSection(project) {
   if (project.id !== 'heat-hero') return '';
   const latest = (project.customerSchedulingRequests || [])[0];
-  return `<section class="workflow-launcher" aria-labelledby="customerSchedulingTitle"><div class="workflow-launcher-head"><div><div class="eyebrow">Direkt oben · operativer Workflow</div><h2 id="customerSchedulingTitle">Kunde terminieren</h2><div class="muted">Kundenname eingeben, Kalenderwoche auswählen und den Auftrag an IVA übergeben.</div></div><span class="workflow-tag">Planbar + Pipedrive</span></div><form class="schedule-form" id="customerSchedulingForm"><label><span>Kundenname</span><input id="scheduleCustomerName" name="customerName" maxlength="220" autocomplete="off" required placeholder="Vorname Nachname"></label><label><span>Kalenderwoche</span><select id="scheduleWeek" name="week" required>${schedulingWeekOptions()}</select></label><button class="btn primary" type="submit">Workflow vorbereiten</button></form><div class="schedule-latest">${latest ? `Zuletzt vorgemerkt: <b>${esc(latest.customerName)}</b> · KW ${esc(latest.week)}/${esc(latest.isoYear)} · bereit für IVA` : 'Noch kein Kunde vorgemerkt.'}</div></section>`;
+  const latestSummary = latest
+    ? `Zuletzt vorgemerkt: <b>${esc(latest.customerName)}</b> · KW ${esc(latest.week)}/${esc(latest.isoYear)} · Material vorher: ${latest.materialDeliverySpace ? 'Ja' : 'Nein'} · geschützt: ${latest.theftWeatherProtected ? 'Ja' : 'Nein'}${latest.additionalInfo ? ' · Zusatzinfo vorhanden' : ''}`
+    : 'Noch kein Kunde vorgemerkt.';
+  return `<section class="workflow-launcher" aria-labelledby="customerSchedulingTitle"><div class="workflow-launcher-head"><div><div class="eyebrow">Direkt oben · operativer Workflow</div><h2 id="customerSchedulingTitle">Kunde terminieren</h2><div class="muted">Kundenname, Kalenderwoche und Materialannahme erfassen. IVA übernimmt die Angaben später in die Planbar-Beschreibung.</div></div><span class="workflow-tag">Planbar + Pipedrive</span></div><form class="schedule-form" id="customerSchedulingForm"><label><span>Kundenname</span><input id="scheduleCustomerName" name="customerName" maxlength="220" autocomplete="off" required placeholder="Vorname Nachname"></label><label><span>Kalenderwoche</span><select id="scheduleWeek" name="week" required>${schedulingWeekOptions()}</select></label><button class="btn primary" type="submit">Workflow vorbereiten</button><div class="schedule-checks"><label class="schedule-check"><input id="scheduleMaterialDeliverySpace" type="checkbox"><span class="schedule-question">Hat der Kunde Platz, Material einige Tage vor Montagebeginn anzunehmen?</span><span class="schedule-answer" data-answer-for="scheduleMaterialDeliverySpace">Nein</span></label><label class="schedule-check"><input id="scheduleTheftWeatherProtected" type="checkbox"><span class="schedule-question">Diebstahl- und wettersicher?</span><span class="schedule-answer" data-answer-for="scheduleTheftWeatherProtected">Nein</span></label></div><label class="schedule-extra"><span>Zusatzinfo · optional</span><textarea id="scheduleAdditionalInfo" maxlength="2000" placeholder="Nur ausfüllen, wenn diese Information zusätzlich in Planbar stehen soll."></textarea></label></form><div class="schedule-latest">${latestSummary}</div></section>`;
 }
 
 function forgetProjectLogo(projectId) {
@@ -169,7 +172,15 @@ function collapseProjectSections() {
 
 function bindProjectActions() {
   const schedulingForm = $('customerSchedulingForm');
-  if (schedulingForm) schedulingForm.onsubmit = requestCustomerScheduling;
+  if (schedulingForm) {
+    schedulingForm.onsubmit = requestCustomerScheduling;
+    document.querySelectorAll('[data-answer-for]').forEach(answer => {
+      const input = $(answer.dataset.answerFor);
+      const sync = () => { answer.textContent = input.checked ? 'Ja' : 'Nein'; };
+      input.onchange = sync;
+      sync();
+    });
+  }
   $('editBrand').onclick = openBrandDialog;
   $('addNote').onclick = addNote;
   $('newFolder').onclick = openFolderDialog;
@@ -208,12 +219,15 @@ async function requestCustomerScheduling(event) {
   if (!state.current) return;
   const customerName = $('scheduleCustomerName').value.trim();
   const [isoYear, week] = $('scheduleWeek').value.split('-').map(Number);
+  const materialDeliverySpace = $('scheduleMaterialDeliverySpace').checked;
+  const theftWeatherProtected = $('scheduleTheftWeatherProtected').checked;
+  const additionalInfo = $('scheduleAdditionalInfo').value.trim();
   const submit = event.submitter;
   if (submit) submit.disabled = true;
   try {
     const project = await api(`/api/projects/${encodeURIComponent(state.current.id)}/customer-scheduling-requests`, {
       method: 'POST',
-      body: { customerName, isoYear, week },
+      body: { customerName, isoYear, week, materialDeliverySpace, theftWeatherProtected, additionalInfo },
     });
     replaceProject(project);
     render();

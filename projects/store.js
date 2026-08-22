@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
+import { buildPlanbarSchedulingExtras } from '../operations/customer-scheduling.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const STORE_FILE = path.join(DATA_DIR, 'projects.json');
@@ -364,12 +365,20 @@ function normalizeCustomerSchedulingRequest(request = {}) {
   const customerName = clean(request.customerName, 220);
   const isoYear = Math.max(2000, Math.min(2100, Number(request.isoYear) || new Date().getUTCFullYear()));
   const week = Math.max(1, Math.min(53, Number(request.week) || 1));
+  const materialDeliverySpace = request.materialDeliverySpace === true;
+  const theftWeatherProtected = request.theftWeatherProtected === true;
+  const additionalInfo = clean(request.additionalInfo, 2000);
+  const planbarDescriptionExtras = buildPlanbarSchedulingExtras({ materialDeliverySpace, theftWeatherProtected, additionalInfo });
   return {
     id: clean(request.id, 100) || crypto.randomUUID(),
     customerName,
     isoYear,
     week,
-    command: `Kunde terminieren: ${customerName} in KW ${week}/${isoYear}`,
+    materialDeliverySpace,
+    theftWeatherProtected,
+    additionalInfo,
+    planbarDescriptionExtras,
+    command: `Kunde terminieren: ${customerName} in KW ${week}/${isoYear}\n${planbarDescriptionExtras.join('\n')}`,
     status: request.status === 'completed' ? 'completed' : 'requested',
     createdAt: iso(request.createdAt),
   };
@@ -632,10 +641,20 @@ export async function addCustomerSchedulingRequest(id, input = {}) {
   if (customerName.length < 3) throw new Error('Bitte den vollständigen Kundennamen eingeben.');
   if (!Number.isInteger(isoYear) || isoYear < 2000 || isoYear > 2100) throw new Error('Das Kalenderjahr ist ungültig.');
   if (!Number.isInteger(week) || week < 1 || week > 53) throw new Error('Die Kalenderwoche ist ungültig.');
+  if (typeof input.materialDeliverySpace !== 'boolean' || typeof input.theftWeatherProtected !== 'boolean') {
+    throw new Error('Bitte beide Materialfragen mit Ja oder Nein beantworten.');
+  }
   return mutate(store => {
     const project = store.projects.find(item => item.id === clean(id, 100));
     if (!project) return null;
-    const request = normalizeCustomerSchedulingRequest({ customerName, isoYear, week });
+    const request = normalizeCustomerSchedulingRequest({
+      customerName,
+      isoYear,
+      week,
+      materialDeliverySpace: input.materialDeliverySpace,
+      theftWeatherProtected: input.theftWeatherProtected,
+      additionalInfo: input.additionalInfo,
+    });
     project.customerSchedulingRequests = [request, ...(project.customerSchedulingRequests || [])].slice(0, 100);
     return publicProject(project);
   });

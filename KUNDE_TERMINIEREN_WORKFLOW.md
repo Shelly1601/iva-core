@@ -1,12 +1,12 @@
 # Workflow „Kunde terminieren“
 
-Stand: 22. August 2026 · Version 2
+Stand: 22. August 2026 · Version 3
 
 ## Trigger und Ziel
 
 Der Workflow startet auf Nadines Zuruf, zum Beispiel: **„Kunde terminieren: Stefanie Schneider in KW 39.“** IVA sucht den eindeutig passenden Heat-Hero-Vorgang, legt den Kunden bei Bedarf in Planbar an und plant die Montage über die fünf Werktage Montag bis Freitag der genannten ISO-Kalenderwoche ein.
 
-Alternativ kann Nadine den Auftrag direkt oben in der Heat-Hero-Projektakte vormerken: Kundenname eintragen, die gewünschte Kalenderwoche aus dem rollierenden Dropdown auswählen und **„Workflow vorbereiten“** drücken. Die Projektakte speichert daraus den eindeutigen Auftrag `Kunde terminieren: <Name> in KW <Woche>/<Jahr>` für IVA. Die Vormerkung führt noch keine externe Planbar- oder Pipedrive-Schreibaktion aus; deren gemeinsame Bestätigung bleibt Teil des Workflows.
+Alternativ kann Nadine den Auftrag direkt oben in der Heat-Hero-Projektakte vormerken: Kundenname eintragen, die gewünschte Kalenderwoche aus dem rollierenden Dropdown auswählen, beide Materialfragen per Ja/Nein-Checkbox beantworten und **„Workflow vorbereiten“** drücken. Die optionale Zusatzinfo wird nur gespeichert und übertragen, wenn sie nach dem Trimmen tatsächlich Inhalt enthält. Die Vormerkung führt noch keine externe Planbar- oder Pipedrive-Schreibaktion aus; deren gemeinsame Bestätigung bleibt Teil des Workflows.
 
 ## 1. Verbindliche Quellen und Vorprüfung
 
@@ -35,6 +35,8 @@ Alternativ kann Nadine den Auftrag direkt oben in der Heat-Hero-Projektakte vorm
 3. Nie verwenden: **David/Dawid Service** und **Antonio Lausic/Lausich/Lausitsch**. Die Schreibvarianten werden absichtlich gemeinsam ausgeschlossen.
 4. Gibt es keine vollständig freie zulässige Ressource, wird nichts angelegt und der Fall mit den belegten Kalenderdaten gemeldet.
 5. Der Termin erhält den vorhandenen oder neu angelegten Planbar-Kunden, die belegte Auftragsnummer und die nach dem Vervollständigungs-Workflow erzeugte Kurzbeschreibung.
+6. Unter den Angebotspositionen stehen immer die beiden Projektakten-Antworten `Materialannahme einige Tage vor Montagebeginn: Ja/Nein` und `Diebstahl- und wettersicher: Ja/Nein` als eigene Zeilen.
+7. `Zusatzinfo: …` wird nur als weitere eigene Zeile angehängt, wenn das Freitextfeld einen nicht-leeren Inhalt besitzt. Bei leerem oder nur aus Leerzeichen bestehendem Feld erscheint keine Zusatzinfo in Planbar.
 
 ## 4. Pipedrive-Abschluss
 

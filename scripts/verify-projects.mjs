@@ -36,9 +36,18 @@ check('Planbar aktiv', heat.automations.some(item => item.id === 'planbar-weekly
 check('Planbar-Vervollständigung ist live schaltbar und aktiv', heat.automations.some(item => item.id === 'planbar-completion-morning' && item.toggleAvailable && item.status === 'active' && item.enabled));
 check('KfW-Morgenlauf wird ohne ausführbaren Job nicht fälschlich als aktiv gezeigt', heat.automations.some(item => item.id === 'kfw-approval-morning' && item.status === 'blocked' && !item.toggleAvailable && !item.enabled));
 check('Montage-Pflichtfeldlauf separat schaltbar', heat.automations.some(item => item.id === 'montage-required-fields-morning' && item.toggleAvailable && item.enabled));
-const heatWithSchedulingRequest = await addCustomerSchedulingRequest('heat-hero', { customerName: 'Stefanie Schneider', isoYear: 2026, week: 39 });
-check('Kunde-terminieren-Auftrag wird in der Projektakte vorgemerkt', heatWithSchedulingRequest.customerSchedulingRequests[0]?.command === 'Kunde terminieren: Stefanie Schneider in KW 39/2026');
-const invalidSchedulingWeek = await addCustomerSchedulingRequest('heat-hero', { customerName: 'Stefanie Schneider', isoYear: 2026, week: 54 }).then(() => false).catch(error => /Kalenderwoche/.test(error.message));
+const heatWithSchedulingRequest = await addCustomerSchedulingRequest('heat-hero', {
+  customerName: 'Stefanie Schneider', isoYear: 2026, week: 39,
+  materialDeliverySpace: true, theftWeatherProtected: false,
+  additionalInfo: 'Zufahrt nur über den Hof.',
+});
+const schedulingRequest = heatWithSchedulingRequest.customerSchedulingRequests[0];
+check('Kunde-terminieren-Auftrag wird in der Projektakte vorgemerkt', schedulingRequest?.command.includes('Kunde terminieren: Stefanie Schneider in KW 39/2026'));
+check('Materialantworten werden für Planbar gespeichert', schedulingRequest?.planbarDescriptionExtras.includes('Materialannahme einige Tage vor Montagebeginn: Ja') && schedulingRequest?.planbarDescriptionExtras.includes('Diebstahl- und wettersicher: Nein'));
+check('Vorhandene Zusatzinfo wird für Planbar gespeichert', schedulingRequest?.planbarDescriptionExtras.includes('Zusatzinfo: Zufahrt nur über den Hof.'));
+const withoutAdditionalInfo = await addCustomerSchedulingRequest('heat-hero', { customerName: 'Max Mustermann', isoYear: 2026, week: 40, materialDeliverySpace: false, theftWeatherProtected: true, additionalInfo: '   ' });
+check('Leere Zusatzinfo wird nicht an Planbar übergeben', !withoutAdditionalInfo.customerSchedulingRequests[0]?.planbarDescriptionExtras.some(line => line.startsWith('Zusatzinfo:')));
+const invalidSchedulingWeek = await addCustomerSchedulingRequest('heat-hero', { customerName: 'Stefanie Schneider', isoYear: 2026, week: 54, materialDeliverySpace: true, theftWeatherProtected: true }).then(() => false).catch(error => /Kalenderwoche/.test(error.message));
 check('Ungültige Kalenderwoche wird abgewiesen', invalidSchedulingWeek);
 check('Herstellerlauf pausiert', heat.automations.some(item => item.id === 'manufacturer-leads-wattfox' && item.status === 'paused' && !item.enabled));
 const blockedKfwToggle = await setProjectAutomationEnabled('heat-hero', 'kfw-approval-morning', true).then(() => false).catch(error => /noch nicht ausführbar/.test(error.message));
@@ -104,6 +113,7 @@ check('Projektbereiche sind standardmäßig zugeklappt', html.includes('project-
 check('Projektworkflows haben echte Ein-Aus-Schalter', html.includes('.switch{') && js.includes('class="switch"') && js.includes('data-project-automation') && js.includes("method: 'PATCH'"));
 check('Markenprofil mit Logo, Website und Instagram ist bedienbar', html.includes('Markenprofil bearbeiten') && html.includes('projectWebsite') && html.includes('projectInstagram') && html.includes('projectLogo') && js.includes('/logo') && js.includes('projectLogo(project)'));
 check('Kunde terminieren steht oben mit Kundenname und KW-Auswahl bereit', html.includes('.workflow-launcher') && js.includes('Kunde terminieren') && js.includes('scheduleCustomerName') && js.includes('scheduleWeek') && js.includes('/customer-scheduling-requests'));
+check('Materialfragen und optionale Zusatzinfo stehen im Schnellstart bereit', js.includes('scheduleMaterialDeliverySpace') && js.includes('scheduleTheftWeatherProtected') && js.includes('scheduleAdditionalInfo'));
 
 console.log(failures ? `${failures} Fehler` : 'Projektakten erfolgreich verifiziert.');
 process.exit(failures ? 1 : 0);

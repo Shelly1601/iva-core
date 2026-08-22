@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   assertSchedulableSourceStage,
+  buildPlanbarSchedulingExtras,
   buildPipedriveCompletion,
   buildPlanbarCustomer,
   isExcludedPlanbarResource,
@@ -23,6 +24,20 @@ assert.equal(assertSchedulableSourceStage('Förderung beantragen'), true);
 assert.equal(assertSchedulableSourceStage('Montage einplanen'), true);
 assert.equal(assertSchedulableSourceStage('Montage terminieren'), true);
 assert.throws(() => assertSchedulableSourceStage('Angebot offen'), /weder/);
+
+assert.deepEqual(buildPlanbarSchedulingExtras({
+  materialDeliverySpace: true,
+  theftWeatherProtected: false,
+  additionalInfo: '  Zufahrt nur über den Hof.  ',
+}), [
+  'Materialannahme einige Tage vor Montagebeginn: Ja',
+  'Diebstahl- und wettersicher: Nein',
+  'Zusatzinfo: Zufahrt nur über den Hof.',
+]);
+assert.deepEqual(buildPlanbarSchedulingExtras({ materialDeliverySpace: false, theftWeatherProtected: true, additionalInfo: '   ' }), [
+  'Materialannahme einige Tage vor Montagebeginn: Nein',
+  'Diebstahl- und wettersicher: Ja',
+]);
 
 assert.deepEqual(buildPlanbarCustomer({
   firstName: 'HH Stefanie',

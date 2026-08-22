@@ -95,6 +95,16 @@ export function selectFirstFreePlanbarResource({ resources, bookings = [], start
   throw new Error('In der gewünschten Kalenderwoche ist keine zulässige Ressource vollständig von Montag bis Freitag frei.');
 }
 
+export function buildPlanbarSchedulingExtras({ materialDeliverySpace, theftWeatherProtected, additionalInfo = '' }) {
+  const lines = [
+    `Materialannahme einige Tage vor Montagebeginn: ${materialDeliverySpace === true ? 'Ja' : 'Nein'}`,
+    `Diebstahl- und wettersicher: ${theftWeatherProtected === true ? 'Ja' : 'Nein'}`,
+  ];
+  const cleanAdditionalInfo = String(additionalInfo || '').trim();
+  if (cleanAdditionalInfo) lines.push(`Zusatzinfo: ${cleanAdditionalInfo}`);
+  return lines;
+}
+
 export function buildPipedriveCompletion({ year, week, currentStage, visibleStages }) {
   isoWeekRange(year, week);
   if (!Array.isArray(visibleStages) || visibleStages.length < 2) {
