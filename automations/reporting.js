@@ -4,6 +4,8 @@ import {
   saveAutomationReport,
   successfulDelivery,
 } from './store.js';
+import { listProjects } from '../projects/store.js';
+import { listProjectProtocols } from '../projects/protocols.js';
 
 const TIME_ZONE = 'Europe/Berlin';
 const DEFAULT_RECIPIENT = 'n.sell@heat-hero.com';
@@ -50,8 +52,11 @@ function runIsoWeek(run) {
 }
 
 function countsFor(runs) {
-  const counts = { total: runs.length, completed: 0, failed: 0, blocked: 0, skipped: 0, running: 0 };
-  for (const run of runs) counts[run.status] = (counts[run.status] || 0) + 1;
+  const counts = { total: runs.length, completed: 0, partial: 0, failed: 0, blocked: 0, skipped: 0, missing: 0, running: 0 };
+  for (const run of runs) {
+    const status = ({ successful: 'completed', partial: 'partial' })[run.outcome] || run.status;
+    counts[status] = (counts[status] || 0) + 1;
+  }
   return counts;
 }
 
@@ -75,18 +80,93 @@ function escapeHtml(value) {
 }
 
 function statusLabel(status) {
-  return ({ completed: 'Erfolgreich durchgelaufen', failed: 'Fehler', blocked: 'Blockiert', skipped: 'Übersprungen', running: 'Läuft noch' })[status]
+  return ({ completed: 'Erfolgreich durchgelaufen', successful: 'Erfolgreich durchgelaufen', partial: 'Teilweise erfolgreich', failed: 'Fehler', blocked: 'Blockiert', skipped: 'Übersprungen', missing: 'NICHT GELAUFEN', running: 'Läuft noch' })[status]
     || String(status || 'Unbekannt');
 }
 
+function normalizedRunStatus(run) {
+  return ({ successful: 'completed', partial: 'partial' })[run.outcome] || run.status || 'completed';
+}
+
+function stringList(value, max = 100) {
+  return (Array.isArray(value) ? value : []).map(item => String(item || '').trim()).filter(Boolean).slice(0, max);
+}
+
+function dealActionText(action = {}) {
+  const deal = String(action.dealId || action.id || 'unbekannt').trim();
+  const label = String(action.dealName || action.customerName || '').trim();
+  const lines = [`Deal ${deal}${label ? ` – ${label}` : ''}`];
+  const uploads = stringList(action.uploadedFiles || action.uploads);
+  if (uploads.length) lines.push(`Hochgeladen: ${uploads.join(', ')}`);
+  for (const draft of Array.isArray(action.drafts) ? action.drafts : []) {
+    const subject = String(draft?.subject || draft || '').trim();
+    if (!subject) continue;
+    const recipient = String(draft?.recipient || '').trim();
+    lines.push(`Mail-Entwurf: ${subject}${recipient ? ` · an ${recipient}` : ''}`);
+  }
+  for (const field of Array.isArray(action.fieldUpdates) ? action.fieldUpdates : []) {
+    const name = String(field?.field || field?.name || '').trim();
+    const value = String(field?.value ?? field?.newValue ?? '').trim();
+    if (name) lines.push(`Pipedrive-Feld: ${name}${value ? ` = ${value}` : ''}`);
+  }
+  for (const note of Array.isArray(action.notes) ? action.notes : []) {
+    const detail = String(note?.summary || note?.action || note || '').trim();
+    if (detail) lines.push(`Pipedrive-Notiz: ${detail}`);
+  }
+  const actionStatus = String(action.status || action.result || '').trim();
+  if (actionStatus) lines.push(`Ergebnis: ${actionStatus}`);
+  const error = String(action.error || '').trim();
+  if (error) lines.push(`Fehler: ${error}`);
+  return lines;
+}
+
+function runDetailLines(run) {
+  const lines = [];
+  const dealActions = Array.isArray(run.metrics?.dealActions) ? run.metrics.dealActions : [];
+  for (const action of dealActions) lines.push(...dealActionText(action).map((line, index) => `${index ? '  ' : ''}${line}`));
+  for (const artifact of stringList(run.artifacts)) lines.push(`Erzeugt: ${artifact}`);
+  if (run.error) lines.push(`Fehlergrund: ${run.error}`);
+  return lines;
+}
+
+async function businessWorkflowRuns(type, periodKey) {
+  const projects = (await listProjects()).filter(project => project.protocolPolicy?.enabled !== false);
+  const runs = [];
+  for (const project of projects) {
+    const listing = await listProjectProtocols(project.id);
+    const folder = listing.folders.find(item => item.id === type);
+    const protocol = folder?.files?.find(item => item.period?.key === periodKey);
+    if (!protocol) continue;
+    for (const run of protocol.runs || []) runs.push({ ...run, projectId: project.id, projectName: project.name });
+    for (const expectation of protocol.expectations || []) {
+      if (!expectation.missingRuns) continue;
+      runs.push({
+        runId: `missing-${project.id}-${expectation.workflowId}-${periodKey}`,
+        workflowId: expectation.workflowId,
+        workflowName: expectation.workflowName,
+        projectId: project.id,
+        projectName: project.name,
+        status: 'missing',
+        outcome: 'missing',
+        completedAt: `${protocol.period?.end || periodKey}T23:59:59.000Z`,
+        summary: `Kein Ergebnisprotokoll eingegangen. Erwartet: ${expectation.expectedRuns}; gemeldet: ${expectation.actualRuns}.`,
+        metrics: {}, artifacts: [], error: null,
+      });
+    }
+  }
+  return runs.sort((left, right) => String(left.completedAt).localeCompare(String(right.completedAt)));
+}
+
 function reportSections(runs) {
-  if (!runs.length) return ['Keine automatischen Läufe protokolliert.'];
+  if (!runs.length) return ['Keine fachlichen Workflow-Läufe protokolliert.'];
   return runs.map(run => {
     const attempts = Number(run.attemptCount || 1) > 1 ? ` · ${run.attemptCount} Versuche, als ein Lauf gezählt` : '';
     const detail = run.summary === 'Automatischer Lauf fehlgeschlagen.' && run.error
       ? `${run.summary} Grund: ${run.error}`
       : (run.summary || 'Ohne Zusammenfassung.');
-    return `**${run.automationName}**\nStatus: ${statusLabel(run.status)}${attempts}\nErgebnis: ${detail}`;
+    const project = run.projectName ? `\nProjekt: ${run.projectName}` : '';
+    const details = runDetailLines(run);
+    return `**${run.workflowName || run.automationName}**${project}\nStatus: ${statusLabel(normalizedRunStatus(run))}${attempts}\nZusammenfassung: ${detail}${details.length ? `\n${details.join('\n')}` : ''}`;
   });
 }
 
@@ -95,10 +175,28 @@ export function formatAutomationReportText({ title, counts, runs }) {
     `**${title}**`,
     `Läufe: ${counts.total}`,
     `Erfolgreich: ${counts.completed}`,
+    `Teilweise: ${counts.partial || 0}`,
     `Fehler: ${counts.failed}`,
     `Blockiert: ${counts.blocked}`,
+    `Nicht gelaufen: ${counts.missing || 0}`,
   ].join('\n');
   return [overview, ...reportSections(runs)].join('\n\n');
+}
+
+function runHtml(run) {
+  const status = normalizedRunStatus(run);
+  const colors = {
+    completed: ['#dff7ea', '#146c43'], partial: ['#fff4d6', '#8a5b00'], failed: ['#ffe2e2', '#a51d1d'],
+    blocked: ['#ffe9d6', '#9a4b00'], missing: ['#ffd7d7', '#8b0000'], skipped: ['#edf1f7', '#526078'],
+  };
+  const [background, color] = colors[status] || ['#edf1f7', '#526078'];
+  const actions = Array.isArray(run.metrics?.dealActions) ? run.metrics.dealActions : [];
+  const actionHtml = actions.map(action => {
+    const lines = dealActionText(action);
+    return `<div style="margin-top:10px;padding:10px 12px;background:#f5f8fc;border-left:4px solid #4f8ff7"><b>${escapeHtml(lines[0])}</b>${lines.slice(1).map(line => `<div style="margin-top:4px">${escapeHtml(line)}</div>`).join('')}</div>`;
+  }).join('');
+  const artifacts = stringList(run.artifacts).map(item => `<li>${escapeHtml(item)}</li>`).join('');
+  return `<section style="margin:14px 0;padding:14px;border:1px solid #d8e1ef;border-radius:10px"><div style="font-size:12px;color:#62708a">${escapeHtml(run.projectName || '')}</div><h3 style="margin:4px 0 8px">${escapeHtml(run.workflowName || run.automationName)}</h3><span style="display:inline-block;padding:4px 8px;border-radius:999px;background:${background};color:${color};font-weight:bold">${escapeHtml(statusLabel(status))}</span><p style="margin:10px 0 0"><b>Zusammenfassung:</b> ${escapeHtml(run.summary || 'Ohne Zusammenfassung.')}</p>${actionHtml}${artifacts ? `<p style="margin-bottom:4px"><b>Weitere Ergebnisse:</b></p><ul style="margin-top:4px">${artifacts}</ul>` : ''}${run.error ? `<p style="color:#a51d1d"><b>Fehlergrund:</b> ${escapeHtml(run.error)}</p>` : ''}</section>`;
 }
 
 export function reportingStatus() {
@@ -116,16 +214,12 @@ export function reportingStatus() {
 export async function buildAutomationReport(type = 'daily', now = new Date()) {
   const normalizedType = type === 'weekly' ? 'weekly' : 'daily';
   const periodKey = normalizedType === 'weekly' ? previousIsoWeek(now) : shiftLocalDate(now, -1);
-  const allRuns = await listAutomationRuns({ limit: 1000 });
-  const runs = collapseAutomationRunAttempts(allRuns
-    .filter(run => normalizedType === 'weekly' ? runIsoWeek(run) === periodKey : runLocalDate(run) === periodKey)
-    .sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt))));
+  const runs = await businessWorkflowRuns(normalizedType, periodKey);
   const counts = countsFor(runs);
   const label = normalizedType === 'weekly' ? `Wochenreport ${periodKey}` : `Tagesreport ${periodKey}`;
   const title = `IVA Workflow-${label}`;
   const text = formatAutomationReportText({ title, counts, runs });
-  const tableRows = runs.map(run => `<tr><td>${escapeHtml(run.automationName)}</td><td>${escapeHtml(run.status)}</td><td>${escapeHtml(run.summary || '–')}</td></tr>`).join('');
-  const html = `<!doctype html><html lang="de"><body style="font-family:Arial,sans-serif;color:#16233b"><h2>${escapeHtml(title)}</h2><p><b>${counts.completed}</b> erfolgreich · <b>${counts.failed}</b> Fehler · <b>${counts.blocked}</b> blockiert · ${counts.total} insgesamt</p><table cellpadding="8" cellspacing="0" border="1" style="border-collapse:collapse;border-color:#d8e1ef;width:100%"><thead><tr><th align="left">Workflow</th><th align="left">Status</th><th align="left">Ergebnis</th></tr></thead><tbody>${tableRows || '<tr><td colspan="3">Keine automatischen Läufe protokolliert.</td></tr>'}</tbody></table><p style="color:#62708a;font-size:12px">Automatisch erstellt von IVA · Zeitzone Europe/Berlin</p></body></html>`;
+  const html = `<!doctype html><html lang="de"><body style="font-family:Arial,sans-serif;color:#16233b;max-width:780px;margin:0 auto;padding:18px"><h2>${escapeHtml(title)}</h2><p><b>${counts.completed}</b> erfolgreich · <b>${counts.partial}</b> teilweise · <b>${counts.failed}</b> Fehler · <b>${counts.blocked}</b> blockiert · <b>${counts.missing}</b> nicht gelaufen</p>${runs.map(runHtml).join('') || '<p>Keine fachlichen Workflow-Läufe protokolliert.</p>'}<p style="color:#62708a;font-size:12px">Enthalten sind nur fachliche Projekt-Workflows und ihre kontrollierbaren Ergebnisse. Reportversand, Bereinigung und Morning-Briefing werden hier bewusst nicht aufgeführt. · Zeitzone Europe/Berlin</p></body></html>`;
   return saveAutomationReport({ key: `workflow-report:${normalizedType}:${periodKey}`, type: normalizedType, periodKey, title, text, html, counts });
 }
 

@@ -11,6 +11,7 @@ process.env.IVA_REPORT_TO_EMAIL = 'Nadine.iva.inbox@gmail.com';
 const store = await import('../automations/store.js');
 const { createAutomationOrchestrator, automationSlotKey } = await import('../automations/orchestrator.js');
 const { buildAutomationReport, collapseAutomationRunAttempts, deliverReportEmail, deliverReportEmailWithTelegramFallback, deliverReportTelegram, formatAutomationReportText } = await import('../automations/reporting.js');
+const { ensureProjectProtocolSummaries, recordProjectWorkflowResult } = await import('../projects/protocols.js');
 
 let failures = 0;
 function check(name, value) {
@@ -60,8 +61,35 @@ check('Verpasster Sonntagslauf behält montags denselben Wochenslot', automation
 const monthlyDefinition = initial.find(item => item.id === 'integration-checkup-monthly');
 check('Monatlicher Check-up hat genau einen Slot je Kalendermonat', automationSlotKey(monthlyDefinition, new Date('2026-08-22T08:00:00+02:00')).endsWith('2026-08'));
 
+await recordProjectWorkflowResult('heat-hero', {
+  runId: 'funding-monitor-report-test',
+  workflowId: 'funding-monitor',
+  workflowName: 'Fördermonitor und Pipedrive-Nachlauf',
+  status: 'completed',
+  startedAt: '2026-08-14T21:00:00.000Z',
+  completedAt: '2026-08-14T21:05:00.000Z',
+  summary: 'Ein Förderfall wurde verarbeitet.',
+  metrics: {
+    dealActions: [{
+      dealId: '7479',
+      uploadedFiles: ['KfW_Zusage.pdf'],
+      drafts: [{ subject: 'Fehlende Förderunterlagen', recipient: 'kunde@example.test' }],
+      fieldUpdates: [{ field: 'Förderhöhe', value: '18.000 €' }],
+      status: 'Geprüft',
+    }],
+  },
+  artifacts: ['Pipedrive-Datei KfW_Zusage.pdf'],
+});
+await ensureProjectProtocolSummaries('heat-hero', {
+  now: new Date('2026-08-15T23:58:00+02:00'),
+  finalizeWeekly: true,
+  expectedWorkflows: [{ workflowId: 'kfw-approval-morning', workflowName: 'KfW-Zusagen morgens prüfen', cadence: 'daily' }],
+});
 const report = await buildAutomationReport('weekly', fixedNow);
 check('Wochenreport hat eine stabile Perioden-ID', report.key === 'workflow-report:weekly:2026-W33');
+check('Report zeigt Deal, Upload, Mail-Entwurf und Pipedrive-Feld', report.text.includes('Deal 7479') && report.text.includes('KfW_Zusage.pdf') && report.text.includes('Mail-Entwurf: Fehlende Förderunterlagen') && report.text.includes('Pipedrive-Feld: Förderhöhe = 18.000 €'));
+check('Report enthält keine technischen Report- und Bereinigungsläufe', !report.text.includes('Täglicher Workflow-Report per E-Mail') && !report.text.includes('Protokoll-Aufbewahrung bereinigen'));
+check('Nicht gelaufener fachlicher Workflow wird ausdrücklich rot gemeldet', report.text.includes('KfW-Zusagen morgens prüfen') && report.text.includes('Status: NICHT GELAUFEN'));
 const collapsedAttempts = collapseAutomationRunAttempts([
   { id: '1', slotKey: 'same-slot', status: 'failed', startedAt: '2026-08-17T04:45:00Z' },
   { id: '2', slotKey: 'same-slot', status: 'failed', startedAt: '2026-08-17T05:00:00Z' },

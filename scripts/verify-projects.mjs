@@ -29,13 +29,11 @@ check('Heat Hero vorhanden', heat);
 check('Projektphasen sichtbar', heat.phases.length === 5);
 check('Automationen sichtbar', heat.automations.length >= 6);
 check('Planbar aktiv', heat.automations.some(item => item.id === 'planbar-weekly-export' && item.status === 'active' && item.enabled));
-check('KfW-Morgenlauf separat schaltbar', heat.automations.some(item => item.id === 'kfw-approval-morning' && item.toggleAvailable && item.enabled));
+check('KfW-Morgenlauf wird ohne ausführbaren Job nicht fälschlich als aktiv gezeigt', heat.automations.some(item => item.id === 'kfw-approval-morning' && item.status === 'blocked' && !item.toggleAvailable && !item.enabled));
 check('Montage-Pflichtfeldlauf separat schaltbar', heat.automations.some(item => item.id === 'montage-required-fields-morning' && item.toggleAvailable && item.enabled));
 check('Herstellerlauf pausiert', heat.automations.some(item => item.id === 'manufacturer-leads-wattfox' && item.status === 'paused' && !item.enabled));
-const disabledKfw = await setProjectAutomationEnabled('heat-hero', 'kfw-approval-morning', false);
-check('KfW-Morgenlauf lässt sich unabhängig ausschalten', disabledKfw.automations.some(item => item.id === 'kfw-approval-morning' && !item.enabled)
-  && disabledKfw.automations.some(item => item.id === 'montage-required-fields-morning' && item.enabled));
-await setProjectAutomationEnabled('heat-hero', 'kfw-approval-morning', true);
+const blockedKfwToggle = await setProjectAutomationEnabled('heat-hero', 'kfw-approval-morning', true).then(() => false).catch(error => /noch nicht ausführbar/.test(error.message));
+check('Blockierter KfW-Morgenlauf kann nicht versehentlich eingeschaltet werden', blockedKfwToggle);
 const disabledHeat = await setProjectAutomationEnabled('heat-hero', 'planbar-weekly-export', false);
 check('Projektworkflow lässt sich ausschalten', disabledHeat.automations.some(item => item.id === 'planbar-weekly-export' && item.status === 'paused' && !item.enabled));
 const enabledHeat = await setProjectAutomationEnabled('heat-hero', 'planbar-weekly-export', true);

@@ -143,15 +143,15 @@ const HEAT_HERO_PROJECT = {
     },
     {
       id: 'kfw-approval-morning',
-      specVersion: 1,
+      specVersion: 2,
       name: 'KfW-Zusagen morgens prüfen',
-      status: 'active',
-      enabled: true,
+      status: 'blocked',
+      enabled: false,
       schedule: 'Täglich · 07:00 Uhr',
-      execution: 'iMac · Chrome, Pipedrive und lokaler IVA-Helfer',
-      purpose: 'In Förderung beantragen neue offizielle KfW-Zusagen prüfen, Pflichtfelder absichern und vollständig belegte Deals auf Gewonnen setzen.',
+      execution: 'Noch kein ausführbarer Job registriert · Pipedrive-Anmeldung und Feldschema fehlen',
+      purpose: 'Geplant: In Förderung beantragen neue offizielle KfW-Zusagen prüfen, den belegten Zuschussbetrag in das echte Pipedrive-Feld eintragen, Pflichtfelder absichern und vollständig belegte Deals auf Gewonnen setzen.',
       safety: 'Keine Statusänderung ohne echte Zuschusszusage und widerspruchsfreie Pflichtfelder. Abgelaufene Pipedrive-Sitzungen werden selbstständig erneuert; bei der Gerätegrenze dürfen andere Pipedrive-Sitzungen abgemeldet werden.',
-      nextStep: 'Täglich separat protokollieren und nur über diesen Schalter pausieren.',
+      nextStep: 'In Pipedrive anmelden, exakten Feldnamen/-typ lesen, eine echte KfW-Zusage kontrolliert auswerten und erst nach Schreib-/Leserückprüfung als aktiv schalten.',
     },
     {
       id: 'montage-required-fields-morning',
@@ -438,6 +438,15 @@ async function loadStore() {
       : [];
     const seeds = seedProjects();
     const projects = seeds.filter(seed => !deletedProjectIds.includes(seed.id)).map(seed => normalizeProject(storedProjects.find(item => item.id === seed.id) || {}, seed));
+    const heatSeed = seeds.find(item => item.id === 'heat-hero');
+    const heatProject = projects.find(item => item.id === 'heat-hero');
+    const storedHeat = storedProjects.find(item => item.id === 'heat-hero');
+    const kfwSeed = heatSeed?.automations?.find(item => item.id === 'kfw-approval-morning');
+    const storedKfw = storedHeat?.automations?.find(item => item.id === 'kfw-approval-morning');
+    if (heatProject && kfwSeed && Number(kfwSeed.specVersion || 0) > Number(storedKfw?.specVersion || 0)) {
+      const index = heatProject.automations.findIndex(item => item.id === 'kfw-approval-morning');
+      if (index >= 0) heatProject.automations[index] = normalizeAutomation({}, kfwSeed);
+    }
     for (const item of storedProjects.filter(item => !deletedProjectIds.includes(item.id) && !seeds.some(seed => seed.id === item.id))) projects.push(normalizeProject(item));
     return { version: 2, deletedProjectIds, projects };
   } catch {

@@ -12,6 +12,17 @@ const {
   listProjectProtocols,
   recordProjectWorkflowResult,
 } = await import(`../projects/protocols.js?test=${Date.now()}`);
+const { buildFundingDealActions, fundingReportArtifacts } = await import('../local-mac-helper/funding-project-report.mjs');
+
+const fundingDealActions = buildFundingDealActions({
+  results: [{ dealId: '7479', status: 'auto_uploaded_to_pipedrive', uploadedFiles: ['KfW_Zusage.pdf'] }],
+  productionOutcomes: [{ dealId: '7479', status: 'missing_documents_draft_created', emailDraft: { subject: 'Fehlende Förderunterlagen' }, note: { action: 'created' } }],
+  followUpOutcomes: [{ dealId: '7520', status: 'reminder_draft_created', subject: 'Erinnerung Förderunterlagen' }],
+});
+assert.equal(fundingDealActions.length, 2);
+assert.deepEqual(fundingDealActions[0].uploadedFiles, ['KfW_Zusage.pdf']);
+assert.equal(fundingDealActions[0].drafts[0].subject, 'Fehlende Förderunterlagen');
+assert.ok(fundingReportArtifacts(fundingDealActions).some(item => item.includes('Deal 7479: Datei KfW_Zusage.pdf')));
 
 const now = new Date('2026-08-15T16:15:00+02:00');
 await recordProjectWorkflowResult('heat-hero', {
