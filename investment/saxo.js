@@ -234,6 +234,34 @@ export function createSaxoClient({ dataDir = process.env.DATA_DIR || '/data', en
     }));
   }
 
+  async function instrumentDetails({ uic, assetType, accountKey = '' } = {}) {
+    const identifier = Math.round(Number(uic));
+    const type = clean(assetType, 80);
+    if (!Number.isInteger(identifier) || identifier <= 0 || !type) throw new Error('Fuer Saxo-Instrumentdetails fehlen UIC oder Anlageklasse.');
+    const params = new URLSearchParams();
+    if (accountKey) params.set('AccountKey', clean(accountKey, 200));
+    const suffix = params.size ? `?${params}` : '';
+    return request(`ref/v1/instruments/details/${identifier}/${encodeURIComponent(type)}${suffix}`);
+  }
+
+  async function chart({ uic, assetType, accountKey = '', horizon = 1440, count = 420 } = {}) {
+    const identifier = Math.round(Number(uic));
+    const type = clean(assetType, 80);
+    const allowedHorizons = new Set([1, 2, 3, 5, 10, 15, 30, 60, 120, 180, 240, 300, 360, 480, 1440, 10080, 43200, 129600, 518400]);
+    const sampleHorizon = allowedHorizons.has(Number(horizon)) ? Number(horizon) : 1440;
+    if (!Number.isInteger(identifier) || identifier <= 0 || !type) throw new Error('Fuer Saxo-Chartdaten fehlen UIC oder Anlageklasse.');
+    const params = new URLSearchParams({
+      AssetType: type,
+      Uic: String(identifier),
+      Horizon: String(sampleHorizon),
+      Count: String(Math.max(20, Math.min(1200, Math.round(Number(count) || 420)))),
+      FieldGroups: 'Data,ChartInfo,DisplayAndFormat',
+      ExtendedHoursEnabled: 'false',
+    });
+    if (accountKey) params.set('AccountKey', clean(accountKey, 200));
+    return request(`chart/v3/charts?${params}`);
+  }
+
   async function precheckOrder(draft) {
     if (!draft?.accountKey) throw new Error('Fuer den Saxo-Precheck muss ein Konto ausgewaehlt sein.');
     const body = {
@@ -252,7 +280,7 @@ export function createSaxoClient({ dataDir = process.env.DATA_DIR || '/data', en
     return request('trade/v2/orders/precheck', { method: 'POST', body });
   }
 
-  return { status, createAuthUrl, completeOAuth, disconnect, portfolio, searchInstruments, precheckOrder, request };
+  return { status, createAuthUrl, completeOAuth, disconnect, portfolio, searchInstruments, instrumentDetails, chart, precheckOrder, request };
 }
 
 export { environmentConfig };

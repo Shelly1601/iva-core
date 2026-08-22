@@ -1,6 +1,7 @@
 import { createInvestmentStore } from './store.js';
 import { analyzePortfolio, LEVERAGED_ASSET_TYPES } from './risk.js';
 import { createSaxoClient } from './saxo.js';
+import { createInvestmentIntelligence } from './intelligence.js';
 
 const clean = (value, max = 2000) => String(value ?? '').trim().slice(0, max);
 
@@ -24,22 +25,60 @@ function normalizeOrders(items = []) {
 export function createInvestmentModule({ dataDir = process.env.DATA_DIR || '/data', env = process.env, fetchImpl = globalThis.fetch } = {}) {
   const store = createInvestmentStore({ dataDir });
   const saxo = createSaxoClient({ dataDir, env, fetchImpl });
+  const intelligence = createInvestmentIntelligence({ saxo, store });
+  let monitorRunning = false;
+
+  function berlinClock() {
+    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Berlin', weekday: 'short', hour: '2-digit', hourCycle: 'h23' }).formatToParts(new Date());
+    return { weekday: parts.find(part => part.type === 'weekday')?.value || '', hour: Number(parts.find(part => part.type === 'hour')?.value) || 0 };
+  }
+
+  async function runScheduledOpportunityMonitor() {
+    if (monitorRunning) return;
+    monitorRunning = true;
+    try {
+      const [mandate, connection, latest] = await Promise.all([store.getMandate(), saxo.status({ probe: false }), store.latestOpportunityScan()]);
+      if (mandate.monthlyAmount <= 0 || !connection.ready) return;
+      const clock = berlinClock();
+      if (clock.hour < 18) return;
+      if (mandate.analysisCadence === 'weekdays' && ['Sat', 'Sun'].includes(clock.weekday)) return;
+      const elapsed = latest?.scannedAt ? Date.now() - Date.parse(latest.scannedAt) : Infinity;
+      const minimumGap = mandate.analysisCadence === 'weekly' ? 6 * 86_400_000 : 20 * 3_600_000;
+      if (Number.isFinite(elapsed) && elapsed < minimumGap) return;
+      await intelligence.screenOpportunities({ limit: 20, trigger: 'scheduled', persist: true });
+    } catch (error) {
+      console.error('Investment-Chancenmonitor:', clean(error.message, 400));
+    } finally { monitorRunning = false; }
+  }
+
+  const monitorTimer = setInterval(() => { void runScheduledOpportunityMonitor(); }, 30 * 60_000);
+  monitorTimer.unref?.();
+  const monitorStartup = setTimeout(() => { void runScheduledOpportunityMonitor(); }, 60_000);
+  monitorStartup.unref?.();
 
   async function status(options = {}) {
     const [connection, local] = await Promise.all([saxo.status(options), store.summary()]);
     return {
       connection,
       local,
-      capabilities: ['Saxo OAuth', 'Depot und Konten lesen', 'Performance', 'Positions- und Konzentrationsrisiken', 'Watchlist', 'Orderentwuerfe', 'Saxo Order-Precheck'],
+      capabilities: [
+        'Saxo OAuth', 'Depot und Konten lesen', 'Performance', 'Positions- und Konzentrationsrisiken',
+        'Multi-Timeframe-Chartanalyse und Mustererkennung', 'Automatischer Chancenmonitor nach Mandats-Takt', 'Quellengepruefter Investment-Research',
+        'Chancen-Ranking der Watchlist', 'Monatliches Investment-Mandat', 'Prognose- und Kalibrierungsjournal',
+        'Watchlist', 'Orderentwuerfe', 'Saxo Order-Precheck',
+      ],
       safeguards: [
         connection.saxoAppTradingPermission
           ? 'Saxo-App hat Handelsberechtigung; IVA-Orderausfuehrung bleibt separat gesperrt'
           : 'Keine Orderausfuehrung',
-        'Keine autonome Anlageentscheidung', 'Keine Hebelprodukte ausserhalb der Risikoregeln',
+        'Keine ungepruefte LIVE-Autonomie', 'Keine Hebelprodukte ausserhalb der Risikoregeln',
         'Verschluesselte OAuth-Tokens', 'Jeder Entwurf mit Investmentthese',
+        'LIVE-Autonomie erst nach dokumentierter SIM-Bewaehrung, Quellenabdeckung und Kalibrierung',
       ],
       nextStep: connection.configured
-        ? connection.authorized ? 'Depotdaten aktualisieren und Anlagestrategie pruefen.' : 'Saxo ueber OAuth verbinden.'
+        ? connection.authorized
+          ? local.mandate?.monthlyAmount > 0 ? 'Watchlist scannen, Top-Kandidaten quellenbasiert pruefen und die SIM-Bewaehrung messen.' : 'Monatlichen Betrag X und harte Mandatsgrenzen festlegen.'
+          : 'Saxo ueber OAuth verbinden.'
         : 'SIM-App im Saxo Developer Portal anlegen und die fehlenden Railway-Variablen setzen.',
     };
   }
@@ -187,6 +226,48 @@ export function createInvestmentModule({ dataDir = process.env.DATA_DIR || '/dat
       try { res.json({ instruments: await saxo.searchInstruments({ query: req.query?.q, accountKey: req.query?.accountKey || '' }) }); }
       catch (error) { res.status(400).json({ error: error.message }); }
     });
+    app.get('/api/investment/knowledge', async (req, res) => {
+      res.json({ status: intelligence.knowledgeStatus(), playbook: intelligence.playbook(String(req.query?.assetType || '')) });
+    });
+    app.post('/api/investment/analysis', async (req, res) => {
+      try { res.status(201).json(await intelligence.snapshot(req.body || {})); }
+      catch (error) { res.status(400).json({ error: error.message }); }
+    });
+    app.post('/api/investment/research', async (req, res) => {
+      if (req.body?.confirmation !== 'QUELLENRESEARCH STARTEN') return res.status(400).json({ error: 'Exakte Research-Bestaetigung fehlt.' });
+      try { res.status(201).json(await intelligence.researchInstrument(req.body || {})); }
+      catch (error) { res.status(400).json({ error: error.message }); }
+    });
+    app.get('/api/investment/analyses', async (req, res) => res.json({ items: await store.listAnalyses({ limit: req.query?.limit, key: String(req.query?.key || '') }) }));
+    app.get('/api/investment/analyses/:id', async (req, res) => {
+      const item = await store.getAnalysis(req.params.id);
+      res.status(item ? 200 : 404).json(item || { error: 'Analyse nicht gefunden.' });
+    });
+    app.post('/api/investment/opportunities/scan', async (req, res) => {
+      try { res.json(await intelligence.screenOpportunities({ limit: req.body?.limit })); }
+      catch (error) { res.status(400).json({ error: error.message }); }
+    });
+    app.get('/api/investment/opportunities/latest', async (_req, res) => res.json({ item: await store.latestOpportunityScan() }));
+    app.get('/api/investment/mandate', async (_req, res) => res.json(await store.getMandate()));
+    app.patch('/api/investment/mandate', async (req, res) => {
+      try { res.json(await store.updateMandate(req.body || {})); }
+      catch (error) { res.status(400).json({ error: error.message }); }
+    });
+    app.get('/api/investment/autonomy-readiness', async (_req, res) => res.json(await intelligence.autonomyReadiness()));
+    app.get('/api/investment/journal', async (req, res) => res.json({
+      items: await store.listJournal({ status: String(req.query?.status || ''), limit: req.query?.limit }),
+      calibration: await store.calibrationSummary(),
+    }));
+    app.post('/api/investment/journal', async (req, res) => {
+      try { res.status(201).json(await store.createJournalEntry(req.body || {})); }
+      catch (error) { res.status(400).json({ error: error.message }); }
+    });
+    app.post('/api/investment/journal/:id/review', async (req, res) => {
+      try {
+        const item = await store.reviewJournalEntry(req.params.id, req.body || {});
+        res.status(item ? 200 : 404).json(item || { error: 'Journal-Eintrag nicht gefunden.' });
+      } catch (error) { res.status(400).json({ error: error.message }); }
+    });
     app.get('/api/investment/watchlist', async (_req, res) => res.json({ items: await store.listWatchlist() }));
     app.post('/api/investment/watchlist', async (req, res) => {
       try { res.status(201).json(await store.addWatchlist(req.body || {})); }
@@ -218,11 +299,25 @@ export function createInvestmentModule({ dataDir = process.env.DATA_DIR || '/dat
 
   return {
     registerRoutes, status, portfolio, riskReport, precheckOrderDraft,
+    analyzeInstrument: intelligence.snapshot,
+    researchInstrument: intelligence.researchInstrument,
+    screenOpportunities: intelligence.screenOpportunities,
+    latestOpportunityScan: store.latestOpportunityScan,
+    autonomyReadiness: intelligence.autonomyReadiness,
+    getInvestmentKnowledge: intelligence.knowledgeStatus,
+    getInvestmentPlaybook: intelligence.playbook,
     searchInstruments: saxo.searchInstruments,
     getSettings: store.getSettings,
     updateSettings: store.updateSettings,
+    getMandate: store.getMandate,
+    updateMandate: store.updateMandate,
     listWatchlist: store.listWatchlist,
     addWatchlist: store.addWatchlist,
+    listAnalyses: store.listAnalyses,
+    listJournal: store.listJournal,
+    createJournalEntry: store.createJournalEntry,
+    reviewJournalEntry: store.reviewJournalEntry,
+    calibrationSummary: store.calibrationSummary,
     listOrderDrafts: store.listOrderDrafts,
     createOrderDraft: store.createOrderDraft,
   };
