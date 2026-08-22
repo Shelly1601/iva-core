@@ -11,7 +11,7 @@ Der Workflow startet auf Nadines Zuruf, zum Beispiel: **„Kunde terminieren: St
 1. Pipedrive bleibt vollständig **rein lesend**.
 2. Der Deal muss entweder in **„Förderung beantragen“** oder in der live sichtbaren Stufe **„Montage einplanen“** liegen. „Montage terminieren“ ist Nadines gleichbedeutender Kurzname dafür.
 3. Identität nur bei eindeutiger Übereinstimmung von Kundenname und Deal verwenden. Vorhandene Adresse, E-Mail und Telefonnummer werden aus der belegten Kontaktperson gelesen.
-4. Auftragsnummer und Leistungsbeschreibung werden nach `PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md` ermittelt. Maßgeblich ist das unterschriebene Angebot; Original und unterschriebene Fassung werden abgeglichen. Widersprüche zwischen Deal-Feld, Dateiname und Dokumentinhalt blockieren den Planbar-Schreibschritt.
+4. Auftragsnummer und Leistungsbeschreibung werden nach `PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md` ermittelt. Die Auftragsnummer stammt **immer aus dem sichtbaren Inhalt des unterschriebenen Angebots**. Deal-Titel, Pipedrive-Auftragsfeld und Dateiname sind dafür niemals maßgeblich. Original und unterschriebene Fassung werden abgeglichen; kann der Inhalt der unterschriebenen Fassung nicht sicher gelesen werden, blockiert das den Planbar-Schreibschritt.
 5. Die Beschreibung enthält nur die tatsächlich beauftragten fett gedruckten Positionsüberschriften. Die Wärmepumpe steht zuerst als `Leistung + Hersteller`; Speicher- und TMB-Regeln gelten unverändert.
 
 ## 2. Planbar-Kunde anlegen
