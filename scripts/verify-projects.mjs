@@ -32,6 +32,7 @@ check('Heat Hero vorhanden', heat);
 check('Projektphasen sichtbar', heat.phases.length === 5);
 check('Automationen sichtbar', heat.automations.length >= 6);
 check('Planbar aktiv', heat.automations.some(item => item.id === 'planbar-weekly-export' && item.status === 'active' && item.enabled));
+check('Planbar-Vervollständigung ist live schaltbar und aktiv', heat.automations.some(item => item.id === 'planbar-completion-morning' && item.toggleAvailable && item.status === 'active' && item.enabled));
 check('KfW-Morgenlauf wird ohne ausführbaren Job nicht fälschlich als aktiv gezeigt', heat.automations.some(item => item.id === 'kfw-approval-morning' && item.status === 'blocked' && !item.toggleAvailable && !item.enabled));
 check('Montage-Pflichtfeldlauf separat schaltbar', heat.automations.some(item => item.id === 'montage-required-fields-morning' && item.toggleAvailable && item.enabled));
 check('Herstellerlauf pausiert', heat.automations.some(item => item.id === 'manufacturer-leads-wattfox' && item.status === 'paused' && !item.enabled));
@@ -41,6 +42,10 @@ const disabledHeat = await setProjectAutomationEnabled('heat-hero', 'planbar-wee
 check('Projektworkflow lässt sich ausschalten', disabledHeat.automations.some(item => item.id === 'planbar-weekly-export' && item.status === 'paused' && !item.enabled));
 const enabledHeat = await setProjectAutomationEnabled('heat-hero', 'planbar-weekly-export', true);
 check('Projektworkflow lässt sich wieder einschalten', enabledHeat.automations.some(item => item.id === 'planbar-weekly-export' && item.status === 'active' && item.enabled));
+const disabledPlanbarCompletion = await setProjectAutomationEnabled('heat-hero', 'planbar-completion-morning', false);
+check('Planbar-Vervollständigung lässt sich ausschalten', disabledPlanbarCompletion.automations.some(item => item.id === 'planbar-completion-morning' && item.status === 'paused' && !item.enabled));
+const enabledPlanbarCompletion = await setProjectAutomationEnabled('heat-hero', 'planbar-completion-morning', true);
+check('Planbar-Vervollständigung lässt sich wieder einschalten', enabledPlanbarCompletion.automations.some(item => item.id === 'planbar-completion-morning' && item.status === 'active' && item.enabled));
 await updateProject('heat-hero', { status: 'active', files: [{ storageName: 'injected' }] });
 const updatedHeat = await getProject('heat-hero');
 check('Projektupdate bleibt gespeichert', updatedHeat.status === 'active');

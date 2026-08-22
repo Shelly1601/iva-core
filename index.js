@@ -1064,14 +1064,14 @@ app.post('/device-agent/:deviceId/project-workflow-runs', async (req, res) => {
   catch (error) { res.status(400).json({ error: error.message }); }
 });
 
-// Der lokale iMac-Lauf braucht vor dem Start ausschließlich die beiden
+// Die lokalen iMac-Läufe brauchen vor dem Start ausschließlich ihre
 // projektbezogenen Ein-/Aus-Schalter. Der Endpunkt gibt bewusst keine
 // Projektnotizen, Dateien oder sonstigen internen Daten preis; Änderungen
 // bleiben weiterhin über die geschützte Projektakte authentifiziert.
 app.get('/public-api/projects/heat-hero/automation-flags', async (_req, res) => {
   try {
     const project = await getProject('heat-hero');
-    const allowedIds = new Set(['kfw-approval-morning', 'montage-required-fields-morning']);
+    const allowedIds = new Set(['kfw-approval-morning', 'montage-required-fields-morning', 'planbar-completion-morning']);
     const automations = Object.fromEntries((project?.automations || [])
       .filter(item => allowedIds.has(item.id))
       .map(item => [item.id, { enabled: item.enabled === true, status: item.status }]));
