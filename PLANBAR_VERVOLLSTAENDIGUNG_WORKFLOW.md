@@ -12,7 +12,7 @@
 
 1. WhatsApp öffnen, die exakte Community und Gruppe `Terminierungen Dispo` prüfen und nur Nachrichten berücksichtigen, die nach sichtbarem Absender von Nadine stammen und gestern gesendet wurden.
 2. Aus jeder relevanten Nachricht Kundenname und Kalenderwoche lesen. Mehrere identische Hinweise zu demselben Kunden und derselben KW bilden einen Fall. Widersprüchliche KW-Angaben werden nicht geraten.
-3. In Planbar genau einen bestehenden Termin mit diesem Kunden in dieser sichtbaren Kalenderwoche verlangen. Der sichtbare Kalender ist für die KW maßgeblich.
+3. In Planbar genau einen bestehenden Termin mit diesem Kunden in dieser sichtbaren Kalenderwoche verlangen. Der sichtbare Kalender ist für die KW allein maßgeblich. Eine abweichende interne Datums- oder Zeitraumangabe im Termindetail ist kein Blocker und wird nicht verändert.
 4. Niemals einen Termin neu anlegen, löschen, verschieben oder einer anderen Ressource zuordnen. Bei keinem oder mehreren Treffern bleibt Planbar unverändert und der Fall kommt als Blocker in den Bericht.
 
 ## Lesender Formatvergleich mit Nadines Einträgen
@@ -34,9 +34,9 @@
 
 1. Pipedrive wird nur lesend verwendet. Den Kunden eindeutig finden und das unterschriebene Angebot öffnen.
 2. Auftragsnummer beziehungsweise Angebotsnummer aus dem unterschriebenen Angebot übernehmen. Bei mehreren oder widersprüchlichen Nummern keine Änderung durchführen.
-3. Das unterschriebene Angebot visuell auf Durchstreichungen, handschriftliche Änderungen, Markierungen und abgewählte optionale Positionen prüfen.
+3. Das unterschriebene Angebot visuell auf vollständig durchgestrichene Positionen sowie die Auswahl der Speichervariante prüfen. Bei `Variante A` (zwei Einzelspeicher) und `Variante B` (Kombispeicher) gilt ein sichtbares Häkchen als Auswahl.
 4. Über die eindeutige Auftrags-/Angebotsnummer das zugehörige Original-PDF in Pipedrive öffnen. Original und unterschriebene Fassung müssen zum selben Vorgang gehören.
-5. Die unterschriebene Fassung ist für erkennbare Änderungen maßgeblich. Unleserliche oder widersprüchliche Abweichungen blockieren den Fall; niemals Inhalte ergänzen oder erraten.
+5. Die unterschriebene Fassung ist für vollständig gestrichene Positionen und die sichtbare Auswahl zwischen `Variante A` und `Variante B` maßgeblich. Sonstige handschriftliche Randnotizen oder Markierungen sind für die Planbar-Beschreibung irrelevant, solange sie keine vollständige Position streichen und keine Speichervariante ändern. Ist bei keiner Speichervariante ein Häkchen gesetzt, wird aus handschriftlichen Notizen keine Auswahl abgeleitet; anschließend gilt die reguläre Speicher-/TMB-Logik. Nur eine unleserliche oder widersprüchliche Änderung an einer ganzen Position oder an der Speicherwahl blockiert den Fall.
 
 ## Beschreibung bilden
 
