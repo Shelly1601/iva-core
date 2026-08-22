@@ -39,6 +39,12 @@ function restHeaders(serviceKey, extra = {}) {
   };
 }
 
+function externalRestBase(value) {
+  const url = clean(value, 1000).replace(/\/$/, '');
+  if (!url) return '';
+  return url.endsWith('/rest/v1') ? url : `${url}/rest/v1`;
+}
+
 async function restRequest({ restBase, serviceKey, table, query = {}, method = 'GET', body, fetchImpl }) {
   const url = new URL(`${restBase.replace(/\/$/, '')}/${table}`);
   for (const [key, value] of Object.entries(query)) {
@@ -100,6 +106,88 @@ function buildNotes(lead) {
   ].filter(Boolean).join(' | ');
 }
 
+async function findDedicatedDuplicate({ restBase, accessKey, fetchImpl, lead }) {
+  const checks = [
+    lead.email ? { email: `eq.${lead.email}` } : null,
+    lead.telefon ? { telefon: `eq.${lead.telefon}` } : null,
+    { notizen: `ilike.*${lead.promatchId}*` },
+  ].filter(Boolean);
+  const rowsById = new Map();
+  for (const query of checks) {
+    const rows = await restRequest({
+      restBase,
+      serviceKey: accessKey,
+      fetchImpl,
+      table: 'leads',
+      query: { select: 'id,name,email,telefon,notizen', ...query, limit: 50 },
+    }) || [];
+    for (const row of rows) rowsById.set(String(row.id), row);
+  }
+  return duplicateMatch([...rowsById.values()], lead);
+}
+
+async function importToDedicatedHeatHeroDatabase(leads, {
+  restBase, accessKey, advisorId, fetchImpl,
+}) {
+  const results = [];
+  for (const lead of leads) {
+    const duplicate = await findDedicatedDuplicate({ restBase, accessKey, fetchImpl, lead });
+    if (duplicate) {
+      results.push({
+        name: lead.name,
+        promatchId: lead.promatchId,
+        status: 'duplicate',
+        crmLeadId: duplicate.id,
+        matchedOn: duplicate.matchedOn,
+      });
+      continue;
+    }
+
+    const payload = {
+      name: lead.name,
+      email: lead.email || null,
+      telefon: lead.telefon || null,
+      strasse: lead.strasse || null,
+      hausnummer: lead.hausnummer || null,
+      plz: lead.plz || null,
+      ort: lead.ort || null,
+      quelle: PANASONIC_SOURCE,
+      status_detail: 'neu',
+      fachberater: SALES_ADVISOR.name,
+      fachberater_name: SALES_ADVISOR.name,
+      fachberater_id: null,
+      vp_id: advisorId,
+      notizen: buildNotes(lead),
+      qualifizierungsdaten: {
+        promatch_id: lead.promatchId,
+        ...(lead.impRequestId ? { imp_id: lead.impRequestId } : {}),
+        ...(lead.details ? { details: lead.details } : {}),
+      },
+    };
+    const created = await restRequest({
+      restBase,
+      serviceKey: accessKey,
+      fetchImpl,
+      table: 'leads',
+      method: 'POST',
+      body: payload,
+    });
+    const row = created?.[0];
+    if (!row?.id) throw new Error(`Mein CRM: Lead ${lead.name} wurde nicht bestaetigt.`);
+    results.push({ name: lead.name, promatchId: lead.promatchId, status: 'created', crmLeadId: row.id });
+  }
+
+  return {
+    projectId: null,
+    projectScope: 'heat-hero-external-database',
+    source: PANASONIC_SOURCE,
+    advisor: { id: advisorId, name: SALES_ADVISOR.name, email: SALES_ADVISOR.email },
+    created: results.filter(result => result.status === 'created').length,
+    duplicates: results.filter(result => result.status === 'duplicate').length,
+    results,
+  };
+}
+
 async function ensureSalesAdvisor({ restBase, serviceKey, fetchImpl }) {
   const reps = await restRequest({
     restBase, serviceKey, fetchImpl, table: 'vertriebler',
@@ -149,8 +237,6 @@ export async function importPanasonicLeadsToMeinCrm(inputs, options = {}) {
   const projectId = clean(options.projectId ?? process.env.HEATHERO_PROJECT_ID, 200);
   const restBase = clean(options.restBase ?? DEFAULT_REST_BASE, 1000);
   const fetchImpl = options.fetchImpl || fetch;
-  if (!serviceKey) throw new Error('MEINCRM_SERVICE_KEY fehlt.');
-  if (!projectId) throw new Error('HEATHERO_PROJECT_ID fehlt.');
   if (!Array.isArray(inputs) || inputs.length === 0 || inputs.length > 100) {
     throw new Error('Panasonic-Import erwartet 1 bis 100 Leads.');
   }
@@ -166,6 +252,32 @@ export async function importPanasonicLeadsToMeinCrm(inputs, options = {}) {
     if (portalIds.has(lead.promatchId)) throw new Error(`Doppelte ProMatch-ID im Import: ${lead.promatchId}`);
     portalIds.add(lead.promatchId);
   }
+
+  const dedicatedRestBase = externalRestBase(
+    options.externalSupabaseUrl ?? process.env.HEATHERO_EXTERNAL_SUPABASE_URL,
+  );
+  const dedicatedAccessKey = clean(
+    options.externalAnonKey ?? process.env.HEATHERO_EXTERNAL_SUPABASE_ANON_KEY,
+    20_000,
+  );
+  const dedicatedAdvisorId = Number(
+    options.externalAdvisorId ?? process.env.HEATHERO_VERTRIEB_INNENDIENST_VP_ID,
+  );
+  const dedicatedConfigured = Boolean(dedicatedRestBase || dedicatedAccessKey || Number.isFinite(dedicatedAdvisorId));
+  if (dedicatedConfigured) {
+    if (!dedicatedRestBase || !dedicatedAccessKey || !Number.isSafeInteger(dedicatedAdvisorId) || dedicatedAdvisorId <= 0) {
+      throw new Error('Heat-Hero-Projektdatenbank ist unvollstaendig konfiguriert.');
+    }
+    return importToDedicatedHeatHeroDatabase(leads, {
+      restBase: dedicatedRestBase,
+      accessKey: dedicatedAccessKey,
+      advisorId: dedicatedAdvisorId,
+      fetchImpl,
+    });
+  }
+
+  if (!serviceKey) throw new Error('MEINCRM_SERVICE_KEY fehlt.');
+  if (!projectId) throw new Error('HEATHERO_PROJECT_ID fehlt.');
 
   const advisor = await ensureSalesAdvisor({ restBase, serviceKey, fetchImpl });
   const advisorId = Number(advisor.id);

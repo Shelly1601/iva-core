@@ -77,6 +77,49 @@ assert.equal('project_id' in splitLeadInsert.body, false);
 assert.equal('assigned_user_id' in splitLeadInsert.body, false);
 assert.equal(splitLeadInsert.body.fachberater_id, 88);
 
+const dedicatedCalls = [];
+const dedicatedResponses = [
+  [], [], [],
+  [{ id: 1254 }],
+];
+async function dedicatedFetchStub(url, options = {}) {
+  const response = dedicatedResponses.shift();
+  dedicatedCalls.push({ url: String(url), method: options.method || 'GET', body: options.body ? JSON.parse(options.body) : null });
+  return { ok: true, status: options.method === 'POST' ? 201 : 200, text: async () => JSON.stringify(response) };
+}
+const dedicatedResult = await importPanasonicLeadsToMeinCrm([{
+  name: 'Aktives Heat Hero', email: 'active@example.de', telefon: '+491704444444',
+  strasse: 'Testweg', hausnummer: '4', plz: '40211', ort: 'Düsseldorf',
+  promatchId: '33333333333333333333333333333333', impRequestId: 'REQ-3', details: 'Rückruf vormittags',
+}], {
+  externalSupabaseUrl: 'https://active.example.invalid',
+  externalAnonKey: 'publishable-test-key',
+  externalAdvisorId: 67,
+  fetchImpl: dedicatedFetchStub,
+});
+assert.equal(dedicatedResult.created, 1);
+assert.equal(dedicatedResult.projectScope, 'heat-hero-external-database');
+assert.equal(dedicatedResult.advisor.id, 67);
+const dedicatedLeadInsert = dedicatedCalls.find(call => call.url.includes('/leads') && call.method === 'POST');
+assert.equal(dedicatedLeadInsert.body.quelle, 'Panasonic');
+assert.equal(dedicatedLeadInsert.body.status_detail, 'neu');
+assert.equal(dedicatedLeadInsert.body.vp_id, 67);
+assert.equal(dedicatedLeadInsert.body.fachberater, 'Vertrieb Innendienst');
+assert.equal(dedicatedLeadInsert.body.qualifizierungsdaten.promatch_id, '33333333333333333333333333333333');
+assert.equal(dedicatedLeadInsert.body.qualifizierungsdaten.imp_id, 'REQ-3');
+assert.equal('project_id' in dedicatedLeadInsert.body, false);
+assert.equal('anrede' in dedicatedLeadInsert.body, false);
+assert.equal('kundentyp' in dedicatedLeadInsert.body, false);
+
+await assert.rejects(
+  () => importPanasonicLeadsToMeinCrm([{
+    name: 'Unvollständig', email: 'broken@example.de', promatchId: '44444444444444444444444444444444',
+  }], {
+    externalSupabaseUrl: 'https://active.example.invalid', fetchImpl: dedicatedFetchStub,
+  }),
+  /unvollstaendig konfiguriert/,
+);
+
 await assert.rejects(
   () => importPanasonicLeadsToMeinCrm([], { serviceKey: 'x', projectId: 'y', fetchImpl: fetchStub }),
   /1 bis 100 Leads/,
