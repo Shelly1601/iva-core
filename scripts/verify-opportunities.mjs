@@ -62,6 +62,7 @@ assert.equal((await opportunityRadarCounts()).pendingHandoffs, 1);
 
 assert.equal(normalizeLinkCheckMode('Für IVA Integration testen'), 'iva-integration');
 assert.equal(normalizeLinkCheckMode('Für Business checken'), 'business');
+assert.equal(normalizeLinkCheckMode('Automatisch einsortieren'), 'auto');
 const linkCheck = await checkOpportunityLink({ url: 'https://example.com/tool', mode: 'iva-integration' }, {
   loadSource: async url => ({ url, finalUrl: url, contentType: 'html', title: 'Beispiel-Tool', text: 'Ein öffentlich beschriebenes Tool mit Exportfunktion.' }),
   analyze: async () => ({
@@ -76,13 +77,37 @@ assert.equal(linkCheck.status, 'complete');
 assert.equal(linkCheck.mode, 'iva-integration');
 assert.equal(linkCheck.assessment.score, 68);
 
+const autoBusiness = await checkOpportunityLink({ url: 'https://example.com/business-idea', mode: 'auto' }, {
+  loadSource: async url => ({ url, finalUrl: url, contentType: 'html', title: 'Neue Dienstleistung', text: 'Ein Angebot für zahlende Firmenkunden mit einem klaren Vertriebsweg.' }),
+  analyze: async (_source, mode) => {
+    assert.equal(mode, 'auto');
+    return {
+      classification: 'business', classificationReason: 'Der primäre Nutzen ist ein vermarktbares Kundenangebot.', classificationConfidence: 0.91,
+      headline: 'Dienstleistung klein am Markt testen', verdict: 'test-first', score: 71, summary: 'Eine mögliche Business-Chance.', whatItIs: 'Ein neues Kundenangebot.', nextTest: 'Fünf Zielkundengespräche führen.',
+    };
+  },
+});
+assert.equal(autoBusiness.mode, 'business');
+assert.equal(autoBusiness.requestedMode, 'auto');
+assert.match(autoBusiness.classificationReason, /Kundenangebot/);
+
+const autoIva = await checkOpportunityLink({ url: 'https://example.com/iva-tool', mode: 'auto' }, {
+  loadSource: async url => ({ url, finalUrl: url, contentType: 'html', title: 'Neue Schnittstelle', text: 'Eine API liefert strukturierte Daten für bestehende Assistenten-Workflows.' }),
+  analyze: async () => ({
+    classification: 'iva-integration', classificationReason: 'Die API erweitert primär IVAs vorhandene Fähigkeiten.', classificationConfidence: 0.95,
+    headline: 'API als IVA-Erweiterung prüfen', verdict: 'test-first', score: 76, summary: 'Eine mögliche IVA-Erweiterung.', whatItIs: 'Eine neue Daten-API.', nextTest: 'Sandbox und Datenrechte prüfen.',
+  }),
+});
+assert.equal(autoIva.mode, 'iva-integration');
+assert.equal(autoIva.requestedMode, 'auto');
+
 await assert.rejects(() => checkOpportunityLink({ url: 'https://example.com/blocked', mode: 'business' }, {
   loadSource: async () => { throw new Error('Quelle absichtlich nicht erreichbar'); },
 }), /absichtlich nicht erreichbar/);
 const linkChecks = await listOpportunityLinkChecks({ limit: 10 });
-assert.equal(linkChecks.length, 2);
+assert.equal(linkChecks.length, 4);
 assert.equal(linkChecks[0].status, 'failed');
-assert.equal((await opportunityRadarCounts()).linkChecks, 2);
+assert.equal((await opportunityRadarCounts()).linkChecks, 4);
 
 const marketAnalysis = await runOpportunityMarketResearch({ topic: 'Betriebliche Krankenversicherung', keywords: ['Mitarbeiterbindung', 'Benefits'], region: 'DACH', language: 'Deutsch' }, {
   search: async () => [
@@ -157,6 +182,12 @@ const html = await fs.readFile(new URL('../public/opportunities.html', import.me
 const js = await fs.readFile(new URL('../public/opportunities.js', import.meta.url), 'utf8');
 const scoutSource = await fs.readFile(new URL('../opportunities/scout.js', import.meta.url), 'utf8');
 assert.match(html, /Marktanalyse & Quellenradar/);
+assert.match(html, /Links prüfen & automatisch einsortieren/);
+assert.match(html, /id="linkUrls"/);
+assert.match(html, /höchstens zehn|Bis zu zehn/);
+assert.match(js, /mode: 'auto'/);
+assert.match(js, /Business-Chance/);
+assert.match(js, /IVA-Erweiterung/);
 assert.match(js, /\/api\/opportunities\/market-research/);
 assert.match(js, /Regelmäßig beobachten/);
 assert.match(scoutSource, /watch-account/);

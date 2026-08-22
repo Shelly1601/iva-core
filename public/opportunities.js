@@ -2,6 +2,7 @@ const $ = id => document.getElementById(id);
 const token = () => localStorage.getItem('iva_token') || '';
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const lines = value => String(value || '').split(/\n|,/).map(item => item.trim().replace(/^#/, '')).filter(Boolean);
+const linkLines = value => [...new Set(String(value || '').split(/\r?\n/).map(item => item.trim().replace(/^[-*•\d.)\s]+/, '')).filter(Boolean))];
 const money = value => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(Number(value) || 0);
 let state = { status: null, marketResearchStatus: null, settings: null, opportunities: [], linkChecks: [], marketAnalyses: [], watchSources: [], filter: '' };
 
@@ -85,22 +86,24 @@ const verdictLabel = value => ({
 const modeLabel = value => value === 'iva-integration' ? 'IVA-Integration' : 'Business';
 const listHtml = values => values?.length ? `<ul class="compact-list">${values.map(value => `<li>${esc(value)}</li>`).join('')}</ul>` : '<div class="muted">Keine belastbare Aussage möglich.</div>';
 
-function renderLinkResult(item) {
-  const root = $('linkResult');
-  root.hidden = false;
+function linkResultHtml(item) {
   if (!item || item.status === 'failed') {
-    root.className = 'link-result result-error';
-    root.innerHTML = `<b>Link-Check nicht abgeschlossen</b><p>${esc(item?.error || 'Der Link konnte nicht geprüft werden.')}</p>`;
-    return;
+    return `<article class="link-result-card result-error"><b>Link-Check nicht abgeschlossen</b><p>${esc(item?.error || 'Der Link konnte nicht geprüft werden.')}</p>${item?.url ? `<a class="source" href="${esc(item.url)}" target="_blank" rel="noopener">Quelle öffnen</a>` : ''}</article>`;
   }
   const assessment = item.assessment || {};
-  root.className = 'link-result';
-  root.innerHTML = `<div class="link-result-head"><div><span class="tag">${esc(modeLabel(item.mode))}</span><h3>${esc(assessment.headline || item.sourceTitle || 'Link-Check')}</h3><div class="summary">${esc(assessment.summary)}</div></div><div class="link-score">${esc(assessment.score || 0)}/100</div></div>
+  return `<article class="link-result-card"><div class="link-result-head"><div><span class="tag">${esc(modeLabel(item.mode))}</span><h3>${esc(assessment.headline || item.sourceTitle || 'Link-Check')}</h3><div class="summary">${esc(assessment.summary)}</div></div><div class="link-score">${esc(assessment.score || 0)}/100</div></div>
     <div class="actions"><span class="tag ${assessment.verdict === 'strong-fit' ? '' : 'warn'}">${esc(verdictLabel(assessment.verdict))}</span><a class="source" href="${esc(item.finalUrl || item.url)}" target="_blank" rel="noopener">Originalquelle öffnen</a></div>
+    ${item.classificationReason ? `<div class="section"><b>Warum hier einsortiert?</b><p>${esc(item.classificationReason)}</p></div>` : ''}
     <div class="section"><b>Was ist es?</b><p>${esc(assessment.whatItIs || 'Noch nicht klar genug erkennbar.')}</p></div>
     <div class="link-columns"><div><div class="section"><b>Direkt belegt</b>${listHtml(assessment.evidence)}</div><div class="section"><b>Passung & Nutzen</b>${listHtml(assessment.fit)}</div></div><div><div class="section"><b>Annahmen & Datenlücken</b>${listHtml([...(assessment.assumptions || []), ...(assessment.gaps || [])])}</div><div class="section"><b>Risiken</b>${listHtml(assessment.risks)}</div></div></div>
     <div class="section"><b>Kosten & Aufwand</b><p>${esc(assessment.costsAndEffort || 'Noch zu verifizieren.')}</p></div>
-    <div class="notice"><b>Nächster kleiner Test:</b> ${esc(assessment.nextTest || 'Offizielle Quelle und Testweg zuerst festlegen.')}</div>`;
+    <div class="notice"><b>Nächster kleiner Test:</b> ${esc(assessment.nextTest || 'Offizielle Quelle und Testweg zuerst festlegen.')}</div></article>`;
+}
+
+function renderLinkResults(items) {
+  const root = $('linkResults');
+  root.hidden = false;
+  root.innerHTML = items.map(linkResultHtml).join('');
 }
 
 function renderLinkHistory() {
@@ -185,23 +188,32 @@ $('runScout').addEventListener('click', async () => {
   } catch (error) { $('statusNotice').textContent = error.message; } finally { setBusy(button, false); }
 });
 
-document.querySelectorAll('[data-link-mode]').forEach(button => button.addEventListener('click', async () => {
-  const url = $('linkUrl').value.trim();
-  if (!url) { $('linkState').textContent = 'Bitte zuerst einen Link einfügen.'; $('linkUrl').focus(); return; }
-  const buttons = [...document.querySelectorAll('[data-link-mode]')];
-  buttons.forEach(item => { item.disabled = true; }); setBusy(button, true, 'Link wird geprüft …');
-  $('linkState').textContent = 'Quelle wird gelesen und getrennt von Annahmen bewertet. Das kann bei Instagram bis zu zwei Minuten dauern.';
-  $('linkResult').hidden = true;
-  try {
-    const result = await api('/api/opportunities/check-link', { method: 'POST', body: JSON.stringify({ url, mode: button.dataset.linkMode }) });
-    $('linkState').textContent = 'Prüfung abgeschlossen und im Verlauf gespeichert.';
-    await loadAll({ fill: false }); renderLinkResult(result);
-  } catch (error) {
-    $('linkState').textContent = error.message;
-    renderLinkResult(error.payload?.linkCheck || { status: 'failed', error: error.message });
-    await loadAll({ fill: false }).catch(() => {});
-  } finally { setBusy(button, false); buttons.forEach(item => { item.disabled = false; }); }
-}));
+$('checkLinks').addEventListener('click', async () => {
+  const urls = linkLines($('linkUrls').value);
+  if (!urls.length) { $('linkState').textContent = 'Bitte zuerst mindestens einen Link einfügen.'; $('linkUrls').focus(); return; }
+  if (urls.length > 10) { $('linkState').textContent = 'Bitte höchstens zehn Links pro Lauf einfügen.'; $('linkUrls').focus(); return; }
+  const button = $('checkLinks');
+  setBusy(button, true, `${urls.length} Link${urls.length === 1 ? '' : 's'} werden geprüft …`);
+  $('linkResults').hidden = true;
+  const results = [];
+  for (let index = 0; index < urls.length; index += 1) {
+    const url = urls[index];
+    $('linkState').textContent = `Prüfe Link ${index + 1} von ${urls.length}, lese die Quelle und sortiere sie automatisch ein. Instagram kann bis zu zwei Minuten dauern.`;
+    try {
+      results.push(await api('/api/opportunities/check-link', { method: 'POST', body: JSON.stringify({ url, mode: 'auto' }) }));
+    } catch (error) {
+      results.push(error.payload?.linkCheck || { status: 'failed', url, error: error.message });
+    }
+    renderLinkResults(results);
+  }
+  const business = results.filter(item => item.status === 'complete' && item.mode === 'business').length;
+  const iva = results.filter(item => item.status === 'complete' && item.mode === 'iva-integration').length;
+  const failed = results.filter(item => item.status !== 'complete').length;
+  $('linkState').textContent = `Fertig: ${business} Business-Chance${business === 1 ? '' : 'n'}, ${iva} IVA-Erweiterung${iva === 1 ? '' : 'en'}${failed ? `, ${failed} nicht vollständig prüfbar` : ''}. Alles wurde im Verlauf gespeichert.`;
+  await loadAll({ fill: false }).catch(() => {});
+  renderLinkResults(results);
+  setBusy(button, false);
+});
 
 $('runMarketResearch').addEventListener('click', async () => {
   const topic = $('marketTopic').value.trim();

@@ -4,6 +4,7 @@ const DATA_DIR = process.env.DATA_DIR || '/data';
 const FILE = DATA_DIR + '/opportunity-radar.json';
 const STATUSES = new Set(['new', 'watch', 'validate', 'rejected', 'selected']);
 const LINK_CHECK_MODES = new Set(['iva-integration', 'business']);
+const LINK_CHECK_REQUESTED_MODES = new Set(['auto', 'iva-integration', 'business']);
 const LINK_CHECK_STATUSES = new Set(['complete', 'failed']);
 const MARKET_SOURCE_TYPES = new Set(['instagram', 'website', 'newsletter', 'youtube', 'linkedin', 'podcast', 'other']);
 const MARKET_ANALYSIS_STATUSES = new Set(['complete', 'failed']);
@@ -212,6 +213,9 @@ function normalizedLinkCheck(input = {}) {
   return {
     id: clean(input.id, 80) || id('link'),
     mode: LINK_CHECK_MODES.has(input.mode) ? input.mode : 'business',
+    requestedMode: LINK_CHECK_REQUESTED_MODES.has(input.requestedMode) ? input.requestedMode : (LINK_CHECK_MODES.has(input.mode) ? input.mode : 'business'),
+    classificationReason: clean(input.classificationReason, 800),
+    classificationConfidence: Math.max(0, Math.min(1, finite(input.classificationConfidence))),
     status: LINK_CHECK_STATUSES.has(input.status) ? input.status : 'complete',
     url: publicHttpUrl(input.url),
     finalUrl: clean(input.finalUrl, 1500),
