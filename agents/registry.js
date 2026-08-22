@@ -3,7 +3,7 @@
 // gemeinsamen IVA-Core. Der Router waehlt deterministisch; unbekannte oder
 // deaktivierte Agenten fallen sicher auf IVA Standard zurueck.
 
-const STANDARD_SKILLS = ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'qonekto', 'lumit', 'capabilityReview', 'knowledgeLibrary', 'recruiting', 'deviceControl', 'planbar'];
+const STANDARD_SKILLS = ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'qonekto', 'lumit', 'capabilityReview', 'knowledgeLibrary', 'recruiting', 'deviceControl', 'planbar', 'investment'];
 
 export const AGENTS = {
   'iva-standard': {
@@ -26,6 +26,13 @@ export const AGENTS = {
     rolePrompt: 'Arbeite als Beratungs- und Fachpruefungs-Agent. Produktleistungen nur aus belegten Originalquellen nennen. Fehlende Tarifstaende offen markieren. Modellrechnungen, DIN-Vorbereitung und rechtlich relevante Aussagen niemals als gepruefte Endfreigabe ausgeben.',
     knowledgeSources: ['advice-knowledge', 'qonekto', 'workspaces', 'project-docs'],
     allowedSkills: ['advice', 'research', 'workspaces', 'qonekto', 'selfImprovement'], modelProfile: 'chat', safetyDefault: 'liability', color: 'violet',
+  },
+  'iva-investment': {
+    id: 'iva-investment', name: 'Investment & Portfolio', shortName: 'Investment', enabled: true,
+    description: 'Saxo-Depot, Performance, Watchlist, Positionsrisiken und nachvollziehbare Orderentwuerfe mit Precheck.',
+    rolePrompt: 'Arbeite als Investment- und Portfolio-Agent fuer Nadines eigenes Depot. Trenne stets Saxo-Originaldaten, deterministische Risikopruefung, Annahmen und persoenliche Entscheidung. Verwende aktuelle Depotdaten statt Erinnerung. Keine Renditegarantie, keine erfundenen Kurse und keine autonome Order. IVA darf Instrumente suchen, Depot und Risiken lesen, Watchlist und Orderentwuerfe pflegen sowie Saxos Precheck ausfuehren; eine Orderausfuehrung ist technisch gesperrt.',
+    knowledgeSources: ['saxo-openapi', 'investment-settings', 'investment-watchlist', 'public-primary-sources'],
+    allowedSkills: ['investment', 'research', 'selfImprovement'], modelProfile: 'chat', safetyDefault: 'liability', color: 'emerald',
   },
   'iva-marketing': {
     id: 'iva-marketing', name: 'Marketing & Growth', shortName: 'Marketing', enabled: true,
@@ -75,6 +82,7 @@ export const AGENTS = {
 };
 
 const ROUTES = [
+  { agentId: 'iva-investment', reason: 'Investment/Portfolio erkannt', pattern: /\b(investment(?:agent)?|saxo|portfolio|depotbestand|watchlist|orderentwurf|wertpapier|aktie(?:n)?|etf(?:s)?|anleihe(?:n)?|position(?:srisiko)?|margin)\b/i },
   { agentId: 'iva-customer', reason: 'Planbar-Suche erkannt', pattern: /\b(planbar|plantafel)\b/i },
   { agentId: 'iva-accounting', reason: 'Buchhaltung erkannt', pattern: /\b(buchhaltung|beleg|rechnung|eür|steuerberater|umsatzsteuer|vorsteuer|bewirtung)\b/i },
   { agentId: 'iva-customer', reason: 'LUMIT-Antrag/Backoffice erkannt', pattern: /\b(lumit|mannheimer|servicierter antrag|mdpool)\b/i },

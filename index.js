@@ -35,6 +35,7 @@ import { knowledgeLibrarySkill } from './skills/knowledge-library.js';
 import { recruitingSkill } from './skills/recruiting.js';
 import { deviceControlSkill } from './skills/device-control.js';
 import { planbarSkill } from './skills/planbar.js';
+import { investmentSkill } from './skills/investment.js';
 import { listAgents, routeAgent } from './agents/registry.js';
 import { marketAnalysis } from './marketing/market.js';
 import { fetchMetaAdsInsights, marketingConnectorStatus } from './marketing/connectors.js';
@@ -246,6 +247,7 @@ import {
   enqueueDeviceCommand,
   listDeviceCommands,
 } from './device-control/store.js';
+import { createInvestmentModule } from './investment/index.js';
 
 const app = express();
 app.use(express.json({
@@ -256,6 +258,7 @@ app.use(express.json({
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const MEM_FILE = DATA_DIR + '/memory.json';
+const investment = createInvestmentModule({ dataDir: DATA_DIR });
 const HEATHERO_LEADS_URL = 'https://thbvjafssbealqsswhdv.supabase.co/functions/v1/api-gateway/v1/leads';
 const MEINCRM_REST_URL = 'https://qqyoqshjwpkmerilhjus.supabase.co/rest/v1/leads';
 
@@ -749,6 +752,7 @@ const ALL_SKILLS = {
   recruiting: recruitingSkill({ createCandidateSearchPlan, screenResumeAgainstCriteria, createInterviewGuide }),
   deviceControl: deviceControlSkill({ enqueueDeviceCommand, deviceCommandStatus }),
   planbar:    planbarSkill({ searchPlanbarAppointments }),
+  investment: investmentSkill({ investment }),
   qonekto:   null, // wird pro Anfrage mit der echten sessionId erzeugt
 };
 
@@ -1157,6 +1161,8 @@ app.use('/api', (req, res, next) => {
   if (expected && (req.headers.authorization || '') !== 'Bearer ' + expected) return res.status(401).json({ error: 'unauthorized' });
   next();
 });
+
+investment.registerRoutes(app);
 
 function envReady(...names) {
   return names.every(name => Boolean(String(process.env[name] || '').trim()));
@@ -2486,6 +2492,7 @@ app.get('/voice-lab', (_req, res) => res.sendFile(path.join(__dirnameIva, 'publi
 app.get('/control', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'control.html')));
 app.get('/projects', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'projects.html')));
 app.get('/recruiting', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'recruiting.html')));
+app.get('/investment', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'investment.html')));
 app.get('/health/qonekto', async (_req, res) => {
   const status = await qonektoStatus();
   if (status.reachable) {
