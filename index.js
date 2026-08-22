@@ -13,6 +13,7 @@ import { generateContent } from './marketing/content.js';
 import * as brands from './marketing/brands.js';
 import { refineTone, analyzeWebsite } from './marketing/assist.js';
 import { klassifiziereMailBatch } from './klassifikation.js';
+import { importPanasonicLeadsToMeinCrm } from './integrations/meincrm-panasonic-leads.js';
 // Stufe 1-3: Model Router, Skills, Agent-Registry.
 import { chooseModel, recordUsage, checkBudget } from './core/router.js';
 import { memorySkill } from './skills/memory.js';
@@ -1381,6 +1382,13 @@ app.post('/api/projects/:id/workflow-runs', async (req, res) => {
   catch (error) { res.status(400).json({ error: error.message }); }
 });
 app.get('/api/leads', async (_req, res) => res.json(await fetchAllLeads()));
+app.post('/api/crm/panasonic-leads/import', async (req, res) => {
+  try {
+    res.status(201).json(await importPanasonicLeadsToMeinCrm(req.body?.leads));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
 app.get('/api/crm-qonekto-sync/status', async (_req, res) => res.json(await crmQonektoSyncStatus()));
 app.post('/api/crm-qonekto-sync/run', async (req, res) => {
   try {

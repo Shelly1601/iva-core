@@ -21,6 +21,7 @@
     "test:mac-helper": "node scripts/verify-mac-helper.mjs",
     "test:device-control": "node scripts/verify-device-control.mjs",
     "test:manufacturer-leads": "node scripts/verify-manufacturer-lead-operations.mjs",
+    "test:meincrm-panasonic": "node scripts/verify-meincrm-panasonic-leads.mjs",
     "test:google-gmail": "node scripts/verify-google-gmail.mjs",
     "test:advice": "node scripts/verify-advice.mjs",
     "test:corporate-benefits": "node scripts/verify-corporate-benefits.mjs",
@@ -43,7 +44,7 @@
     "test:recruiting": "node scripts/verify-recruiting.mjs",
     "test:maintenance": "node scripts/verify-integration-checkup.mjs",
     "sample:lumit-package": "node scripts/generate-lumit-package-sample.mjs",
-    "test:all": "npm run test:agents && npm run test:operations && npm run test:automations && npm run test:maintenance && npm run test:projects && npm run test:project-protocols && npm run test:scheduling && npm run test:qonekto && npm run test:qonekto-customers && npm run test:address-autocomplete && npm run test:customer-files && npm run test:crm-name-matching && npm run test:crm-qonekto && npm run test:mac-helper && npm run test:device-control && npm run test:manufacturer-leads && npm run test:google-gmail && npm run test:lumit && npm run test:marketing && npm run test:whatsapp && npm run test:tmb && npm run test:workspaces && npm run test:advice && npm run test:corporate-benefits && npm run test:presentations && npm run test:energy && npm run test:pv-price && npm run test:energy-tariffs && npm run test:accounting && npm run test:opportunities && npm run test:voice && npm run test:capability-knowledge-recruiting && npm run test:recruiting"
+    "test:all": "npm run test:agents && npm run test:operations && npm run test:automations && npm run test:maintenance && npm run test:projects && npm run test:project-protocols && npm run test:scheduling && npm run test:qonekto && npm run test:qonekto-customers && npm run test:address-autocomplete && npm run test:customer-files && npm run test:crm-name-matching && npm run test:crm-qonekto && npm run test:mac-helper && npm run test:device-control && npm run test:manufacturer-leads && npm run test:meincrm-panasonic && npm run test:google-gmail && npm run test:lumit && npm run test:marketing && npm run test:whatsapp && npm run test:tmb && npm run test:workspaces && npm run test:advice && npm run test:corporate-benefits && npm run test:presentations && npm run test:energy && npm run test:pv-price && npm run test:energy-tariffs && npm run test:accounting && npm run test:opportunities && npm run test:voice && npm run test:capability-knowledge-recruiting && npm run test:recruiting"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.0.0",
