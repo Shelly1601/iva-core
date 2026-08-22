@@ -26,7 +26,7 @@
 
 - Liegt `data/planbar-completion-pending.json` mit `status: "pending"` vor, wird diese Liste vor den regulären WhatsApp-Nachrichten verarbeitet.
 - Sie ist eine ausdrückliche einmalige Nutzerfreigabe und ersetzt nur für die darin enthaltenen Kunden-/KW-Fälle die Prüfung „vorheriger Kalendertag“. Die Bilddateien und die strukturierte Warteschlange bilden gemeinsam den Eingangsbeleg.
-- Wärmepumpenangaben aus der Übergabeliste dienen ausschließlich als Such- und Plausibilitätshinweis. Auftragsnummer, beauftragte Positionen und Beschreibung werden weiterhin nur aus unterschriebenem Angebot, Original-PDF und gegebenenfalls TMB belegt.
+- Wärmepumpenangaben aus der Übergabeliste dienen grundsätzlich als Such- und Plausibilitätshinweis. Einzige Ausnahme nur für diese 25 neu gelegten Termine: Steht im unterschriebenen Angebot wegen des ursprünglichen Angebotsstands `10 kW Vaillant` oder `12 kW Vaillant Plus`, während Nadines bestätigte Übergabeliste `11 kW Vaillant Pro` nennt, ist dies die operative Austauschinformation wegen Nichtlieferbarkeit. Dann wird in Planbar kompakt `11 kW Vaillant` verwendet. Diese Ausnahme gilt weder für sonstige Bestandsfälle noch für spätere reguläre WhatsApp-Läufe.
 - Bei jedem Kunden aus dieser Übergabeliste muss im Planbar-Feld `Vorname` genau einmal das Präfix `HH ` vor dem eigentlichen Vornamen stehen, zum Beispiel `HH Hartmut`. Ein bereits vorhandenes `HH ` wird nicht verdoppelt.
 - Jeder Fall erhält nach der Bearbeitung einen eindeutigen Status und Zeitstempel. Abgeschlossene oder blockierte Einträge werden nicht erneut geschrieben. Wenn alle Einträge beendet sind, wird die Warteschlange auf `completed` gesetzt.
 - Nach Abschluss der Übergabeliste gilt wieder ausschließlich die tägliche WhatsApp-Quelle `Terminierungen Dispo`.
@@ -54,7 +54,7 @@
 - Ist keiner von beiden enthalten, die TMB für den vollständigen Keller-/Transportweg einschließlich aller relevanten Türen prüfen:
   - Nur wenn sämtliche benötigten Maße eindeutig **größer als 1,80 m Höhe und größer als 70 cm Breite** sind, `Kombispeicher` ergänzen.
   - Ist mindestens ein belegtes Maß nicht größer als eine der Grenzen, `zwei Einzelspeicher` ergänzen.
-  - Fehlen Maße oder sind sie widersprüchlich/mehrdeutig, keine Speicherart raten und den Fall ohne Planbar-Änderung als Blocker melden.
+  - Fehlen Maße oder sind sie widersprüchlich/mehrdeutig, keine Speicherart raten. Die Speicherangabe bleibt dann offen; der übrige eindeutig belegte Fall wird trotzdem vervollständigt und die fehlende Speicherangabe unter `Manuell prüfen` gemeldet.
 
 ## Planbar-Kundenstammdaten vervollständigen
 
