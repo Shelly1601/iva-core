@@ -10,6 +10,7 @@ const env = {
   SAXO_APP_SECRET: 'sim-app-secret',
   SAXO_REDIRECT_URI: 'https://iva.example.test/oauth/saxo/callback',
   SAXO_TOKEN_KEY: 'test-encryption-key-with-at-least-32-characters',
+  SAXO_TRADING_ENABLED: 'true',
 };
 const calls = [];
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
@@ -61,6 +62,8 @@ const encrypted = await fs.readFile(path.join(dataDir, 'saxo-sim-oauth.enc.json'
 assert.equal(encrypted.includes('plain-access-token'), false);
 assert.equal(encrypted.includes('plain-refresh-token'), false);
 assert.equal((await saxo.status()).authorized, true);
+assert.equal((await saxo.status()).saxoAppTradingPermission, true);
+assert.equal((await saxo.status()).orderExecutionEnabled, false);
 assert.equal((await saxo.status({ probe: true })).reachable, true);
 
 const rawPortfolio = await saxo.portfolio();

@@ -35,7 +35,10 @@ function renderConnection() {
     $('connectionCard').innerHTML = `<div class="card-head"><div><h2>Saxo OpenAPI einrichten</h2><div class="muted small">Der Saxo-Handelsaccount allein enthält noch keine API-App.</div></div>${badge}</div><ol class="setup-steps"><li>Im Saxo Developer Portal zuerst eine persönliche <b>SIM-App</b> mit Authorization Code Grant anlegen.</li><li>Redirect-URL exakt als <b>https://iva-core-production.up.railway.app/oauth/saxo/callback</b> eintragen.</li><li>App Key, Secret und einen neuen Token-Schlüssel als Railway-Secrets setzen.</li><li>Nach grünem SIM-Test und finanziertem Konto bei Saxo die separate LIVE-App beantragen.</li></ol><div class="notice error">Noch fehlend: ${esc((c.missing || []).join(', ') || 'Konfiguration')}</div>`;
     return;
   }
-  $('connectionCard').innerHTML = `<div class="card-head"><div><h2>Saxo-Verbindung</h2><div class="muted small">${esc(c.setup || '')}</div></div>${badge}</div>${c.authorized ? `<div class="notice good">OAuth-Tokens liegen verschlüsselt im Railway-Volume. Modus: lesen, analysieren und Saxo-Precheck.</div><button class="btn danger" id="disconnect">Verbindung trennen</button>` : '<div class="notice">Klicke oben auf „Saxo verbinden“. Login und Freigabe erfolgen ausschließlich bei Saxo.</div>'}`;
+  const permissionNote = c.saxoAppTradingPermission
+    ? '<div class="notice">Die Saxo-App besitzt Handelsberechtigung. IVAs eigener Orderversand bleibt dennoch technisch gesperrt.</div>'
+    : '';
+  $('connectionCard').innerHTML = `<div class="card-head"><div><h2>Saxo-Verbindung</h2><div class="muted small">${esc(c.setup || '')}</div></div>${badge}</div>${permissionNote}${c.authorized ? `<div class="notice good">OAuth-Tokens liegen verschlüsselt im Railway-Volume. Modus: lesen, analysieren und Saxo-Precheck.</div><button class="btn danger" id="disconnect">Verbindung trennen</button>` : '<div class="notice">Klicke oben auf „Saxo verbinden“. Login und Freigabe erfolgen ausschließlich bei Saxo.</div>'}`;
   $('disconnect')?.addEventListener('click', disconnect);
 }
 

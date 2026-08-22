@@ -44,6 +44,7 @@ export function createSaxoClient({ dataDir = process.env.DATA_DIR || '/data', en
   const appSecret = clean(env.SAXO_APP_SECRET, 1000);
   const redirectUri = clean(env.SAXO_REDIRECT_URI, 1000);
   const tokenKey = clean(env.SAXO_TOKEN_KEY, 1000);
+  const saxoAppTradingPermission = clean(env.SAXO_TRADING_ENABLED, 10).toLowerCase() === 'true';
   const tokenFile = path.join(dataDir, `saxo-${environment}-oauth.enc.json`);
   let refreshQueue = Promise.resolve();
 
@@ -163,7 +164,9 @@ export function createSaxoClient({ dataDir = process.env.DATA_DIR || '/data', en
       provider: 'Saxo OpenAPI', environment, configured: problems.length === 0,
       authorized: Boolean(token), ready: problems.length === 0 && Boolean(token), missing: problems,
       expiresAt: token?.expiresAt || null, refreshExpiresAt: token?.refreshExpiresAt || null,
+      saxoAppTradingPermission,
       tradingEnabled: false,
+      orderExecutionEnabled: false,
       mode: 'read-analyze-precheck',
       setup: environment === 'sim'
         ? 'SIM-App testen; danach LIVE-App bei Saxo beantragen.'

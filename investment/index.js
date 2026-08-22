@@ -31,7 +31,13 @@ export function createInvestmentModule({ dataDir = process.env.DATA_DIR || '/dat
       connection,
       local,
       capabilities: ['Saxo OAuth', 'Depot und Konten lesen', 'Performance', 'Positions- und Konzentrationsrisiken', 'Watchlist', 'Orderentwuerfe', 'Saxo Order-Precheck'],
-      safeguards: ['Keine Orderausfuehrung', 'Keine autonome Anlageentscheidung', 'Keine Hebelprodukte ausserhalb der Risikoregeln', 'Verschluesselte OAuth-Tokens', 'Jeder Entwurf mit Investmentthese'],
+      safeguards: [
+        connection.saxoAppTradingPermission
+          ? 'Saxo-App hat Handelsberechtigung; IVA-Orderausfuehrung bleibt separat gesperrt'
+          : 'Keine Orderausfuehrung',
+        'Keine autonome Anlageentscheidung', 'Keine Hebelprodukte ausserhalb der Risikoregeln',
+        'Verschluesselte OAuth-Tokens', 'Jeder Entwurf mit Investmentthese',
+      ],
       nextStep: connection.configured
         ? connection.authorized ? 'Depotdaten aktualisieren und Anlagestrategie pruefen.' : 'Saxo ueber OAuth verbinden.'
         : 'SIM-App im Saxo Developer Portal anlegen und die fehlenden Railway-Variablen setzen.',
@@ -146,7 +152,8 @@ export function createInvestmentModule({ dataDir = process.env.DATA_DIR || '/dat
       const result = await saxo.status({ probe: false });
       res.status(result.configured ? 200 : 503).json({
         configured: result.configured, authorized: result.authorized, environment: result.environment,
-        tradingEnabled: false, missing: result.missing,
+        saxoAppTradingPermission: result.saxoAppTradingPermission,
+        tradingEnabled: false, orderExecutionEnabled: false, missing: result.missing,
       });
     });
 

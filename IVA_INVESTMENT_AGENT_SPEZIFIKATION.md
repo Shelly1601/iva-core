@@ -30,6 +30,8 @@ Die aktuelle Stufe endet absichtlich vor der Orderausführung:
 - Audit-Trail in `/data/investment.json`;
 - keine Orderausführung, keine autonome Kaufentscheidung und keine Renditegarantie.
 
+Die am 22. August 2026 angelegte Saxo-SIM-App besitzt auf Nadines ausdrücklichen Wunsch eine Saxo-Handelsberechtigung. Diese Berechtigung allein aktiviert in IVA keinen Orderversand: Der aktuelle IVA-Code endet weiterhin technisch am Precheck und weist beide Zustände getrennt aus.
+
 ## Saxo-Einrichtung
 
 Saxo trennt SIM und LIVE vollständig. Der LIVE-Handelsaccount ersetzt kein Entwicklerkonto.
