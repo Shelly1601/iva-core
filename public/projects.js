@@ -16,6 +16,35 @@ function projectLogo(project, large = false) {
   return `<span class="project-logo${large ? ' brand-logo-large' : ''}">${source ? `<img src="${esc(source)}" alt="Logo ${esc(project.name)}">` : esc(initials(project.name))}</span>`;
 }
 
+function isoWeekInfo(value) {
+  const date = new Date(value);
+  const utc = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const day = utc.getUTCDay() || 7;
+  utc.setUTCDate(utc.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+  return { isoYear: utc.getUTCFullYear(), week: Math.ceil((((utc - yearStart) / 86400000) + 1) / 7) };
+}
+
+function schedulingWeekOptions() {
+  const today = new Date();
+  const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  const options = [];
+  for (let offset = 0; offset < 53; offset += 1) {
+    const date = new Date(monday);
+    date.setDate(monday.getDate() + (offset * 7));
+    const { isoYear, week } = isoWeekInfo(date);
+    options.push(`<option value="${isoYear}-${week}">KW ${week} · ${isoYear}</option>`);
+  }
+  return options.join('');
+}
+
+function customerSchedulingSection(project) {
+  if (project.id !== 'heat-hero') return '';
+  const latest = (project.customerSchedulingRequests || [])[0];
+  return `<section class="workflow-launcher" aria-labelledby="customerSchedulingTitle"><div class="workflow-launcher-head"><div><div class="eyebrow">Direkt oben · operativer Workflow</div><h2 id="customerSchedulingTitle">Kunde terminieren</h2><div class="muted">Kundenname eingeben, Kalenderwoche auswählen und den Auftrag an IVA übergeben.</div></div><span class="workflow-tag">Planbar + Pipedrive</span></div><form class="schedule-form" id="customerSchedulingForm"><label><span>Kundenname</span><input id="scheduleCustomerName" name="customerName" maxlength="220" autocomplete="off" required placeholder="Vorname Nachname"></label><label><span>Kalenderwoche</span><select id="scheduleWeek" name="week" required>${schedulingWeekOptions()}</select></label><button class="btn primary" type="submit">Workflow vorbereiten</button></form><div class="schedule-latest">${latest ? `Zuletzt vorgemerkt: <b>${esc(latest.customerName)}</b> · KW ${esc(latest.week)}/${esc(latest.isoYear)} · bereit für IVA` : 'Noch kein Kunde vorgemerkt.'}</div></section>`;
+}
+
 function forgetProjectLogo(projectId) {
   const existing = state.logoUrls.get(projectId);
   if (existing) URL.revokeObjectURL(existing);
@@ -139,6 +168,8 @@ function collapseProjectSections() {
 }
 
 function bindProjectActions() {
+  const schedulingForm = $('customerSchedulingForm');
+  if (schedulingForm) schedulingForm.onsubmit = requestCustomerScheduling;
   $('editBrand').onclick = openBrandDialog;
   $('addNote').onclick = addNote;
   $('newFolder').onclick = openFolderDialog;
@@ -167,9 +198,28 @@ function render() {
   $('title').textContent = project.name;
   $('description').textContent = project.description || 'Projektakte für Ideen, Absprachen und Dokumente.';
   const objective = project.objective || project.description;
-  $('content').innerHTML = `${brandSection(project)}${notesSection(project)}${objective ? `<section class="hero"><div class="eyebrow">Zielbild</div><h2>${esc(objective)}</h2></section>` : ''}${archiveSection(project)}${operationalSections(project)}`;
+  $('content').innerHTML = `${customerSchedulingSection(project)}${brandSection(project)}${notesSection(project)}${objective ? `<section class="hero"><div class="eyebrow">Zielbild</div><h2>${esc(objective)}</h2></section>` : ''}${archiveSection(project)}${operationalSections(project)}`;
   collapseProjectSections();
   bindProjectActions();
+}
+
+async function requestCustomerScheduling(event) {
+  event.preventDefault();
+  if (!state.current) return;
+  const customerName = $('scheduleCustomerName').value.trim();
+  const [isoYear, week] = $('scheduleWeek').value.split('-').map(Number);
+  const submit = event.submitter;
+  if (submit) submit.disabled = true;
+  try {
+    const project = await api(`/api/projects/${encodeURIComponent(state.current.id)}/customer-scheduling-requests`, {
+      method: 'POST',
+      body: { customerName, isoYear, week },
+    });
+    replaceProject(project);
+    render();
+    showToast(`${customerName} für KW ${week}/${isoYear} an IVA übergeben.`);
+  } catch (error) { showToast(error.message, true); }
+  finally { if (submit && document.body.contains(submit)) submit.disabled = false; }
 }
 
 async function toggleProjectAutomation(input) {

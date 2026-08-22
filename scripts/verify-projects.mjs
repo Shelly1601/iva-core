@@ -4,6 +4,7 @@ import path from 'path';
 
 process.env.DATA_DIR = await fs.mkdtemp(path.join(os.tmpdir(), 'iva-projects-'));
 const {
+  addCustomerSchedulingRequest,
   addProjectNote,
   createProject,
   createProjectFolder,
@@ -35,6 +36,10 @@ check('Planbar aktiv', heat.automations.some(item => item.id === 'planbar-weekly
 check('Planbar-Vervollständigung ist live schaltbar und aktiv', heat.automations.some(item => item.id === 'planbar-completion-morning' && item.toggleAvailable && item.status === 'active' && item.enabled));
 check('KfW-Morgenlauf wird ohne ausführbaren Job nicht fälschlich als aktiv gezeigt', heat.automations.some(item => item.id === 'kfw-approval-morning' && item.status === 'blocked' && !item.toggleAvailable && !item.enabled));
 check('Montage-Pflichtfeldlauf separat schaltbar', heat.automations.some(item => item.id === 'montage-required-fields-morning' && item.toggleAvailable && item.enabled));
+const heatWithSchedulingRequest = await addCustomerSchedulingRequest('heat-hero', { customerName: 'Stefanie Schneider', isoYear: 2026, week: 39 });
+check('Kunde-terminieren-Auftrag wird in der Projektakte vorgemerkt', heatWithSchedulingRequest.customerSchedulingRequests[0]?.command === 'Kunde terminieren: Stefanie Schneider in KW 39/2026');
+const invalidSchedulingWeek = await addCustomerSchedulingRequest('heat-hero', { customerName: 'Stefanie Schneider', isoYear: 2026, week: 54 }).then(() => false).catch(error => /Kalenderwoche/.test(error.message));
+check('Ungültige Kalenderwoche wird abgewiesen', invalidSchedulingWeek);
 check('Herstellerlauf pausiert', heat.automations.some(item => item.id === 'manufacturer-leads-wattfox' && item.status === 'paused' && !item.enabled));
 const blockedKfwToggle = await setProjectAutomationEnabled('heat-hero', 'kfw-approval-morning', true).then(() => false).catch(error => /noch nicht ausführbar/.test(error.message));
 check('Blockierter KfW-Morgenlauf kann nicht versehentlich eingeschaltet werden', blockedKfwToggle);
@@ -98,6 +103,7 @@ check('Papierkorb löscht nur die Projektakte', js.includes('Projektdateien werd
 check('Projektbereiche sind standardmäßig zugeklappt', html.includes('project-disclosure') && js.includes('collapseProjectSections'));
 check('Projektworkflows haben echte Ein-Aus-Schalter', html.includes('.switch{') && js.includes('class="switch"') && js.includes('data-project-automation') && js.includes("method: 'PATCH'"));
 check('Markenprofil mit Logo, Website und Instagram ist bedienbar', html.includes('Markenprofil bearbeiten') && html.includes('projectWebsite') && html.includes('projectInstagram') && html.includes('projectLogo') && js.includes('/logo') && js.includes('projectLogo(project)'));
+check('Kunde terminieren steht oben mit Kundenname und KW-Auswahl bereit', html.includes('.workflow-launcher') && js.includes('Kunde terminieren') && js.includes('scheduleCustomerName') && js.includes('scheduleWeek') && js.includes('/customer-scheduling-requests'));
 
 console.log(failures ? `${failures} Fehler` : 'Projektakten erfolgreich verifiziert.');
 process.exit(failures ? 1 : 0);

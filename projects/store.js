@@ -360,6 +360,21 @@ function normalizeNote(note = {}) {
   return { id: clean(note.id, 100) || crypto.randomUUID(), text: clean(note.text, 12_000), source: clean(note.source, 80) || 'manual', createdAt: iso(note.createdAt) };
 }
 
+function normalizeCustomerSchedulingRequest(request = {}) {
+  const customerName = clean(request.customerName, 220);
+  const isoYear = Math.max(2000, Math.min(2100, Number(request.isoYear) || new Date().getUTCFullYear()));
+  const week = Math.max(1, Math.min(53, Number(request.week) || 1));
+  return {
+    id: clean(request.id, 100) || crypto.randomUUID(),
+    customerName,
+    isoYear,
+    week,
+    command: `Kunde terminieren: ${customerName} in KW ${week}/${isoYear}`,
+    status: request.status === 'completed' ? 'completed' : 'requested',
+    createdAt: iso(request.createdAt),
+  };
+}
+
 function normalizeFolder(folder = {}) {
   return { id: clean(folder.id, 100) || crypto.randomUUID(), name: clean(folder.name, 180) || 'Neuer Ordner', parentId: clean(folder.parentId, 100) || null, createdAt: iso(folder.createdAt) };
 }
@@ -440,6 +455,9 @@ function normalizeProject(input = {}, fallback = {}) {
     fallbackRunLog.find(item => item?.id === id) || {},
   )).sort((left, right) => String(right.executedAt).localeCompare(String(left.executedAt)));
   const notes = Array.isArray(input.notes) ? input.notes : (fallback.notes || []);
+  const customerSchedulingRequests = Array.isArray(input.customerSchedulingRequests)
+    ? input.customerSchedulingRequests
+    : (fallback.customerSchedulingRequests || []);
   const folders = Array.isArray(input.folders) ? input.folders : (fallback.folders || []);
   const files = Array.isArray(input.files) ? input.files : (fallback.files || []);
   return {
@@ -487,6 +505,11 @@ function normalizeProject(input = {}, fallback = {}) {
     missingCapabilities: (Array.isArray(input.missingCapabilities) ? input.missingCapabilities : (fallback.missingCapabilities || [])).map(item => clean(item, 3000)).filter(Boolean).slice(0, 200),
     roadmap: clone(Array.isArray(input.roadmap) ? input.roadmap : (fallback.roadmap || [])),
     notes: notes.map(normalizeNote).filter(note => note.text),
+    customerSchedulingRequests: customerSchedulingRequests
+      .map(normalizeCustomerSchedulingRequest)
+      .filter(request => request.customerName)
+      .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
+      .slice(0, 100),
     folders: folders.map(normalizeFolder),
     files: files.map(normalizeFile).filter(file => file.storageName),
   };
@@ -558,7 +581,7 @@ export async function getProject(id) {
 
 export async function createProject(input = {}) {
   return mutate(store => {
-    const project = normalizeProject({ ...input, id: undefined, logo: null, notes: [], folders: [], files: [] });
+    const project = normalizeProject({ ...input, id: undefined, logo: null, notes: [], customerSchedulingRequests: [], folders: [], files: [] });
     if (store.projects.some(item => item.id === project.id)) throw new Error('Projekt-ID ist bereits vorhanden.');
     store.projects.push(project);
     store.deletedProjectIds = (store.deletedProjectIds || []).filter(id => id !== project.id);
@@ -571,7 +594,7 @@ export async function updateProject(id, patch = {}) {
     const index = store.projects.findIndex(item => item.id === clean(id, 100));
     if (index < 0) return null;
     const current = store.projects[index];
-    store.projects[index] = normalizeProject({ ...current, ...patch, id: current.id, logo: current.logo, notes: current.notes, folders: current.folders, files: current.files }, current);
+    store.projects[index] = normalizeProject({ ...current, ...patch, id: current.id, logo: current.logo, notes: current.notes, customerSchedulingRequests: current.customerSchedulingRequests, folders: current.folders, files: current.files }, current);
     return publicProject(store.projects[index]);
   });
 }
@@ -598,6 +621,22 @@ export async function addProjectNote(id, text, source = 'manual') {
     const project = store.projects.find(item => item.id === clean(id, 100));
     if (!project) return null;
     project.notes = [...(project.notes || []), normalizeNote({ text: noteText, source })];
+    return publicProject(project);
+  });
+}
+
+export async function addCustomerSchedulingRequest(id, input = {}) {
+  const customerName = clean(input.customerName, 220);
+  const isoYear = Number(input.isoYear);
+  const week = Number(input.week);
+  if (customerName.length < 3) throw new Error('Bitte den vollständigen Kundennamen eingeben.');
+  if (!Number.isInteger(isoYear) || isoYear < 2000 || isoYear > 2100) throw new Error('Das Kalenderjahr ist ungültig.');
+  if (!Number.isInteger(week) || week < 1 || week > 53) throw new Error('Die Kalenderwoche ist ungültig.');
+  return mutate(store => {
+    const project = store.projects.find(item => item.id === clean(id, 100));
+    if (!project) return null;
+    const request = normalizeCustomerSchedulingRequest({ customerName, isoYear, week });
+    project.customerSchedulingRequests = [request, ...(project.customerSchedulingRequests || [])].slice(0, 100);
     return publicProject(project);
   });
 }

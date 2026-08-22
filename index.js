@@ -71,6 +71,7 @@ import {
   updateAppointmentType,
 } from './scheduling/store.js';
 import {
+  addCustomerSchedulingRequest,
   addProjectNote,
   createProject,
   createProjectFolder,
@@ -1290,6 +1291,12 @@ app.post('/api/projects/:id/notes', async (req, res) => {
   try {
     const project = await addProjectNote(req.params.id, req.body?.text, req.body?.source || 'manual');
     res.status(project ? 200 : 404).json(project || { error: 'not found' });
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.post('/api/projects/:id/customer-scheduling-requests', async (req, res) => {
+  try {
+    const project = await addCustomerSchedulingRequest(req.params.id, req.body || {});
+    res.status(project ? 201 : 404).json(project || { error: 'not found' });
   } catch (error) { res.status(400).json({ error: error.message }); }
 });
 app.post('/api/projects/:id/folders', async (req, res) => {

@@ -6,6 +6,8 @@ Stand: 22. August 2026 · Version 2
 
 Der Workflow startet auf Nadines Zuruf, zum Beispiel: **„Kunde terminieren: Stefanie Schneider in KW 39.“** IVA sucht den eindeutig passenden Heat-Hero-Vorgang, legt den Kunden bei Bedarf in Planbar an und plant die Montage über die fünf Werktage Montag bis Freitag der genannten ISO-Kalenderwoche ein.
 
+Alternativ kann Nadine den Auftrag direkt oben in der Heat-Hero-Projektakte vormerken: Kundenname eintragen, die gewünschte Kalenderwoche aus dem rollierenden Dropdown auswählen und **„Workflow vorbereiten“** drücken. Die Projektakte speichert daraus den eindeutigen Auftrag `Kunde terminieren: <Name> in KW <Woche>/<Jahr>` für IVA. Die Vormerkung führt noch keine externe Planbar- oder Pipedrive-Schreibaktion aus; deren gemeinsame Bestätigung bleibt Teil des Workflows.
+
 ## 1. Verbindliche Quellen und Vorprüfung
 
 1. Pipedrive bleibt bis zur erfolgreich rückgeprüften Planbar-Anlage **rein lesend**. Erst der definierte Abschluss in Abschnitt 4 darf den Deal verändern.
