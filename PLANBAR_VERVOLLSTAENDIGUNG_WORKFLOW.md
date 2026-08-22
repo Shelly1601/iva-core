@@ -73,6 +73,15 @@
 4. Nach jedem Speichern den Termin beziehungsweise die Kundenansicht erneut öffnen und alle geänderten Zielwerte sichtbar verifizieren. Bei Abweichung keine weiteren Schreibversuche; Fehler dokumentieren.
 5. Ein lokales Laufprotokoll verhindert die erneute Verarbeitung derselben WhatsApp-Nachricht beziehungsweise desselben Kunden-KW-Falls.
 
+## Einmaliger Abschluss-Forecast für Angelos Excel-Listen
+
+- Die Warteschlange `data/planbar-completion-pending.json` enthält eine einmalige Abschlussaktion. Sie wird erst freigegeben, wenn **alle 25 Kundenfälle den Status `completed`** haben. Ein blockierter, übersprungener oder noch offener Fall zählt nicht als Abschluss.
+- Nach Freigabe genau einmal außerplanmäßig den verbindlichen Workflow `PLANBAR_FORECAST_WORKFLOW.md` ausführen. Für diese Abschlussaktion ist der Zeitraum fest auf **KW 36 bis einschließlich KW 45 des Jahres 2026** gesetzt, unabhängig vom späteren tatsächlichen Ausführungsdatum.
+- Empfänger ist ausschließlich Angelo Keller unter `a.keller@heat-hero.com`. Es werden ausschließlich die dort vorgeschriebenen Excel-Dateien versendet; keine PDFs und keine zusätzlichen Empfänger.
+- Die reguläre Freitagsautomation bleibt bestehen. Vor dem außerplanmäßigen Versand sowohl den lokalen Forecast-Sendelaufstatus als auch Outlook `Gesendet` auf denselben Empfänger, Betreff und KW-Bereich prüfen. Ein bereits verifizierter Versand wird nicht wiederholt.
+- Die Abschlussaktion wechselt erst nach sichtbarer Prüfung in Outlook `Gesendet` auf `sent-and-verified`. Bei einem technischen oder fachlichen Blocker bleibt sie ungesendet und wird mit konkretem Grund protokolliert; es gibt pro Lauf höchstens einen logischen Versandversuch.
+- Nach bestätigtem Versand das Ergebnis zusätzlich mit `workflowId: planbar-weekly-export` an die Heat-Hero-Projektakte melden und im Detailbericht des Vervollständigungslaufs aufführen.
+
 ## Detaillierter Ergebnisbericht: E-Mail mit Telegram-Ersatz
 
 Nach jedem Lauf einen detaillierten, nachvollziehbaren Bericht an `n.sell@heat-hero.com` senden – auch bei keinen relevanten Nachrichten, ausgeschaltetem Projekt-Schalter, Blockern oder technischen Fehlern.
