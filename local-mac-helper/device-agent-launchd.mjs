@@ -20,7 +20,7 @@ export function imacDeviceAgentPlistFile() {
   return path.join(os.homedir(), 'Library', 'LaunchAgents', `${IMAC_DEVICE_AGENT_LABEL}.plist`);
 }
 
-export function buildImacDeviceAgentLaunchAgent({ nodePath = process.execPath, cliPath = fileURLToPath(new URL('./cli.mjs', import.meta.url)) } = {}) {
+export function buildImacDeviceAgentLaunchAgent({ nodePath = process.execPath, cliPath = fileURLToPath(new URL('./device-agent-runner.mjs', import.meta.url)) } = {}) {
   const logs = path.join(dataRoot(), 'logs');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
