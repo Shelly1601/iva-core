@@ -20,8 +20,11 @@ const {
   voiceLearningPromptContext,
 } = await import('../voice-lab/store.js');
 const { prepareSpeechText } = await import('../voice.js');
+const { buildTranscriptionPrompt, normalizeTranscript, transcribeAudio, transcriptionProviderStatus } = await import('../voice-lab/transcribe.js');
 const cockpitSource = await fs.readFile(new URL('../public/cockpit.html', import.meta.url), 'utf8');
 const transcriptionSource = await fs.readFile(new URL('../voice-lab/transcribe.js', import.meta.url), 'utf8');
+const cockpitScript = cockpitSource.match(/<script>([\s\S]*)<\/script>/)?.[1] || '';
+assert.doesNotThrow(() => new Function(cockpitScript), 'Cockpit-Script muss syntaktisch gültig sein');
 
 assert.ok(VOICE_TEST_PHRASES.length >= 8);
 assert.equal(calculateWordErrorRate('Eva öffne die Kundenakte', 'Eva öffne Kundenakte').errors, 1);
@@ -57,8 +60,9 @@ const improvement = await captureImprovementRequest({
   desiredOutcome: 'Ein geprüfter Bauvorschlag mit Tests.',
 });
 assert.equal(improvement.status, 'captured');
-assert.equal(improvement.requiresConfirmationBeforeCode, true);
-assert.equal(improvement.requiresConfirmationBeforeDeploy, true);
+assert.equal(improvement.buildMode, 'autonomous-on-command');
+assert.equal(improvement.requiresConfirmationBeforeCode, false);
+assert.equal(improvement.requiresConfirmationBeforeDeploy, false);
 const learning = await listVoiceLearning();
 assert.equal(learning.pronunciations.length, 1);
 assert.equal(learning.communicationPreferences.length, 1);
@@ -68,11 +72,35 @@ assert.deepEqual(learnedSummary.learned, { pronunciations: 1, communicationPrefe
 
 assert.match(cockpitSource, /function shouldListen\(\)\{ return wakeOn\|\|manualMicOn; \}/);
 assert.match(cockpitSource, /rec\?\.abort\(\)/, 'Mikro aus muss die Erkennung hart abbrechen');
-assert.match(cockpitSource, /if\(!shouldListen\(\)\)return;/, 'Ergebnisse nach Mikro aus müssen ignoriert werden');
-assert.match(cockpitSource, /if\(!isBusyState\(\)&&shouldListen\(\)\)\{ startRec\(\); \}/, 'Nur ein aktiver Hörmodus darf neu starten');
+assert.match(cockpitSource, /navigator\.mediaDevices\?\.getUserMedia/, 'Cockpit muss echtes Audio serverseitig transkribieren');
+assert.match(cockpitSource, /\/api\/voice\/transcribe/, 'Cockpit und Sprachlabor müssen dieselbe Transkriptionsroute verwenden');
+assert.match(cockpitSource, /if\(manualMicOn\|\|awake\)startServerCapture\(\);else startRec\(\);/, 'Nur das Wake-Word darf Browser-SpeechRecognition verwenden');
+assert.match(cockpitSource, /queueTranscriptForSend/, 'Transkript muss vor dem automatischen Senden sichtbar korrigierbar sein');
 assert.match(cockpitSource, /location\.assign\(url\)/, 'Blockierte Pop-ups brauchen Same-Tab-Fallback');
 assert.match(cockpitSource, /openOptions=\{sameTab:viaVoice===true\}/, 'Sprachbefehle öffnen Arbeitsbereiche ohne Pop-up-Abhängigkeit');
 assert.doesNotMatch(cockpitSource, /Bitte Pop-ups für IVA erlauben/);
-assert.match(transcriptionSource, /Eigennamen und buchstabierte Namen exakt wiedergeben/);
+assert.match(transcriptionSource, /Eigennamen, Firmennamen, Fachbegriffe/);
+assert.equal(normalizeTranscript('Connecto und Heat Hero mit Haus Wert Schutz'), 'Qonekto und HeatHero mit HausWertSchutz');
+assert.match(buildTranscriptionPrompt(['Qonekto']), /Wichtige Schreibweisen: Qonekto/);
+assert.equal(typeof transcriptionProviderStatus().ready, 'boolean');
+
+const previousFetch = globalThis.fetch;
+const previousOpenAiKey = process.env.OPENAI_API_KEY;
+const previousGroqKey = process.env.GROQ_API_KEY;
+process.env.OPENAI_API_KEY = '';
+process.env.GROQ_API_KEY = 'test-key';
+globalThis.fetch = async (url, options) => {
+  assert.equal(url, 'https://api.groq.com/openai/v1/audio/transcriptions');
+  assert.equal(options.body.get('language'), 'de');
+  assert.match(options.body.get('prompt'), /Qonekto/);
+  return { ok: true, status: 200, text: async () => JSON.stringify({ text: 'Connecto und Heat Hero' }) };
+};
+const mockedTranscript = await transcribeAudio(Buffer.from('fake-audio'), { mime: 'audio/webm', fileName: 'test.webm' });
+assert.equal(mockedTranscript.text, 'Qonekto und HeatHero');
+assert.equal(mockedTranscript.provider, 'groq');
+assert.equal(mockedTranscript.audioStored, false);
+globalThis.fetch = previousFetch;
+if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previousOpenAiKey;
+if (previousGroqKey === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = previousGroqKey;
 
 console.log('IVA Voice-Lab: OK');

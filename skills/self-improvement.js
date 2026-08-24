@@ -27,7 +27,7 @@ export function selfImprovementSkill({ savePronunciationCorrection, saveCommunic
       },
     }),
     captureImprovementRequest: tool({
-      description: 'Erfasst Nadines ausdrücklichen Wunsch nach einer neuen IVA-Funktion oder Systemänderung als kontrollierten Bauauftrag. Das Tool baut oder deployt noch nichts und darf niemals behaupten, die Funktion sei bereits umgesetzt.',
+      description: 'Merkt eine noch nicht ausdrücklich zur Umsetzung beauftragte IVA-Idee. Wenn Nadine bereits „mach das“, „bau das“ oder gleichbedeutend gesagt hat, nicht dieses Werkzeug verwenden, sondern startIvaBuild, damit Codex ohne erneute Rückfrage wirklich baut, testet und ausliefert.',
       parameters: z.object({
         title: z.string().min(3).max(180),
         description: z.string().min(3).max(4000),
@@ -38,7 +38,7 @@ export function selfImprovementSkill({ savePronunciationCorrection, saveCommunic
       }),
       execute: async input => {
         const request = await captureImprovementRequest(input);
-        return { ok: true, status: request.status, requestId: request.id, title: request.title, codeChanged: false, deployed: false, next: 'Bauvorschlag und Tests erstellen; Code und Deployment separat bestätigen.' };
+        return { ok: true, status: request.status, requestId: request.id, title: request.title, codeChanged: false, deployed: false, next: 'Bei Nadines ausdrücklichem Umsetzungsauftrag startIvaBuild ohne weitere Planbestätigung verwenden.' };
       },
     }),
     listSelfImprovements: tool({

@@ -34,6 +34,7 @@ import { capabilityReviewSkill } from './skills/capability-review.js';
 import { knowledgeLibrarySkill } from './skills/knowledge-library.js';
 import { recruitingSkill } from './skills/recruiting.js';
 import { deviceControlSkill } from './skills/device-control.js';
+import { builderSkill } from './skills/builder.js';
 import { planbarSkill } from './skills/planbar.js';
 import { investmentSkill } from './skills/investment.js';
 import { listAgents, routeAgent } from './agents/registry.js';
@@ -46,13 +47,14 @@ import {
   captureImprovementRequest,
   listVoiceEvaluations,
   listVoiceLearning,
+  markImprovementRequestDispatched,
   recordVoiceEvaluation,
   saveCommunicationPreference,
   savePronunciationCorrection,
   voiceLabSummary,
   voiceLearningPromptContext,
 } from './voice-lab/store.js';
-import { transcribeAudio } from './voice-lab/transcribe.js';
+import { transcribeAudio, transcriptionProviderStatus } from './voice-lab/transcribe.js';
 import { askArchitect } from './agents/architect.js';
 import * as workspaces from './workspaces/store.js';
 import {
@@ -667,14 +669,14 @@ Anfrage-Typ erkennen und Antwort-Format wählen:
 - Kurze Faktenfrage, ja/nein oder Definition: 1–3 Sätze. Keine Alternative anhängen, keine Vorrede.
 - Brainstorming (Signale: "welche Optionen", "was könnte man", "Ideen für"): 5–8 kurze Optionen, sortiert nach Wirkung. Am Ende ein klarer Top-Pick mit einem Satz Grund.
 - Entscheidungshilfe (Signale: "soll ich", "lohnt sich", "vs.", "umsteigen"): kurz Pro und Contra (je 1–3 Zeilen), dann eine klare Empfehlung mit einem Satz warum.
-- Umsetzung (Signale: "wie mache ich", "hilf mir einrichten", "bau"): genau ein konkreter nächster Schritt, dann Stopp und warten. Sag dazu, woran du erkennst, dass der Schritt geklappt hat.
+- Umsetzung ohne ausdrücklichen Bauauftrag (Signale: "wie mache ich", "hilf mir einrichten"): genau ein konkreter nächster Schritt. Ein ausdrücklicher Bauauftrag ("mach das", "bau das", "setz das um" oder gleichbedeutend) wird dagegen vollständig und ohne erneute Planbestätigung über startIvaBuild gestartet.
 - Typ unklar: eine (nicht mehrere) präzise Rückfrage.
 
 So denkst du je Fachgebiet:
 
 - Vertrieb, Marketing, Business: wie ein erfahrener Unternehmer und Verkäufer. Perspektiven Cashflow, Kundenwert, Skalierbarkeit, USP, Timing. Bei Verkaufssituationen konkrete Formulierungen (Öffner, Einwandbehandlung, Closing-Frage), keine Prinzipien-Vorträge.
 - Finanz und Versicherung (Nadines Kernfach): rechne konkret in Größenordnungen, nenn gesetzliche Basis wenn relevant. Bei unklaren Fakten kurz nachfragen, sonst weitermachen.
-- Technisch: strikt ein Schritt pro Antwort. Nächster Schritt erst nach Feedback.
+- Technisch: bei Erklärungen kompakt und schrittweise. Bei einem ausdrücklichen Bauauftrag nicht auf Feedback warten, sondern startIvaBuild sofort verwenden.
 
 Challenge- und Alternativen-Reflex:
 
@@ -686,7 +688,7 @@ Tool-Nutzung:
 
 - Bevor du aus einem Reel, Profil, fremden Tool oder einer spontanen Idee eine neue IVA-Funktion oder einen neuen Agenten empfiehlst, MUSST du assessCapability aufrufen. Pruefe echten Zusatznutzen, bestehende Abdeckung, offiziellen Nachweis, Rechte, Kosten, Datenschutz und Sicherheitsfolgen. Ergebnis "integrate-existing" bedeutet: keinen neuen Agenten bauen. "needs-verification" oder "watch" bedeutet: noch nicht integrieren. Fremden Code, geschuetzte Texte oder Designs niemals kopieren; nur eigenstaendig implementierte Funktionsmuster uebernehmen.
 - Live-Daten oder Aktion nötig (Kalender, Mails, Leads, Todos, Kampagnen, Bilder, Qonekto/blau direkt): Tool sofort aufrufen. Nie "hätte ich Zugriff auf…", nie "soll ich mal nachsehen?" — machen und dann zusammenfassen.
-- Wenn Nadine ausdrücklich sagt, dass etwas "auf dem iMac" passieren soll, ausschließlich sendCommandToImac mit einer freigegebenen Aktion verwenden. Niemals so tun, als sei ein nur eingereihter Befehl bereits ausgeführt; bei Bedarf anschließend getImacCommandStatus nutzen. Keine freien Shell-Befehle, keine Zugangsdaten und keine beliebigen Dateipfade an den Gerätekanal übergeben.
+- Wenn Nadine ausdrücklich sagt, dass eine normale freigegebene Aktion "auf dem iMac" passieren soll, sendCommandToImac verwenden. Für ausdrücklich beauftragte IVA-Code-, App- oder Systemänderungen stattdessen startIvaBuild verwenden; dieses Werkzeug übergibt den vollständigen Auftrag kontrolliert an Codex. Niemals so tun, als sei ein nur eingereihter Befehl bereits ausgeführt; bei Bedarf anschließend den passenden Status prüfen. Keine freien Shell-Befehle, keine Zugangsdaten und keine beliebigen Dateipfade an den Gerätekanal übergeben.
 - CRM-Namen aus Sprache oder freier Texteingabe können falsch geschrieben beziehungsweise transkribiert sein. Vor jeder CRM-Auskunft oder -Aktion zu einer namentlich genannten Person findHeatHeroLeads mit der gelieferten Schreibweise aufrufen. Das Werkzeug durchsucht Schreibvarianten. Bei matchStatus "unique" ausschließlich den gespeicherten CRM-Namen und die gespeicherte ID verwenden. Bei "ambiguous" mit höchstens drei Kandidaten nachfragen, welcher gemeint ist. Bei "not-found" genau eine Frage stellen: wie der Nachname geschrieben wird. Niemals einen ähnlich klingenden Namen stillschweigend auswählen. Bei anderen CRM-Projekten ohne eigenen Resolver gilt mindestens dieselbe Rückfragepflicht, bis der gespeicherte Vollname eindeutig ist.
 - Wenn Nadine verlangt, eine Kundenakte aus dem CRM anzulegen oder CRM-Daten in die Kundenakte zu ziehen, ausschließlich importCrmCustomerFile aufrufen. Dieses Werkzeug erstellt eine aktive Kundenakte, übernimmt vorhandene Kontaktdaten und CRM-Notizen und verhindert Dubletten. Dafür niemals mehrfach createWorkspace aufrufen. Eine Qonekto-/Blau-direkt-Übertragung erfolgt dadurch ausdrücklich noch nicht.
 - Mehrere Quellen relevant (z. B. Kalender + Mails + Leads): parallel abrufen.
@@ -699,9 +701,9 @@ Direktes Lernen und Selbstverbesserung:
 
 - Wenn Nadine ausdrücklich sagt, dass ein Begriff, Name oder Kürzel anders ausgesprochen wird, sofort savePronunciationCorrection verwenden und die genaue Zuordnung bestätigen. Die Korrektur gilt ab der nächsten Sprachausgabe.
 - Wenn Nadine ausdrücklich eine dauerhafte Kommunikationsregel nennt, zum Beispiel kürzer antworten, zuerst das Ergebnis sagen oder einen Ausdruck nicht mehr verwenden, saveCommunicationPreference verwenden. Aus bloßem Ärger oder einer mehrdeutigen Bemerkung keine dauerhafte Regel ableiten; dann genau eine Rückfrage stellen.
-- Wenn Nadine eine neue Funktion oder Systemänderung wünscht, captureImprovementRequest verwenden. Danach ehrlich sagen: Der Bauauftrag ist erfasst, aber noch nicht programmiert oder deployt.
-- Eine beiläufige Sprachäußerung darf niemals selbstständig Code ändern oder produktiv deployen. Codeänderung, Tests und Produktionsdeployment bleiben getrennte Schritte mit ausdrücklicher Bestätigung.
-- Niemals behaupten, IVA habe sich bereits repariert, gebaut oder weiterentwickelt, wenn nur eine Korrektur oder ein Bauauftrag gespeichert wurde.
+- Wenn Nadine eine Funktion oder Systemänderung nur als Idee nennt, captureImprovementRequest verwenden und ehrlich sagen, dass sie lediglich gemerkt wurde.
+- Wenn Nadine die Umsetzung klar beauftragt, etwa mit "mach das", "bau das", "setz das um" oder gleichbedeutend, startIvaBuild sofort mit dem vollständigen Gesprächskontext verwenden. Keine erneute Plan-, Code-, Push- oder Deployment-Bestätigung verlangen. Der Codex-Auftrag folgt AGENTS.md und umfasst Bau, Tests, Fehlerbehebung, Commit, Push, Railway-Deployment und Live-Prüfung.
+- Niemals behaupten, IVA habe sich bereits repariert, gebaut oder weiterentwickelt, wenn der Codex-Auftrag nur eingereiht oder noch nicht nachweislich abgeschlossen ist.
 
 Voice-Modus überschreibt die Format-Regeln oben, wenn Sprache aktiviert ist:
 
@@ -746,6 +748,7 @@ const ALL_SKILLS = {
   accounting: accountingSkill({ listAccountingEntities, listAccountingDocuments, getAccountingDocument, accountingSummary }),
   energyTariffs: energyTariffsSkill({ workspaces, energyTariffStatus, prepareWorkspaceEnergyTariffRequest }),
   selfImprovement: selfImprovementSkill({ savePronunciationCorrection, saveCommunicationPreference, captureImprovementRequest, listVoiceLearning }),
+  builder: builderSkill({ captureImprovementRequest, markImprovementRequestDispatched, enqueueDeviceCommand, deviceCommandStatus }),
   lumit:      lumitSkill({ lumitWorkflowConfig, listLumitApplications, createLumitServicedApplication, markLumitApplicationStep }),
   capabilityReview: capabilityReviewSkill({ evaluateCapability, listCapabilityReviews }),
   knowledgeLibrary: knowledgeLibrarySkill({ listKnowledgeLibrary, knowledgeLibraryStatus, assessKnowledgeSourceCandidate }),
@@ -1185,6 +1188,7 @@ async function controlSnapshot() {
     googleGmailStatus().catch(error => ({ configured: false, authorized: false, ready: false, missing: ['Google-Gmail-Verbindung'], error: error.message })),
   ]);
   const marketing = marketingConnectorStatus();
+  const transcription = transcriptionProviderStatus();
   const metaWhatsApp = whatsappStatus();
   const hubWhatsApp = whatsappHubStatus();
   const adviceConnectors = adviceConnectorStatus();
@@ -1196,8 +1200,9 @@ async function controlSnapshot() {
     connector('anthropic', 'IVA Kernmodell', envReady('ANTHROPIC_API_KEY'), ['ANTHROPIC_API_KEY'], 'Chat, Planung und Fachagenten.'),
     connector('gemini', 'Gemini Nebenmodell', envReady('GEMINI_API_KEY'), ['GEMINI_API_KEY'], 'Guentige Marketing-, Markt- und Nebenanalysen.'),
     connector('telegram', 'Telegram', envReady('TELEGRAM_BOT_TOKEN'), ['TELEGRAM_BOT_TOKEN'], 'Assistentenkanal und proaktive Berichte.'),
-    connector('voice-input', 'Spracheingabe', Boolean(voiceResult.configured?.groq), ['GROQ_API_KEY'], 'Transkription mit Groq Whisper.'),
+    connector('voice-input', 'Spracheingabe', transcription.ready, ['OPENAI_API_KEY oder GROQ_API_KEY'], transcription.ready ? `Server-Transkription mit ${transcription.activeProvider} · ${transcription.activeModel} · IVA-Fachwörterbuch aktiv.` : 'Serverseitige Transkription ist noch nicht konfiguriert.'),
     connector('voice-output', 'IVA Stimme', Boolean(voiceResult.configured?.elevenLabs), ['ELEVENLABS_API_KEY'], 'Sprachausgabe mit ElevenLabs; eine feste Voice-ID ist optional.'),
+    connector('codex-builder', 'IVA → Codex Bauaufträge', envReady('IMAC_DEVICE_TOKEN'), ['IMAC_DEVICE_TOKEN'], 'Ausdrücklich beauftragte IVA-Änderungen werden ohne erneute Planbestätigung an den lokalen Codex übergeben.'),
     connector('qonekto', 'Qonekto / blau direkt', Boolean(qonektoResult.reachable), ['QONEKTO_MCP_TOKEN'], qonektoResult.reachable ? `${qonektoResult.toolCount || qonektoResult.tools?.total || 0} Werkzeuge erreichbar.` : (qonektoResult.error || 'Nicht erreichbar.')),
     connector('lumit', 'Mannheimer LUMIT · servicierter Antrag', true, [], `Agentur ${lumitWorkflowConfig().agency.display} · Vermittler ${lumitWorkflowConfig().brokerNumber} · Nachprozess vorbereitet.`),
     connector('crm-goals', 'CRM · Goals & Concepts', envReady('MEINCRM_SERVICE_KEY', 'GOALS_CONCEPTS_PROJECT_ID'), ['MEINCRM_SERVICE_KEY', 'GOALS_CONCEPTS_PROJECT_ID'], `${projectIds} CRM-Projektzuordnungen hinterlegt.`),
@@ -1246,7 +1251,7 @@ async function controlSnapshot() {
     systems: {
       qonekto: qonektoResult,
       crmQonektoSync: syncResult,
-      voice: voiceResult,
+      voice: { ...voiceResult, transcription },
       adviceKnowledge: knowledgeResult,
       opportunityRadar: opportunityResult,
       reporting: reportingStatus(),

@@ -131,7 +131,7 @@ function renderLearning(learning = {}){
     ? learning.communicationPreferences.slice(0,20).map(item => `<div class="learning-item"><span class="state">gelernt</span><b>${esc(item.preference)}</b><small>${esc(item.context || 'allgemein')}</small></div>`).join('')
     : empty('Noch keine zusätzliche Kommunikationsregel.');
   $('improvements').innerHTML = learning.improvementRequests?.length
-    ? learning.improvementRequests.slice(0,20).map(item => `<div class="learning-item"><span class="state">${esc(item.status || 'erfasst')}</span><b>${esc(item.title)}</b><small>${esc(item.desiredOutcome || item.description || '')}</small><small>Code und Deployment brauchen Bestätigung.</small></div>`).join('')
+    ? learning.improvementRequests.slice(0,20).map(item => `<div class="learning-item"><span class="state">${esc(item.status || 'erfasst')}</span><b>${esc(item.title)}</b><small>${esc(item.desiredOutcome || item.description || '')}</small><small>Ein ausdrücklicher Umsetzungsauftrag wird ohne weitere Planbestätigung an Codex übergeben.</small></div>`).join('')
     : empty('Noch kein offener Bauauftrag.');
 }
 async function loadDashboard(){
@@ -139,7 +139,7 @@ async function loadDashboard(){
   try {
     const [summary,items,learning] = await Promise.all([api('/api/voice-lab/summary'),api('/api/voice-lab/evaluations?limit=40'),api('/api/voice-lab/learning')]);
     state.summary = summary; state.phrases = summary.testPhrases || []; renderMetrics(); if (!$('phraseSelect').options.length) renderPhrases(); renderHistory(items); renderLearning(learning);
-    setStatus(summary.configured?.groq && summary.configured?.elevenLabs ? 'on' : '', summary.configured?.groq && summary.configured?.elevenLabs ? 'bereit' : 'Anbindung unvollständig');
+    setStatus(summary.configured?.transcription && summary.configured?.elevenLabs ? 'on' : '', summary.configured?.transcription && summary.configured?.elevenLabs ? 'bereit' : 'Anbindung unvollständig');
   } catch (error) { setStatus('err',error.message); }
 }
 

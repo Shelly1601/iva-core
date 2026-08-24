@@ -3,7 +3,7 @@
 // gemeinsamen IVA-Core. Der Router waehlt deterministisch; unbekannte oder
 // deaktivierte Agenten fallen sicher auf IVA Standard zurueck.
 
-const STANDARD_SKILLS = ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'qonekto', 'lumit', 'capabilityReview', 'knowledgeLibrary', 'recruiting', 'deviceControl', 'planbar', 'investment'];
+const STANDARD_SKILLS = ['memory', 'calendar', 'mails', 'crm', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'builder', 'qonekto', 'lumit', 'capabilityReview', 'knowledgeLibrary', 'recruiting', 'deviceControl', 'planbar', 'investment'];
 
 export const AGENTS = {
   'iva-standard': {
@@ -75,13 +75,15 @@ export const AGENTS = {
     knowledgeSources: ['knowledge-library', 'job-criteria', 'candidate-provided-documents'], allowedSkills: ['recruiting', 'knowledgeLibrary', 'research', 'capabilityReview'], modelProfile: 'chat', safetyDefault: 'liability', color: 'teal',
   },
   'iva-builder': {
-    id: 'iva-builder', name: 'Entwicklung & QA', shortName: 'Builder', enabled: false,
-    description: 'Bauvorschlaege, Tests, Vorschau und Rollback. Bleibt deaktiviert, bis Git- und Deployment-Freigaben getrennt sind.',
-    rolePrompt: null, knowledgeSources: [], allowedSkills: [], modelProfile: 'chat', safetyDefault: 'operational', color: 'slate',
+    id: 'iva-builder', name: 'Entwicklung & QA', shortName: 'Builder', enabled: true,
+    description: 'Übergibt ausdrücklich beauftragte IVA-Änderungen an den lokalen Codex und verfolgt Umsetzung, Tests, Git, Railway-Deployment und Live-Prüfung.',
+    rolePrompt: 'Arbeite als IVA-Builder-Koordinator. Wenn Nadine die Umsetzung klar beauftragt hat, verwende startIvaBuild sofort und ohne erneute Plan- oder Deployment-Bestätigung. Eine bloße Idee wird nur gemerkt. Behaupte nie, die Änderung sei fertig, solange der Codex-Auftrag nicht nachweislich abgeschlossen und live geprüft ist.',
+    knowledgeSources: ['project-docs', 'build-backlog', 'codex-task-status'], allowedSkills: ['builder', 'selfImprovement', 'deviceControl'], modelProfile: 'chat', safetyDefault: 'operational', color: 'slate',
   },
 };
 
 const ROUTES = [
+  { agentId: 'iva-builder', reason: 'IVA-Bauauftrag erkannt', pattern: /\b(?:bau(?:e|en)?|implementier(?:e|en)?|programmier(?:e|en)?|entwickl(?:e|en)?|setz(?:e|t)?\s+.{0,35}\s+um|codeänderung|codeaenderung|systemänderung|systemaenderung)\b.{0,80}\b(?:iva|eva|funktion|cockpit|chat|app|code|server|frontend|backend|agent)\b/i },
   { agentId: 'iva-investment', reason: 'Investment/Portfolio erkannt', pattern: /\b(investment(?:agent)?|saxo|portfolio|depotbestand|watchlist|orderentwurf|wertpapier|aktie(?:n)?|etf(?:s)?|anleihe(?:n)?|position(?:srisiko)?|margin)\b/i },
   { agentId: 'iva-customer', reason: 'Planbar-Suche erkannt', pattern: /\b(planbar|plantafel)\b/i },
   { agentId: 'iva-accounting', reason: 'Buchhaltung erkannt', pattern: /\b(buchhaltung|beleg|rechnung|eür|steuerberater|umsatzsteuer|vorsteuer|bewirtung)\b/i },

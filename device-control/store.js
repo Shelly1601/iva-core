@@ -16,6 +16,8 @@ export const DEVICE_ACTIONS = Object.freeze({
   'funding.reviews.list': Object.freeze({ description: 'Lokale Förder-Prüfwarteschlange zusammenfassen', mutating: false }),
   'planbar.search.refresh': Object.freeze({ description: 'Sichtbaren Planbar-Terminindex rein lesend aktualisieren', mutating: false }),
   'app.open': Object.freeze({ description: 'Eine freigegebene App auf dem iMac öffnen', mutating: true }),
+  'codex.task.start': Object.freeze({ description: 'Einen ausdrücklich beauftragten IVA-Bauauftrag im lokalen Codex starten', mutating: true }),
+  'codex.task.status': Object.freeze({ description: 'Status eines lokalen Codex-Bauauftrags lesen', mutating: false }),
 });
 
 async function loadStore() {
@@ -56,6 +58,22 @@ function validatePayload(action, payload = {}) {
       throw new Error('Diese App ist für die iMac-Fernsteuerung nicht freigegeben.');
     }
     return { app };
+  }
+  if (action === 'codex.task.start') {
+    const prompt = cleanText(payload.prompt, 12_000);
+    if (prompt.length < 10) throw new Error('Der Codex-Bauauftrag ist zu kurz.');
+    return {
+      prompt,
+      title: cleanText(payload.title || 'IVA-Bauauftrag', 180),
+      requestId: cleanText(payload.requestId, 100),
+      acceptanceCriteria: (Array.isArray(payload.acceptanceCriteria) ? payload.acceptanceCriteria : [])
+        .map(value => cleanText(value, 500)).filter(Boolean).slice(0, 12),
+    };
+  }
+  if (action === 'codex.task.status') {
+    const jobId = cleanText(payload.jobId, 80);
+    if (!/^[a-f0-9-]{20,80}$/i.test(jobId)) throw new Error('Ungültige Codex-Auftrags-ID.');
+    return { jobId };
   }
   return {};
 }

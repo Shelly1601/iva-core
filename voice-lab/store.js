@@ -187,7 +187,12 @@ export async function voiceLabSummary() {
   const topIssues = Object.entries(issueCounts).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([tag, count]) => ({ tag, count }));
   const avg = values => values.length ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10 : null;
   return {
-    configured: { groq: Boolean(process.env.GROQ_API_KEY), elevenLabs: Boolean(process.env.ELEVENLABS_API_KEY) },
+    configured: {
+      transcription: Boolean(process.env.OPENAI_API_KEY || process.env.GROQ_API_KEY),
+      openaiTranscription: Boolean(process.env.OPENAI_API_KEY),
+      groq: Boolean(process.env.GROQ_API_KEY),
+      elevenLabs: Boolean(process.env.ELEVENLABS_API_KEY),
+    },
     privacy: { audioStored: false, transcriptRetentionDays: store.settings.retentionDays },
     samples: items.length,
     ratedSamples: rated.length,
@@ -265,14 +270,26 @@ export async function captureImprovementRequest(input = {}) {
       area: clean(input.area || 'iva-core', 100),
       priority: ['low', 'normal', 'high'].includes(input.priority) ? input.priority : 'normal',
       status: 'captured',
-      buildMode: 'proposal-first',
-      requiresConfirmationBeforeCode: true,
-      requiresConfirmationBeforeDeploy: true,
+      buildMode: 'autonomous-on-command',
+      requiresConfirmationBeforeCode: false,
+      requiresConfirmationBeforeDeploy: false,
       createdAt: now,
       updatedAt: now,
     };
     store.improvementRequests.push(item);
     store.improvementRequests = store.improvementRequests.slice(-500);
+    return structuredClone(item);
+  });
+}
+
+export async function markImprovementRequestDispatched(requestId, { commandId = '', jobId = '' } = {}) {
+  return mutate(store => {
+    const item = store.improvementRequests.find(entry => entry.id === String(requestId));
+    if (!item) throw new Error('Der IVA-Bauauftrag wurde nicht gefunden.');
+    item.status = 'dispatched';
+    item.commandId = clean(commandId, 100);
+    item.jobId = clean(jobId, 100);
+    item.updatedAt = new Date().toISOString();
     return structuredClone(item);
   });
 }

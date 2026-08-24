@@ -49,9 +49,9 @@ const routingCases = [
 ];
 for (const [text, expected] of routingCases) check(`Routing ${expected}`, routeAgent(text).agent.id === expected);
 check('Explizite aktive Rolle wird respektiert', routeAgent('gemischtes Thema', 'iva-energy').agent.id === 'iva-energy');
-check('Deaktivierter Agent fällt sicher zurück', getAgent('iva-builder').id === 'iva-standard');
-check('Zehn Rollen sind aktiv', listAgents().filter(agent => agent.enabled).length === 10);
-check('Nur der autonome Builder bleibt gesperrt', !AGENTS['iva-builder'].enabled && AGENTS['iva-knowledge'].enabled && AGENTS['iva-recruiting'].enabled);
+check('Builder ist für ausdrückliche IVA-Bauaufträge aktiv', getAgent('iva-builder').id === 'iva-builder');
+check('Elf Rollen sind aktiv', listAgents().filter(agent => agent.enabled).length === 11);
+check('Builder besitzt nur kontrollierte Übergabe-Werkzeuge', AGENTS['iva-builder'].enabled && AGENTS['iva-builder'].allowedSkills.includes('builder') && !AGENTS['iva-builder'].allowedSkills.includes('qonekto'));
 check('Marketing hat kein Qonekto-Schreibwerkzeug', !AGENTS['iva-marketing'].allowedSkills.includes('qonekto'));
 
 const tools = accountingSkill({

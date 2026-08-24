@@ -117,6 +117,14 @@ async function executeDeviceCommand(command) {
       readOnly: true,
     };
   }
+  if (command.action === 'codex.task.start') {
+    const { startCodexTask } = await import('./codex-tasks.mjs');
+    return startCodexTask(command.payload || {});
+  }
+  if (command.action === 'codex.task.status') {
+    const { codexTaskStatus } = await import('./codex-tasks.mjs');
+    return codexTaskStatus(command.payload?.taskId);
+  }
   if (command.action === 'app.open') return openApplication(command.payload?.app);
   throw new Error('Der iMac hat diesen Befehl nicht in seiner lokalen Positivliste.');
 }
@@ -148,7 +156,7 @@ export function imacDeviceAgentPolicy() {
     deviceId: IMAC_DEVICE_ID,
     keychainService: KEYCHAIN_SERVICE,
     arbitraryShellCommands: false,
-    allowedActions: ['computer.status', 'funding.monitor.status', 'funding.monitor.run', 'funding.reviews.list', 'planbar.search.refresh', 'app.open'],
+    allowedActions: ['computer.status', 'funding.monitor.status', 'funding.monitor.run', 'funding.reviews.list', 'planbar.search.refresh', 'codex.task.start', 'codex.task.status', 'app.open'],
     allowedApps: Object.keys(APP_ALLOWLIST),
   });
 }

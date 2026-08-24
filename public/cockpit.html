@@ -104,6 +104,7 @@
   .bubble.iva{align-self:flex-start;background:rgba(79,157,255,.12);border:1px solid rgba(79,157,255,.25)}
   .bubble.user{align-self:flex-end;background:linear-gradient(135deg,rgba(34,230,214,.9),rgba(79,157,255,.9));color:#04121a;font-weight:500}
   .bubble.sys{align-self:center;background:transparent;color:var(--muted);font-size:12.5px;text-align:center;max-width:100%}
+  .bubble.transcript{align-self:center;max-width:96%;background:rgba(34,230,214,.08);border:1px solid rgba(34,230,214,.25);color:#bdfbf4;font-size:12.5px;cursor:pointer;text-align:center}
   .ask{display:flex;gap:10px;padding:14px;border-top:1px solid var(--border)}
   .ask input{flex:1;background:rgba(3,6,14,.7);border:1px solid var(--border2);color:var(--text);padding:12px 15px;border-radius:12px;font-size:14px;outline:none}
   .ask input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(34,230,214,.15)}
@@ -223,7 +224,7 @@
   // ---- Chat ----
   let chatAbort=null;
   let activeVoiceTurn=null;
-  function beginVoiceTurn(transcript){ activeVoiceTurn={transcript,answer:'',sentAt:performance.now(),timings:{}}; }
+  function beginVoiceTurn(transcript,timings={}){ activeVoiceTurn={transcript,answer:'',sentAt:performance.now(),timings:{...timings}}; }
   function finishVoiceTurn(){
     const turn=activeVoiceTurn;if(!turn)return;activeVoiceTurn=null;
     turn.timings.totalMs=Math.round(performance.now()-turn.sentAt);
@@ -269,10 +270,10 @@
   $('openVoiceLab').addEventListener('click',()=>openToolWindow('/voice-lab','Sprachlabor'));
   $('openControl').addEventListener('click',()=>openToolWindow('/control','Kontrollzentrum'));
   $('openProjects').addEventListener('click',()=>openToolWindow('/projects?id=heat-hero','Projekte'));
-  async function sendChat(viaVoice){const inp=$('chatIn');const t=inp.value.trim();if(!t)return;
+  async function sendChat(viaVoice,voiceTimings={}){cancelTranscriptPreview();const inp=$('chatIn');const t=inp.value.trim();if(!t)return;
     const target=workspaceIntent(t);if(target){bubble('user',t);inp.value='';let opened=false;const openOptions={sameTab:viaVoice===true};if(target==='buchhaltung'||target==='chancen'||target==='sprache'||target==='kontrolle'||target==='projekte'||target==='recruiting'||target==='investment'){const url=target==='buchhaltung'?'/accounting':target==='chancen'?'/opportunities':target==='kontrolle'?'/control':target==='projekte'?'/projects?id=heat-hero':target==='recruiting'?'/recruiting':target==='investment'?'/investment':'/voice-lab';opened=openToolWindow(url,({buchhaltung:'Buchhaltung',chancen:'Chancenradar',sprache:'Sprachlabor',kontrolle:'Kontrollzentrum',projekte:'Projekte',recruiting:'Recruiting',investment:'Investment & Portfolio'})[target],openOptions);}else opened=openWorkspace(target,t,openOptions);if(opened==='popup')bubble('sys',({beratung:'Beratungsmodus',kunde:'Kundenbereich',energie:'Beratung · Energie & Versorgung',buchhaltung:'Buchhaltung',chancen:'Chancenradar',sprache:'Sprachlabor',kontrolle:'Kontrollzentrum',projekte:'Projekte',recruiting:'Recruiting',investment:'Investment & Portfolio'})[target]+' wurde in einem neuen Fenster geöffnet. Das Cockpit bleibt hier geöffnet.');return;}
     unlockAudio();
-    if(viaVoice===true){ beginVoiceTurn(t); clearVoiceDraft(); setState('thinking'); try{if(rec)rec.stop();}catch(e){} }   // Ohr aus, solange IVA denkt+spricht
+    if(viaVoice===true){ beginVoiceTurn(t,voiceTimings); clearVoiceDraft(); setState('thinking'); stopServerCapture({discard:true}); try{if(rec)rec.stop();}catch(e){} }   // Ohr aus, solange IVA denkt+spricht
     bubble('user',t);inp.value='';const b=bubble('iva','…');
     resetTTS();
     const aborter=new AbortController(); chatAbort=aborter;
@@ -346,7 +347,7 @@
     try{ evaAudio.src='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
       evaAudio.play().catch(()=>{}); }catch(e){}
     setupAudioAnalyser(); }
-  function afterSpeak(){ finishVoiceTurn(); setState(shouldListen()?'listening':'idle'); if(shouldListen()) startRec(); }
+  function afterSpeak(){ finishVoiceTurn(); setState(shouldListen()?'listening':'idle'); if(shouldListen()) resumeVoiceInput(); }
   // ---- TTS-Queue: satzweise Wiedergabe waehrend Claude streamt (Phase 2) ----
   // Trigger fuer "Satz abgeschlossen":
   //   1) Terminator (. ! ?) im Puffer wird gefolgt von weiterem gestreamten Text -> Ende bewiesen.
@@ -464,99 +465,113 @@
   $('ttsBtn').addEventListener('click',()=>{ttsOn=!ttsOn;$('ttsBtn').classList.toggle('off',!ttsOn);if(!ttsOn){ttsQueue=[];ttsBuffer='';ttsFinished=true;clearTimeout(ttsStableTimer);try{evaAudio.pause();}catch(e){}afterSpeak();}});
   $('stopIvaBtn').addEventListener('click',stopIvaOutput);
 
-  // ---- Sprache: Mikro + Wake-Word „Eva wake up" + Gespraechsmodus (nur Chrome) ----
+  // ---- Sprache: Browser nur noch fuer das Wake-Word; der eigentliche Inhalt
+  // wird als Audio an IVAs zentrale Transkriptionspipeline geschickt. Dadurch
+  // verwenden Cockpit, Sprachlabor und Telegram dieselben Fachbegriffe und Modelle.
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   let rec=null, wakeOn=false, awake=false, manualMicOn=false, recognitionRunning=false;
-  // SpeechRecognition liefert bereits ein finales Segment. Eine weitere starre
-  // Drei-Sekunden-Pause machte jeden Dialog unnötig träge; 850 ms fängt nur noch
-  // unmittelbar nachgelieferte Segmente ab.
-  const VOICE_PAUSE_MS=850;
+  let serverCapture=null, transcriptTimer=null, transcriptBubble=null;
+  const VAD_THRESHOLD=.026, VAD_SILENCE_MS=950, VAD_NO_SPEECH_MS=18000, VAD_MAX_MS=60000;
   let voiceDraft='', voicePauseTimer=null;
   function clearVoiceDraft(){ clearTimeout(voicePauseTimer); voicePauseTimer=null; voiceDraft=''; }
-  function armVoicePause(){
-    clearTimeout(voicePauseTimer);
-    voicePauseTimer=setTimeout(()=>{
-      const txt=voiceDraft.trim(); voiceDraft=''; voicePauseTimer=null;
-      if(!txt||isBusyState()) return;
-      if(manualMicOn){ manualMicOn=false; $('micBtn').classList.remove('rec'); $('micBtn').setAttribute('aria-pressed','false'); }
-      $('chatIn').value=txt;
-      sendChat(true);
-    },VOICE_PAUSE_MS);
+  function cancelTranscriptPreview(){ clearTimeout(transcriptTimer); transcriptTimer=null; if(transcriptBubble){transcriptBubble.remove();transcriptBubble=null;} }
+  function isStopPhrase(text){ return /\b(reicht|jetzt gut|jetzt reicht|stop|stopp|ruhe|sei still|h(ö|oe)r auf|schluss)\b/i.test(String(text||'')); }
+  function queueTranscriptForSend(text,timings={}){
+    const clean=String(text||'').trim(); if(!clean)return;
+    cancelTranscriptPreview();
+    $('chatIn').value=clean;
+    transcriptBubble=bubble('transcript','Verstanden: „'+clean+'" · antippen zum Korrigieren');
+    transcriptBubble.addEventListener('click',()=>{clearTimeout(transcriptTimer);transcriptTimer=null;$('chatIn').focus();$('chatIn').select();setStatus('on','Transkript korrigieren und senden');});
+    transcriptTimer=setTimeout(()=>{transcriptTimer=null;if(transcriptBubble){transcriptBubble.remove();transcriptBubble=null;}sendChat(true,timings);},1200);
   }
-  function queueVoiceText(txt){
+  $('chatIn').addEventListener('input',()=>{if(transcriptTimer){clearTimeout(transcriptTimer);transcriptTimer=null;setStatus('on','Transkript korrigieren und senden');}});
+  function queueVoiceText(txt,timings={}){
     const clean=String(txt||'').trim();
     if(clean) voiceDraft=(voiceDraft+' '+clean).trim();
-    if(!voiceDraft) return;
-    setStatus('on','Eva hört weiter zu …');
-    armVoicePause();
+    if(!voiceDraft)return;
+    clearTimeout(voicePauseTimer);
+    voicePauseTimer=setTimeout(()=>{const text=voiceDraft.trim();voiceDraft='';voicePauseTimer=null;if(text&&!isBusyState())queueTranscriptForSend(text,timings);},450);
   }
   function shouldListen(){ return wakeOn||manualMicOn; }
-  function startRec(){ if(!rec||isBusyState()||!shouldListen()||recognitionRunning)return; try{rec.start();}catch(e){} }
+  function preferredRecordingType(){return ['audio/webm;codecs=opus','audio/webm','audio/mp4'].find(type=>window.MediaRecorder?.isTypeSupported?.(type))||'';}
+  function cleanupCapture(capture){
+    clearInterval(capture.vadTimer);capture.vadTimer=null;
+    capture.stream?.getTracks?.().forEach(track=>track.stop());
+    capture.audioContext?.close?.().catch(()=>{});
+    if(serverCapture===capture)serverCapture=null;
+  }
+  async function finishServerCapture(capture){
+    if(capture.finalized)return;capture.finalized=true;cleanupCapture(capture);
+    if(capture.discard||!capture.hadSpeech){if(shouldListen()&&!isBusyState())setTimeout(resumeVoiceInput,180);return;}
+    const blob=new Blob(capture.chunks,{type:capture.recorder.mimeType||'audio/webm'});
+    if(blob.size<600){if(shouldListen()&&!isBusyState())setTimeout(resumeVoiceInput,180);return;}
+    setStatus('on','IVA transkribiert …');
+    try{
+      const c=cfg();const started=performance.now();
+      const response=await fetch(c.url+'/api/voice/transcribe',{method:'POST',headers:{'Content-Type':blob.type||'audio/webm','Authorization':'Bearer '+c.tok,'X-File-Name':'cockpit.'+((blob.type||'').includes('mp4')?'m4a':'webm')},body:blob});
+      const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(result.error||'HTTP '+response.status);
+      const text=String(result.text||'').trim();
+      if(!text){setStatus('on','Nichts verstanden · bitte noch einmal');if(shouldListen())setTimeout(resumeVoiceInput,250);return;}
+      if(awake&&isStopPhrase(text)){awake=false;setStatus('on','👂 warte auf „Eva wake up"');setTimeout(resumeVoiceInput,180);return;}
+      if(manualMicOn){manualMicOn=false;$('micBtn').classList.remove('rec');$('micBtn').setAttribute('aria-pressed','false');}
+      queueTranscriptForSend(text,{endpointMs:Math.round(capture.endpointAt-capture.startedAt),transcriptionMs:Math.round(performance.now()-started)});
+    }catch(error){setStatus('err','Transkription fehlgeschlagen');bubble('sys','Ich konnte die Aufnahme nicht transkribieren: '+error.message);if(shouldListen())setTimeout(resumeVoiceInput,350);}
+  }
+  function stopServerCapture({discard=false}={}){
+    const capture=serverCapture;if(!capture)return;capture.discard=capture.discard||discard;
+    clearInterval(capture.vadTimer);capture.vadTimer=null;
+    if(capture.recorder?.state&&capture.recorder.state!=='inactive'){try{capture.recorder.stop();}catch(e){finishServerCapture(capture);}}
+    else finishServerCapture(capture);
+  }
+  async function startServerCapture(){
+    if(serverCapture||isBusyState()||!shouldListen())return;
+    if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){bubble('sys','Dieser Browser kann keine Audioaufnahme an IVA senden.');stopListening({status:'Audioaufnahme nicht verfügbar'});return;}
+    try{
+      try{rec?.abort();}catch(e){}recognitionRunning=false;
+      const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+      if(isBusyState()||!shouldListen()){stream.getTracks().forEach(track=>track.stop());return;}
+      const mimeType=preferredRecordingType();const recorder=new MediaRecorder(stream,mimeType?{mimeType}:undefined);
+      const Ctx=window.AudioContext||window.webkitAudioContext;const audioContext=Ctx?new Ctx():null;
+      const analyser=audioContext?audioContext.createAnalyser():null;const samples=analyser?new Uint8Array(512):null;
+      if(analyser){analyser.fftSize=512;audioContext.createMediaStreamSource(stream).connect(analyser);}
+      const capture={stream,recorder,audioContext,analyser,samples,chunks:[],hadSpeech:false,lastVoiceAt:0,startedAt:performance.now(),endpointAt:0,discard:false,finalized:false,vadTimer:null};
+      serverCapture=capture;recorder.ondataavailable=event=>{if(event.data?.size)capture.chunks.push(event.data);};recorder.onstop=()=>finishServerCapture(capture);recorder.start(250);
+      setState('listening');$('micBtn').classList.add('rec');setStatus('on',awake?'Eva hört dir zu …':'Mikrofon an · sprich jetzt');
+      capture.vadTimer=setInterval(()=>{
+        if(serverCapture!==capture||capture.finalized)return;
+        const now=performance.now();let rms=0;
+        if(analyser){analyser.getByteTimeDomainData(samples);let sum=0;for(const value of samples){const normalized=(value-128)/128;sum+=normalized*normalized;}rms=Math.sqrt(sum/samples.length);}
+        if(rms>VAD_THRESHOLD){capture.hadSpeech=true;capture.lastVoiceAt=now;}
+        if(capture.hadSpeech&&now-capture.lastVoiceAt>=VAD_SILENCE_MS){capture.endpointAt=now;stopServerCapture();}
+        else if(!capture.hadSpeech&&now-capture.startedAt>=VAD_NO_SPEECH_MS){capture.endpointAt=now;stopServerCapture({discard:true});}
+        else if(now-capture.startedAt>=VAD_MAX_MS){capture.endpointAt=now;stopServerCapture();}
+      },55);
+    }catch(error){bubble('sys','Mikrofon nicht verfügbar: '+error.message);stopListening({status:'Mikrofon nicht verfügbar'});}
+  }
+  function startRec(){if(!rec||isBusyState()||!wakeOn||awake||recognitionRunning)return;try{rec.start();}catch(e){}}
+  function resumeVoiceInput(){if(isBusyState()||!shouldListen())return;if(manualMicOn||awake)startServerCapture();else startRec();}
   function stopListening({status='Mikrofon aus'}={}){
-    clearVoiceDraft(); manualMicOn=false; wakeOn=false; awake=false; recognitionRunning=false;
-    $('micBtn').classList.remove('rec'); $('micBtn').setAttribute('aria-pressed','false');
-    $('wakeBtn').classList.remove('on'); $('wakeBtn').setAttribute('aria-pressed','false');
-    try{rec?.abort();}catch(e){}
-    if(!isBusyState())setState('idle');
-    setStatus('on',status);
+    cancelTranscriptPreview();clearVoiceDraft();manualMicOn=false;wakeOn=false;awake=false;recognitionRunning=false;
+    $('micBtn').classList.remove('rec');$('micBtn').setAttribute('aria-pressed','false');$('wakeBtn').classList.remove('on');$('wakeBtn').setAttribute('aria-pressed','false');
+    stopServerCapture({discard:true});try{rec?.abort();}catch(e){}if(!isBusyState())setState('idle');setStatus('on',status);
   }
   function ensureRec(){
-    if(!SR){ bubble('sys','Sprache/Wake-Word geht nur in Chrome — Safari kann das leider nicht.'); return null; }
-    if(rec) return rec;
-    rec=new SR(); rec.lang='de-DE'; rec.continuous=true; rec.interimResults=true;
-    rec.onstart=()=>{ recognitionRunning=true; if(manualMicOn)$('micBtn').classList.add('rec'); };
-    rec.onresult=e=>{
-      if(!shouldListen())return;
-      let finalText='', hasInterim=false;
-      for(let i=e.resultIndex;i<e.results.length;i++){
-        const part=(e.results[i][0]?.transcript||'').trim();
-        if(e.results[i].isFinal) finalText=(finalText+' '+part).trim();
-        else if(part) hasInterim=true;
-      }
-      if(finalText){ if(wakeOn) handleWake(finalText); else if(manualMicOn) queueVoiceText(finalText); }
-      else if(hasInterim&&voiceDraft) armVoicePause();
-    };
-    rec.onend=()=>{
-      recognitionRunning=false;
-      if(!manualMicOn)$('micBtn').classList.remove('rec');
-      if(!isBusyState()&&shouldListen()){ startRec(); }
-      else if(!shouldListen()&&state==='listening'){ setState('idle'); }
-    };
-    rec.onerror=event=>{
-      recognitionRunning=false;
-      if(['not-allowed','service-not-allowed','audio-capture'].includes(event?.error)) stopListening({status:'Mikrofon nicht verfügbar'});
-      else if(!manualMicOn)$('micBtn').classList.remove('rec');
-    };
+    if(!SR){bubble('sys','Das Wake-Word braucht Chrome. Der normale Mikrofonknopf nutzt auf diesem Browser trotzdem IVAs Server-Transkription.');return null;}
+    if(rec)return rec;rec=new SR();rec.lang='de-DE';rec.continuous=true;rec.interimResults=false;
+    rec.onstart=()=>{recognitionRunning=true;};
+    rec.onresult=event=>{if(!wakeOn||awake)return;let finalText='';for(let i=event.resultIndex;i<event.results.length;i++)if(event.results[i].isFinal)finalText=(finalText+' '+(event.results[i][0]?.transcript||'')).trim();if(finalText)handleWake(finalText);};
+    rec.onend=()=>{recognitionRunning=false;if(!isBusyState()&&wakeOn&&!awake)startRec();};
+    rec.onerror=event=>{recognitionRunning=false;if(['not-allowed','service-not-allowed','audio-capture'].includes(event?.error))stopListening({status:'Mikrofon nicht verfügbar'});};
     return rec;
   }
-  function handleWake(txt){ const low=txt.toLowerCase();
-    // Im Gespraech: Stop-Kommando -> zurueck ins Warten aufs Weckwort
-    if(awake && /\b(reicht|jetzt gut|jetzt reicht|stop|stopp|ruhe|sei still|h(ö|oe)r auf|schluss)\b/.test(low)){
-      clearVoiceDraft(); awake=false; setStatus('on','👂 warte auf „Eva wake up"'); return; }
-    // Im Gespraech aktiv: jede Aeusserung ist eine Frage
-    if(awake){ if(low.length<2)return; unlockAudio(); queueVoiceText(txt); return; }
-    // Noch nicht wach: auf „Eva wake up" warten
-    if(low.includes('eva') && /(wake|wach|weck|w[eä]k)/.test(low)){
-      awake=true; unlockAudio();
-      const rest=txt.replace(/.*?(wake ?up|wake|wach ?auf|wach|weck\w*)/i,'').trim();
-      if(rest.length>2){ queueVoiceText(rest); } else { setStatus('on','Eva hört zu …'); }
-    }
-  }
+  function handleWake(txt){const low=txt.toLowerCase();if(low.includes('eva')&&/(wake|wach|weck|w[eä]k)/.test(low)){awake=true;unlockAudio();try{rec?.abort();}catch(e){}const rest=txt.replace(/.*?(wake ?up|wake|wach ?auf|wach|weck\w*)/i,'').trim();if(rest.length>2)queueVoiceText(rest);else setTimeout(resumeVoiceInput,180);}}
   function toggleMic(){
-    if(manualMicOn||wakeOn){ stopListening(); return; }
-    const r=ensureRec(); if(!r)return;
-    clearVoiceDraft(); manualMicOn=true; wakeOn=false; awake=false;
-    $('micBtn').classList.add('rec'); $('micBtn').setAttribute('aria-pressed','true');
-    $('wakeBtn').classList.remove('on'); $('wakeBtn').setAttribute('aria-pressed','false');
-    setState('listening'); setStatus('on','Mikrofon an · hört einmal zu'); startRec();
+    if(manualMicOn||wakeOn){stopListening();return;}
+    clearVoiceDraft();manualMicOn=true;wakeOn=false;awake=false;$('micBtn').classList.add('rec');$('micBtn').setAttribute('aria-pressed','true');$('wakeBtn').classList.remove('on');$('wakeBtn').setAttribute('aria-pressed','false');setState('listening');startServerCapture();
   }
   function toggleWake(){
-    if(wakeOn){ stopListening(); return; }
-    const r=ensureRec(); if(!r)return;
-    clearVoiceDraft(); manualMicOn=false; wakeOn=true; awake=false;
-    $('micBtn').classList.remove('rec'); $('micBtn').setAttribute('aria-pressed','false');
-    $('wakeBtn').classList.add('on'); $('wakeBtn').setAttribute('aria-pressed','true');
-    unlockAudio(); if(!isBusyState())setState('listening'); setStatus('on','👂 warte auf „Eva wake up"'); startRec();
+    if(wakeOn){stopListening();return;}
+    const wakeRecognition=ensureRec();if(!wakeRecognition)return;clearVoiceDraft();manualMicOn=false;wakeOn=true;awake=false;$('micBtn').classList.remove('rec');$('micBtn').setAttribute('aria-pressed','false');$('wakeBtn').classList.add('on');$('wakeBtn').setAttribute('aria-pressed','true');unlockAudio();if(!isBusyState())setState('listening');setStatus('on','👂 warte auf „Eva wake up"');startRec();
   }
   $('micBtn').addEventListener('click',toggleMic);
   $('wakeBtn').addEventListener('click',toggleWake);
