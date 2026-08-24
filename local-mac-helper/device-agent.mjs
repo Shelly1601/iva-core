@@ -3,15 +3,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { listFundingReviews } from './funding-review-queue.mjs';
-import { runFundingMonitorOnce } from './funding-monitor-runner.mjs';
-import { loadFundingMonitorState } from './funding-monitor-state.mjs';
-import { fundingMonitorLaunchAgentStatus } from './funding-monitor-launchd.mjs';
-import { diagnoseOutlook } from './outlook.mjs';
-import { diagnosePipedriveChrome } from './chrome-pipedrive.mjs';
-import { diagnoseWhatsAppMac } from './whatsapp-mac.mjs';
-import { runMacUiBridge } from './macos-ui.mjs';
-import { collectPlanbarSearchIndex } from './planbar.mjs';
 
 const execFileAsync = promisify(execFile);
 export const IMAC_DEVICE_ID = 'imac-nadine';
@@ -72,6 +63,10 @@ function openApplication(appName) {
 
 async function executeDeviceCommand(command) {
   if (command.action === 'computer.status') {
+    const { diagnoseOutlook } = await import('./outlook.mjs');
+    const { diagnosePipedriveChrome } = await import('./chrome-pipedrive.mjs');
+    const { diagnoseWhatsAppMac } = await import('./whatsapp-mac.mjs');
+    const { runMacUiBridge } = await import('./macos-ui.mjs');
     // Die UI-Pruefungen laufen absichtlich nacheinander. Outlook und WhatsApp
     // greifen beide auf macOS Accessibility/Apple Events zu und koennen sich
     // bei parallelen Probes gegenseitig einen falschen Negativstatus liefern.
@@ -87,6 +82,8 @@ async function executeDeviceCommand(command) {
     };
   }
   if (command.action === 'funding.monitor.status') {
+    const { loadFundingMonitorState } = await import('./funding-monitor-state.mjs');
+    const { fundingMonitorLaunchAgentStatus } = await import('./funding-monitor-launchd.mjs');
     const [state, launchd] = await Promise.all([loadFundingMonitorState(), fundingMonitorLaunchAgentStatus()]);
     return {
       mode: state.mode,
@@ -97,14 +94,19 @@ async function executeDeviceCommand(command) {
       launchd,
     };
   }
-  if (command.action === 'funding.monitor.run') return runFundingMonitorOnce({ ignoreIdle: true });
+  if (command.action === 'funding.monitor.run') {
+    const { runFundingMonitorOnce } = await import('./funding-monitor-runner.mjs');
+    return runFundingMonitorOnce({ ignoreIdle: true });
+  }
   if (command.action === 'funding.reviews.list') {
+    const { listFundingReviews } = await import('./funding-review-queue.mjs');
     const reviews = await listFundingReviews();
     const counts = {};
     for (const review of reviews) counts[review.status] = (counts[review.status] || 0) + 1;
     return { total: reviews.length, counts, latestAt: reviews[0]?.updatedAt || reviews[0]?.createdAt || null };
   }
   if (command.action === 'planbar.search.refresh') {
+    const { collectPlanbarSearchIndex } = await import('./planbar.mjs');
     const snapshot = await collectPlanbarSearchIndex();
     const stored = await request(`/device-agent/${IMAC_DEVICE_ID}/planbar-search-index`, { method: 'POST', body: snapshot });
     return {
