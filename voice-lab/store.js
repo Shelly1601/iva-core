@@ -26,6 +26,7 @@ function emptyStore() {
     },
     evaluations: [],
     pronunciations: [],
+    transcriptionCorrections: [],
     communicationPreferences: [],
     improvementRequests: [],
   };
@@ -44,6 +45,7 @@ async function load() {
       settings: { ...base.settings, ...(parsed.settings || {}), targets: { ...base.settings.targets, ...(parsed.settings?.targets || {}) } },
       evaluations: Array.isArray(parsed.evaluations) ? parsed.evaluations : [],
       pronunciations: Array.isArray(parsed.pronunciations) ? parsed.pronunciations : [],
+      transcriptionCorrections: Array.isArray(parsed.transcriptionCorrections) ? parsed.transcriptionCorrections : [],
       communicationPreferences: Array.isArray(parsed.communicationPreferences) ? parsed.communicationPreferences : [],
       improvementRequests: Array.isArray(parsed.improvementRequests) ? parsed.improvementRequests : [],
     };
@@ -209,6 +211,7 @@ export async function voiceLabSummary() {
     testPhrases: VOICE_TEST_PHRASES,
     learned: {
       pronunciations: store.pronunciations.filter(item => item.active !== false).length,
+      transcriptionCorrections: store.transcriptionCorrections.filter(item => item.active !== false).length,
       communicationPreferences: store.communicationPreferences.filter(item => item.active !== false).length,
       improvementRequests: store.improvementRequests.filter(item => item.status !== 'rejected').length,
     },
@@ -236,6 +239,33 @@ export async function savePronunciationCorrection(input = {}) {
     if (existing) Object.assign(existing, correction);
     else store.pronunciations.push(correction);
     store.pronunciations = store.pronunciations.slice(-250);
+    return structuredClone(correction);
+  });
+}
+
+export async function saveTranscriptionCorrection(input = {}) {
+  const heardText = clean(input.heardText, 2000);
+  const correctedText = clean(input.correctedText, 2000);
+  if (!heardText || !correctedText) throw new Error('Erkanntes und korrigiertes Transkript werden benötigt.');
+  if (heardText === correctedText) throw new Error('Die Korrektur ist mit dem erkannten Text identisch.');
+  return mutate(store => {
+    const now = new Date().toISOString();
+    const key = heardText.toLocaleLowerCase('de-DE');
+    const existing = store.transcriptionCorrections.find(item => item.heardText.toLocaleLowerCase('de-DE') === key);
+    const correction = {
+      id: existing?.id || crypto.randomUUID(),
+      heardText,
+      correctedText,
+      context: clean(input.context || 'Sprachlabor', 120),
+      source: clean(input.source || 'nadine', 80),
+      active: true,
+      uses: (existing?.uses || 0) + 1,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    };
+    if (existing) Object.assign(existing, correction);
+    else store.transcriptionCorrections.push(correction);
+    store.transcriptionCorrections = store.transcriptionCorrections.slice(-250);
     return structuredClone(correction);
   });
 }
@@ -298,6 +328,7 @@ export async function listVoiceLearning() {
   const store = await load();
   return {
     pronunciations: store.pronunciations.filter(item => item.active !== false).slice().sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))),
+    transcriptionCorrections: store.transcriptionCorrections.filter(item => item.active !== false).slice().sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))),
     communicationPreferences: store.communicationPreferences.filter(item => item.active !== false).slice().sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))),
     improvementRequests: store.improvementRequests.slice().sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))),
   };
@@ -311,9 +342,21 @@ export async function activePronunciationCorrections() {
     .map(item => ({ term: item.term, spokenAs: item.spokenAs }));
 }
 
+export async function activeTranscriptionCorrections() {
+  return (await load()).transcriptionCorrections
+    .filter(item => item.active !== false && item.heardText && item.correctedText)
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+    .slice(0, 40)
+    .map(item => ({ heardText: item.heardText, correctedText: item.correctedText }));
+}
+
 export async function voiceLearningPromptContext() {
   const store = await load();
   const preferences = store.communicationPreferences.filter(item => item.active !== false).slice(-30);
-  if (!preferences.length) return 'Noch keine zusätzlichen Kommunikationspräferenzen gespeichert.';
-  return preferences.map(item => `- ${item.preference}${item.context && item.context !== 'allgemein' ? ` (Kontext: ${item.context})` : ''}`).join('\n');
+  const corrections = store.transcriptionCorrections.filter(item => item.active !== false).slice(-20);
+  if (!preferences.length && !corrections.length) return 'Noch keine zusätzlichen Kommunikationspräferenzen oder Transkriptkorrekturen gespeichert.';
+  return [
+    ...preferences.map(item => `- Kommunikationsregel: ${item.preference}${item.context && item.context !== 'allgemein' ? ` (Kontext: ${item.context})` : ''}`),
+    ...corrections.map(item => `- Bestätigte Transkriptkorrektur: „${item.heardText}“ bedeutet „${item.correctedText}“.`),
+  ].join('\n');
 }

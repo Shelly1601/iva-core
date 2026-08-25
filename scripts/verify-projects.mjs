@@ -14,6 +14,7 @@ const {
   listProjects,
   readProjectFile,
   readProjectLogo,
+  renameProjectAutomation,
   setProjectAutomationEnabled,
   storeProjectFile,
   storeProjectLogo,
@@ -60,6 +61,10 @@ const disabledPlanbarCompletion = await setProjectAutomationEnabled('heat-hero',
 check('Planbar-Vervollständigung lässt sich ausschalten', disabledPlanbarCompletion.automations.some(item => item.id === 'planbar-completion-morning' && item.status === 'paused' && !item.enabled));
 const enabledPlanbarCompletion = await setProjectAutomationEnabled('heat-hero', 'planbar-completion-morning', true);
 check('Planbar-Vervollständigung lässt sich wieder einschalten', enabledPlanbarCompletion.automations.some(item => item.id === 'planbar-completion-morning' && item.status === 'active' && item.enabled));
+const renamedPlanbar = await renameProjectAutomation('heat-hero', 'planbar-weekly-export', 'Planbar Kunden- und Herstellerlisten');
+check('Workflow-Name lässt sich frei anpassen und speichern', renamedPlanbar.automations.some(item => item.id === 'planbar-weekly-export' && item.name === 'Planbar Kunden- und Herstellerlisten'));
+const invalidWorkflowName = await renameProjectAutomation('heat-hero', 'planbar-weekly-export', ' ').then(() => false).catch(error => /mindestens zwei Zeichen/.test(error.message));
+check('Leerer Workflow-Name wird abgewiesen', invalidWorkflowName);
 await updateProject('heat-hero', { status: 'active', files: [{ storageName: 'injected' }] });
 const updatedHeat = await getProject('heat-hero');
 check('Projektupdate bleibt gespeichert', updatedHeat.status === 'active');
@@ -111,8 +116,11 @@ check('Ordner, Unterordner und Mehrfachupload vorhanden', html.includes('multipl
 check('Papierkorb löscht nur die Projektakte', js.includes('Projektdateien werden entfernt') && js.includes("method: 'DELETE'"));
 check('Projektbereiche sind standardmäßig zugeklappt', html.includes('project-disclosure') && js.includes('collapseProjectSections'));
 check('Projektworkflows haben echte Ein-Aus-Schalter', html.includes('.switch{') && js.includes('class="switch"') && js.includes('data-project-automation') && js.includes("method: 'PATCH'"));
+check('Workflow-Namen sind bearbeitbar und speicherbar', js.includes('data-workflow-name') && js.includes('data-workflow-save') && js.includes('saveWorkflowName'));
+check('Jeder Workflow hat manuellen Start oder IVA-Fertigstellungsauftrag', js.includes('▶ Jetzt auslösen') && js.includes('✦ Mit IVA fertig bauen') && js.includes('/${action}') && js.includes('runOrPrepareWorkflow'));
 check('Markenprofil mit Logo, Website und Instagram ist bedienbar', html.includes('Markenprofil bearbeiten') && html.includes('projectWebsite') && html.includes('projectInstagram') && html.includes('projectLogo') && js.includes('/logo') && js.includes('projectLogo(project)'));
 check('Kunde terminieren steht oben mit Kundenname und KW-Auswahl bereit', html.includes('.workflow-launcher') && js.includes('Kunde terminieren') && js.includes('scheduleCustomerName') && js.includes('scheduleWeek') && js.includes('/customer-scheduling-requests'));
+check('Kunde terminieren ist standardmäßig kompakt einklappbar', js.includes('<details class="workflow-launcher workflow-launcher-disclosure"') && html.includes('.workflow-launcher-disclosure'));
 check('Materialfragen und optionale Zusatzinfo stehen im Schnellstart bereit', js.includes('scheduleMaterialDeliverySpace') && js.includes('scheduleTheftWeatherProtected') && js.includes('scheduleAdditionalInfo'));
 
 console.log(failures ? `${failures} Fehler` : 'Projektakten erfolgreich verifiziert.');

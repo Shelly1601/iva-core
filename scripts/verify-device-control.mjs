@@ -44,6 +44,12 @@ try {
   const planbarCommand = await enqueueDeviceCommand({ action: 'planbar.search.refresh', requestedBy: 'test' });
   assert.equal(planbarCommand.action, 'planbar.search.refresh');
   assert.deepEqual(planbarCommand.payload, {});
+  const projectWorkflowCommand = await enqueueDeviceCommand({
+    action: 'project.workflow.run', requestedBy: 'test',
+    payload: { projectId: 'heat-hero', workflowId: 'planbar-weekly-export', displayName: 'Meine Planbar-Liste' },
+  });
+  assert.deepEqual(projectWorkflowCommand.payload, { projectId: 'heat-hero', workflowId: 'planbar-weekly-export', displayName: 'Meine Planbar-Liste' });
+  await assert.rejects(enqueueDeviceCommand({ action: 'project.workflow.run', payload: { projectId: 'heat-hero', workflowId: 'unbekannt' } }), /nicht freigegeben/);
   const portalLoginCommand = await enqueueDeviceCommand({ action: 'portal.login', payload: { service: 'Panasonic' }, requestedBy: 'test' });
   assert.equal(portalLoginCommand.action, 'portal.login');
   assert.deepEqual(portalLoginCommand.payload, { service: 'panasonic' });
@@ -76,6 +82,7 @@ try {
   const devicePolicy = imacDeviceAgentPolicy();
   assert.equal(devicePolicy.allowedActions.includes('portal.login'), true);
   assert.equal(devicePolicy.allowedActions.includes('portal.credentials.status'), true);
+  assert.equal(devicePolicy.allowedActions.includes('project.workflow.run'), true);
 
   const { builderSkill } = await import('../skills/builder.js');
   console.log('Device-Control: Builder-Werkzeug prüfen …');

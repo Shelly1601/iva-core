@@ -68,10 +68,10 @@ function isDue(definition, now) {
 }
 
 export function createAutomationOrchestrator(handlers = {}) {
-  async function runAutomation(id, { trigger = 'schedule', now = new Date(), slotKey = '' } = {}) {
+  async function runAutomation(id, { trigger = 'schedule', now = new Date(), slotKey = '', allowDisabled = false } = {}) {
     const automation = await getAutomation(id);
     if (!automation) throw new Error('Automation nicht gefunden.');
-    if (!automation.enabled) return { automationId: id, skipped: true, reason: 'disabled' };
+    if (!automation.enabled && !allowDisabled) return { automationId: id, skipped: true, reason: 'disabled' };
     const handler = handlers[id];
     if (typeof handler !== 'function') throw new Error(`Kein Handler für Automation ${id}.`);
     const started = await beginAutomationRun(id, { trigger, slotKey: slotKey || automationSlotKey(automation, now) });

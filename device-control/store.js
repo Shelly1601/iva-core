@@ -15,6 +15,7 @@ export const DEVICE_ACTIONS = Object.freeze({
   'funding.monitor.run': Object.freeze({ description: 'Fördermonitor einmal im gesperrten Review-Modus ausführen', mutating: false }),
   'funding.reviews.list': Object.freeze({ description: 'Lokale Förder-Prüfwarteschlange zusammenfassen', mutating: false }),
   'planbar.search.refresh': Object.freeze({ description: 'Sichtbaren Planbar-Terminindex rein lesend aktualisieren', mutating: false }),
+  'project.workflow.run': Object.freeze({ description: 'Einen freigegebenen Projekt-Workflow einmalig manuell starten', mutating: true }),
   'portal.credentials.status': Object.freeze({ description: 'Nur die Belegung von IVAs lokalem macOS-Schlüsselbund prüfen', mutating: false }),
   'portal.login': Object.freeze({ description: 'Bei einem vorab freigegebenen Portal mit lokalem Schlüsselbund anmelden', mutating: false }),
   'app.open': Object.freeze({ description: 'Eine freigegebene App auf dem iMac öffnen', mutating: true }),
@@ -54,6 +55,13 @@ function cleanText(value, max = 240) {
 }
 
 function validatePayload(action, payload = {}) {
+  if (action === 'project.workflow.run') {
+    const projectId = cleanText(payload.projectId, 100);
+    const workflowId = cleanText(payload.workflowId, 140);
+    const allowed = new Set(['funding-monitor', 'planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning']);
+    if (projectId !== 'heat-hero' || !allowed.has(workflowId)) throw new Error('Dieser Projekt-Workflow ist für den manuellen iMac-Start nicht freigegeben.');
+    return { projectId, workflowId, displayName: cleanText(payload.displayName, 220) || workflowId };
+  }
   if (action === 'portal.credentials.status' || action === 'portal.login') {
     const service = cleanText(payload.service, 40).toLowerCase();
     if (!['panasonic', 'bosch', 'pipedrive', 'airtable', 'planbar'].includes(service)) {

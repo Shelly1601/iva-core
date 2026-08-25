@@ -11,20 +11,25 @@ const {
   captureImprovementRequest,
   evaluateSpokenAnswer,
   activePronunciationCorrections,
+  activeTranscriptionCorrections,
   listVoiceEvaluations,
   listVoiceLearning,
   recordVoiceEvaluation,
   saveCommunicationPreference,
   savePronunciationCorrection,
+  saveTranscriptionCorrection,
   voiceLabSummary,
   voiceLearningPromptContext,
 } = await import('../voice-lab/store.js');
 const { prepareSpeechText } = await import('../voice.js');
-const { buildTranscriptionPrompt, normalizeTranscript, transcribeAudio, transcriptionProviderStatus } = await import('../voice-lab/transcribe.js');
+const { applyLearnedTranscriptionCorrections, buildTranscriptionPrompt, normalizeTranscript, transcribeAudio, transcriptionProviderStatus } = await import('../voice-lab/transcribe.js');
 const cockpitSource = await fs.readFile(new URL('../public/cockpit.html', import.meta.url), 'utf8');
+const voiceLabSource = await fs.readFile(new URL('../public/voice-lab.html', import.meta.url), 'utf8');
+const voiceLabScript = await fs.readFile(new URL('../public/voice-lab.js', import.meta.url), 'utf8');
 const transcriptionSource = await fs.readFile(new URL('../voice-lab/transcribe.js', import.meta.url), 'utf8');
 const cockpitScript = cockpitSource.match(/<script>([\s\S]*)<\/script>/)?.[1] || '';
 assert.doesNotThrow(() => new Function(cockpitScript), 'Cockpit-Script muss syntaktisch gültig sein');
+assert.doesNotThrow(() => new Function(voiceLabScript), 'Sprachlabor-Script muss syntaktisch gültig sein');
 
 assert.ok(VOICE_TEST_PHRASES.length >= 8);
 assert.equal(calculateWordErrorRate('Eva öffne die Kundenakte', 'Eva öffne Kundenakte').errors, 1);
@@ -51,6 +56,10 @@ await savePronunciationCorrection({ term: 'Qonekto', spokenAs: 'Ko-nek-to', sour
 assert.deepEqual(await activePronunciationCorrections(), [{ term: 'Qonekto', spokenAs: 'Ko-nek-to' }]);
 assert.match(await prepareSpeechText('Qonekto ist verbunden.'), /Ko-nek-to ist verbunden/);
 
+await saveTranscriptionCorrection({ heardText: 'Plan war Kunde', correctedText: 'Planbar Kunde', context: 'Hersteller' });
+assert.deepEqual(await activeTranscriptionCorrections(), [{ heardText: 'Plan war Kunde', correctedText: 'Planbar Kunde' }]);
+assert.equal(applyLearnedTranscriptionCorrections('Bitte Plan war Kunde öffnen.', await activeTranscriptionCorrections()), 'Bitte Planbar Kunde öffnen.');
+
 await saveCommunicationPreference({ preference: 'Nenne zuerst das Ergebnis.', context: 'Sprache' });
 assert.match(await voiceLearningPromptContext(), /Nenne zuerst das Ergebnis/);
 
@@ -65,10 +74,11 @@ assert.equal(improvement.requiresConfirmationBeforeCode, false);
 assert.equal(improvement.requiresConfirmationBeforeDeploy, false);
 const learning = await listVoiceLearning();
 assert.equal(learning.pronunciations.length, 1);
+assert.equal(learning.transcriptionCorrections.length, 1);
 assert.equal(learning.communicationPreferences.length, 1);
 assert.equal(learning.improvementRequests.length, 1);
 const learnedSummary = await voiceLabSummary();
-assert.deepEqual(learnedSummary.learned, { pronunciations: 1, communicationPreferences: 1, improvementRequests: 1 });
+assert.deepEqual(learnedSummary.learned, { pronunciations: 1, transcriptionCorrections: 1, communicationPreferences: 1, improvementRequests: 1 });
 
 assert.match(cockpitSource, /function shouldListen\(\)\{ return wakeOn\|\|manualMicOn; \}/);
 assert.match(cockpitSource, /rec\?\.abort\(\)/, 'Mikro aus muss die Erkennung hart abbrechen');
@@ -80,8 +90,15 @@ assert.match(cockpitSource, /location\.assign\(url\)/, 'Blockierte Pop-ups brauc
 assert.match(cockpitSource, /openOptions=\{sameTab:viaVoice===true\}/, 'Sprachbefehle öffnen Arbeitsbereiche ohne Pop-up-Abhängigkeit');
 assert.doesNotMatch(cockpitSource, /Bitte Pop-ups für IVA erlauben/);
 assert.match(transcriptionSource, /Eigennamen, Firmennamen, Fachbegriffe/);
+assert.match(voiceLabSource, /id="pauseRecording"/);
+assert.match(voiceLabSource, /Transkript-Entwurf · vor dem Senden bearbeitbar/);
+assert.match(voiceLabSource, /Korrigierten Text an IVA senden/);
+assert.match(voiceLabScript, /state\.media\.pause\(\)/);
+assert.match(voiceLabScript, /state\.media\.resume\(\)/);
+assert.match(voiceLabScript, /\/api\/voice-lab\/transcription-corrections/);
 assert.equal(normalizeTranscript('Connecto und Heat Hero mit Haus Wert Schutz'), 'Qonekto und HeatHero mit HausWertSchutz');
 assert.match(buildTranscriptionPrompt(['Qonekto']), /Wichtige Schreibweisen: Qonekto/);
+assert.match(buildTranscriptionPrompt(['Planbar'], await activeTranscriptionCorrections()), /Plan war Kunde/);
 assert.equal(typeof transcriptionProviderStatus().ready, 'boolean');
 
 const previousFetch = globalThis.fetch;

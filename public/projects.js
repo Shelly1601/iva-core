@@ -1,6 +1,7 @@
 const $ = id => document.getElementById(id);
 const TOKEN_KEY = 'iva_token';
 const state = { projects: [], current: null, activeFolderId: 'all', capacityOffset: 0, uploading: false, planbarRefreshing: false, logoUrls: new Map() };
+const MANUAL_WORKFLOW_IDS = new Set(['workflow-protocol-summaries', 'funding-monitor', 'planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning']);
 
 function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
 function esc(value) { return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
@@ -64,7 +65,7 @@ function customerSchedulingSection(project) {
   const latestSummary = latest
     ? `Zuletzt vorgemerkt: <b>${esc(latest.customerName)}</b> · KW ${esc(latest.week)}/${esc(latest.isoYear)} · Material vorher: ${latest.materialDeliverySpace ? 'Ja' : 'Nein'} · geschützt: ${latest.theftWeatherProtected ? 'Ja' : 'Nein'}${latest.additionalInfo ? ' · Zusatzinfo vorhanden' : ''}`
     : 'Noch kein Kunde vorgemerkt.';
-  return `<section class="workflow-launcher" aria-labelledby="customerSchedulingTitle"><div class="workflow-launcher-head"><div><div class="eyebrow">Direkt oben · operativer Workflow</div><h2 id="customerSchedulingTitle">Kunde terminieren</h2><div class="muted">Kundenname, Kalenderwoche und Materialannahme erfassen. IVA übernimmt die Angaben später in die Planbar-Beschreibung.</div></div><span class="workflow-tag">Planbar + Pipedrive</span></div>${planbarCapacityOverview(project)}${planbarSearchPanel()}<form class="schedule-form" id="customerSchedulingForm"><label><span>Kundenname</span><input id="scheduleCustomerName" name="customerName" maxlength="220" autocomplete="off" required placeholder="Vorname Nachname"></label><label><span>Kalenderwoche</span><select id="scheduleWeek" name="week" required>${schedulingWeekOptions()}</select></label><button class="btn primary" type="submit">Workflow vorbereiten</button><div class="schedule-checks"><label class="schedule-check"><input id="scheduleMaterialDeliverySpace" type="checkbox"><span class="schedule-question">Hat der Kunde Platz, Material einige Tage vor Montagebeginn anzunehmen?</span><span class="schedule-answer" data-answer-for="scheduleMaterialDeliverySpace">Nein</span></label><label class="schedule-check"><input id="scheduleTheftWeatherProtected" type="checkbox"><span class="schedule-question">Diebstahl- und wettersicher?</span><span class="schedule-answer" data-answer-for="scheduleTheftWeatherProtected">Nein</span></label></div><label class="schedule-extra"><span>Zusatzinfo · optional</span><textarea id="scheduleAdditionalInfo" maxlength="2000" placeholder="Nur ausfüllen, wenn diese Information zusätzlich in Planbar stehen soll."></textarea></label></form><div class="schedule-latest">${latestSummary}</div></section>`;
+  return `<details class="workflow-launcher workflow-launcher-disclosure" aria-labelledby="customerSchedulingTitle"><summary><div class="workflow-launcher-head"><div><div class="eyebrow">Operativer Workflow</div><h2 id="customerSchedulingTitle">Kunde terminieren</h2><div class="muted">${latestSummary}</div></div><span class="workflow-tag">Planbar + Pipedrive</span></div></summary><div class="workflow-launcher-body"><div class="muted scheduling-intro">Kundenname, Kalenderwoche und Materialannahme erfassen. IVA übernimmt die Angaben später in die Planbar-Beschreibung.</div>${planbarCapacityOverview(project)}${planbarSearchPanel()}<form class="schedule-form" id="customerSchedulingForm"><label><span>Kundenname</span><input id="scheduleCustomerName" name="customerName" maxlength="220" autocomplete="off" required placeholder="Vorname Nachname"></label><label><span>Kalenderwoche</span><select id="scheduleWeek" name="week" required>${schedulingWeekOptions()}</select></label><button class="btn primary" type="submit">Workflow vorbereiten</button><div class="schedule-checks"><label class="schedule-check"><input id="scheduleMaterialDeliverySpace" type="checkbox"><span class="schedule-question">Hat der Kunde Platz, Material einige Tage vor Montagebeginn anzunehmen?</span><span class="schedule-answer" data-answer-for="scheduleMaterialDeliverySpace">Nein</span></label><label class="schedule-check"><input id="scheduleTheftWeatherProtected" type="checkbox"><span class="schedule-question">Diebstahl- und wettersicher?</span><span class="schedule-answer" data-answer-for="scheduleTheftWeatherProtected">Nein</span></label></div><label class="schedule-extra"><span>Zusatzinfo · optional</span><textarea id="scheduleAdditionalInfo" maxlength="2000" placeholder="Nur ausfüllen, wenn diese Information zusätzlich in Planbar stehen soll."></textarea></label></form></div></details>`;
 }
 
 function forgetProjectLogo(projectId) {
@@ -165,7 +166,16 @@ function operationalSections(project) {
   const automations = project.automations || [];
   const phases = project.phases || [];
   const areas = project.areas || [];
-  return `${automations.length ? `<section class="card"><h2>Automationen und Workflows</h2><div class="muted">Jeden ausführbaren Ablauf hier direkt an- oder ausschalten. Details bleiben standardmäßig zugeklappt.</div><div class="metrics"><div class="metric"><b>${automations.filter(item => item.enabled).length}</b><small>eingeschaltet</small></div><div class="metric"><b>${automations.filter(item => item.toggleAvailable && !item.enabled).length}</b><small>ausgeschaltet</small></div><div class="metric"><b>${automations.filter(item => item.status === 'prepared').length}</b><small>vorbereitet</small></div><div class="metric"><b>${automations.filter(item => item.status === 'planned').length}</b><small>geplant</small></div></div><div class="automation-grid">${automations.map(item => `<article class="automation"><div class="automation-top"><div><h3>${esc(item.name)}</h3><span class="badge ${esc(item.status)}">${esc(item.enabled ? 'An' : item.toggleAvailable ? 'Aus' : label(item.status))}</span></div><label class="switch" title="${esc(item.toggleAvailable ? 'Workflow an- oder ausschalten' : 'Noch nicht ausführbar')}"><input type="checkbox" data-project-automation="${esc(item.id)}" ${item.enabled ? 'checked' : ''} ${item.toggleAvailable ? '' : 'disabled'}><span class="slider"></span></label></div><details class="automation-details"><summary>Details anzeigen</summary><p>${esc(item.purpose)}</p><div class="meta"><div><span>Zeitplan</span><b>${esc(item.schedule)}</b></div><div><span>Ausführung</span><b>${esc(item.execution)}</b></div></div><div class="rule"><b>Sicherheitsregel:</b> ${esc(item.safety)}</div><div class="next"><b>Nächster Schritt:</b> ${esc(item.nextStep)}</div></details></article>`).join('')}</div></section>` : ''}${phases.length ? `<section class="card"><h2>Projektphasen</h2><div class="muted">Roadmap und aktueller Stand.</div>${phases.map(item => `<div class="road"><strong>${esc(item.phase)}</strong><div><b>${esc(item.name)}</b><small>${esc(item.result)}</small></div><span class="badge ${esc(item.status)}">${esc(label(item.status))}</span></div>`).join('')}</section>` : ''}${areas.length ? `<section class="card"><h2>Unterbereiche</h2><div class="muted">Arbeitsbereiche, Verantwortung und nächste Schritte.</div><div class="item-grid">${areas.map(item => `<article class="item"><div class="head"><h3>${esc(item.name)}</h3><span class="badge ${esc(item.status)}">${esc(label(item.status))}</span></div><p>${esc(item.summary)}</p><div class="next"><b>Nächster Schritt:</b> ${esc(item.nextStep)}</div></article>`).join('')}</div></section>` : ''}`;
+  const workflowCards = automations.map(item => {
+    const canRunNow = ['active', 'paused'].includes(item.status) && MANUAL_WORKFLOW_IDS.has(item.id);
+    const action = canRunNow ? 'run' : 'prepare';
+    const actionLabel = canRunNow ? '▶ Jetzt auslösen' : '✦ Mit IVA fertig bauen';
+    const actionHint = canRunNow
+      ? 'Diesen Workflow jetzt einmal außerplanmäßig starten'
+      : 'IVA/Codex beauftragen, den fehlenden Ausführungsweg vollständig zu bauen, zu testen und live auszuliefern';
+    return `<article class="automation"><div class="automation-top"><label class="automation-name"><span>Name</span><input value="${esc(item.name)}" maxlength="220" data-workflow-name="${esc(item.id)}" aria-label="Workflow-Name bearbeiten"></label><label class="switch" title="${esc(item.toggleAvailable ? 'Workflow an- oder ausschalten' : 'Noch nicht ausführbar')}"><input type="checkbox" data-project-automation="${esc(item.id)}" ${item.enabled ? 'checked' : ''} ${item.toggleAvailable ? '' : 'disabled'}><span class="slider"></span></label></div><div class="automation-state"><span class="badge ${esc(item.status)}">${esc(item.enabled ? 'An' : item.toggleAvailable ? 'Aus' : label(item.status))}</span></div><div class="automation-actions"><button class="btn" type="button" data-workflow-save="${esc(item.id)}">Name speichern</button><button class="btn ${canRunNow ? 'primary' : 'finish'}" type="button" data-workflow-action="${action}" data-workflow-id="${esc(item.id)}" title="${esc(actionHint)}">${actionLabel}</button></div><details class="automation-details"><summary>Details anzeigen</summary><p>${esc(item.purpose)}</p><div class="meta"><div><span>Zeitplan</span><b>${esc(item.schedule)}</b></div><div><span>Ausführung</span><b>${esc(item.execution)}</b></div></div><div class="rule"><b>Sicherheitsregel:</b> ${esc(item.safety)}</div><div class="next"><b>Nächster Schritt:</b> ${esc(item.nextStep)}</div></details></article>`;
+  }).join('');
+  return `${automations.length ? `<section class="card"><h2>Automationen und Workflows</h2><div class="muted">Namen direkt anpassen und speichern. Laufende Workflows kannst du sofort manuell auslösen; geplante oder blockierte Abläufe gibst du mit „Mit IVA fertig bauen“ als vollständigen Umsetzungsauftrag zurück.</div><div class="metrics"><div class="metric"><b>${automations.filter(item => item.enabled).length}</b><small>eingeschaltet</small></div><div class="metric"><b>${automations.filter(item => item.toggleAvailable && !item.enabled).length}</b><small>ausgeschaltet</small></div><div class="metric"><b>${automations.filter(item => item.status === 'prepared').length}</b><small>vorbereitet</small></div><div class="metric"><b>${automations.filter(item => ['planned', 'blocked'].includes(item.status)).length}</b><small>noch fertigzubauen</small></div></div><div class="automation-grid">${workflowCards}</div></section>` : ''}${phases.length ? `<section class="card"><h2>Projektphasen</h2><div class="muted">Roadmap und aktueller Stand.</div>${phases.map(item => `<div class="road"><strong>${esc(item.phase)}</strong><div><b>${esc(item.name)}</b><small>${esc(item.result)}</small></div><span class="badge ${esc(item.status)}">${esc(label(item.status))}</span></div>`).join('')}</section>` : ''}${areas.length ? `<section class="card"><h2>Unterbereiche</h2><div class="muted">Arbeitsbereiche, Verantwortung und nächste Schritte.</div><div class="item-grid">${areas.map(item => `<article class="item"><div class="head"><h3>${esc(item.name)}</h3><span class="badge ${esc(item.status)}">${esc(label(item.status))}</span></div><p>${esc(item.summary)}</p><div class="next"><b>Nächster Schritt:</b> ${esc(item.nextStep)}</div></article>`).join('')}</div></section>` : ''}`;
 }
 
 function collapseProjectSections() {
@@ -218,6 +228,8 @@ function bindProjectActions() {
   document.querySelectorAll('[data-folder-id]').forEach(button => { button.onclick = () => { state.activeFolderId = button.dataset.folderId; render(); }; });
   document.querySelectorAll('[data-open-file]').forEach(button => { button.onclick = () => openFile(button.dataset.openFile); });
   document.querySelectorAll('[data-project-automation]').forEach(input => { input.onchange = () => toggleProjectAutomation(input); });
+  document.querySelectorAll('[data-workflow-save]').forEach(button => { button.onclick = () => saveWorkflowName(button); });
+  document.querySelectorAll('[data-workflow-action]').forEach(button => { button.onclick = () => runOrPrepareWorkflow(button); });
   const dropzone = $('dropzone');
   dropzone.onclick = () => { if (!state.uploading) $('fileInput').click(); };
   ['dragenter', 'dragover'].forEach(type => dropzone.addEventListener(type, event => { event.preventDefault(); dropzone.classList.add('drag'); }));
@@ -352,6 +364,42 @@ async function toggleProjectAutomation(input) {
     input.checked = !input.checked;
     input.disabled = false;
     showToast(error.message, true);
+  }
+}
+
+async function saveWorkflowName(button) {
+  if (!state.current) return;
+  const workflowId = button.dataset.workflowSave;
+  const input = document.querySelector(`[data-workflow-name="${CSS.escape(workflowId)}"]`);
+  const name = input?.value.trim() || '';
+  button.disabled = true;
+  try {
+    const project = await api(`/api/projects/${encodeURIComponent(state.current.id)}/automations/${encodeURIComponent(workflowId)}`, { method: 'PATCH', body: { name } });
+    replaceProject(project);
+    render();
+    showToast(`Workflow-Name als „${name}“ gespeichert.`);
+  } catch (error) { showToast(error.message, true); }
+  finally { if (document.body.contains(button)) button.disabled = false; }
+}
+
+async function runOrPrepareWorkflow(button) {
+  if (!state.current) return;
+  const workflowId = button.dataset.workflowId;
+  const workflow = (state.current.automations || []).find(item => item.id === workflowId);
+  const action = button.dataset.workflowAction;
+  const question = action === 'run'
+    ? `„${workflow?.name || 'Workflow'}“ jetzt einmal außerplanmäßig auslösen?`
+    : `IVA/Codex jetzt beauftragen, „${workflow?.name || 'diesen Workflow'}“ vollständig fertigzubauen, zu testen und live auszuliefern?`;
+  if (!window.confirm(question)) return;
+  button.disabled = true;
+  const original = button.textContent;
+  button.textContent = action === 'run' ? 'Wird gestartet …' : 'Wird an IVA übergeben …';
+  try {
+    const result = await api(`/api/projects/${encodeURIComponent(state.current.id)}/automations/${encodeURIComponent(workflowId)}/${action}`, { method: 'POST' });
+    showToast(result.message || (action === 'run' ? 'Workflow wurde gestartet.' : 'Fertigstellungsauftrag wurde an IVA übergeben.'));
+  } catch (error) { showToast(error.message, true); }
+  finally {
+    if (document.body.contains(button)) { button.disabled = false; button.textContent = original; }
   }
 }
 

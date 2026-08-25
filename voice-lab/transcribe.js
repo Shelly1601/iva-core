@@ -1,4 +1,4 @@
-import { activePronunciationCorrections } from './store.js';
+import { activePronunciationCorrections, activeTranscriptionCorrections } from './store.js';
 
 const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
 export const TRANSCRIPTION_GLOSSARY_VERSION = 'iva-de-2026-08-24';
@@ -46,18 +46,34 @@ async function glossaryTerms() {
   ])].slice(0, 250);
 }
 
-export function buildTranscriptionPrompt(terms = BASE_GLOSSARY) {
-  return [
+export function buildTranscriptionPrompt(terms = BASE_GLOSSARY, corrections = []) {
+  const parts = [
     'Deutsche Geschäftssprache von Nadine an ihre persönliche Assistentin IVA.',
     'Eigennamen, Firmennamen, Fachbegriffe, buchstabierte Namen, Datumsangaben und Zahlen exakt wiedergeben.',
     'Keine Namen ergänzen, keine Person aus dem Zusammenhang erraten und keine Inhalte zusammenfassen.',
     `Wichtige Schreibweisen: ${terms.join(', ')}.`,
-  ].join(' ');
+  ];
+  if (corrections.length) {
+    parts.push(`Von Nadine bestätigte Korrekturen: ${corrections.map(item => `„${item.heardText}“ → „${item.correctedText}“`).join('; ')}.`);
+  }
+  return parts.join(' ');
 }
 
 export function normalizeTranscript(value = '') {
   let text = String(value || '').normalize('NFKC').replace(/\s+/g, ' ').trim();
   for (const [pattern, canonical] of CANONICAL_TERMS) text = text.replace(pattern, canonical);
+  return text;
+}
+
+export function applyLearnedTranscriptionCorrections(value = '', corrections = []) {
+  let text = String(value || '');
+  for (const item of corrections) {
+    const heardText = String(item?.heardText || '').trim();
+    const correctedText = String(item?.correctedText || '').trim();
+    if (!heardText || !correctedText) continue;
+    const escaped = heardText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    text = text.replace(new RegExp(escaped, 'giu'), correctedText);
+  }
   return text;
 }
 
@@ -109,7 +125,11 @@ export async function transcribeAudio(buffer, { mime = 'audio/webm', fileName = 
   const providers = transcriptionProviderStatus();
   if (!providers.ready) throw new Error('OPENAI_API_KEY oder GROQ_API_KEY fehlt.');
   const startedAt = Date.now();
-  const prompt = buildTranscriptionPrompt(await glossaryTerms());
+  const [terms, corrections] = await Promise.all([
+    glossaryTerms(),
+    activeTranscriptionCorrections().catch(() => []),
+  ]);
+  const prompt = buildTranscriptionPrompt(terms, corrections);
   const attempts = [];
 
   if (providers.openai) attempts.push({
@@ -128,7 +148,10 @@ export async function transcribeAudio(buffer, { mime = 'audio/webm', fileName = 
   const errors = [];
   for (const attempt of attempts) {
     try {
-      const text = await requestTranscription({ ...attempt, buffer, mime, fileName, prompt });
+      const text = applyLearnedTranscriptionCorrections(
+        await requestTranscription({ ...attempt, buffer, mime, fileName, prompt }),
+        corrections,
+      );
       return {
         text,
         provider: attempt.providerId,

@@ -646,6 +646,21 @@ export async function setProjectAutomationEnabled(projectId, automationId, enabl
   });
 }
 
+export async function renameProjectAutomation(projectId, automationId, name) {
+  const workflowName = clean(name, 220);
+  if (workflowName.length < 2) throw new Error('Bitte einen Workflow-Namen mit mindestens zwei Zeichen eingeben.');
+  return mutate(store => {
+    const projectIndex = store.projects.findIndex(item => item.id === clean(projectId, 100));
+    if (projectIndex < 0) return null;
+    const project = store.projects[projectIndex];
+    const itemIndex = (project.automations || []).findIndex(item => item.id === clean(automationId, 100));
+    if (itemIndex < 0) throw new Error('Projekt-Workflow nicht gefunden.');
+    project.automations[itemIndex] = { ...project.automations[itemIndex], name: workflowName };
+    store.projects[projectIndex] = normalizeProject(project, project);
+    return publicProject(store.projects[projectIndex]);
+  });
+}
+
 export async function addProjectNote(id, text, source = 'manual') {
   const noteText = clean(text, 12_000);
   if (!noteText) throw new Error('Bitte zuerst eine Notiz eingeben.');

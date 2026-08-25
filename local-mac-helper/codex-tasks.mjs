@@ -55,6 +55,16 @@ async function writeState(paths, value) {
 }
 
 function buildCodexPrompt(request) {
+  if (request.mode === 'project-workflow') {
+    return `Nadine hat diesen Projekt-Workflow in IVA ausdrücklich über den Button „Manuell auslösen“ gestartet. Führe jetzt genau einen operativen Einmallauf aus, ohne eine weitere Planbestätigung zu verlangen.
+
+Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.md vollständig. Dies ist kein Bauauftrag: ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts. Führe nur den unten genannten Workflow mit seinen dokumentierten Quellen, Sicherheitsregeln, Verifikationen, Zeitlimits, Protokollen und Rückfallwegen aus. Normale erneute Anmeldungen erledigst du mit den vorhandenen sicheren Zugangsdaten selbstständig. Bei CAPTCHA, Kontosperre, technisch erzwungener externer Bestätigung oder einem fachlichen Sicherheits-Gate stoppst du mit dem konkreten Blocker. Erfinde keinen Erfolg.
+
+Manueller Einmallauf:
+${request.prompt}
+
+${request.acceptanceCriteria?.length ? `Abnahmekriterien:\n${request.acceptanceCriteria.map(item => `- ${item}`).join('\n')}` : ''}`.trim();
+  }
   return `Nadine hat diesen Auftrag ausdrücklich über ihren IVA-Chat erteilt. Setze ihn jetzt vollständig und eigenständig um, ohne eine weitere Planbestätigung von Nadine zu verlangen.
 
 Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace. Lies und befolge AGENTS.md vollständig. Bewahre fremde und nicht zum Auftrag gehörende Änderungen. Fertig bedeutet gemäß Projektregel: implementieren, angemessen testen, Fehler beheben, nur die eigenen Änderungen committen, pushen, Railway deployen und die öffentliche Live-URL prüfen. Falls ein echter externer Blocker besteht, dokumentiere ihn konkret im Endergebnis; erfinde keinen Erfolg.
@@ -76,7 +86,7 @@ export function codexTaskPolicy() {
   });
 }
 
-export async function startCodexTask({ prompt, title = '', requestId = '', acceptanceCriteria = [] } = {}) {
+export async function startCodexTask({ prompt, title = '', requestId = '', acceptanceCriteria = [], mode = 'build' } = {}) {
   const cleanPrompt = clean(prompt, MAX_PROMPT_LENGTH);
   if (cleanPrompt.length < 10) throw new Error('Der Codex-Bauauftrag ist zu kurz.');
   const jobId = crypto.randomUUID();
@@ -88,6 +98,7 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
     requestId: clean(requestId, 100),
     prompt: cleanPrompt,
     acceptanceCriteria: (Array.isArray(acceptanceCriteria) ? acceptanceCriteria : []).map(value => clean(value, 500)).filter(Boolean).slice(0, 12),
+    mode: mode === 'project-workflow' ? 'project-workflow' : 'build',
     workspace: REPO_ROOT,
     createdAt: new Date().toISOString(),
   };
@@ -96,6 +107,39 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
   const child = spawn(process.execPath, [MODULE_PATH, 'run', jobId], { detached: true, stdio: 'ignore' });
   child.unref();
   return { jobId, status: 'queued', title: request.title, workspace: 'iva-core', startedLocally: true };
+}
+
+const PROJECT_WORKFLOW_TASKS = Object.freeze({
+  'funding-monitor': Object.freeze({
+    title: 'Fördermonitor manuell ausführen',
+    prompt: 'Führe den bestehenden lokalen Fördermonitor jetzt genau einmal im fest gesperrten Review-only-Modus aus. Verwende die vorhandenen lokalen Module und Zustände, versende keine E-Mail, verändere Pipedrive nicht und lege ausschließlich nachvollziehbare Prüffälle für neue eindeutig erkannte Eingänge an. Beachte Lock, Idempotenz, Audit und die vorhandenen Sicherheitsregeln.',
+    acceptanceCriteria: ['Der Lauf bleibt review-only, versendet nichts und verändert Pipedrive nicht.', 'Neue Eingänge werden dedupliziert und nachvollziehbar in die Prüfliste übernommen.', 'Laufergebnis oder konkreter technischer Blocker ist im Audit festgehalten.'],
+  }),
+  'planbar-weekly-export': Object.freeze({
+    title: 'Planbar-Forecast manuell ausführen',
+    prompt: 'Lies PLANBAR_FORECAST_WORKFLOW.md vollständig und führe den dort beschriebenen Forecast jetzt genau einmal für den aktuell vorgesehenen rollierenden Zehn-Wochen-Zeitraum aus. Die unmittelbar folgende Kalenderwoche bleibt ausgelassen. Erzeuge und versende ausschließlich die geprüfte Gesamt-XLSX und die nichtleeren Hersteller-XLSX; niemals PDFs. Prüfe den Versand sichtbar in Outlook „Gesendet“ und verhindere einen Doppelversand.',
+    acceptanceCriteria: ['David Service und Antonio Lausich sind vollständig ausgeschlossen.', 'Alle Anhänge sind geprüfte XLSX-Dateien; keine PDF ist enthalten.', 'Empfänger, Zeitraum, Anhänge und sichtbare Gesendet-Prüfung sind protokolliert.'],
+  }),
+  'planbar-completion-morning': Object.freeze({
+    title: 'Planbar-Vervollständigung manuell ausführen',
+    prompt: 'Lies PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md vollständig und führe den dort beschriebenen Morgenworkflow jetzt genau einmal außerplanmäßig aus. Verarbeite nur die dort erlaubten Eingänge, ändere nur die ausdrücklich freigegebenen leeren beziehungsweise eindeutig belegten Zielfelder und verifiziere jede Speicherung sichtbar. Beachte Laufzeitlimit, Idempotenz, Bericht und Display-Regel.',
+    acceptanceCriteria: ['Kein Termin wird angelegt, gelöscht, verschoben oder einer anderen Ressource zugeordnet.', 'Pipedrive und HH-Beispiele bleiben rein lesend.', 'Jede Änderung oder jeder Blocker wird im vorgesehenen Ergebnisbericht dokumentiert.'],
+  }),
+  'montage-required-fields-morning': Object.freeze({
+    title: 'Montage-Pflichtfelder manuell prüfen',
+    prompt: 'Führe den in AGENTS.md und in der Heat-Hero-Projektautomation „Montage-Pflichtfelder morgens prüfen“ beschriebenen Ablauf jetzt genau einmal aus. Prüfe alle offenen Deals in „Montage terminieren“: Telefonnummer und E-Mail gegen die TMB sowie die Anlage gegen das unterschriebene Angebot. Ergänze ausschließlich eindeutig belegte leere Felder, überschreibe keine bestehenden Widersprüche und verifiziere jeden Schreibschritt sichtbar. Melde unklare Fälle statt zu raten.',
+    acceptanceCriteria: ['Nur eindeutig belegte leere Pflichtfelder werden ergänzt.', 'Bestehende Werte und Widersprüche werden nicht still überschrieben.', 'Ergebnis, Änderungen und manuelle Prüffälle werden protokolliert.'],
+  }),
+});
+
+export async function startProjectWorkflowTask({ workflowId } = {}) {
+  const definition = PROJECT_WORKFLOW_TASKS[clean(workflowId, 140)];
+  if (!definition) throw new Error('Dieser Projekt-Workflow ist für den operativen Codex-Start nicht freigegeben.');
+  return startCodexTask({
+    ...definition,
+    mode: 'project-workflow',
+    requestId: `project-workflow-${workflowId}-${Date.now()}`,
+  });
 }
 
 export async function getCodexTaskStatus(jobId) {

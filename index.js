@@ -51,6 +51,7 @@ import {
   recordVoiceEvaluation,
   saveCommunicationPreference,
   savePronunciationCorrection,
+  saveTranscriptionCorrection,
   voiceLabSummary,
   voiceLearningPromptContext,
 } from './voice-lab/store.js';
@@ -85,6 +86,7 @@ import {
   listProjects,
   readProjectFile,
   readProjectLogo,
+  renameProjectAutomation,
   setProjectAutomationEnabled,
   storeProjectFile,
   storeProjectLogo,
@@ -670,6 +672,7 @@ Anfrage-Typ erkennen und Antwort-Format wählen:
 - Brainstorming (Signale: "welche Optionen", "was könnte man", "Ideen für"): 5–8 kurze Optionen, sortiert nach Wirkung. Am Ende ein klarer Top-Pick mit einem Satz Grund.
 - Entscheidungshilfe (Signale: "soll ich", "lohnt sich", "vs.", "umsteigen"): kurz Pro und Contra (je 1–3 Zeilen), dann eine klare Empfehlung mit einem Satz warum.
 - Umsetzung ohne ausdrücklichen Bauauftrag (Signale: "wie mache ich", "hilf mir einrichten"): genau ein konkreter nächster Schritt. Ein ausdrücklicher Bauauftrag ("mach das", "bau das", "setz das um" oder gleichbedeutend) wird dagegen vollständig und ohne erneute Planbestätigung über startIvaBuild gestartet.
+- Steht ein vorhandener Workflow auf geplant, vorbereitet, pausiert, blockiert oder fehlerhaft und Nadine sagt "mach das", "fix das", "bau das fertig" oder nutzt den Fertig-bauen-Button, ist genau dieser Zustand Teil des Bauauftrags und keine Antwort. Finde eigenständig einen funktionierenden technischen Weg oder übergib den vollständigen Auftrag sofort mit startIvaBuild an Codex. Ein alter Bug, fehlende interne Anbindung oder früherer Blocker ist kein Endergebnis. Bau, Befehle, Tests, Git/Push, Railway-Deploy und Live-Prüfung laufen bevorzugt über den dauerhaft aktiven iMac und den gesicherten iMac-/Codex-Kanal. Zurück zu Nadine darf nur ein nach konkretem Versuch technisch erzwungener Schritt, den ausschließlich sie leisten kann; nenne dann den bereits versuchten Weg und genau den verbleibenden Schritt.
 - Typ unklar: eine (nicht mehrere) präzise Rückfrage.
 
 So denkst du je Fachgebiet:
@@ -704,6 +707,7 @@ Direktes Lernen und Selbstverbesserung:
 - Wenn Nadine ausdrücklich eine dauerhafte Kommunikationsregel nennt, zum Beispiel kürzer antworten, zuerst das Ergebnis sagen oder einen Ausdruck nicht mehr verwenden, saveCommunicationPreference verwenden. Aus bloßem Ärger oder einer mehrdeutigen Bemerkung keine dauerhafte Regel ableiten; dann genau eine Rückfrage stellen.
 - Wenn Nadine eine Funktion oder Systemänderung nur als Idee nennt, captureImprovementRequest verwenden und ehrlich sagen, dass sie lediglich gemerkt wurde.
 - Wenn Nadine die Umsetzung klar beauftragt, etwa mit "mach das", "bau das", "setz das um" oder gleichbedeutend, startIvaBuild sofort mit dem vollständigen Gesprächskontext verwenden. Keine erneute Plan-, Code-, Push- oder Deployment-Bestätigung verlangen. Der Codex-Auftrag folgt AGENTS.md und umfasst Bau, Tests, Fehlerbehebung, Commit, Push, Railway-Deployment und Live-Prüfung.
+- Dass ein Workflow aktuell blockiert, fehlerhaft, nur geplant oder noch nicht angebunden ist, verhindert startIvaBuild nicht. Übernimm Status, Zweck, Sicherheitsregel, bisherigen Blocker und gewünschtes Ergebnis vollständig in den Bauauftrag, damit Codex den Ausführungsweg fertigstellt und live prüft.
 - Niemals behaupten, IVA habe sich bereits repariert, gebaut oder weiterentwickelt, wenn der Codex-Auftrag nur eingereiht oder noch nicht nachweislich abgeschlossen ist.
 
 Voice-Modus überschreibt die Format-Regeln oben, wenn Sprache aktiviert ist:
@@ -1415,20 +1419,43 @@ app.post('/api/devices/:deviceId/commands', async (req, res) => {
 });
 app.patch('/api/projects/:id/automations/:automationId', async (req, res) => {
   try {
-    const existingProject = await getProject(req.params.id);
-    const existingAutomation = existingProject?.automations?.find(item => item.id === req.params.automationId);
-    if (!existingProject || !existingAutomation) return res.status(404).json({ error: 'not found' });
-    if (!existingAutomation.toggleAvailable) return res.status(409).json({ error: 'Dieser Workflow ist noch nicht ausführbar und kann deshalb nicht eingeschaltet werden.' });
-    if (req.params.automationId === 'workflow-protocol-summaries') {
-      await Promise.all([
-        setAutomationEnabled('project-protocol-daily', req.body?.enabled === true),
-        setAutomationEnabled('project-protocol-weekly', req.body?.enabled === true),
-        setAutomationEnabled('project-protocol-cleanup', req.body?.enabled === true),
-      ]);
+    let project = await getProject(req.params.id);
+    let automation = project?.automations?.find(item => item.id === req.params.automationId);
+    if (!project || !automation) return res.status(404).json({ error: 'not found' });
+    if (Object.hasOwn(req.body || {}, 'name')) {
+      project = await renameProjectAutomation(req.params.id, req.params.automationId, req.body?.name);
+      automation = project?.automations?.find(item => item.id === req.params.automationId);
     }
-    const project = await setProjectAutomationEnabled(req.params.id, req.params.automationId, req.body?.enabled === true);
+    if (Object.hasOwn(req.body || {}, 'enabled')) {
+      if (!automation?.toggleAvailable) return res.status(409).json({ error: 'Dieser Workflow ist noch nicht ausführbar und kann deshalb nicht eingeschaltet werden.' });
+      if (req.params.automationId === 'workflow-protocol-summaries') {
+        await Promise.all([
+          setAutomationEnabled('project-protocol-daily', req.body?.enabled === true),
+          setAutomationEnabled('project-protocol-weekly', req.body?.enabled === true),
+          setAutomationEnabled('project-protocol-cleanup', req.body?.enabled === true),
+        ]);
+      }
+      project = await setProjectAutomationEnabled(req.params.id, req.params.automationId, req.body?.enabled === true);
+    }
     res.status(project ? 200 : 404).json(project || { error: 'not found' });
   } catch (error) { res.status(409).json({ error: error.message }); }
+});
+app.post('/api/projects/:id/automations/:automationId/run', async (req, res) => {
+  try {
+    const result = await triggerProjectWorkflowManually(req.params.id, req.params.automationId);
+    res.status(202).json(result);
+  } catch (error) {
+    const status = /nicht gefunden/i.test(error.message) ? 404 : /noch nicht|nicht manuell|blockiert/i.test(error.message) ? 409 : 500;
+    res.status(status).json({ error: error.message });
+  }
+});
+app.post('/api/projects/:id/automations/:automationId/prepare', async (req, res) => {
+  try {
+    const result = await prepareProjectWorkflowWithIva(req.params.id, req.params.automationId);
+    res.status(202).json(result);
+  } catch (error) {
+    res.status(/nicht gefunden/i.test(error.message) ? 404 : 500).json({ error: error.message });
+  }
 });
 app.get('/api/projects/:id/protocols', async (req, res) => {
   const project = await getProject(req.params.id);
@@ -1572,6 +1599,10 @@ app.post('/api/voice-lab/evaluations', async (req, res) => {
 app.get('/api/voice-lab/learning', async (_req, res) => res.json(await listVoiceLearning()));
 app.post('/api/voice-lab/pronunciations', async (req, res) => {
   try { res.status(201).json(await savePronunciationCorrection({ ...(req.body || {}), source: 'voice-lab' })); }
+  catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.post('/api/voice-lab/transcription-corrections', async (req, res) => {
+  try { res.status(201).json(await saveTranscriptionCorrection({ ...(req.body || {}), source: 'voice-lab' })); }
   catch (error) { res.status(400).json({ error: error.message }); }
 });
 app.post('/api/voice-lab/preferences', async (req, res) => {
@@ -2455,6 +2486,87 @@ const automationRunner = createAutomationOrchestrator({
   'project-protocol-weekly': async () => { await updateProjectProtocolSummaries({ finalizeWeekly: true }); return { summary: 'Projekt-Wochenprotokolle finalisiert.' }; },
   'project-protocol-cleanup': async () => { const result = await cleanupExpiredProjectProtocols(); return { result, summary: 'Abgelaufene Projektprotokolle bereinigt.' }; },
 });
+
+const SERVER_MANUAL_PROJECT_WORKFLOWS = Object.freeze({
+  'workflow-protocol-summaries': ['project-protocol-daily', 'project-protocol-weekly'],
+});
+const IMAC_MANUAL_PROJECT_WORKFLOWS = new Set([
+  'funding-monitor',
+  'planbar-weekly-export',
+  'planbar-completion-morning',
+  'montage-required-fields-morning',
+]);
+
+async function triggerProjectWorkflowManually(projectId, workflowId) {
+  const project = await getProject(projectId);
+  const workflow = project?.automations?.find(item => item.id === workflowId);
+  if (!project || !workflow) throw new Error('Projekt-Workflow nicht gefunden.');
+  if (!['active', 'paused'].includes(workflow.status)) {
+    throw new Error(`„${workflow.name}“ ist noch nicht ausführbar. ${workflow.nextStep || 'Der vorbereitete Ablauf muss zuerst freigeschaltet werden.'}`);
+  }
+  const serverAutomationIds = SERVER_MANUAL_PROJECT_WORKFLOWS[workflow.id];
+  if (serverAutomationIds) {
+    const requestedAt = Date.now();
+    void Promise.all(serverAutomationIds.map(automationId => automationRunner.runAutomation(automationId, {
+      trigger: 'manual',
+      allowDisabled: true,
+      slotKey: `${automationId}:manual:${requestedAt}`,
+    }))).catch(error => console.error(`Manueller Projekt-Workflow ${workflow.id}:`, error.message));
+    return {
+      accepted: true,
+      mode: 'server',
+      workflowId: workflow.id,
+      message: `„${workflow.name}“ wurde auf IVA Core gestartet.`,
+    };
+  }
+  if (project.id === 'heat-hero' && IMAC_MANUAL_PROJECT_WORKFLOWS.has(workflow.id)) {
+    const command = await enqueueDeviceCommand({
+      deviceId: IVA_IMAC_DEVICE_ID,
+      action: 'project.workflow.run',
+      payload: { projectId: project.id, workflowId: workflow.id, displayName: workflow.name },
+      requestedBy: 'projects-manual-trigger',
+      requestText: `Projekt-Workflow manuell auslösen: ${workflow.name}`,
+    });
+    return {
+      accepted: true,
+      mode: 'imac',
+      workflowId: workflow.id,
+      commandId: command.id,
+      message: `„${workflow.name}“ wurde an Nadines iMac übergeben.`,
+    };
+  }
+  throw new Error('Dieser Workflow kann noch nicht manuell ausgelöst werden. Der Ausführungsweg ist noch nicht angebunden.');
+}
+
+async function prepareProjectWorkflowWithIva(projectId, workflowId) {
+  const project = await getProject(projectId);
+  const workflow = project?.automations?.find(item => item.id === workflowId);
+  if (!project || !workflow) throw new Error('Projekt-Workflow nicht gefunden.');
+  const command = await enqueueDeviceCommand({
+    deviceId: IVA_IMAC_DEVICE_ID,
+    action: 'codex.task.start',
+    payload: {
+      title: `${workflow.name} fertig bauen`,
+      requestId: `project-${project.id}-${workflow.id}-${Date.now()}`,
+      prompt: `Stelle den vorhandenen IVA-Projekt-Workflow vollständig fertig und liefere ihn live aus.\n\nProjekt: ${project.name} (${project.id})\nWorkflow: ${workflow.name} (${workflow.id})\nAktueller Status: ${workflow.status}\nZeitplan: ${workflow.schedule || 'noch offen'}\nAusführungsort: ${workflow.execution || 'noch offen'}\nZweck: ${workflow.purpose || 'noch zu konkretisieren'}\nSicherheitsregel: ${workflow.safety || 'bestehende IVA-Sicherheitsregeln anwenden'}\nBisheriger nächster Schritt/Blocker: ${workflow.nextStep || 'Ausführungsweg vollständig anbinden'}\n\nFinde eigenständig einen funktionierenden technischen Weg. Ein alter Bug, der bisherige Status oder eine fehlende interne Anbindung ist Teil dieses Bauauftrags und kein Endergebnis. Nutze vorhandene sichere Zugänge und Authenticator-Wege selbstständig. Baue den echten Ausführungsweg, verbinde ihn mit Zeitplan, Ein-/Aus-Schalter und manuellem Start in /projects, protokolliere das Ergebnis nachvollziehbar und halte alle genannten Sicherheitsregeln ein. Nur ein nach konkretem Versuch technisch erzwungener Schritt, den ausschließlich Nadine erledigen kann, darf als präziser Restblocker zurückbleiben.`,
+      acceptanceCriteria: [
+        'Der Workflow ist technisch ausführbar und nicht nur als vorbereitet oder geplant dargestellt.',
+        'Ein-/Aus-Schalter, manueller Start und verständlicher Status in /projects funktionieren.',
+        'Sicherheitsregel, Idempotenz, Ergebnisprotokoll und echte Fehlerpfade sind getestet.',
+        'Tests, Commit, Push, Railway-Deployment und öffentliche Live-Prüfung sind abgeschlossen.',
+      ],
+    },
+    requestedBy: 'projects-finish-workflow',
+    requestText: `Workflow mit IVA fertig bauen: ${workflow.name}`,
+  });
+  return {
+    accepted: true,
+    mode: 'iva-build',
+    workflowId: workflow.id,
+    commandId: command.id,
+    message: `„${workflow.name}“ wurde als vollständiger Fertigstellungsauftrag an IVA/Codex übergeben.`,
+  };
+}
 
 app.get('/api/integration-checkup', async (_req, res) => {
   try { res.json(await getIntegrationCheckupStatus()); }
