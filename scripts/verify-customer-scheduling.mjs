@@ -126,18 +126,19 @@ assert.deepEqual(selectFirstPlanbarEnterBlocker({
     { id: 'excluded', resourceId: '1674', startDate: '2026-09-14', endDateExclusive: '2026-09-19', text: 'Geblockt für Kunde ENTER' },
     { id: 'later-resource', resourceId: '1648', startDate: '2026-09-14', endDateExclusive: '2026-09-19', text: 'Geblockt für Kunde ENTER' },
     { id: 'first-visible', resourceId: '1490', startDate: '2026-09-16', endDateExclusive: '2026-09-21', text: 'Geblockt für Kunde ENTER' },
+    { id: 'real-site-conflict', resourceId: '1490', startDate: '2026-09-17', endDateExclusive: '2026-09-18', text: 'HH Bestehende Baustelle' },
     { id: 'wrong-text', resourceId: '1439', startDate: '2026-09-14', endDateExclusive: '2026-09-19', text: 'Geblockt für Enervado' },
   ],
   year: 2026,
   week: 38,
 }), {
-  id: 'first-visible',
-  resourceId: '1490',
-  startDate: '2026-09-16',
-  endDateExclusive: '2026-09-21',
+  id: 'later-resource',
+  resourceId: '1648',
+  startDate: '2026-09-14',
+  endDateExclusive: '2026-09-19',
   text: 'Geblockt für Kunde ENTER',
-  resource: resources[1],
-}, 'der erste sichtbare exakte ENTER-Blocker gewinnt; fremde Blocker und ausgeschlossene Ressourcen bleiben unberührt');
+  resource: resources[2],
+}, 'ein mit einer echten Baustelle kollidierender ENTER-Blocker wird übersprungen; fremde Blocker und ausgeschlossene Ressourcen bleiben unberührt');
 
 assert.throws(() => selectFirstPlanbarEnterBlocker({
   resources,

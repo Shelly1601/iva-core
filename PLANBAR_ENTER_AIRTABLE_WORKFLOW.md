@@ -67,11 +67,12 @@ Stand: 25. August 2026 - Version 1
 
 1. Zulässig ist ausschließlich eine sichtbare Standardaufgabe mit dem exakten Text `Geblockt für Kunde ENTER` in der ISO-Kalenderwoche des geplanten Airtable-Datums.
 2. Andere Blocker, Urlaub, Service, `nicht verfügbar` und fremde Partnerblocker bleiben unangetastet.
-3. Sind mehrere passende ENTER-Blocker vorhanden, wird nach der sichtbaren Planbar-Ressourcenreihenfolge von oben nach unten der erste verwendet. Innerhalb derselben Ressource gilt der früheste passende Blocker. `Dawid Service` sowie `Antonio Lausic` und bekannte Schreibvarianten bleiben ausgeschlossen.
-4. Der tatsächliche Termin übernimmt exakt Ressource, Start und Ende des ausgewählten Blockers. Das Airtable-Datum bestimmt die Kalenderwoche, überschreibt aber nicht die sichtbaren Blockergrenzen.
-5. Vor jeder Entfernung müssen Kunde, Kontaktdaten, Auftragsnummer, Kurzbeschreibung, Ressource und Zeitraum vollständig vorbereitet und nochmals geprüft sein.
-6. Wenn Planbar eine parallele Anlage zulässt, wird zuerst die tatsächliche Baustelle angelegt und verifiziert und erst danach genau dieser eine Blocker entfernt. Wenn die Oberfläche dies nicht zulässt, wird der vorbereitete Blocker genau einmal entfernt und der Termin unmittelbar am gleichen Platz angelegt; bei Fehlschlag ist der identische Blocker wiederherzustellen und sichtbar zu verifizieren.
-7. Niemals einen Blocker löschen, wenn die anschließende Anlage nicht eindeutig vorbereitet ist. Keine Serienaufgabe oder andere Vorkommen des Standardaufgaben-Typs verändern.
+3. Ein ENTER-Blocker wird übersprungen, wenn sich auf derselben Ressource in seinem Zeitraum bereits eine andere sichtbare Buchung oder Baustelle befindet. Es wird dabei nichts an der überlappenden Buchung verändert.
+4. Sind mehrere konfliktfreie ENTER-Blocker vorhanden, wird nach der sichtbaren Planbar-Ressourcenreihenfolge von oben nach unten der erste verwendet. Innerhalb derselben Ressource gilt der früheste passende Blocker. `Dawid Service` sowie `Antonio Lausic` und bekannte Schreibvarianten bleiben ausgeschlossen.
+5. Der tatsächliche Termin übernimmt exakt Ressource, Start und Ende des ausgewählten Blockers. Das Airtable-Datum bestimmt die Kalenderwoche, überschreibt aber nicht die sichtbaren Blockergrenzen.
+6. Vor jeder Entfernung müssen Kunde, Kontaktdaten, Auftragsnummer, Kurzbeschreibung, Ressource und Zeitraum vollständig vorbereitet und nochmals geprüft sein.
+7. Wenn Planbar eine parallele Anlage zulässt, wird zuerst die tatsächliche Baustelle angelegt und verifiziert und erst danach genau dieser eine Blocker entfernt. Wenn die Oberfläche dies nicht zulässt, wird der vorbereitete Blocker genau einmal entfernt und der Termin unmittelbar am gleichen Platz angelegt; bei Fehlschlag ist der identische Blocker wiederherzustellen und sichtbar zu verifizieren.
+8. Niemals einen Blocker löschen, wenn die anschließende Anlage nicht eindeutig vorbereitet ist. Keine Serienaufgabe oder andere Vorkommen des Standardaufgaben-Typs verändern.
 
 ## Schreiben, Rückprüfung und Bericht
 

@@ -157,12 +157,21 @@ export function selectFirstPlanbarEnterBlocker({ resources, bookings = [], year,
   if (!Array.isArray(resources) || !resources.length) throw new Error('Keine Planbar-Ressourcen vorhanden.');
   const { startDate, endDateExclusive } = isoWeekRange(year, week);
   const resourceById = new Map(resources.map((resource, index) => [String(resource?.id || ''), { resource, index }]));
+  const isEnterBlocker = booking => String(booking?.text || booking?.description || booking?.title || '').trim() === 'Geblockt für Kunde ENTER';
 
   const candidates = bookings
-    .filter(booking => String(booking?.text || booking?.description || booking?.title || '').trim() === 'Geblockt für Kunde ENTER')
+    .filter(isEnterBlocker)
     .filter(booking => overlaps(startDate, endDateExclusive, booking))
     .map(booking => ({ booking, match: resourceById.get(String(booking?.resourceId || '')) }))
     .filter(item => item.match?.resource?.id && !isExcludedPlanbarResource(item.match.resource.name))
+    .filter(item => !bookings.some(other => other !== item.booking
+      && String(other?.resourceId || '') === String(item.booking?.resourceId || '')
+      && !isEnterBlocker(other)
+      && overlaps(
+        String(item.booking.startDate || item.booking.start || ''),
+        String(item.booking.endDateExclusive || item.booking.end || item.booking.startDate || item.booking.start || ''),
+        other,
+      )))
     .sort((left, right) => left.match.index - right.match.index
       || String(left.booking.startDate || left.booking.start || '').localeCompare(String(right.booking.startDate || right.booking.start || '')));
 
