@@ -115,6 +115,24 @@ export function buildPlanbarCustomer({ firstName, lastName, address, email, phon
   };
 }
 
+export function buildEnterPlanbarCustomer({ firstName, lastName, address, email, phone, phoneKind = 'Telefon' }) {
+  const cleanFirstName = String(firstName || '').trim().replace(/^(?:EN|HH)\s+/i, '');
+  const cleanLastName = String(lastName || '').trim();
+  if (!cleanFirstName || !cleanLastName) throw new Error('Vor- und Nachname sind Pflichtfelder.');
+  if (!String(address || '').trim() || !String(email || '').trim() || !String(phone || '').trim()) {
+    throw new Error('Adresse, E-Mail-Adresse und Telefonnummer müssen vollständig belegt sein.');
+  }
+
+  return {
+    firstName: `EN ${cleanFirstName}`,
+    lastName: cleanLastName,
+    address: String(address).trim(),
+    email: String(email).trim(),
+    phone: String(phone).trim(),
+    phoneKind: normalizedText(phoneKind) === 'mobil' ? 'Mobil' : 'Telefon',
+  };
+}
+
 function overlaps(startDate, endDateExclusive, booking) {
   const bookingStart = String(booking.startDate || booking.start || '');
   const bookingEnd = String(booking.endDateExclusive || booking.end || bookingStart);
@@ -133,6 +151,26 @@ export function selectFirstFreePlanbarResource({ resources, bookings = [], start
   }
 
   throw new Error('In der gewünschten Kalenderwoche ist keine zulässige Ressource vollständig von Montag bis Freitag frei.');
+}
+
+export function selectFirstPlanbarEnterBlocker({ resources, bookings = [], year, week }) {
+  if (!Array.isArray(resources) || !resources.length) throw new Error('Keine Planbar-Ressourcen vorhanden.');
+  const { startDate, endDateExclusive } = isoWeekRange(year, week);
+  const resourceById = new Map(resources.map((resource, index) => [String(resource?.id || ''), { resource, index }]));
+
+  const candidates = bookings
+    .filter(booking => String(booking?.text || booking?.description || booking?.title || '').trim() === 'Geblockt für Kunde ENTER')
+    .filter(booking => overlaps(startDate, endDateExclusive, booking))
+    .map(booking => ({ booking, match: resourceById.get(String(booking?.resourceId || '')) }))
+    .filter(item => item.match?.resource?.id && !isExcludedPlanbarResource(item.match.resource.name))
+    .sort((left, right) => left.match.index - right.match.index
+      || String(left.booking.startDate || left.booking.start || '').localeCompare(String(right.booking.startDate || right.booking.start || '')));
+
+  if (!candidates.length) throw new Error('In der gewünschten Kalenderwoche ist kein zulässiger ENTER-Blocker vorhanden.');
+  return {
+    ...candidates[0].booking,
+    resource: candidates[0].match.resource,
+  };
 }
 
 export function buildPlanbarSchedulingExtras({ materialDeliverySpace, theftWeatherProtected, additionalInfo = '' }) {

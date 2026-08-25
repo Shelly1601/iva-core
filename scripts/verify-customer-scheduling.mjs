@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   assertSchedulableSourceStage,
   buildPlanbarSchedulingExtras,
+  buildEnterPlanbarCustomer,
   buildPipedriveCompletion,
   buildPlanbarCustomer,
   isExcludedPlanbarResource,
@@ -9,6 +10,7 @@ import {
   normalizePlanbarCapacitySnapshot,
   planbarCapacityWindow,
   selectFirstFreePlanbarResource,
+  selectFirstPlanbarEnterBlocker,
 } from '../operations/customer-scheduling.js';
 
 assert.deepEqual(isoWeekRange(2026, 39), {
@@ -79,6 +81,22 @@ assert.deepEqual(buildPlanbarCustomer({
   phoneKind: 'Mobil',
 });
 
+assert.deepEqual(buildEnterPlanbarCustomer({
+  firstName: 'HH Urban',
+  lastName: 'Backes',
+  address: 'Musterstraße 2, 12345 Musterstadt',
+  email: 'urban@example.test',
+  phone: '+49 170 7654321',
+  phoneKind: 'Telefon',
+}), {
+  firstName: 'EN Urban',
+  lastName: 'Backes',
+  address: 'Musterstraße 2, 12345 Musterstadt',
+  email: 'urban@example.test',
+  phone: '+49 170 7654321',
+  phoneKind: 'Telefon',
+});
+
 const resources = [
   { id: '1439', name: 'Team Batek+Marcin' },
   { id: '1490', name: 'Team Tomek/Tomek/Kuba' },
@@ -101,6 +119,32 @@ assert.throws(() => selectFirstFreePlanbarResource({
   startDate: '2026-09-21',
   endDateExclusive: '2026-09-26',
 }), /keine zulässige Ressource/);
+
+assert.deepEqual(selectFirstPlanbarEnterBlocker({
+  resources,
+  bookings: [
+    { id: 'excluded', resourceId: '1674', startDate: '2026-09-14', endDateExclusive: '2026-09-19', text: 'Geblockt für Kunde ENTER' },
+    { id: 'later-resource', resourceId: '1648', startDate: '2026-09-14', endDateExclusive: '2026-09-19', text: 'Geblockt für Kunde ENTER' },
+    { id: 'first-visible', resourceId: '1490', startDate: '2026-09-16', endDateExclusive: '2026-09-21', text: 'Geblockt für Kunde ENTER' },
+    { id: 'wrong-text', resourceId: '1439', startDate: '2026-09-14', endDateExclusive: '2026-09-19', text: 'Geblockt für Enervado' },
+  ],
+  year: 2026,
+  week: 38,
+}), {
+  id: 'first-visible',
+  resourceId: '1490',
+  startDate: '2026-09-16',
+  endDateExclusive: '2026-09-21',
+  text: 'Geblockt für Kunde ENTER',
+  resource: resources[1],
+}, 'der erste sichtbare exakte ENTER-Blocker gewinnt; fremde Blocker und ausgeschlossene Ressourcen bleiben unberührt');
+
+assert.throws(() => selectFirstPlanbarEnterBlocker({
+  resources,
+  bookings: [{ resourceId: '1439', startDate: '2026-09-21', endDateExclusive: '2026-09-26', text: 'Blocker Art of Energy' }],
+  year: 2026,
+  week: 39,
+}), /kein zulässiger ENTER-Blocker/);
 
 assert.deepEqual(buildPipedriveCompletion({
   year: 2026,
@@ -126,4 +170,4 @@ assert.throws(() => buildPipedriveCompletion({
   visibleStages: ['Montage einplanen', 'Zahlungseingang prüfen'],
 }), /letzte sichtbare Phase/);
 
-console.log('PASS Kunde terminieren: KW, Quellen-Gate, HH-Kunde, Ausschlüsse, Ressource und Pipedrive-Abschluss');
+console.log('PASS Kunde terminieren: KW, Quellen-Gate, HH-/EN-Kunde, Ausschlüsse, Ressource, ENTER-Blocker und Pipedrive-Abschluss');
