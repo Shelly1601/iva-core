@@ -15,6 +15,7 @@ const APP_ALLOWLIST = Object.freeze({
   WhatsApp: '/Applications/WhatsApp.app',
   Codex: '/Applications/Codex.app',
 });
+const UI_ACTIONS = new Set(['computer.status', 'planbar.search.refresh', 'portal.login', 'app.open']);
 
 function cleanServerUrl(value) {
   const url = new URL(String(value || DEFAULT_SERVER_URL));
@@ -117,6 +118,14 @@ async function executeDeviceCommand(command) {
       readOnly: true,
     };
   }
+  if (command.action === 'portal.credentials.status') {
+    const { credentialServiceStatus } = await import('./credential-broker.mjs');
+    return credentialServiceStatus(command.payload?.service);
+  }
+  if (command.action === 'portal.login') {
+    const { ensurePortalLogin } = await import('./portal-auth.mjs');
+    return ensurePortalLogin(command.payload?.service);
+  }
   if (command.action === 'codex.task.start') {
     const { startCodexTask } = await import('./codex-tasks.mjs');
     return startCodexTask(command.payload || {});
@@ -137,7 +146,12 @@ export async function runImacDeviceAgentOnce() {
   let result = null;
   let error = '';
   try {
-    result = await executeDeviceCommand(command);
+    if (UI_ACTIONS.has(command.action)) {
+      const { withMacWakeGuard } = await import('./mac-wake-guard.mjs');
+      result = await withMacWakeGuard(() => executeDeviceCommand(command), { maxSeconds: command.action === 'planbar.search.refresh' ? 180 : 120 });
+    } else {
+      result = await executeDeviceCommand(command);
+    }
     ok = true;
   } catch (caught) {
     error = String(caught?.message || caught).slice(0, 1000);
@@ -156,7 +170,7 @@ export function imacDeviceAgentPolicy() {
     deviceId: IMAC_DEVICE_ID,
     keychainService: KEYCHAIN_SERVICE,
     arbitraryShellCommands: false,
-    allowedActions: ['computer.status', 'funding.monitor.status', 'funding.monitor.run', 'funding.reviews.list', 'planbar.search.refresh', 'codex.task.start', 'codex.task.status', 'app.open'],
+    allowedActions: ['computer.status', 'funding.monitor.status', 'funding.monitor.run', 'funding.reviews.list', 'planbar.search.refresh', 'portal.credentials.status', 'portal.login', 'codex.task.start', 'codex.task.status', 'app.open'],
     allowedApps: Object.keys(APP_ALLOWLIST),
   });
 }

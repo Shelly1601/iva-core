@@ -259,6 +259,112 @@ func typeText(_ text: String) throws {
     }
 }
 
+func pathPrefix(_ prefix: [Int], matches path: [Int]) -> Bool {
+    guard prefix.count <= path.count else { return false }
+    return Array(path.prefix(prefix.count)) == prefix
+}
+
+func sixDigitCodes(_ value: String) -> [String] {
+    let pattern = "(?<![0-9])([0-9]{3})[\\s-]?([0-9]{3})(?![0-9])"
+    guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+    let range = NSRange(value.startIndex..<value.endIndex, in: value)
+    return regex.matches(in: value, range: range).compactMap { match in
+        guard match.numberOfRanges == 3,
+              let first = Range(match.range(at: 1), in: value),
+              let second = Range(match.range(at: 2), in: value) else { return nil }
+        return String(value[first]) + String(value[second])
+    }
+}
+
+func enteAuthApplication() throws -> (NSRunningApplication, AXUIElement) {
+    guard AXIsProcessTrusted() else {
+        throw HelperError.message("macOS-Bedienungshilfe ist für den aufrufenden Helper nicht freigegeben.")
+    }
+    guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "io.ente.auth").first else {
+        throw HelperError.message("Ente Auth läuft nicht.")
+    }
+    return (app, AXUIElementCreateApplication(app.processIdentifier))
+}
+
+func enteNodeText(_ node: AXNode) -> String {
+    return normalizedAXText([node.title, node.description, safeValue(node.element)].joined(separator: " ")).lowercased()
+}
+
+func findPanasonicEnteCode(_ nodes: [AXNode]) -> (entryFound: Bool, code: String?) {
+    let targets = nodes.filter { node in
+        let text = enteNodeText(node)
+        return text.contains("phvaceu-prod") && text.contains("panasonic")
+    }
+    guard !targets.isEmpty else { return (false, nil) }
+    for target in targets.sorted(by: { $0.path.count > $1.path.count }) {
+        for depth in stride(from: target.path.count, through: 0, by: -1) {
+            let prefix = Array(target.path.prefix(depth))
+            let scope = nodes.filter { pathPrefix(prefix, matches: $0.path) }
+            let scopeText = scope.map(enteNodeText).joined(separator: " ")
+            if scopeText.contains("lausig") { continue }
+            let codes = Set(scope.flatMap { sixDigitCodes([$0.title, $0.description, safeValue($0.element)].joined(separator: " ")) })
+            if codes.count == 1 { return (true, codes.first) }
+            if codes.count > 1 && depth <= max(0, target.path.count - 3) { break }
+        }
+    }
+    return (true, nil)
+}
+
+func focusPanasonicOtpInChrome() throws {
+    let source = """
+    tell application "Google Chrome"
+      activate
+      repeat with w in windows
+        repeat with t in tabs of w
+          if (URL of t contains "hvac-key.eu.panasonic.com/u/mfa-otp-challenge") then
+            set active tab index of w to (index of t)
+            set index of w to 1
+            execute t javascript "(() => { const e = document.querySelector('#code, input[name=code], input[autocomplete=one-time-code]'); if (!e) return 'NO_FIELD'; e.focus(); e.select?.(); return 'FOCUSED'; })()"
+            return "FOCUSED"
+          end if
+        end repeat
+      end repeat
+      return "NO_TAB"
+    end tell
+    """
+    var error: NSDictionary?
+    guard let script = NSAppleScript(source: source), script.executeAndReturnError(&error).stringValue == "FOCUSED" else {
+        throw HelperError.message("Das echte Panasonic-2FA-Feld ist in Chrome nicht geöffnet.")
+    }
+    usleep(350_000)
+}
+
+func enteAuthStatus() throws -> [String: Any] {
+    let (_, appElement) = try enteAuthApplication()
+    let match = findPanasonicEnteCode(collect(appElement))
+    return [
+        "running": true,
+        "accessibility": true,
+        "exactEntryFound": match.entryFound,
+        "currentCodeAvailable": match.code != nil,
+        "secretReturned": false,
+    ]
+}
+
+func typePanasonicCodeFromEnte() throws -> [String: Any] {
+    let (app, appElement) = try enteAuthApplication()
+    activateApplication(app)
+    let match = findPanasonicEnteCode(collect(appElement))
+    guard match.entryFound else { throw HelperError.message("Der exakte Ente-Auth-Eintrag phvaceu-prod / Panasonic wurde nicht gefunden.") }
+    guard let code = match.code else { throw HelperError.message("Der aktuelle Panasonic-Code konnte im richtigen Ente-Eintrag nicht eindeutig erkannt werden.") }
+    try focusPanasonicOtpInChrome()
+    try typeText(code)
+    try keyboardEvent(36)
+    return [
+        "typed": true,
+        "submitted": true,
+        "digits": code.count,
+        "entry": "phvaceu-prod / Panasonic",
+        "clipboardUsed": false,
+        "secretReturned": false,
+    ]
+}
+
 func snapshotPasteboard(_ pasteboard: NSPasteboard) -> [[String: Data]] {
     return (pasteboard.pasteboardItems ?? []).map { item in
         var stored: [String: Data] = [:]
@@ -353,6 +459,16 @@ do {
             trusted = AXIsProcessTrusted()
         }
         try writeJSON(["trusted": trusted, "promptRequested": shouldPrompt])
+        exit(0)
+    }
+
+    if command == "ente-auth-status" {
+        try writeJSON(enteAuthStatus())
+        exit(0)
+    }
+
+    if command == "ente-auth-type-panasonic-code" {
+        try writeJSON(typePanasonicCodeFromEnte())
         exit(0)
     }
 

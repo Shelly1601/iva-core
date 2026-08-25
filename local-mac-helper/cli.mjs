@@ -56,6 +56,12 @@ import {
   loadManufacturerLeadState,
   recordManufacturerOperation,
 } from './manufacturer-lead-operations.mjs';
+import {
+  configureCredentialFieldInteractive,
+  credentialBrokerPolicy,
+  credentialBrokerStatus,
+} from './credential-broker.mjs';
+import { ensurePortalLogin, portalAuthPolicy } from './portal-auth.mjs';
 
 async function readJson(filePath) {
   if (!filePath) throw new Error('Pfad zu einer JSON-Datei fehlt.');
@@ -88,6 +94,13 @@ const batchService = new FundingBatchService({
 
 async function main() {
   const [command, filePath, confirmation, extra] = process.argv.slice(2);
+  if (command === 'credential-policy') return console.log(JSON.stringify({ keychain: credentialBrokerPolicy(), portalLogin: portalAuthPolicy() }, null, 2));
+  if (command === 'credential-status') return console.log(JSON.stringify(await credentialBrokerStatus(filePath), null, 2));
+  if (command === 'credential-setup') {
+    if (extra !== '--commit') throw new Error('Der Schlüsselbund-Eintrag wurde nicht angelegt. Zum Bestätigen --commit anhängen.');
+    return console.log(JSON.stringify(await configureCredentialFieldInteractive(filePath, confirmation), null, 2));
+  }
+  if (command === 'portal-login') return console.log(JSON.stringify(await ensurePortalLogin(filePath), null, 2));
   if (command === 'manufacturer-lead-readiness') {
     const config = await loadManufacturerLeadConfig(filePath);
     return console.log(JSON.stringify(getManufacturerLeadReadiness(config), null, 2));
@@ -246,6 +259,10 @@ async function main() {
   }
   console.log(`IVA Mac Helper
 
+  node local-mac-helper/cli.mjs credential-policy
+  node local-mac-helper/cli.mjs credential-status [panasonic|bosch|pipedrive|airtable|planbar]
+  node local-mac-helper/cli.mjs credential-setup <portal> <username|password|totp> --commit
+  node local-mac-helper/cli.mjs portal-login <panasonic|bosch|pipedrive|airtable|planbar>
   node local-mac-helper/cli.mjs manufacturer-lead-readiness [konfiguration.json]
   node local-mac-helper/cli.mjs manufacturer-lead-classify "Adresse" [konfiguration.json]
   node local-mac-helper/cli.mjs manufacturer-operation-record /pfad/ergebnis.json --commit

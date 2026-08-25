@@ -17,6 +17,30 @@ export function deviceControlSkill({ enqueueDeviceCommand, deviceCommandStatus }
         return { queued: true, commandId: command.id, deviceId: command.deviceId, action: command.action, expiresAt: command.expiresAt };
       },
     }),
+    ensureImacPortalLogin: tool({
+      description: 'Meldet IVA auf Nadines Mac selbstständig bei einem bereits freigegebenen Portal an. Zugangsdaten kommen aus dem lokalen macOS-Schlüsselbund; Panasonic-2FA kommt direkt aus dem fest hinterlegten Ente-Auth-Eintrag. Kein Secret wird an Railway, Chat oder Modell zurückgegeben. Normale Wiederanmeldungen benötigen keine erneute Freigabe; CAPTCHA, Kontosperre, externe Bestätigung oder fehlende lokale Zugänge werden konkret gemeldet.',
+      parameters: z.object({
+        service: z.enum(['panasonic', 'bosch', 'pipedrive', 'airtable', 'planbar']),
+        requestText: z.string().max(500).optional(),
+      }),
+      execute: async ({ service, requestText }) => {
+        const command = await enqueueDeviceCommand({
+          action: 'portal.login',
+          payload: { service },
+          requestedBy: 'iva-login',
+          requestText: requestText || `Bei ${service} anmelden`,
+        });
+        return { queued: true, commandId: command.id, deviceId: command.deviceId, service, expiresAt: command.expiresAt };
+      },
+    }),
+    getImacCredentialStatus: tool({
+      description: 'Prüft ohne Secret-Ausgabe, ob IVAs lokale Schlüsselbund-Einträge für ein freigegebenes Portal vorhanden sind.',
+      parameters: z.object({ service: z.enum(['panasonic', 'bosch', 'pipedrive', 'airtable', 'planbar']) }),
+      execute: async ({ service }) => {
+        const command = await enqueueDeviceCommand({ action: 'portal.credentials.status', payload: { service }, requestedBy: 'iva-login-status' });
+        return { queued: true, commandId: command.id, deviceId: command.deviceId, service, expiresAt: command.expiresAt };
+      },
+    }),
     getImacCommandStatus: tool({
       description: 'Prüft den Status eines zuvor an Nadines iMac gesendeten Befehls.',
       parameters: z.object({ commandId: z.string().uuid() }),
@@ -25,4 +49,4 @@ export function deviceControlSkill({ enqueueDeviceCommand, deviceCommandStatus }
   };
 }
 
-export const deviceControlSkillMeta = { id: 'deviceControl', toolNames: ['sendCommandToImac', 'getImacCommandStatus'] };
+export const deviceControlSkillMeta = { id: 'deviceControl', toolNames: ['sendCommandToImac', 'ensureImacPortalLogin', 'getImacCredentialStatus', 'getImacCommandStatus'] };

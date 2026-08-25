@@ -15,6 +15,8 @@ export const DEVICE_ACTIONS = Object.freeze({
   'funding.monitor.run': Object.freeze({ description: 'Fördermonitor einmal im gesperrten Review-Modus ausführen', mutating: false }),
   'funding.reviews.list': Object.freeze({ description: 'Lokale Förder-Prüfwarteschlange zusammenfassen', mutating: false }),
   'planbar.search.refresh': Object.freeze({ description: 'Sichtbaren Planbar-Terminindex rein lesend aktualisieren', mutating: false }),
+  'portal.credentials.status': Object.freeze({ description: 'Nur die Belegung von IVAs lokalem macOS-Schlüsselbund prüfen', mutating: false }),
+  'portal.login': Object.freeze({ description: 'Bei einem vorab freigegebenen Portal mit lokalem Schlüsselbund anmelden', mutating: false }),
   'app.open': Object.freeze({ description: 'Eine freigegebene App auf dem iMac öffnen', mutating: true }),
   'codex.task.start': Object.freeze({ description: 'Einen ausdrücklich beauftragten IVA-Bauauftrag im lokalen Codex starten', mutating: true }),
   'codex.task.status': Object.freeze({ description: 'Status eines lokalen Codex-Bauauftrags lesen', mutating: false }),
@@ -52,6 +54,13 @@ function cleanText(value, max = 240) {
 }
 
 function validatePayload(action, payload = {}) {
+  if (action === 'portal.credentials.status' || action === 'portal.login') {
+    const service = cleanText(payload.service, 40).toLowerCase();
+    if (!['panasonic', 'bosch', 'pipedrive', 'airtable', 'planbar'].includes(service)) {
+      throw new Error('Dieser Portalzugang ist für die iMac-Anmeldung nicht freigegeben.');
+    }
+    return { service };
+  }
   if (action === 'app.open') {
     const app = cleanText(payload.app, 80);
     if (!['Microsoft Outlook', 'Google Chrome', 'WhatsApp', 'Codex'].includes(app)) {

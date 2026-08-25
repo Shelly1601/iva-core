@@ -2,6 +2,18 @@
 
 Der lokale Helper bedient Programme, die nur auf Nadines Mac angemeldet sind. Er liest Förderfälle aus Pipedrive, wertet lokale Förder-PDFs aus und erstellt Outlook-Entwürfe. Es existiert bewusst kein Versand-Endpunkt.
 
+## IVA-Schlüsselbund und automatische Wiederanmeldung
+
+Panasonic, Bosch, Pipedrive, Airtable und Planbar besitzen feste, erweiterbare Portalprofile. Wiederkehrende Zugangsdaten liegen ausschließlich im macOS-Anmeldeschlüsselbund; Railway und IVA erhalten niemals Secret-Werte. Vorhandene Sitzungen werden zuerst wiederverwendet. Nur wenn eine echte Loginseite sichtbar ist, setzt der lokale Helper den passenden Schlüsselbund-Eintrag direkt ein. Panasonic bleibt bei Ente Auth: Der richtige Eintrag wird lokal erkannt und der aktuelle Code ohne Zwischenablage direkt auf der fest erlaubten Panasonic-Authentifizierungsdomain eingegeben. CAPTCHA, Kontosperre und externe Bestätigung bleiben konkrete Blocker.
+
+Vollständige Einrichtung und Regeln: `IVA_SCHLUESSELBUND.md`.
+
+```bash
+node local-mac-helper/cli.mjs credential-status
+node local-mac-helper/cli.mjs credential-setup <portal> <username|password|totp> --commit
+node local-mac-helper/cli.mjs portal-login <panasonic|bosch|pipedrive|airtable|planbar>
+```
+
 ## Sicherheitsgrenzen
 
 - hört nur auf `127.0.0.1`

@@ -44,6 +44,12 @@ try {
   const planbarCommand = await enqueueDeviceCommand({ action: 'planbar.search.refresh', requestedBy: 'test' });
   assert.equal(planbarCommand.action, 'planbar.search.refresh');
   assert.deepEqual(planbarCommand.payload, {});
+  const portalLoginCommand = await enqueueDeviceCommand({ action: 'portal.login', payload: { service: 'Panasonic' }, requestedBy: 'test' });
+  assert.equal(portalLoginCommand.action, 'portal.login');
+  assert.deepEqual(portalLoginCommand.payload, { service: 'panasonic' });
+  const credentialStatusCommand = await enqueueDeviceCommand({ action: 'portal.credentials.status', payload: { service: 'planbar' }, requestedBy: 'test' });
+  assert.deepEqual(credentialStatusCommand.payload, { service: 'planbar' });
+  await assert.rejects(enqueueDeviceCommand({ action: 'portal.login', payload: { service: 'bank' } }), /nicht freigegeben/);
   const codexCommand = await enqueueDeviceCommand({
     action: 'codex.task.start', requestedBy: 'test',
     payload: { title: 'Voice-Parität', prompt: 'Baue die gemeinsame Voice- und Text-Pipeline vollständig.', acceptanceCriteria: ['Tests grün'] },
@@ -66,6 +72,11 @@ try {
   assert.equal(codexPolicy.sandbox, 'workspace-write');
   assert.match(codexPolicy.workspace, /iva-core$/);
 
+  const { imacDeviceAgentPolicy } = await import('../local-mac-helper/device-agent.mjs');
+  const devicePolicy = imacDeviceAgentPolicy();
+  assert.equal(devicePolicy.allowedActions.includes('portal.login'), true);
+  assert.equal(devicePolicy.allowedActions.includes('portal.credentials.status'), true);
+
   const { builderSkill } = await import('../skills/builder.js');
   console.log('Device-Control: Builder-Werkzeug prüfen …');
   let dispatched = null;
@@ -80,6 +91,20 @@ try {
   const ordered = await tools.startIvaBuild.execute({ title: 'Test', request: 'Eine echte Funktion bauen', explicitlyOrdered: true, acceptanceCriteria: ['Tests grün'] });
   assert.equal(ordered.queued, true);
   assert.equal(dispatched.commandId, ordered.commandId);
+
+  const { deviceControlSkill } = await import('../skills/device-control.js');
+  let portalDispatch = null;
+  const deviceTools = deviceControlSkill({
+    enqueueDeviceCommand: async input => {
+      portalDispatch = input;
+      return { id: '33333333-3333-4333-8333-333333333333', deviceId: IVA_IMAC_DEVICE_ID, expiresAt: new Date().toISOString(), ...input };
+    },
+    deviceCommandStatus: async id => ({ id, status: 'completed' }),
+  });
+  const loginDispatch = await deviceTools.ensureImacPortalLogin.execute({ service: 'pipedrive' });
+  assert.equal(loginDispatch.queued, true);
+  assert.equal(portalDispatch.action, 'portal.login');
+  assert.deepEqual(portalDispatch.payload, { service: 'pipedrive' });
   console.log('PASS IVA Device Control: ausgehender Gerätekanal, Lease-Schutz und enge Aktions-Positivliste.');
 } finally {
   await rm(root, { recursive: true, force: true });

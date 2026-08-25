@@ -79,7 +79,7 @@ async function main() {
 
   const task = spawn(options.command, options.args, {
     detached: true,
-    env: process.env,
+    env: { ...process.env, IVA_MAC_WAKE_GUARD_ACTIVE: '1' },
     stdio: 'inherit',
   });
   const taskResult = closeResult(task);
