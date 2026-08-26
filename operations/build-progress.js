@@ -134,6 +134,43 @@ function taskFromRequest(request, commands) {
   };
 }
 
+function operationalSteps(status) {
+  const terminal = status === 'completed';
+  const blocked = status === 'blocked';
+  return [
+    { id: 'queued', label: 'Eingereiht', progress: 10, state: 'completed' },
+    { id: 'accepted', label: 'Angenommen', progress: 30, state: 'completed' },
+    { id: 'running', label: 'Ausführung', progress: 70, state: terminal ? 'completed' : blocked ? 'blocked' : 'current' },
+    { id: 'completed', label: 'Ergebnis geprüft', progress: 100, state: terminal ? 'completed' : 'pending' },
+  ];
+}
+
+function taskFromOperationalRun(run = {}) {
+  const rawStatus = clean(run.status, 50);
+  const terminalFailure = ['failed', 'blocked', 'timed_out', 'incomplete', 'stopped'].includes(rawStatus);
+  const status = rawStatus === 'completed' ? 'completed' : terminalFailure ? 'blocked' : rawStatus === 'queued' ? 'queued' : 'running';
+  const build = run.channel === 'codex-build';
+  const phase = build
+    ? (BUILD_PHASES.some(item => item.id === run.phase) ? run.phase : status === 'completed' ? 'completed' : 'implementing')
+    : (status === 'completed' ? 'completed' : clean(run.phase, 60) || 'running');
+  const progress = status === 'completed'
+    ? 100
+    : Math.max(0, Math.min(99, Number(run.progress) || (status === 'queued' ? 5 : build ? progressForPhase(phase, 30) : 70)));
+  const detail = clean(run.resultPreview || run.requestPreview || (status === 'queued' ? 'Der Auftrag wartet auf die lokale Ausführung.' : 'Der Auftrag läuft.'), 1800);
+  return {
+    id: run.id, requestId: '', commandId: '', jobId: clean(run.jobId, 100),
+    title: clean(run.taskTitle || run.agentName || 'IVA-Hintergrundauftrag', 180),
+    description: clean(run.requestPreview, 1200), status, phase,
+    phaseLabel: build ? BUILD_PHASES.find(item => item.id === phase)?.label || 'Umsetzung' : status === 'completed' ? 'Ergebnis geprüft' : status === 'queued' ? 'Eingereiht' : 'Befehl läuft',
+    progress, detail, blocker: terminalFailure ? clean(run.error || detail, 1000) : '',
+    steps: build ? buildSteps(phase, status) : operationalSteps(status),
+    createdAt: run.createdAt || run.startedAt, updatedAt: run.updatedAt || run.completedAt || run.createdAt,
+    completedAt: run.completedAt || '', resultPreview: clean(run.resultPreview, 1800),
+    gitCommit: '', liveUrl: '', livePath: '', liveStatus: status === 'completed' && build ? 'live' : '',
+    source: clean(run.source, 120), workflowId: clean(run.workflowId, 140),
+  };
+}
+
 function releaseFallback(release = {}) {
   if (!release?.title) return null;
   const railwayDomain = clean(process.env.RAILWAY_PUBLIC_DOMAIN, 300);
@@ -160,11 +197,16 @@ function releaseFallback(release = {}) {
   };
 }
 
-export function buildProgressSnapshot({ requests = [], commands = [], release = null } = {}) {
-  const tasks = (Array.isArray(requests) ? requests : [])
+export function buildProgressSnapshot({ requests = [], commands = [], operationRuns = [], release = null } = {}) {
+  const requestedTasks = (Array.isArray(requests) ? requests : [])
     .filter(request => !['rejected'].includes(request.status))
-    .map(request => taskFromRequest(request, Array.isArray(commands) ? commands : []))
-    .sort(byNewest);
+    .map(request => taskFromRequest(request, Array.isArray(commands) ? commands : []));
+  const requestedJobIds = new Set(requestedTasks.map(task => task.jobId).filter(Boolean));
+  const reportedTasks = (Array.isArray(operationRuns) ? operationRuns : [])
+    .filter(run => ['codex-build', 'project-workflow'].includes(run.channel))
+    .filter(run => !run.jobId || !requestedJobIds.has(run.jobId))
+    .map(taskFromOperationalRun);
+  const tasks = [...requestedTasks, ...reportedTasks].sort(byNewest);
   const active = tasks.filter(task => task.status === 'running');
   const queued = tasks.filter(task => task.status === 'queued');
   const blocked = tasks.filter(task => task.status === 'blocked');
@@ -184,30 +226,34 @@ export function buildProgressSnapshot({ requests = [], commands = [], release = 
 
 export function buildJobsNeedingRefresh({ requests = [], commands = [], now = Date.now(), minAgeMs = 20_000, limit = 4 } = {}) {
   const jobs = [];
-  for (const request of Array.isArray(requests) ? requests : []) {
-    const start = (Array.isArray(commands) ? commands : [])
-      .filter(command => command.action === 'codex.task.start')
-      .find(command => command.id === request.commandId || command.payload?.requestId === request.id);
+  const allCommands = Array.isArray(commands) ? commands : [];
+  const origins = allCommands
+    .filter(command => ['codex.task.start', 'project.workflow.run', 'planbar.customer.schedule'].includes(command.action))
+    .filter(command => command.result?.jobId);
+  const requestedByCommand = new Map((Array.isArray(requests) ? requests : []).map(request => [request.commandId, request]));
+  for (const start of origins) {
+    const request = requestedByCommand.get(start.id) || (Array.isArray(requests) ? requests : [])
+      .find(item => start.payload?.requestId && item.id === start.payload.requestId) || {};
     const jobId = clean(request.jobId || start?.result?.jobId, 100);
     if (!jobId) continue;
-    const latest = latestStatusCommand(commands, jobId);
+    const latest = latestStatusCommand(allCommands, jobId);
     const localStatus = latest?.status === 'completed' ? latest.result?.status : '';
     if (TERMINAL_TASK_STATUSES.has(localStatus)) continue;
     if (latest && ['queued', 'running'].includes(latest.status)) continue;
     const lastAt = Date.parse(latest?.completedAt || latest?.createdAt || start?.completedAt || start?.createdAt || 0);
     if (Number.isFinite(lastAt) && now - lastAt < minAgeMs) continue;
-    jobs.push({ jobId, requestId: request.id, title: clean(request.title, 180) });
+    jobs.push({ jobId, requestId: request.id || '', title: clean(request.title || start.payload?.displayName || start.payload?.title || start.requestText || start.action, 180), originCommandId: start.id, workflowId: clean(start.payload?.workflowId, 140) });
     if (jobs.length >= limit) break;
   }
   return jobs;
 }
 
 export const CURRENT_BUILD_RELEASE = Object.freeze({
-  id: 'transparent-build-progress-v1',
-  title: 'Transparente Befehls- und Baufortschrittsanzeige',
-  summary: 'Echte Meilensteine, laufende und wartende Aufträge, konkrete Blocker sowie die zuletzt live verfügbare Umsetzung im IVA-Kontrollzentrum.',
-  detail: 'Das Kontrollzentrum aktualisiert sich automatisch und zeigt nur tatsächlich erreichte Schritte.',
-  implementedAt: '2026-08-26T05:09:09.000Z',
+  id: 'complete-operations-journal-v2',
+  title: 'Vollständiges Betriebsjournal im Kontrollzentrum',
+  summary: 'Codex-Bauaufträge, iMac-Befehle, Projekt-Workflows, Railway-Automationen und IVA-Chatläufe erscheinen mit echtem Zeitstempel, Status und Ergebnis in einer gemeinsamen Historie.',
+  detail: 'Der belegte Angelo-Forecast vom 23.08.2026 ist sichtbar; zukünftige lokale Läufe melden Start, Fortschritt und Endergebnis automatisch.',
+  implementedAt: '2026-08-26T08:57:52.000Z',
   livePath: '/control',
 });
 

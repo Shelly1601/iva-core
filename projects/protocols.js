@@ -270,6 +270,23 @@ export async function listProjectProtocols(projectId) {
   };
 }
 
+export async function listProjectWorkflowRuns(projectId, { limit = 250 } = {}) {
+  const protocols = await listProjectProtocols(projectId);
+  const runs = new Map();
+  for (const folder of protocols.folders || []) {
+    for (const file of folder.files || []) {
+      for (const run of file.runs || []) {
+        if (!runs.has(run.runId) || String(run.completedAt).localeCompare(String(runs.get(run.runId)?.completedAt || '')) > 0) {
+          runs.set(run.runId, { ...run, projectId: safeId(projectId) });
+        }
+      }
+    }
+  }
+  return [...runs.values()]
+    .sort((left, right) => String(right.completedAt || right.startedAt).localeCompare(String(left.completedAt || left.startedAt)))
+    .slice(0, Math.max(1, Math.min(1000, Number(limit) || 250)));
+}
+
 export async function getProjectProtocol(projectId, type, fileId) {
   const files = await listDirectory(projectId, type === 'weekly' ? 'weekly' : 'daily');
   return files.find(item => item.fileId === clean(fileId, 180)) || null;

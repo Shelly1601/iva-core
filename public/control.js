@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id);
 const TOKEN_KEY = 'iva_token';
-const state = { status:null, approvals:[], runs:[], audit:[], automations:[], automationRuns:[], reports:[], loading:false };
+const state = { status:null, approvals:[], runs:[], audit:[], automations:[], projectWorkflows:[], reports:[], loading:false };
 function token(){ return localStorage.getItem(TOKEN_KEY) || ''; }
 function esc(value){ return String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char])); }
 function fmt(value){ if(!value)return '–'; try{return new Date(value).toLocaleString('de-DE',{dateStyle:'short',timeStyle:'short'});}catch{return value;} }
@@ -45,9 +45,27 @@ function renderMetrics(){
   $('metrics').innerHTML=values.map(([value,label,kind])=>`<div class="metric ${kind}"><b>${esc(value)}</b><small>${esc(label)}</small></div>`).join('');
 }
 function automationStatus(item){ const run=item.lastRun; if(!run)return ['noch kein Lauf','off']; if(run.status==='completed')return ['zuletzt erfolgreich','ready']; if(run.status==='failed')return ['zuletzt Fehler','']; if(run.status==='blocked')return ['blockiert','']; return [run.status,'off']; }
+function statusView(status){
+  const value=String(status||'recorded').toLowerCase();
+  if(value==='completed'||value==='successful'||value==='sent-and-verified')return ['erfolgreich','ready'];
+  if(value==='running')return ['läuft','live'];
+  if(value==='queued')return ['wartet','off'];
+  if(value==='blocked')return ['blockiert',''];
+  if(value==='skipped')return ['übersprungen','off'];
+  if(['failed','timed_out','incomplete'].includes(value))return ['Fehler',''];
+  return [value,'off'];
+}
+function workflowResult(item){
+  const run=item.lastRun;
+  if(!run)return '<div class="workflow-result empty-result"><b>Noch kein belegter Lauf</b><span>Sobald der Workflow läuft, erscheinen Zeitpunkt, Status und Ergebnis automatisch hier.</span></div>';
+  const [label,kind]=statusView(run.status);
+  const evidence=(run.proofs||[]).length?`<div class="proofs">${run.proofs.map(value=>`<span>✓ ${esc(value)}</span>`).join('')}</div>`:'';
+  return `<div class="workflow-result"><div class="list-head"><b>Letzter Lauf: ${fmt(run.completedAt||run.updatedAt||run.startedAt)}</b><span class="badge ${kind}">${esc(label)}</span></div><p>${esc(run.summary||'Lauf protokolliert.')}</p>${evidence}${run.error?`<div class="error">${esc(run.error)}</div>`:''}</div>`;
+}
 function renderAutomations(){
   const reporting=state.status?.systems?.reporting||{};
-  $('automations').innerHTML=state.automations.length?state.automations.map(item=>{ const [label,kind]=automationStatus(item); return `<article class="workflow"><div><div class="list-head"><h3>${esc(item.name)}</h3><span class="badge ${kind}">${esc(label)}</span></div><p>${esc(item.description)}</p><div class="workflow-meta"><span>${esc(item.category)}</span><span>${esc(item.schedule)}</span>${item.lastRun?`<span>Letzter Lauf: ${fmt(item.lastRun.completedAt||item.lastRun.startedAt)}</span>`:''}</div></div><label class="switch" title="${item.enabled?'Ausschalten':'Einschalten'}"><input type="checkbox" data-automation="${esc(item.id)}" ${item.enabled?'checked':''}><span class="slider"></span></label></article>`; }).join(''):empty('Keine Automationen registriert.');
+  $('projectWorkflows').innerHTML=state.projectWorkflows.length?state.projectWorkflows.map(item=>`<article class="workflow project-workflow"><div><div class="list-head"><h3>${esc(item.name)}</h3><span class="badge ${item.enabled?'ready':'off'}">${item.enabled?'aktiv':esc(item.status)}</span></div><p>${esc(item.purpose)}</p><div class="workflow-meta"><span>${esc(item.projectName)}</span><span>${esc(item.schedule)}</span><span>${esc(item.execution)}</span></div>${workflowResult(item)}</div><a class="workflow-link" href="/projects?id=${encodeURIComponent(item.projectId)}">Projekt öffnen</a></article>`).join(''):empty('Keine Projekt-Workflows registriert.');
+  $('automations').innerHTML=state.automations.length?state.automations.map(item=>{ const [label,kind]=automationStatus(item); const run=item.lastRun; return `<article class="workflow"><div><div class="list-head"><h3>${esc(item.name)}</h3><span class="badge ${kind}">${esc(label)}</span></div><p>${esc(item.description)}</p><div class="workflow-meta"><span>${esc(item.category)}</span><span>${esc(item.schedule)}</span>${run?`<span>Letzter Lauf: ${fmt(run.completedAt||run.startedAt)}</span>`:''}</div>${run?`<div class="workflow-result"><p>${esc(run.summary||run.error||'Lauf protokolliert.')}</p>${run.error?`<div class="error">${esc(run.error)}</div>`:''}</div>`:''}</div><label class="switch" title="${item.enabled?'Ausschalten':'Einschalten'}"><input type="checkbox" data-automation="${esc(item.id)}" ${item.enabled?'checked':''}><span class="slider"></span></label></article>`; }).join(''):empty('Keine Automationen registriert.');
   const emailHint=reporting.ready?`E-Mail bereit über ${reporting.provider} · ${reporting.recipient}`:`E-Mail noch nicht bereit · fehlt: ${(reporting.missing||[]).join(', ')}`;
   $('reports').innerHTML=`<span class="report-chip">${esc(emailHint)}</span>`+(state.reports.length?state.reports.slice(0,8).map(item=>`<span class="report-chip">${esc(item.type==='weekly'?'Woche':'Tag')} ${esc(item.periodKey)} · ${esc(item.counts?.completed||0)} ok / ${esc(item.counts?.failed||0)} Fehler</span>`).join(''):'<span class="report-chip">Noch kein Report erstellt.</span>');
   document.querySelectorAll('[data-automation]').forEach(input=>input.addEventListener('change',()=>{void toggleAutomation(input);}));
@@ -70,7 +88,7 @@ function renderApprovals(){
   $('approvals').innerHTML=state.approvals.length?state.approvals.map(item=>`<article class="list-item"><div class="list-head"><b>${esc(item.title)}</b><span class="badge">${esc(item.status)}</span></div><p>${esc(item.summary||'')}</p><div class="tools">Bestätigung: ${esc(item.confirmationPhrase||'im Vorgang')}</div><div class="meta">${fmt(item.updatedAt)} · ${esc(item.agentId)}</div></article>`).join(''):empty('Keine Freigabe wartet.');
 }
 function renderRuns(){
-  $('runs').innerHTML=state.runs.length?state.runs.map(item=>`<article class="list-item"><div class="list-head"><b>${esc(item.agentName)}</b><span class="badge ${item.status==='completed'?'ready':item.status==='failed'?'':'off'}">${esc(item.status)}</span></div><p>${esc(item.requestPreview||'')}</p>${item.tools?.length?`<div class="tools">Werkzeuge: ${item.tools.map(esc).join(' · ')}</div>`:''}${item.error?`<div class="error">${esc(item.error)}</div>`:''}<div class="meta">${fmt(item.createdAt)} · ${duration(item.durationMs)} · ${esc(item.routeReason)}</div></article>`).join(''):empty('Noch keine protokollierten Agentenläufe.');
+  $('runs').innerHTML=state.runs.length?state.runs.map(item=>{ const [label,kind]=statusView(item.status); const when=item.completedAt||item.updatedAt||item.startedAt; const evidence=(item.proofs||[]).length?`<div class="proofs">${item.proofs.map(value=>`<span>✓ ${esc(value)}</span>`).join('')}</div>`:''; const progress=Number.isFinite(Number(item.progress))&&item.status==='running'?`<div class="run-progress"><i style="width:${Math.max(0,Math.min(100,Number(item.progress)))}%"></i></div>`:''; return `<article class="list-item activity-item"><div class="list-head"><div><b>${esc(item.name)}</b><div class="activity-source">${esc(item.source)} · ${esc(item.type)}</div></div><span class="badge ${kind}">${esc(label)}</span></div><p>${esc(item.summary||'Lauf protokolliert.')}</p>${progress}${item.phase?`<div class="tools">Phase: ${esc(item.phase)}${Number.isFinite(Number(item.progress))?` · ${esc(item.progress)} %`:''}</div>`:''}${item.tools?.length?`<div class="tools">Werkzeuge: ${item.tools.map(esc).join(' · ')}</div>`:''}${evidence}${item.error?`<div class="error">${esc(item.error)}</div>`:''}<div class="meta">${fmt(when)}${item.startedAt&&item.completedAt?` · Start ${fmt(item.startedAt)} · Ende ${fmt(item.completedAt)}`:''}${item.durationMs!=null?` · ${duration(item.durationMs)}`:''}</div></article>`; }).join(''):empty('Noch keine echten Läufe oder Befehle protokolliert.');
 }
 function renderBacklog(){
   const items=state.status?.buildBacklog||[];
@@ -86,7 +104,9 @@ async function load(){
   state.loading=true;
   setStatus('','verbinde …');
   try{
-    [state.status,state.approvals,state.runs,state.audit,state.automations,state.automationRuns,state.reports]=await Promise.all([api('/api/control/status'),api('/api/control/approvals?status=pending&limit=30'),api('/api/control/runs?limit=30'),api('/api/control/audit?limit=30'),api('/api/automations'),api('/api/automations/runs?limit=50'),api('/api/automation-reports?limit=12')]);
+    [state.status,state.approvals,state.audit,state.automations,state.reports]=await Promise.all([api('/api/control/status'),api('/api/control/approvals?status=pending&limit=30'),api('/api/control/audit?limit=30'),api('/api/automations'),api('/api/automation-reports?limit=12')]);
+    state.runs=state.status.activity||[];
+    state.projectWorkflows=state.status.projectWorkflows||[];
     render(); setStatus('on','aktuell · '+fmt(state.status.generatedAt));
   }catch(error){ setStatus('err',error.message); if(error.message.includes('401')) $('token').focus(); }
   finally{ state.loading=false; }

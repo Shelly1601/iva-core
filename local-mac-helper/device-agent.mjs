@@ -52,6 +52,14 @@ async function request(pathname, { method = 'GET', body } = {}) {
   return payload;
 }
 
+export async function reportOperationalRun(input = {}) {
+  return request(`/device-agent/${IMAC_DEVICE_ID}/operational-runs`, { method: 'POST', body: input });
+}
+
+export async function reportProjectWorkflowRun(input = {}) {
+  return request(`/device-agent/${IMAC_DEVICE_ID}/project-workflow-runs`, { method: 'POST', body: input });
+}
+
 function openApplication(appName) {
   const appPath = APP_ALLOWLIST[appName];
   if (!appPath) throw new Error('Diese App ist auf dem iMac nicht freigegeben.');

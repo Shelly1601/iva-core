@@ -21,6 +21,18 @@ function safePreview(value) {
     .replace(/\+?[0-9][0-9\s()/.-]{7,}/g, '[Telefon]');
 }
 
+function safeTimestamp(value, fallback = '') {
+  const parsed = Date.parse(String(value || ''));
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : fallback;
+}
+
+function normalizedRunStatus(value) {
+  const status = clean(value, 40).toLowerCase();
+  return ['queued', 'running', 'completed', 'failed', 'blocked', 'stopped', 'timed_out', 'incomplete'].includes(status)
+    ? status
+    : 'running';
+}
+
 function sessionHash(value) {
   return value ? crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 12) : '';
 }
@@ -99,6 +111,61 @@ export async function finishAgentRun(id, input = {}) {
     item.resultPreview = safePreview(input.resultPreview);
     item.error = item.status === 'failed' ? safePreview(input.error || 'Unbekannter Fehler') : '';
     item.updatedAt = new Date().toISOString();
+    return structuredClone(item);
+  });
+}
+
+// Lokale Codex-/iMac-Läufe melden ihren echten Zustand über einen stabilen
+// externen Schlüssel. Dadurch wird derselbe Lauf vom Start bis zum Ergebnis
+// aktualisiert, statt bei jedem Meilenstein als neuer Chatlauf aufzutauchen.
+export async function upsertExternalAgentRun(input = {}) {
+  const externalKey = clean(input.externalKey, 180);
+  if (!externalKey) throw new Error('Für einen externen Lauf fehlt der stabile Schlüssel.');
+  return mutate(store => {
+    const now = new Date().toISOString();
+    const existing = store.runs.find(run => run.externalKey === externalKey);
+    const item = existing || {
+      id: crypto.randomUUID(),
+      externalKey,
+      createdAt: safeTimestamp(input.startedAt || input.createdAt, now),
+      tools: [],
+      durationMs: null,
+    };
+    const status = normalizedRunStatus(input.status);
+    const startedAt = safeTimestamp(input.startedAt, item.startedAt || item.createdAt);
+    const completedAt = ['completed', 'failed', 'blocked', 'stopped', 'timed_out', 'incomplete'].includes(status)
+      ? safeTimestamp(input.completedAt || input.updatedAt, now)
+      : '';
+    Object.assign(item, {
+      agentId: clean(input.agentId || item.agentId || 'iva-operations', 100),
+      agentName: clean(input.agentName || input.taskTitle || item.agentName || 'IVA-Hintergrundlauf', 180),
+      taskTitle: safePreview(input.taskTitle || input.agentName || item.taskTitle || item.agentName),
+      routeReason: clean(input.routeReason || item.routeReason || 'background-operation', 180),
+      channel: clean(input.channel || item.channel || 'background', 80),
+      source: clean(input.source || item.source || 'IVA-Hintergrund', 120),
+      jobId: clean(input.jobId || item.jobId, 100),
+      projectId: clean(input.projectId || item.projectId, 100),
+      workflowId: clean(input.workflowId || item.workflowId, 140),
+      requestPreview: safePreview(input.requestPreview || input.taskTitle || item.requestPreview),
+      resultPreview: safePreview(input.resultPreview || input.detail || item.resultPreview),
+      error: ['failed', 'blocked', 'timed_out', 'incomplete'].includes(status)
+        ? safePreview(input.error || input.detail || item.error || 'Lauf nicht erfolgreich abgeschlossen.')
+        : '',
+      status,
+      phase: clean(input.phase || item.phase, 80),
+      progress: Math.max(0, Math.min(100, Number(input.progress ?? item.progress) || 0)),
+      tools: [...new Set([...(item.tools || []), ...(Array.isArray(input.tools) ? input.tools : [])]
+        .map(value => clean(value, 120)).filter(Boolean))].slice(0, 30),
+      proofs: (Array.isArray(input.proofs) ? input.proofs : (item.proofs || []))
+        .map(value => safePreview(value)).filter(Boolean).slice(0, 12),
+      startedAt,
+      completedAt,
+      updatedAt: safeTimestamp(input.updatedAt, now),
+    });
+    item.durationMs = completedAt
+      ? Math.max(0, Date.parse(completedAt) - Date.parse(startedAt || item.createdAt))
+      : null;
+    if (!existing) store.runs.push(item);
     return structuredClone(item);
   });
 }

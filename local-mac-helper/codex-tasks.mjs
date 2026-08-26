@@ -64,6 +64,54 @@ async function writeState(paths, value) {
   return value;
 }
 
+async function reportTaskState(request, state, resultPreview = '') {
+  try {
+    const { reportOperationalRun, reportProjectWorkflowRun } = await import('./device-agent.mjs');
+    const terminal = ['completed', 'failed', 'blocked', 'timed_out', 'incomplete'].includes(state.status);
+    const operational = {
+      externalKey: `codex-task:${request.jobId}`,
+      jobId: request.jobId,
+      agentId: request.mode === 'project-workflow' ? 'iva-operations' : 'iva-builder',
+      agentName: request.title,
+      taskTitle: request.title,
+      routeReason: request.mode === 'project-workflow' ? 'project-workflow' : 'explicit-build-order',
+      channel: request.mode === 'project-workflow' ? 'project-workflow' : 'codex-build',
+      source: 'iMac · Codex',
+      projectId: request.projectId || '',
+      workflowId: request.workflowId || '',
+      requestPreview: request.title,
+      status: state.status,
+      phase: state.phase,
+      progress: state.progress,
+      detail: state.detail,
+      resultPreview: resultPreview || state.detail,
+      error: state.error || (['failed', 'blocked', 'timed_out', 'incomplete'].includes(state.status) ? state.detail : ''),
+      startedAt: state.startedAt || request.createdAt,
+      completedAt: terminal ? state.completedAt || state.updatedAt : '',
+      updatedAt: state.updatedAt,
+    };
+    await reportOperationalRun(operational);
+    if (terminal && request.mode === 'project-workflow' && request.workflowId) {
+      await reportProjectWorkflowRun({
+        runId: `codex-${request.jobId}`,
+        workflowId: request.workflowId,
+        workflowName: request.workflowName || request.title,
+        status: state.status,
+        startedAt: state.startedAt || request.createdAt,
+        completedAt: terminal ? state.completedAt || state.updatedAt : state.updatedAt,
+        summary: resultPreview || state.detail || 'Lokaler Projekt-Workflow läuft.',
+        error: operational.error,
+        metrics: { jobId: request.jobId, phase: state.phase, progress: state.progress },
+      });
+    }
+  } catch (error) {
+    // Der lokale Zustand bleibt die Quelle für spätere Statusabfragen. Ein
+    // vorübergehend nicht erreichbarer Server darf den eigentlichen Lauf nie
+    // abbrechen oder fälschlich als fehlgeschlagen markieren.
+    console.error(`Kontrollzentrum-Meldung fehlgeschlagen: ${clean(error.message, 300)}`);
+  }
+}
+
 function buildCodexPrompt(request) {
   if (request.mode === 'project-workflow') {
     return `Nadine hat diesen Projekt-Workflow in IVA ausdrücklich über den Button „Manuell auslösen“ gestartet. Führe jetzt genau einen operativen Einmallauf aus, ohne eine weitere Planbestätigung zu verlangen.
@@ -110,7 +158,7 @@ export function codexTaskPolicy() {
   });
 }
 
-export async function startCodexTask({ prompt, title = '', requestId = '', acceptanceCriteria = [], mode = 'build' } = {}) {
+export async function startCodexTask({ prompt, title = '', requestId = '', acceptanceCriteria = [], mode = 'build', projectId = '', workflowId = '', workflowName = '' } = {}) {
   const cleanPrompt = clean(prompt, MAX_PROMPT_LENGTH);
   if (cleanPrompt.length < 10) throw new Error('Der Codex-Bauauftrag ist zu kurz.');
   const jobId = crypto.randomUUID();
@@ -123,11 +171,15 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
     prompt: cleanPrompt,
     acceptanceCriteria: (Array.isArray(acceptanceCriteria) ? acceptanceCriteria : []).map(value => clean(value, 500)).filter(Boolean).slice(0, 12),
     mode: mode === 'project-workflow' ? 'project-workflow' : 'build',
+    projectId: clean(projectId, 100),
+    workflowId: clean(workflowId, 140),
+    workflowName: clean(workflowName, 220),
     workspace: REPO_ROOT,
     createdAt: new Date().toISOString(),
   };
   await writeFile(paths.request, JSON.stringify(request, null, 2));
-  await writeState(paths, { jobId, title: request.title, requestId: request.requestId, status: 'queued', phase: request.mode === 'build' ? 'planning' : 'queued', progress: request.mode === 'build' ? 5 : 0, detail: 'Auftrag wartet auf den lokalen Codex-Start.', createdAt: request.createdAt, updatedAt: request.createdAt, workspace: REPO_ROOT });
+  const initialState = await writeState(paths, { jobId, title: request.title, requestId: request.requestId, mode: request.mode, projectId: request.projectId, workflowId: request.workflowId, status: 'queued', phase: request.mode === 'build' ? 'planning' : 'queued', progress: request.mode === 'build' ? 5 : 0, detail: 'Auftrag wartet auf den lokalen Codex-Start.', createdAt: request.createdAt, updatedAt: request.createdAt, workspace: REPO_ROOT });
+  await reportTaskState(request, initialState);
   const child = spawn(process.execPath, [MODULE_PATH, 'run', jobId], { detached: true, stdio: 'ignore' });
   child.unref();
   return { jobId, status: 'queued', title: request.title, workspace: 'iva-core', startedLocally: true };
@@ -162,6 +214,9 @@ export async function startProjectWorkflowTask({ workflowId } = {}) {
   return startCodexTask({
     ...definition,
     mode: 'project-workflow',
+    projectId: 'heat-hero',
+    workflowId,
+    workflowName: definition.title,
     requestId: `project-workflow-${workflowId}-${Date.now()}`,
   });
 }
@@ -222,13 +277,14 @@ export async function getCodexTaskStatus(jobId) {
 export async function updateCodexTaskProgress(jobId, phase, detail = '') {
   const paths = jobPaths(jobId);
   const state = await readJson(paths.state);
+  const request = await readJson(paths.request).catch(() => null);
   const nextPhase = clean(phase, 60);
   const isBlocked = nextPhase === 'blocked';
   if (!isBlocked && !Object.hasOwn(BUILD_PHASES, nextPhase)) throw new Error('Unbekannter IVA-Baumeilenstein.');
   const currentProgress = Number(state.progress) || 0;
   const nextProgress = isBlocked ? currentProgress : nextPhase === 'completed' ? 99 : BUILD_PHASES[nextPhase];
   if (!isBlocked && nextProgress < currentProgress) throw new Error('Ein abgeschlossener Baumeilenstein kann nicht zurückgesetzt werden.');
-  return writeState(paths, {
+  const updated = await writeState(paths, {
     ...state,
     status: isBlocked ? 'blocked' : 'running',
     phase: isBlocked ? (state.phase || 'planning') : nextPhase,
@@ -237,13 +293,16 @@ export async function updateCodexTaskProgress(jobId, phase, detail = '') {
     error: isBlocked ? clean(detail, 1000) : '',
     updatedAt: new Date().toISOString(),
   });
+  if (request) await reportTaskState(request, updated);
+  return updated;
 }
 
 export async function runCodexTask(jobId) {
   const paths = jobPaths(jobId);
   const request = await readJson(paths.request);
   const startedAt = new Date().toISOString();
-  await writeState(paths, { jobId, title: request.title, requestId: request.requestId, status: 'running', phase: request.mode === 'build' ? 'planning' : 'running', progress: request.mode === 'build' ? 10 : 5, detail: request.mode === 'build' ? 'Planung wurde begonnen.' : 'Workflow wurde gestartet.', createdAt: request.createdAt, startedAt, updatedAt: startedAt, workspace: REPO_ROOT });
+  const runningState = await writeState(paths, { jobId, title: request.title, requestId: request.requestId, mode: request.mode, projectId: request.projectId, workflowId: request.workflowId, status: 'running', phase: request.mode === 'build' ? 'planning' : 'running', progress: request.mode === 'build' ? 10 : 5, detail: request.mode === 'build' ? 'Planung wurde begonnen.' : 'Workflow wurde gestartet.', createdAt: request.createdAt, startedAt, updatedAt: startedAt, workspace: REPO_ROOT });
+  await reportTaskState(request, runningState);
   const logHandle = await open(paths.log, 'a');
   const command = codexBinary();
   const args = [
@@ -275,7 +334,7 @@ export async function runCodexTask(jobId) {
           ? 'incomplete'
           : 'completed';
   const finalProgress = status === 'completed' ? 100 : Number(current.progress) || 0;
-  return writeState(paths, {
+  const finalState = await writeState(paths, {
     ...current,
     jobId, title: request.title, requestId: request.requestId, status,
     phase: status === 'completed' ? 'completed' : current.phase,
@@ -284,6 +343,9 @@ export async function runCodexTask(jobId) {
     createdAt: request.createdAt, startedAt, completedAt, exitCode,
     updatedAt: completedAt, workspace: REPO_ROOT,
   });
+  const resultPreview = clean(await readFile(paths.lastMessage, 'utf8').catch(() => ''), 1800);
+  await reportTaskState(request, finalState, resultPreview);
+  return finalState;
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url && process.argv[2] === 'progress') {

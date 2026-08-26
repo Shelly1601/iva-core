@@ -63,6 +63,7 @@ import {
   ensureProjectProtocolSummaries,
   getProjectProtocol,
   listProjectProtocols,
+  listProjectWorkflowRuns,
   recordProjectWorkflowResult,
 } from './projects/protocols.js';
 import {
@@ -223,8 +224,10 @@ import {
   operationsSummary,
   recordAudit,
   resolveApprovalByExternalKey,
+  upsertExternalAgentRun,
 } from './operations/store.js';
 import { buildJobsNeedingRefresh, buildProgressSnapshot, CURRENT_BUILD_RELEASE } from './operations/build-progress.js';
+import { buildControlActivityFeed, buildProjectWorkflowOverview } from './operations/activity-feed.js';
 import {
   AUTOMATION_DEFINITIONS,
   automationSummary,
@@ -1087,6 +1090,14 @@ app.post('/device-agent/:deviceId/project-workflow-runs', async (req, res) => {
   catch (error) { res.status(400).json({ error: error.message }); }
 });
 
+app.post('/device-agent/:deviceId/operational-runs', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try { res.status(201).json(await upsertExternalAgentRun(req.body || {})); }
+  catch (error) { res.status(400).json({ error: error.message }); }
+});
+
 app.post('/device-agent/:deviceId/planbar-capacity', async (req, res) => {
   if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) {
     return res.status(401).json({ error: 'unauthorized' });
@@ -1182,8 +1193,9 @@ function connector(id, label, ready, missing = [], detail = '') {
 }
 
 async function controlSnapshot() {
-  const [ops, qonektoResult, syncResult, voiceResult, knowledgeResult, opportunityResult, learningResult, automationsResult, googleGmailResult, deviceCommandsResult] = await Promise.all([
+  const [ops, agentRunsResult, qonektoResult, syncResult, voiceResult, knowledgeResult, opportunityResult, learningResult, automationsResult, automationRunsResult, googleGmailResult, deviceCommandsResult, projectsResult, protocolRunsResult] = await Promise.all([
     operationsSummary(),
+    listAgentRuns({ limit: 300 }).catch(() => []),
     qonektoStatus().catch(error => ({ configured: envReady('QONEKTO_MCP_TOKEN'), reachable: false, error: error.message })),
     crmQonektoSyncStatus().catch(error => ({ enabled: false, error: error.message })),
     voiceLabSummary().catch(error => ({ configured: {}, error: error.message })),
@@ -1191,8 +1203,11 @@ async function controlSnapshot() {
     opportunityRadarStatus().catch(error => ({ configured: false, ready: false, missing: ['APIFY_TOKEN'], error: error.message })),
     listVoiceLearning().catch(() => ({ improvementRequests: [] })),
     automationSummary().catch(error => ({ enabled: 0, disabled: 0, running: 0, failedToday: 0, reports: 0, error: error.message })),
+    listAutomationRuns({ limit: 500 }).catch(() => []),
     googleGmailStatus().catch(error => ({ configured: false, authorized: false, ready: false, missing: ['Google-Gmail-Verbindung'], error: error.message })),
-    listDeviceCommands({ limit: 200 }).catch(() => []),
+    listDeviceCommands({ limit: 500 }).catch(() => []),
+    listProjects().catch(() => []),
+    listProjectWorkflowRuns('heat-hero', { limit: 500 }).catch(() => []),
   ]);
   const improvementRequests = learningResult.improvementRequests || [];
   const buildRefreshJobs = buildJobsNeedingRefresh({ requests: improvementRequests, commands: deviceCommandsResult });
@@ -1204,7 +1219,15 @@ async function controlSnapshot() {
       requestText: `Baufortschritt: ${job.title || job.requestId}`,
     }).catch(() => null)));
   }
-  const buildProgress = buildProgressSnapshot({ requests: improvementRequests, commands: deviceCommandsResult, release: CURRENT_BUILD_RELEASE });
+  const buildProgress = buildProgressSnapshot({ requests: improvementRequests, commands: deviceCommandsResult, operationRuns: agentRunsResult, release: CURRENT_BUILD_RELEASE });
+  const activity = buildControlActivityFeed({
+    agentRuns: agentRunsResult,
+    automationRuns: automationRunsResult,
+    deviceCommands: deviceCommandsResult,
+    projects: projectsResult,
+    protocolRuns: protocolRunsResult,
+  });
+  const projectWorkflows = buildProjectWorkflowOverview(projectsResult, activity);
   const marketing = marketingConnectorStatus();
   const transcription = transcriptionProviderStatus();
   const metaWhatsApp = whatsappStatus();
@@ -1276,6 +1299,8 @@ async function controlSnapshot() {
       googleGmail: googleGmailResult,
     },
     buildProgress,
+    activity,
+    projectWorkflows,
     buildBacklog: improvementRequests.filter(item => !['done', 'rejected'].includes(item.status)).slice(-30).reverse(),
   };
 }
