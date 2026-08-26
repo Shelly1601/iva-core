@@ -60,7 +60,10 @@ function workflowResult(item){
   if(!run)return '<div class="workflow-result empty-result"><b>Noch kein belegter Lauf</b><span>Sobald der Workflow läuft, erscheinen Zeitpunkt, Status und Ergebnis automatisch hier.</span></div>';
   const [label,kind]=statusView(run.status);
   const evidence=(run.proofs||[]).length?`<div class="proofs">${run.proofs.map(value=>`<span>✓ ${esc(value)}</span>`).join('')}</div>`:'';
-  return `<div class="workflow-result"><div class="list-head"><b>Letzter Lauf: ${fmt(run.completedAt||run.updatedAt||run.startedAt)}</b><span class="badge ${kind}">${esc(label)}</span></div><p>${esc(run.summary||'Lauf protokolliert.')}</p>${evidence}${run.error?`<div class="error">${esc(run.error)}</div>`:''}</div>`;
+  const success=item.lastSuccessfulRun;
+  const successEvidence=(success?.proofs||[]).length?`<div class="proofs">${success.proofs.map(value=>`<span>✓ ${esc(value)}</span>`).join('')}</div>`:'';
+  const priorSuccess=success&&success.id!==run.id?`<div class="workflow-result verified-result"><div class="list-head"><b>Letzter erfolgreicher Nachweis: ${fmt(success.completedAt||success.updatedAt||success.startedAt)}</b><span class="badge ready">verifiziert</span></div><p>${esc(success.summary||'Erfolgreicher Lauf belegt.')}</p>${successEvidence}</div>`:'';
+  return `<div class="workflow-result"><div class="list-head"><b>Letzter Lauf: ${fmt(run.completedAt||run.updatedAt||run.startedAt)}</b><span class="badge ${kind}">${esc(label)}</span></div><p>${esc(run.summary||'Lauf protokolliert.')}</p>${evidence}${run.error?`<div class="error">${esc(run.error)}</div>`:''}</div>${priorSuccess}`;
 }
 function renderAutomations(){
   const reporting=state.status?.systems?.reporting||{};

@@ -65,6 +65,9 @@ try {
   const workflows = buildProjectWorkflowOverview([project], activity);
   assert.equal(workflows[0].lastRun.status, 'running');
   assert.match(workflows[0].lastRun.summary, /Planbar wird ausgelesen/);
+  assert.equal(workflows[0].lastSuccessfulRun.status, 'completed');
+  assert.match(workflows[0].lastSuccessfulRun.summary, /Angelo/);
+  assert.equal(workflows[0].recentRuns.length, 2);
 
   const progress = buildProgressSnapshot({ operationRuns: [{
     id: 'direct-running', taskTitle: 'Direkter Bau', agentName: 'Direkter Bau', channel: 'codex-build', source: 'Codex Desktop', status: 'running', phase: 'testing', progress: 50, createdAt: '2026-08-26T10:00:00.000Z', updatedAt: '2026-08-26T10:05:00.000Z', resultPreview: 'Tests laufen.',
@@ -86,6 +89,7 @@ try {
   assert.match(html, /Letzte echte Läufe &amp; Befehle|Letzte echte Läufe & Befehle/);
   assert.match(browserJs, /state\.status\.activity/);
   assert.match(browserJs, /Im Gesendet-Ordner verifiziert|proofs/);
+  assert.match(browserJs, /Letzter erfolgreicher Nachweis/);
 
   console.log('PASS Kontrollzentrum-Aktivität: echte Bau-, iMac-, Projekt- und Automationsläufe mit Status, Ergebnis und Angelo-Beleg.');
 } finally {

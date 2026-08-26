@@ -224,14 +224,19 @@ export function buildProjectWorkflowOverview(projects = [], activity = []) {
   const output = [];
   for (const project of projects) {
     for (const workflow of Array.isArray(project.automations) ? project.automations : []) {
-      const lastRun = activity
+      const recentRuns = activity
         .filter(event => event.workflowId === workflow.id && (!event.projectId || event.projectId === project.id))
-        .sort(newest)[0] || null;
+        .sort(newest)
+        .slice(0, 5);
+      const lastRun = recentRuns[0] || null;
+      const lastSuccessfulRun = recentRuns.find(event => event.status === 'completed') || null;
       output.push({
         ...workflow,
         projectId: project.id,
         projectName: project.name,
         lastRun,
+        lastSuccessfulRun,
+        recentRuns,
       });
     }
   }
