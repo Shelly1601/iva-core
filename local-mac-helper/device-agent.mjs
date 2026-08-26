@@ -158,6 +158,7 @@ async function executeDeviceCommand(command) {
     }
     return {
       online: true,
+      runtimeMode: process.env.IVA_DEVICE_LOCAL_RUNTIME === 'true' ? 'local' : 'icloud',
       ...imacDeviceAgentMetadata(),
       launchd,
     };

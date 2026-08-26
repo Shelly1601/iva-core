@@ -239,6 +239,8 @@ try {
   assert.match(deviceAgentRunnerSource, /'X-IVA-Agent-Workspace': metadata\.workspace/);
   assert.match(deviceAgentRunnerSource, /spawn\('\/usr\/bin\/caffeinate', \['-s', '-w'/);
   assert.match(deviceAgentRunnerSource, /updateLocalRunnerFromIcloud/);
+  const deviceAgentSource = await readFile(new URL('../local-mac-helper/device-agent.mjs', import.meta.url), 'utf8');
+  assert.match(deviceAgentSource, /runtimeMode: process\.env\.IVA_DEVICE_LOCAL_RUNTIME === 'true' \? 'local' : 'icloud'/);
   assert.match(deviceAgentRunnerSource, /LOCAL_RUNTIME \? path\.join\(LOCAL_HELPER_DIR, 'device-agent\.mjs'\)/);
   assert.match(deviceAgentRunnerSource, /scheduleLocalRuntimeMigration/);
   assert.match(deviceAgentRunnerSource, /de\.iva\.device-agent-migrator/);
