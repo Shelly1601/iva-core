@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 
 const root = await mkdtemp(path.join(os.tmpdir(), 'iva-device-control-'));
 process.env.DATA_DIR = root;
@@ -98,6 +98,9 @@ try {
   assert.equal(codexPolicy.arbitraryWorkspace, false);
   assert.equal(codexPolicy.sandbox, 'workspace-write');
   assert.match(codexPolicy.workspace, /iva-core$/);
+  const codexTaskSource = await readFile(new URL('../local-mac-helper/codex-tasks.mjs', import.meta.url), 'utf8');
+  assert.match(codexTaskSource, /'exec', '--approve-for-me'/);
+  assert.doesNotMatch(codexTaskSource, /'--sandbox'[^\n]+?'--approve-for-me'/, 'Codex CLI erlaubt --sandbox nicht zusammen mit --approve-for-me');
 
   const { imacDeviceAgentPolicy } = await import('../local-mac-helper/device-agent.mjs');
   const devicePolicy = imacDeviceAgentPolicy();

@@ -306,7 +306,7 @@ export async function runCodexTask(jobId) {
   const logHandle = await open(paths.log, 'a');
   const command = codexBinary();
   const args = [
-    'exec', '--sandbox', 'workspace-write', '--approve-for-me', '--add-dir', paths.directory,
+    'exec', '--approve-for-me', '--add-dir', paths.directory,
     '-C', REPO_ROOT, '--output-last-message', paths.lastMessage,
     buildCodexPrompt(request),
   ];
