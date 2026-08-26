@@ -30,7 +30,7 @@ export function buildImacDeviceAgentLaunchAgent({ nodePath = process.execPath, c
 <key>ProgramArguments</key><array><string>${xml(nodePath)}</string><string>${xml(cliPath)}</string><string>run-imac-device-agent-once</string></array>
 <key>WorkingDirectory</key><string>${xml(path.dirname(path.dirname(cliPath)))}</string>
 <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string><key>IVA_TESSERACT_LANG</key><string>deu+eng</string></dict>
-<key>RunAtLoad</key><true/><key>StartInterval</key><integer>15</integer><key>ProcessType</key><string>Background</string>
+<key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>10</integer><key>ProcessType</key><string>Background</string>
 <key>StandardOutPath</key><string>${xml(path.join(logs, 'device-agent.out.log'))}</string>
 <key>StandardErrorPath</key><string>${xml(path.join(logs, 'device-agent.err.log'))}</string>
 </dict></plist>`;

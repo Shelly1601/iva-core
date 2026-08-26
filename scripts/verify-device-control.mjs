@@ -156,7 +156,8 @@ try {
   console.log('Device-Control: LaunchAgent und Codex-Policy prüfen …');
   const plist = buildImacDeviceAgentLaunchAgent({ nodePath: '/node', cliPath: '/repo/local-mac-helper/cli.mjs' });
   assert.match(plist, /run-imac-device-agent-once/);
-  assert.match(plist, /<integer>15<\/integer>/);
+  assert.match(plist, /<key>KeepAlive<\/key><true\/>/);
+  assert.doesNotMatch(plist, /StartInterval/);
   const { codexTaskPolicy, inferProjectWorkflowStatus, startProjectWorkflowTask } = await import('../local-mac-helper/codex-tasks.mjs');
   const codexPolicy = codexTaskPolicy();
   assert.equal(codexPolicy.arbitraryWorkspace, false);
@@ -180,6 +181,7 @@ try {
   assert.equal(inferProjectWorkflowStatus('Status: erfolgreich\nKeine Blocker vorhanden.'), '');
   const deviceAgentRunnerSource = await readFile(new URL('../local-mac-helper/device-agent-runner.mjs', import.meta.url), 'utf8');
   assert.match(deviceAgentRunnerSource, /DEVICE_AGENT_HARD_TIMEOUT_MS = 240_000/, 'der äußere Agent darf die 180-Sekunden-Planbar-Prüfung nicht vorzeitig abbrechen');
+  assert.match(deviceAgentRunnerSource, /DEVICE_AGENT_POLL_INTERVAL_MS = 15_000/);
 
   const { assertImacExecutionHost, imacDeviceAgentPolicy, isAllowedImacExecutionHost, isAuthoritativeIcloudWorkspace } = await import('../local-mac-helper/device-agent.mjs');
   assert.equal(isAllowedImacExecutionHost('iMac-von-Nadine.local'), true);
