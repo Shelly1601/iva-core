@@ -363,6 +363,16 @@ try {
   assert.equal(queuedRuntimeCommand.action, 'codex.task.start');
   assert.equal(queuedRuntimeCommand.payload.requestId, FUNDING_RUNTIME_MARKER);
   assert.equal(queuedRuntimeCommand.payload.mode, 'operational');
+  const materializationBlocked = await reconcileFundingImacRuntime({
+    getStatus: async () => ({ ...imacMetadata, attested: true, online: true, allowedActions: ['codex.task.start', 'agent.status'] }),
+    enqueue: async () => { throw new Error('nach drei identischen iCloud-Fehlern darf kein weiterer Minutenlauf starten'); },
+    listCommands: async () => [1, 2, 3].map(index => ({
+      id: `failed-${index}`, action: 'codex.task.start', status: 'failed',
+      payload: { requestId: FUNDING_RUNTIME_MARKER }, error: 'AGENTS.md EAGAIN -11',
+    })),
+  });
+  assert.equal(materializationBlocked.status, 'blocked_icloud_materialization');
+  assert.equal(materializationBlocked.attempts, 3);
   let queuedSuspendCommand = null;
   const suspendQueued = await reconcileFundingImacRuntime({
     getStatus: async () => ({ ...imacMetadata, attested: true, online: true }),

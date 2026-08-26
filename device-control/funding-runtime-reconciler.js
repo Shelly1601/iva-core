@@ -42,9 +42,20 @@ export async function reconcileFundingImacRuntime({
     return { status: 'waiting_for_imac', detail: 'Der attestierte iMac ist noch nicht online.' };
   }
   const allowed = new Set(Array.isArray(status.allowedActions) ? status.allowedActions : []);
+  const commands = await listCommands({ deviceId: IVA_IMAC_DEVICE_ID, limit: 100 });
   if (!allowed.has(FUNDING_RUNTIME_REQUIRED_ACTION)) {
     if (!allowed.has('codex.task.start')) {
       return { status: 'blocked', detail: 'Die alte iMac-Laufzeit kann den sicheren Aktualisierungsauftrag nicht annehmen.' };
+    }
+    const failedUpdates = commands.filter(command => command.action === 'codex.task.start'
+      && command.payload?.requestId === FUNDING_RUNTIME_MARKER
+      && command.status === 'failed');
+    if (failedUpdates.length >= 3) {
+      return {
+        status: 'blocked_icloud_materialization',
+        attempts: failedUpdates.length,
+        detail: failedUpdates[0]?.error || 'Die iMac-iCloud-Dateien konnten wiederholt nicht materialisiert werden.',
+      };
     }
     const command = await enqueue({
       deviceId: IVA_IMAC_DEVICE_ID,
@@ -67,7 +78,6 @@ export async function reconcileFundingImacRuntime({
     return { status: 'runtime_update_queued', commandId: command.id };
   }
 
-  const commands = await listCommands({ deviceId: IVA_IMAC_DEVICE_ID, limit: 100 });
   const suspension = commands.find(command => command.action === FUNDING_RUNTIME_REQUIRED_ACTION
     && String(command.requestText || '').includes(FUNDING_RUNTIME_MARKER));
   if (successfulSuspension(suspension)) {

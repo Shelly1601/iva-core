@@ -2742,6 +2742,15 @@ const automationRunner = createAutomationOrchestrator({
       summary: `Förderlauf nicht an den iMac übergeben: Projektschalter aus (${disabled.join(', ')}).`,
       error: 'Mindestens ein Förder-Workflow ist in der Projektakte ausgeschaltet.',
     };
+    const imac = await deviceAgentStatus();
+    if (imac.online !== true || !Array.isArray(imac.allowedActions)
+      || !imac.allowedActions.includes('funding.legacy-monitor.suspend')) {
+      return {
+        status: 'blocked',
+        summary: 'Förderlauf nicht gestartet: Die neue lokale Förderungslaufzeit ist auf dem iMac noch nicht attestiert.',
+        error: 'iMac-iCloud-Materialisierung muss zuerst erfolgreich abgeschlossen werden.',
+      };
+    }
     const command = await enqueueDeviceCommand({
       deviceId: IVA_IMAC_DEVICE_ID,
       action: 'project.workflow.run',
