@@ -62,7 +62,15 @@ async function reportBootstrapHeartbeat() {
   const token = await readDeviceToken();
   const response = await fetch(`${SERVER_URL}/device-agent/${DEVICE_ID}/heartbeat`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'X-IVA-Agent-Host': metadata.hostname,
+      'X-IVA-Agent-Protocol': String(metadata.protocolVersion),
+      'X-IVA-Agent-Release': metadata.release,
+      'X-IVA-Agent-Workspace': metadata.workspace,
+      'X-IVA-Agent-ICloud': metadata.iCloudAuthoritative ? 'true' : 'false',
+    },
     body: JSON.stringify(metadata),
     signal: AbortSignal.timeout(20_000),
   });
