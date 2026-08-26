@@ -8,7 +8,7 @@ function safePreview(value, max = 2000) {
   return clean(value, max)
     .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '[E-Mail]')
     .replace(/\bDE\d{20}\b/gi, '[IBAN]')
-    .replace(/\+?[0-9][0-9\s()/.-]{7,}/g, '[Telefon]');
+    .replace(/\+?[0-9][0-9\s()/.-]{7,}/g, candidate => ((candidate.match(/\d/g) || []).length >= 8 ? '[Telefon]' : candidate));
 }
 
 function timestamp(...values) {

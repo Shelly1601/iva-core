@@ -60,6 +60,7 @@ try {
   assert.ok(activity.some(item => item.source === 'Codex Desktop' && item.status === 'completed'));
   assert.ok(activity.some(item => item.name === 'IVA Morning-Briefing'));
   assert.ok(activity.some(item => /Angelo/.test(item.summary) && item.proofs.includes('Im Gesendet-Ordner verifiziert')));
+  assert.ok(activity.some(item => item.proofs.includes('KW 36–45 / 2026')));
   assert.ok(activity.some(item => item.workflowId === 'planbar-weekly-export' && item.status === 'running'));
 
   const workflows = buildProjectWorkflowOverview([project], activity);
