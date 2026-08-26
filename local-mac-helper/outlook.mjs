@@ -204,7 +204,7 @@ export function buildVerifiedSendAppleScript(input = {}) {
   );
   appendExactListVerification(lines, { actualVariable: 'actualAttachmentNames', expectedVariable: 'expectedAttachmentNames', label: 'XLSX-Anlagen' });
   lines.push(
-    'save draftMessage',
+    'if senderAccount is not missing value then save draftMessage',
     'on error preflightError number preflightNumber',
     'try',
     'delete draftMessage',
