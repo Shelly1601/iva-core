@@ -229,6 +229,8 @@ try {
   assert.match(finalBootstrapSource, /4\/4 – Dauerverbindung wird umgeschaltet und doppelt geprüft/);
   const codexTaskSource = await readFile(new URL('../local-mac-helper/codex-tasks.mjs', import.meta.url), 'utf8');
   assert.match(codexTaskSource, /'exec', '--approve-for-me'/);
+  assert.match(codexTaskSource, /withMacWakeGuard\(\(\) => runCodexTaskWithoutWakeGuard/);
+  assert.match(codexTaskSource, /delete childEnv\.IVA_MAC_WAKE_GUARD_ACTIVE/);
   assert.doesNotMatch(codexTaskSource, /'--sandbox'[^\n]+?'--approve-for-me'/, 'Codex CLI erlaubt --sandbox nicht zusammen mit --approve-for-me');
   assert.equal(inferProjectWorkflowStatus('Status: **fachlich blockiert**.\n\nGrund: Pflichtdaten fehlen.'), 'blocked');
   assert.equal(inferProjectWorkflowStatus('Status: technisch blockiert\nKeine Schreibaktion.'), 'blocked');
@@ -242,6 +244,7 @@ try {
   assert.match(deviceAgentRunnerSource, /updateLocalRunnerFromIcloud/);
   const deviceAgentRuntimeSource = await readFile(new URL('../local-mac-helper/device-agent.mjs', import.meta.url), 'utf8');
   assert.match(deviceAgentRuntimeSource, /runtimeMode: process\.env\.IVA_DEVICE_LOCAL_RUNTIME === 'true' \? 'local' : 'icloud'/);
+  assert.match(deviceAgentRuntimeSource, /'codex\.task\.start'/);
   assert.match(deviceAgentRunnerSource, /LOCAL_RUNTIME \? path\.join\(LOCAL_HELPER_DIR, 'device-agent\.mjs'\)/);
   assert.match(deviceAgentRunnerSource, /scheduleLocalRuntimeMigration/);
   assert.match(deviceAgentRunnerSource, /de\.iva\.device-agent-migrator/);

@@ -115,7 +115,6 @@ function appendExactAccountLookup(lines) {
     'end ignoring',
     'end repeat',
     'end if',
-    'if senderAccount is missing value then error "Das gewünschte Outlook-Absenderkonto ist über die native Schnittstelle nicht verfügbar." number 550',
   );
 }
 
@@ -150,11 +149,22 @@ export function buildVerifiedSendAppleScript(input = {}) {
   ];
   appendExactAccountLookup(lines);
   lines.push(
+    'if senderAccount is missing value then',
+    message.html
+      ? `set draftMessage to make new outgoing message with properties {subject:requestedSubject, content:${appleScriptString(message.html)}}`
+      : `set draftMessage to make new outgoing message with properties {subject:requestedSubject, plain text content:${appleScriptString(message.body)}}`,
+    'set sender of draftMessage to {address:requestedSender}',
+    'else',
     'set targetDrafts to drafts of senderAccount',
     message.html
       ? `set draftMessage to make new outgoing message at targetDrafts with properties {subject:requestedSubject, content:${appleScriptString(message.html)}, account:senderAccount}`
       : `set draftMessage to make new outgoing message at targetDrafts with properties {subject:requestedSubject, plain text content:${appleScriptString(message.body)}, account:senderAccount}`,
+    'end if',
     'try',
+    'set actualSender to (address of sender of draftMessage as text)',
+    'ignoring case',
+    'if actualSender is not requestedSender then error "Outlook-Versand abgebrochen: Der Absender stimmt nicht exakt überein." number 573',
+    'end ignoring',
   );
   for (const address of message.to) lines.push(`make new to recipient at draftMessage with properties {email address:{address:${appleScriptString(address)}}}`);
   for (const address of message.cc) lines.push(`make new cc recipient at draftMessage with properties {email address:{address:${appleScriptString(address)}}}`);
@@ -224,32 +234,19 @@ export function buildSentVerificationAppleScript({ from, subject, to = [], attac
     `set requestedSender to ${appleScriptString(requestedFrom)}`,
     `set requestedSubject to ${appleScriptString(requestedSubject)}`,
     `set earliestTime to (current date) - ${seconds}`,
-    'set senderAccount to missing value',
-    'repeat with accountCandidate in exchange accounts',
-    'ignoring case',
-    'if (email address of accountCandidate as text) is requestedSender then set senderAccount to accountCandidate',
-    'end ignoring',
-    'end repeat',
-    'if senderAccount is missing value then',
-    'repeat with accountCandidate in imap accounts',
-    'ignoring case',
-    'if (email address of accountCandidate as text) is requestedSender then set senderAccount to accountCandidate',
-    'end ignoring',
-    'end repeat',
-    'end if',
-    'if senderAccount is missing value then',
-    'repeat with accountCandidate in pop accounts',
-    'ignoring case',
-    'if (email address of accountCandidate as text) is requestedSender then set senderAccount to accountCandidate',
-    'end ignoring',
-    'end repeat',
-    'end if',
-    'if senderAccount is missing value then error "Gesendet-Prüfung: Das Absenderkonto ist nicht verfügbar." number 560',
-    'set targetSent to sent items of senderAccount',
+  ];
+  appendExactAccountLookup(lines);
+  lines.push(
     'set recentMatches to {}',
     'repeat 20 times',
     'set recentMatches to {}',
-    'repeat with candidate in (every outgoing message of targetSent whose subject is requestedSubject)',
+    'if senderAccount is missing value then',
+    'set candidateMessages to (every outgoing message whose subject is requestedSubject)',
+    'else',
+    'set targetSent to sent items of senderAccount',
+    'set candidateMessages to (every outgoing message of targetSent whose subject is requestedSubject)',
+    'end if',
+    'repeat with candidate in candidateMessages',
     'if (time sent of candidate) is greater than or equal to earliestTime and (was sent of candidate) is true then set end of recentMatches to candidate',
     'end repeat',
     'if (count of recentMatches) is 1 then exit repeat',
@@ -258,6 +255,7 @@ export function buildSentVerificationAppleScript({ from, subject, to = [], attac
     'end repeat',
     'if (count of recentMatches) is not 1 then error "Gesendet-Prüfung: Die Nachricht wurde nicht eindeutig im Gesendet-Ordner gefunden." number 562',
     'set sentMessage to item 1 of recentMatches',
+    'set sentSender to (address of sender of sentMessage as text)',
     'set recipientAddresses to {}',
     'repeat with recipientItem in (every to recipient of sentMessage)',
     'set end of recipientAddresses to (address of email address of recipientItem as text)',
@@ -270,24 +268,25 @@ export function buildSentVerificationAppleScript({ from, subject, to = [], attac
     'set recipientText to recipientAddresses as text',
     'set attachmentText to attachmentNames as text',
     'set AppleScript\'s text item delimiters to ""',
-    'return (subject of sentMessage as text) & linefeed & recipientText & linefeed & attachmentText',
+    'return (subject of sentMessage as text) & linefeed & sentSender & linefeed & recipientText & linefeed & attachmentText',
     'end tell',
-  ];
+  );
   return { script: lines.join('\n'), expected: { from: requestedFrom, subject: requestedSubject, to: requestedTo, attachments: expectedAttachments } };
 }
 
 export async function verifyOutlookSentMessage(input = {}) {
   const { script, expected } = buildSentVerificationAppleScript(input);
   const output = await runAppleScript(script, { timeoutMs: 30000 });
-  const [subject = '', recipientLine = '', attachmentLine = ''] = output.split(/\r?\n/);
+  const [subject = '', sender = '', recipientLine = '', attachmentLine = ''] = output.split(/\r?\n/);
   const actualRecipients = recipientLine.split('\t').map(email => email.trim().toLowerCase()).filter(Boolean).sort();
   const actualAttachments = attachmentLine.split('\t').map(name => name.trim()).filter(Boolean).sort();
   if (subject !== expected.subject) throw new Error('Gesendet-Prüfung: Der Betreff stimmt nicht exakt überein.');
+  if (sender.trim().toLowerCase() !== expected.from) throw new Error('Gesendet-Prüfung: Der Absender stimmt nicht exakt überein.');
   if (!expected.to.every(address => actualRecipients.includes(address))) throw new Error('Gesendet-Prüfung: Der An-Empfänger stimmt nicht exakt überein.');
   if (JSON.stringify(actualAttachments) !== JSON.stringify(expected.attachments)) {
     throw new Error('Gesendet-Prüfung: Die Anlagen stimmen nicht exakt mit dem versendeten Manifest überein.');
   }
-  return { verified: true, folder: 'Gesendet', subject, recipients: actualRecipients, attachments: actualAttachments };
+  return { verified: true, folder: 'Gesendet', subject, sender: expected.from, recipients: actualRecipients, attachments: actualAttachments };
 }
 
 function normalizeDeleteEntries(entries = []) {

@@ -18,7 +18,7 @@ const APP_ALLOWLIST = Object.freeze({
   WhatsApp: '/Applications/WhatsApp.app',
   Codex: '/Applications/Codex.app',
 });
-const UI_ACTIONS = new Set(['computer.status', 'planbar.search.refresh', 'planbar.customer.schedule', 'project.workflow.run', 'portal.login', 'app.open']);
+const UI_ACTIONS = new Set(['computer.status', 'planbar.search.refresh', 'planbar.customer.schedule', 'project.workflow.run', 'portal.login', 'codex.task.start', 'app.open']);
 const AGENT_WORKSPACE = path.resolve(process.env.IVA_DEVICE_WORKSPACE || path.join(path.dirname(fileURLToPath(import.meta.url)), '..'));
 const ALLOWED_ACTIONS = Object.freeze([
   'agent.status',

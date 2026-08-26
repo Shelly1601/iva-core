@@ -20,6 +20,8 @@ assert.equal(credentialBrokerPolicy().remoteSecretRead, false);
 assert.equal(portalAuthPolicy().arbitraryHosts, false);
 assert.equal(portalAuthPolicy().credentialsViaProcessArguments, false);
 assert.equal(macWakeGuardPolicy().displaySleepAfterRun, true);
+assert.equal(macWakeGuardPolicy().displaySleepOnlyAfterLastRun, true);
+assert.equal(macWakeGuardPolicy().sharedRunLeases, true);
 
 const rfcSecret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
 assert.equal(generateTotp(`otpauth://totp/Test?secret=${rfcSecret}&algorithm=SHA1&digits=8&period=30`, { now: 59_000 }), '94287082');

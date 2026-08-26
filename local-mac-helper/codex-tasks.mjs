@@ -180,7 +180,9 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
   await writeFile(paths.request, JSON.stringify(request, null, 2));
   const initialState = await writeState(paths, { jobId, title: request.title, requestId: request.requestId, mode: request.mode, projectId: request.projectId, workflowId: request.workflowId, status: 'queued', phase: request.mode === 'build' ? 'planning' : 'queued', progress: request.mode === 'build' ? 5 : 0, detail: 'Auftrag wartet auf den lokalen Codex-Start.', createdAt: request.createdAt, updatedAt: request.createdAt, workspace: REPO_ROOT });
   await reportTaskState(request, initialState);
-  const child = spawn(process.execPath, [MODULE_PATH, 'run', jobId], { detached: true, stdio: 'ignore' });
+  const childEnv = { ...process.env };
+  delete childEnv.IVA_MAC_WAKE_GUARD_ACTIVE;
+  const child = spawn(process.execPath, [MODULE_PATH, 'run', jobId], { detached: true, stdio: 'ignore', env: childEnv });
   child.unref();
   return { jobId, status: 'queued', title: request.title, workspace: 'iva-core', startedLocally: true };
 }
@@ -316,7 +318,7 @@ export function inferProjectWorkflowStatus(lastMessage = '') {
     : '';
 }
 
-export async function runCodexTask(jobId) {
+async function runCodexTaskWithoutWakeGuard(jobId) {
   const paths = jobPaths(jobId);
   const request = await readJson(paths.request);
   const startedAt = new Date().toISOString();
@@ -375,6 +377,14 @@ export async function runCodexTask(jobId) {
   });
   await reportTaskState(request, finalState, resultPreview);
   return finalState;
+}
+
+export async function runCodexTask(jobId) {
+  const { withMacWakeGuard } = await import('./mac-wake-guard.mjs');
+  return withMacWakeGuard(() => runCodexTaskWithoutWakeGuard(jobId), {
+    maxSeconds: Math.ceil(MAX_RUNTIME_MS / 1000) + 60,
+    sleepDisplays: true,
+  });
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url && process.argv[2] === 'progress') {
