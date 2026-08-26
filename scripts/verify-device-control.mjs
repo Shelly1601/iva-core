@@ -236,6 +236,7 @@ try {
   assert.equal(codexPolicy.iCloudMaterialization, true);
   const { materializeIcloudWorkspace } = await import('../local-mac-helper/icloud-workspace.mjs');
   let downloadRequested = false;
+  const downloadTargets = [];
   let readAttempts = 0;
   const materialized = await materializeIcloudWorkspace({
     workspace: '/Users/nadine/Library/Mobile Documents/com~apple~CloudDocs/IVA-Assistent/iva-core',
@@ -243,6 +244,7 @@ try {
       assert.equal(command, '/usr/bin/brctl');
       assert.equal(args[0], 'download');
       downloadRequested = true;
+      downloadTargets.push(args[1]);
     },
     read: async () => {
       readAttempts += 1;
@@ -254,6 +256,7 @@ try {
   assert.equal(downloadRequested, true);
   assert.equal(materialized.materialized, true);
   assert.equal(materialized.probes.length, 4);
+  assert.equal(downloadTargets.some(target => target.endsWith('/AGENTS.md')), true, 'die übergeordnete Regeldatei wird gezielt materialisiert');
   assert.equal(readAttempts, 5, 'ein vorübergehender iCloud-Deadlock wird wiederholt');
   const directForecast = await startProjectWorkflowTask({
     workflowId: 'planbar-weekly-export',

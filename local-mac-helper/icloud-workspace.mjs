@@ -53,12 +53,24 @@ export async function materializeIcloudWorkspace({
   }));
 
   const probes = [];
+  const fileDownloads = [];
   for (const file of [
     path.join(root, '..', 'AGENTS.md'),
     path.join(root, 'package.json'),
     path.join(root, 'local-mac-helper', 'device-agent.mjs'),
     path.join(root, '.git', 'HEAD'),
   ]) {
+    // Der Ordner-Download materialisiert keine danebenliegende AGENTS.md.
+    // Fordere deshalb jede tatsächlich benötigte Datei gezielt an, bevor ein
+    // EAGAIN-Placeholder fälschlich als dauerhafter Blocker gewertet wird.
+    fileDownloads.push(await exec('/usr/bin/brctl', ['download', file], {
+      timeout: 30_000,
+      maxBuffer: 256 * 1024,
+    }).then(() => ({ file, requested: true, error: '' })).catch(error => ({
+      file,
+      requested: false,
+      error: String(error?.message || error).slice(0, 300),
+    })));
     probes.push(await readWithRetry(file, { attempts, read, waitFn }));
   }
 
@@ -67,6 +79,7 @@ export async function materializeIcloudWorkspace({
     iCloud: true,
     materialized: true,
     download,
+    fileDownloads,
     probes,
   };
 }
