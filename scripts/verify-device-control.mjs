@@ -157,11 +157,21 @@ try {
   const plist = buildImacDeviceAgentLaunchAgent({ nodePath: '/node', cliPath: '/repo/local-mac-helper/cli.mjs' });
   assert.match(plist, /run-imac-device-agent-once/);
   assert.match(plist, /<integer>15<\/integer>/);
-  const { codexTaskPolicy, inferProjectWorkflowStatus } = await import('../local-mac-helper/codex-tasks.mjs');
+  const { codexTaskPolicy, inferProjectWorkflowStatus, startProjectWorkflowTask } = await import('../local-mac-helper/codex-tasks.mjs');
   const codexPolicy = codexTaskPolicy();
   assert.equal(codexPolicy.arbitraryWorkspace, false);
   assert.equal(codexPolicy.sandbox, 'workspace-write');
   assert.match(codexPolicy.workspace, /iva-core$/);
+  const directForecast = await startProjectWorkflowTask({
+    workflowId: 'planbar-weekly-export',
+    findPreparedForecast: async () => ({ directory: '/prepared/forecast' }),
+    sendPreparedForecast: async directory => ({ sent: true, sentFolderVerified: true, directory }),
+  });
+  assert.deepEqual(directForecast, { sent: true, sentFolderVerified: true, directory: '/prepared/forecast' });
+  const bootstrapSource = await readFile(new URL('../IVA-iMac-einmalig-verbinden.command', import.meta.url), 'utf8');
+  assert.match(bootstrapSource, /nodejs\.org\/dist\/\$\{node_version\}/);
+  assert.match(bootstrapSource, /shasum -a 256/);
+  assert.match(bootstrapSource, /run-imac-device-agent-once/);
   const codexTaskSource = await readFile(new URL('../local-mac-helper/codex-tasks.mjs', import.meta.url), 'utf8');
   assert.match(codexTaskSource, /'exec', '--approve-for-me'/);
   assert.doesNotMatch(codexTaskSource, /'--sandbox'[^\n]+?'--approve-for-me'/, 'Codex CLI erlaubt --sandbox nicht zusammen mit --approve-for-me');

@@ -208,16 +208,28 @@ const PROJECT_WORKFLOW_TASKS = Object.freeze({
   }),
 });
 
-export async function startProjectWorkflowTask({ workflowId } = {}) {
-  const definition = PROJECT_WORKFLOW_TASKS[clean(workflowId, 140)];
+export async function startProjectWorkflowTask({ workflowId, findPreparedForecast, sendPreparedForecast } = {}) {
+  const normalizedWorkflowId = clean(workflowId, 140);
+  const definition = PROJECT_WORKFLOW_TASKS[normalizedWorkflowId];
   if (!definition) throw new Error('Dieser Projekt-Workflow ist für den operativen Codex-Start nicht freigegeben.');
+  if (normalizedWorkflowId === 'planbar-weekly-export') {
+    const mail = typeof findPreparedForecast === 'function' && typeof sendPreparedForecast === 'function'
+      ? null
+      : await import('./planbar-forecast-mail.mjs');
+    const findPrepared = typeof findPreparedForecast === 'function' ? findPreparedForecast : mail.findRecentValidatedPlanbarForecastRun;
+    const sendPrepared = typeof sendPreparedForecast === 'function'
+      ? sendPreparedForecast
+      : directory => mail.sendPlanbarForecastRun(directory, { commit: true });
+    const prepared = await findPrepared();
+    if (prepared) return sendPrepared(prepared.directory);
+  }
   return startCodexTask({
     ...definition,
     mode: 'project-workflow',
     projectId: 'heat-hero',
-    workflowId,
+    workflowId: normalizedWorkflowId,
     workflowName: definition.title,
-    requestId: `project-workflow-${workflowId}-${Date.now()}`,
+    requestId: `project-workflow-${normalizedWorkflowId}-${Date.now()}`,
   });
 }
 

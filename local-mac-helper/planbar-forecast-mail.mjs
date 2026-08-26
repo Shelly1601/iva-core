@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
-import { access, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { sendVerifiedOutlookXlsxMessage } from './outlook.mjs';
 
@@ -13,6 +13,7 @@ const OUTPUT_ROOT = path.join(REPO_ROOT, 'outputs', 'planbar-weekly');
 const SEND_LOG = path.join(OUTPUT_ROOT, 'send-log.json');
 const REQUIRED_EXCLUSIONS = Object.freeze(['David Service', 'Dawid Service', 'Antonio Lausic', 'Antonio Lausich', 'Antonio Lausitsch']);
 const EXACT_HEADERS = Object.freeze(['Kalenderwoche', 'Kunde', 'Adresse', 'Anlage']);
+const MAX_PREPARED_RUN_AGE_MS = 72 * 60 * 60_000;
 
 function sameStrings(left, right) {
   return JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
@@ -36,12 +37,21 @@ async function existingFile(file) {
   await access(file);
   const info = await stat(file);
   if (!info.isFile() || info.size <= 0) throw new Error(`Forecast-Abbruch: Datei fehlt oder ist leer: ${file}`);
+  const handle = await open(file, 'r');
+  try {
+    const probe = Buffer.alloc(1);
+    const { bytesRead } = await handle.read(probe, 0, 1, 0);
+    if (bytesRead !== 1) throw new Error(`Forecast-Abbruch: Datei konnte nicht aus iCloud geladen werden: ${file}`);
+  } finally {
+    await handle.close();
+  }
   return file;
 }
 
-export async function validatePlanbarForecastRun(runDirectory) {
+export async function validatePlanbarForecastRun(runDirectory, { outputRoot = OUTPUT_ROOT } = {}) {
+  const allowedRoot = path.resolve(String(outputRoot || OUTPUT_ROOT));
   const directory = path.resolve(String(runDirectory || ''));
-  if (!directory.startsWith(`${OUTPUT_ROOT}${path.sep}`)) {
+  if (!directory.startsWith(`${allowedRoot}${path.sep}`)) {
     throw new Error('Forecast-Abbruch: Der Laufordner liegt nicht im verbindlichen Planbar-Ausgabebereich.');
   }
   const manifestFile = await access(path.join(directory, 'xlsx-manifest.json'))
@@ -93,7 +103,12 @@ export async function validatePlanbarForecastRun(runDirectory) {
     if (!sameStrings(item.headers || [], EXACT_HEADERS) || Number(item.excelErrors || 0) !== 0 || !item.renderFile) {
       throw new Error(`Forecast-Abbruch: QA ist nicht grün für ${path.basename(String(item.file || 'unbekannt'))}.`);
     }
-    await existingFile(path.resolve(String(item.renderFile)));
+    const sourceFilename = path.basename(String(item.file || ''));
+    const renderFilename = path.basename(String(item.renderFile || ''));
+    if (renderFilename !== sourceFilename.replace(/\.xlsx$/i, '.png')) {
+      throw new Error(`Forecast-Abbruch: QA-Vorschaubild passt nicht zur Excel-Datei ${sourceFilename || 'unbekannt'}.`);
+    }
+    await existingFile(path.join(directory, 'rendered', renderFilename));
   }
   const subject = `Planbar-Listen KW ${period.firstWeek}-${period.lastWeek} / ${period.year}`;
   return {
@@ -108,6 +123,27 @@ export async function validatePlanbarForecastRun(runDirectory) {
     sender: PLANBAR_FORECAST_SENDER,
     recipient: PLANBAR_FORECAST_RECIPIENT,
   };
+}
+
+export async function findRecentValidatedPlanbarForecastRun({ outputRoot = OUTPUT_ROOT, now = new Date(), maxAgeMs = MAX_PREPARED_RUN_AGE_MS } = {}) {
+  const allowedRoot = path.resolve(String(outputRoot || OUTPUT_ROOT));
+  const directories = (await readdir(allowedRoot, { withFileTypes: true }).catch(error => {
+    if (error?.code === 'ENOENT') return [];
+    throw error;
+  }))
+    .filter(item => item.isDirectory() && /^\d{4}-\d{2}-\d{2}-kw\d{1,2}-\d{1,2}$/i.test(item.name))
+    .map(item => item.name)
+    .sort((left, right) => right.localeCompare(left));
+  if (!directories.length) return null;
+  const run = await validatePlanbarForecastRun(path.join(allowedRoot, directories[0]), { outputRoot: allowedRoot });
+  const generatedAt = Date.parse(run.manifest.generatedAt || '');
+  const reference = now instanceof Date ? now.getTime() : Date.parse(now);
+  if (!Number.isFinite(generatedAt) || !Number.isFinite(reference)) {
+    throw new Error('Forecast-Abbruch: Erzeugungs- oder Prüfzeitpunkt des vorbereiteten Laufs ist ungültig.');
+  }
+  if (generatedAt > reference + 5 * 60_000) throw new Error('Forecast-Abbruch: Der vorbereitete Lauf liegt unerwartet in der Zukunft.');
+  if (reference - generatedAt > Number(maxAgeMs || MAX_PREPARED_RUN_AGE_MS)) return null;
+  return run;
 }
 
 async function loadSendLog() {

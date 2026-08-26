@@ -19,6 +19,8 @@ fi
 /usr/bin/brctl download "$workspace/local-mac-helper/device-agent.mjs" >/dev/null 2>&1 || true
 /usr/bin/brctl download "$workspace/local-mac-helper/device-agent-runner.mjs" >/dev/null 2>&1 || true
 /usr/bin/brctl download "$workspace/local-mac-helper/device-agent-launchd.mjs" >/dev/null 2>&1 || true
+/usr/bin/brctl download "$workspace/local-mac-helper/planbar-forecast-mail.mjs" >/dev/null 2>&1 || true
+/usr/bin/brctl download "$workspace/outputs/planbar-weekly" >/dev/null 2>&1 || true
 
 for _ in {1..30}; do
   if /usr/bin/grep -q "imac-icloud-v2" "$workspace/local-mac-helper/device-agent.mjs" 2>/dev/null; then
@@ -41,11 +43,54 @@ for candidate in /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do
 done
 
 if [[ -z "$node_bin" ]]; then
-  print -u2 "FEHLER: Node.js wurde auf dem iMac nicht gefunden."
-  exit 1
+  node_version="v22.12.0"
+  case "$(/usr/bin/uname -m)" in
+    arm64) node_arch="arm64" ;;
+    x86_64) node_arch="x64" ;;
+    *)
+      print -u2 "FEHLER: Die Prozessorarchitektur dieses iMac wird nicht unterstützt."
+      exit 1
+      ;;
+  esac
+  node_folder="node-${node_version}-darwin-${node_arch}"
+  runtime_root="$HOME/Library/Application Support/IVA Runtime"
+  node_dir="$runtime_root/$node_folder"
+  node_bin="$node_dir/bin/node"
+
+  if [[ ! -x "$node_bin" ]]; then
+    print "Node.js wird einmalig und ohne Administratorrechte für IVA eingerichtet …"
+    temp_base="${TMPDIR:-/tmp}"
+    download_dir="$(/usr/bin/mktemp -d "${temp_base%/}/iva-node.XXXXXX")"
+    cleanup_download() {
+      if [[ -n "${download_dir:-}" && -d "$download_dir" ]]; then
+        /bin/rm -rf "$download_dir"
+      fi
+    }
+    trap cleanup_download EXIT
+    archive_name="${node_folder}.tar.gz"
+    dist_url="https://nodejs.org/dist/${node_version}"
+
+    /usr/bin/curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+      "$dist_url/$archive_name" -o "$download_dir/$archive_name"
+    /usr/bin/curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+      "$dist_url/SHASUMS256.txt" -o "$download_dir/SHASUMS256.txt"
+
+    expected_hash="$(/usr/bin/awk -v file="$archive_name" '$2 == file { print $1; exit }' "$download_dir/SHASUMS256.txt")"
+    actual_hash="$(/usr/bin/shasum -a 256 "$download_dir/$archive_name" | /usr/bin/awk '{ print $1 }')"
+    if [[ -z "$expected_hash" || "$actual_hash" != "$expected_hash" ]]; then
+      print -u2 "FEHLER: Die heruntergeladene Node.js-Laufzeit hat die offizielle Prüfsumme nicht bestanden."
+      exit 1
+    fi
+
+    /usr/bin/tar -xzf "$download_dir/$archive_name" -C "$download_dir"
+    /bin/mkdir -p "$runtime_root"
+    /bin/rm -rf "$node_dir"
+    /bin/mv "$download_dir/$node_folder" "$node_dir"
+  fi
 fi
 
 cd "$workspace"
 "$node_bin" local-mac-helper/cli.mjs install-imac-device-agent --commit
+"$node_bin" local-mac-helper/cli.mjs run-imac-device-agent-once
 
 print "IVA ist jetzt dauerhaft mit diesem iMac und dem zentralen iCloud-Ordner verbunden."
