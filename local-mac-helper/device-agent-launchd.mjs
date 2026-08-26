@@ -96,11 +96,11 @@ async function copyDirectoryWithRetry(source, target, label) {
   for (let attempt = 1; attempt <= 6; attempt += 1) {
     try {
       await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
-      await cp(source, target, { recursive: true, force: true, preserveTimestamps: true });
+      await cp(source, target, { recursive: true, force: true });
       return;
     } catch (error) {
       lastError = error;
-      const transient = error?.code === 'EAGAIN' || error?.errno === -11;
+      const transient = error?.code === 'EAGAIN' || error?.code === 'ENOENT' || error?.errno === -11;
       if (!transient || attempt === 6) break;
       console.error(`${label}: iCloud-Dateien sind kurz belegt, Versuch ${attempt + 1} von 6 …`);
       await wait(2_000 * attempt);

@@ -243,10 +243,13 @@ try {
   assert.match(deviceAgentRunnerSource, /scheduleLocalRuntimeMigration/);
   assert.match(deviceAgentRunnerSource, /de\.iva\.device-agent-migrator/);
   assert.match(deviceAgentRunnerSource, /IVA_DEVICE_MIGRATOR/);
+  assert.doesNotMatch(deviceAgentRunnerSource, /preserveTimestamps:\s*true/);
+  assert.match(deviceAgentRunnerSource, /error\?\.code === 'ENOENT'/);
   const deviceAgentLaunchdSource = await readFile(new URL('../local-mac-helper/device-agent-launchd.mjs', import.meta.url), 'utf8');
   assert.match(deviceAgentLaunchdSource, /previousPlist/);
   assert.match(deviceAgentLaunchdSource, /vorheriger Agent wurde wiederhergestellt/);
   assert.match(deviceAgentLaunchdSource, /IVA_DEVICE_RUNTIME_SOURCE/);
+  assert.doesNotMatch(deviceAgentLaunchdSource, /preserveTimestamps:\s*true/);
   const planbarForecastSource = await readFile(new URL('../local-mac-helper/planbar-forecast-mail.mjs', import.meta.url), 'utf8');
   assert.match(planbarForecastSource, /IVA_PLANBAR_OUTPUT_ROOT/);
   const dedicatedInstallerSource = await readFile(new URL('../local-mac-helper/install-imac-device-agent.mjs', import.meta.url), 'utf8');
