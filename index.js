@@ -112,6 +112,7 @@ import {
   updateAccountingDocument,
 } from './accounting/store.js';
 import { createTmbPdf } from './workspaces/tmb-pdf.js';
+import { mergeTmbPrefillPreservingExisting, prepareTmbPrefill } from './workspaces/tmb-prefill.js';
 import {
   getOpportunity,
   getOpportunitySettings,
@@ -171,7 +172,7 @@ import {
   qonektoCustomerCapabilityStatus,
   upsertQonektoCustomerAutomatically,
 } from './integrations/qonekto-customers.js';
-import { crmQonektoSyncStatus, normalizeCrmLeadForIvaWorkspace, runCrmQonektoSync } from './integrations/crm-qonekto-sync.js';
+import { crmQonektoSyncStatus, normalizeCrmLeadForIvaWorkspace, normalizeCrmLeadForQonekto, runCrmQonektoSync } from './integrations/crm-qonekto-sync.js';
 import { buildNameSearchVariants, resolveLeadName } from './crm/name-matching.js';
 import { suggestGermanAddresses } from './integrations/address-autocomplete.js';
 import {
@@ -516,6 +517,26 @@ async function fetchLeads(src) {
 }
 async function fetchAllLeads() {
   return await Promise.all(CRM_SOURCES.map(fetchLeads));
+}
+
+async function findCurrentCrmLeadForWorkspace(workspace) {
+  const sourceId = String(workspace?.data?.crm?.sourceId || '').trim();
+  const project = String(workspace?.data?.crm?.project || '').trim().toLocaleLowerCase('de');
+  const email = String(workspace?.customer?.email || '').trim().toLocaleLowerCase('de');
+  if (!sourceId && !email) return null;
+  try {
+    const sources = await fetchAllLeads();
+    const candidates = sources
+      .filter(source => !project || String(source.projekt || '').toLocaleLowerCase('de') === project)
+      .flatMap(source => crmLeadRows(source.leads));
+    return candidates.find(lead => {
+      const normalized = normalizeCrmLeadForQonekto(lead);
+      if (sourceId && normalized.id === sourceId) return true;
+      return email && String(normalized.values?.kommunikation?.email || '').toLocaleLowerCase('de') === email;
+    }) || null;
+  } catch {
+    return null;
+  }
 }
 
 function crmLeadRows(value) {
@@ -2107,6 +2128,38 @@ app.patch('/api/workspaces/:id', async (req, res) => {
   try {
     const workspace = await workspaces.updateWorkspace(req.params.id, req.body || {});
     res.status(workspace ? 200 : 404).json(workspace || { error: 'not found' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/workspaces/:id/tmb/prepare', async (req, res) => {
+  try {
+    const customerWorkspace = await workspaces.getWorkspace(req.params.id);
+    if (!customerWorkspace) return res.status(404).json({ error: 'Kundenakte nicht gefunden.' });
+    if (customerWorkspace.mode !== 'kunde') return res.status(400).json({ error: 'Die TMB-Vorbelegung muss aus einer Kundenakte gestartet werden.' });
+
+    const [crmLead, qonektoDetail] = await Promise.all([
+      findCurrentCrmLeadForWorkspace(customerWorkspace),
+      customerWorkspace.customer?.id
+        ? getQonektoCustomerDetail(customerWorkspace.customer.id).catch(() => null)
+        : Promise.resolve(null),
+    ]);
+    const prefill = await prepareTmbPrefill({ customerWorkspace, crmLead, qonektoDetail }, { useAi: req.body?.useAi !== false });
+    const energyWorkspaces = await workspaces.listWorkspaces({ mode: 'energie' });
+    const existing = energyWorkspaces.find(item => item.data?.prefill?.sourceWorkspaceId === customerWorkspace.id) || null;
+    const title = `${customerWorkspace.customer?.name || 'Kunde'} · TMB`;
+    const data = existing
+      ? mergeTmbPrefillPreservingExisting(existing.data || {}, prefill.data)
+      : prefill.data;
+    const input = {
+      mode: 'energie',
+      title,
+      customer: customerWorkspace.customer,
+      data,
+      visit: prefill.visit,
+    };
+    const workspace = existing
+      ? await workspaces.updateWorkspace(existing.id, input)
+      : await workspaces.createWorkspace(input);
+    res.status(existing ? 200 : 201).json({ workspace, prefill: prefill.summary, reused: Boolean(existing) });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.delete('/api/workspaces/:id', async (req, res) => {

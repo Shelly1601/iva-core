@@ -312,13 +312,24 @@ function formatFileSize(bytes) {
   return `${Math.max(1, Math.round(value / 1024))} KB`;
 }
 
+function meetingRows(meetings = []) {
+  if (!meetings.length) return '<div class="empty-card">Noch kein Gespräch in dieser Kundenakte hinterlegt.</div>';
+  return `<div class="note-list">${meetings.slice().sort((a, b) => String(b.occurredAt || '').localeCompare(String(a.occurredAt || ''))).map(meeting => {
+    const source = meeting.source === 'plaud' ? 'PLAUD' : (meeting.source || 'Gespräch');
+    const summary = clean(meeting.internalSummary || meeting.customerSummary) || 'Gespräch ist hinterlegt; eine geprüfte Zusammenfassung fehlt noch.';
+    return `<div class="note"><span class="conversation-source${meeting.source === 'plaud' ? ' plaud' : ''}">${escapeHtml(source)}</span><b>${escapeHtml(meeting.title || 'Kundengespräch')}</b><div>${escapeHtml(summary)}</div><small>${escapeHtml(dateValue(meeting.occurredAt))}${meeting.externalId ? ` · Aufnahme ${escapeHtml(meeting.externalId)}` : ''}</small></div>`;
+  }).join('')}</div>`;
+}
+
 function renderDetail(detail, listId) {
   const customer = detail.customer;
   const workspace = state.currentWorkspace;
   const localNotes = workspace?.notes || [];
   const localFiles = workspace?.files || [];
+  const meetings = Array.isArray(workspace?.data?.meetings) ? workspace.data.meetings : [];
   const archiveNotes = (detail.archiveNotes || []).map(normalizeNote);
   const contracts = detail.contracts || [];
+  const companies = new Set(contracts.map(contract => contract.company).filter(Boolean)).size;
   const sourceIsLocal = detail.source === 'iva';
   const customerUrl = !sourceIsLocal && customer.id ? `https://www.maklerinfo.biz/maklerportal/?show=kunde&kunde=${encodeURIComponent(customer.id)}` : '';
   const detailRoot = $('customerDetail');
@@ -327,31 +338,58 @@ function renderDetail(detail, listId) {
       <div class="identity"><span class="avatar">${escapeHtml(initials(customer.name))}</span><div><div class="identity-line"><span class="${sourceIsLocal ? 'live-badge local-badge' : 'live-badge'}">${sourceIsLocal ? 'IVA-Kundenakte' : 'Qonekto live'}</span><span>Kunden-ID ${escapeHtml(customer.id || 'noch nicht an Blau Direkt übertragen')}</span></div><h1>${escapeHtml(customer.name)}</h1><div class="muted">${escapeHtml(sourceAddress(customer) || 'Adresse noch nicht hinterlegt')}</div></div></div>
       <div class="top-actions">${customerUrl ? `<a class="btn" href="${escapeHtml(customerUrl)}" target="_blank" rel="noopener">In Blau Direkt öffnen ↗</a>` : ''}<button class="btn" id="refreshDetail">↻ Aktualisieren</button></div>
     </div>
-    <div class="stats"><div class="stat"><span>Verträge</span><b>${contracts.length}</b></div><div class="stat"><span>Gesellschaften</span><b>${new Set(contracts.map(contract => contract.company).filter(Boolean)).size}</b></div><div class="stat"><span>IVA-Notizen</span><b>${localNotes.length}</b></div><div class="stat"><span>Dokumente</span><b>${localFiles.length}</b></div></div>
-    <div class="grid">
-      <section class="card"><h2>Kontaktdaten <span class="tag">Stammdaten</span></h2><div class="data-grid">
-        ${datum('Anrede', customer.salutation)}${datum('Vermittler-ID', customer.brokerId)}
-        ${datum(customer.company ? 'Firma' : 'Vorname', customer.company || customer.firstName)}${datum(customer.company ? 'Rechtsform' : 'Nachname', customer.company ? customer.legalForm : customer.lastName)}
-        ${datum('E-Mail', customer.email, { link: customer.email ? `mailto:${customer.email}` : '' })}
-        ${datum('Telefon', customer.mobile || customer.phone, { link: customer.mobile || customer.phone ? `tel:${customer.mobile || customer.phone}` : '' })}
-        ${datum('Straße', customer.street)}${datum('PLZ / Ort', [customer.zip, customer.city].filter(Boolean).join(' '))}
-        ${datum('Geburtsdatum', dateValue(customer.birthDate))}${datum('Beruf', customer.profession)}
-        ${datum('simplr', customer.simplrUsername || 'nicht verknüpft')}
-      </div></section>
-      <section class="card"><h2>Service & Aktionen <span class="tag">mit Sicherheitsabfrage</span></h2><div class="service-grid">
-        ${sourceIsLocal ? '<button class="service" id="transferLocalCustomerBtn"><b>↗ An Blau Direkt übertragen</b><small>Daten prüfen und Qonekto-Anlage separat bestätigen</small></button>' : ''}
-        <button class="service" id="editAddressBtn"><b>✎ Kontaktdaten bearbeiten</b><small>${sourceIsLocal ? 'Direkt in der IVA-Kundenakte speichern' : 'Bei Blau Direkt vorbereiten und ausdrücklich bestätigen'}</small></button>
-        <button class="service" id="messageCompanyBtn" ${contracts.length ? '' : 'disabled'}><b>✉ Gesellschaft anschreiben</b><small>Vertragsbezogenen Entwurf anlegen</small></button>
+    <div class="stats"><div class="stat"><span>Verträge</span><b>${contracts.length}</b></div><div class="stat"><span>Gespräche</span><b>${meetings.length}</b></div><div class="stat"><span>Notizen gesamt</span><b>${localNotes.length + archiveNotes.length}</b></div><div class="stat"><span>Dokumente</span><b>${localFiles.length}</b></div></div>
+    <section class="quick-start-panel">
+      <div class="quick-start-head"><h2>Was möchtest du für diesen Kunden tun?</h2><span>Erst die grobe Richtung wählen – Details öffnen sich danach.</span></div>
+      <div class="quick-start-grid">
+        <button class="service primary-action" id="tmbAssistantBtn"><b>⌁ TMB geführt aufnehmen</b><small>CRM- und PLAUD-Daten übernehmen, nur Lücken abfragen, danach alles prüfen</small></button>
+        <button class="service" id="newConsultationBtn"><b>◌ Beratung starten</b><small>Beratung mit diesem Kunden vorausfüllen</small></button>
         <button class="service" id="uploadDocumentBtn"><b>＋ Dokumente hinzufügen</b><small>Mehrere Dateien auswählen oder hineinziehen</small></button>
-        <button class="service" id="newConsultationBtn"><b>◌ Beratung starten</b><small>Mit diesem Kunden vorausfüllen</small></button>
-        <button class="service" id="lumitApplicationBtn" ${sourceIsLocal ? 'disabled' : ''}><b>☀ LUMIT-Antrag</b><small>Online abschließen und als servicierten Antrag übernehmen</small></button>
-        ${sourceIsLocal ? '<button class="service danger" id="deleteLocalCustomerBtn"><b>× IVA-Kundenakte löschen</b><small>Löscht nur diese lokale IVA-Akte – niemals Pipedrive oder Blau Direkt</small></button>' : ''}
-      </div></section>
-      <section class="card full"><h2>Verträge <span class="tag">Blau Direkt</span></h2>${contractRows(contracts)}</section>
-      <section class="card"><h2>IVA-Arbeitsnotizen <span class="tag">nur deine Akte</span></h2><div class="note-list">${localNotes.length ? localNotes.slice().reverse().map(note => `<div class="note"><b>${escapeHtml(note.text)}</b><small>${escapeHtml(note.source || 'manual')} · ${escapeHtml(new Date(note.createdAt).toLocaleString('de-DE'))}</small></div>`).join('') : '<div class="empty-card">Noch keine IVA-Notizen.</div>'}</div><div class="composer"><textarea id="noteDraft" placeholder="Notiz, Wiedervorlage oder nächsten Schritt eintragen …"></textarea><button class="btn primary" id="saveNoteBtn">Speichern</button></div></section>
-      <section class="card"><h2>Qonekto-Archiv <span class="tag">gelesen</span></h2><div class="note-list">${archiveNotes.length ? archiveNotes.slice(0, 20).map(note => `<div class="note"><b>${escapeHtml(note.text)}</b><small>${escapeHtml(note.meta)}</small></div>`).join('') : '<div class="empty-card">Keine Archivnotizen übermittelt.</div>'}</div></section>
-      <section class="card"><h2>Dokumente in IVA <span class="tag">Kundenakte</span><button class="doc-plus" id="addDocumentInline" title="Dokumente hinzufügen" aria-label="Dokumente hinzufügen">+</button></h2><div class="document-hint">Grundrisse, Verbrauchsnachweise, Angebote, TMBs und weitere Unterlagen bleiben direkt diesem Kunden zugeordnet.</div><div class="files">${localFiles.length ? localFiles.slice().sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''))).map(file => `<div class="file"><div class="file-copy"><span class="file-category">${escapeHtml(documentCategoryLabel(file.category))}</span><b>${escapeHtml(file.name)}</b><small>${escapeHtml(formatFileSize(file.bytes))} · ${escapeHtml(file.createdAt ? new Date(file.createdAt).toLocaleString('de-DE') : 'Datum unbekannt')}</small></div><button class="btn ghost open-file" data-file-id="${escapeHtml(file.id)}">Öffnen</button></div>`).join('') : '<div class="empty-card">Noch keine Dokumente. Klicke auf das Plus und ziehe mehrere Dateien direkt in die Kundenakte.</div>'}</div></section>
-      <section class="card"><h2>Weitere Kundendaten</h2>${rawCustomerFields(customer)}</section>
+      </div>
+    </section>
+    <div class="record-sections">
+      <details class="record-section">
+        <summary><span class="section-icon">⌂</span><span class="section-title"><b>Kontakt & Stammdaten</b><small>${escapeHtml(customer.email || customer.mobile || customer.phone || sourceAddress(customer) || 'Kontaktdaten prüfen')}</small></span><span class="section-chevron">›</span></summary>
+        <div class="section-body"><div class="data-grid">
+          ${datum('Anrede', customer.salutation)}${datum('Vermittler-ID', customer.brokerId)}
+          ${datum(customer.company ? 'Firma' : 'Vorname', customer.company || customer.firstName)}${datum(customer.company ? 'Rechtsform' : 'Nachname', customer.company ? customer.legalForm : customer.lastName)}
+          ${datum('E-Mail', customer.email, { link: customer.email ? `mailto:${customer.email}` : '' })}
+          ${datum('Telefon', customer.mobile || customer.phone, { link: customer.mobile || customer.phone ? `tel:${customer.mobile || customer.phone}` : '' })}
+          ${datum('Straße', customer.street)}${datum('PLZ / Ort', [customer.zip, customer.city].filter(Boolean).join(' '))}
+          ${datum('Geburtsdatum', dateValue(customer.birthDate))}${datum('Beruf', customer.profession)}
+          ${datum('simplr', customer.simplrUsername || 'nicht verknüpft')}
+        </div></div>
+      </details>
+      <details class="record-section">
+        <summary><span class="section-icon">▤</span><span class="section-title"><b>Verträge & Gesellschaften</b><small>${contracts.length} Verträge bei ${companies} Gesellschaft${companies === 1 ? '' : 'en'}</small></span><span class="section-chevron">›</span></summary>
+        <div class="section-body">${contractRows(contracts)}</div>
+      </details>
+      <details class="record-section">
+        <summary><span class="section-icon">◌</span><span class="section-title"><b>Gespräche & Notizen</b><small>${meetings.length} Gespräch${meetings.length === 1 ? '' : 'e'} · ${localNotes.length + archiveNotes.length} ${(localNotes.length + archiveNotes.length) === 1 ? 'Notiz' : 'Notizen'}</small></span><span class="section-chevron">›</span></summary>
+        <div class="section-body">
+          <h2>Gespräche <span class="tag">PLAUD & IVA</span></h2>${meetingRows(meetings)}
+          <div style="height:18px"></div><h2>IVA-Arbeitsnotizen <span class="tag">nur deine Akte</span></h2><div class="note-list">${localNotes.length ? localNotes.slice().reverse().map(note => `<div class="note"><b>${escapeHtml(note.text)}</b><small>${escapeHtml(note.source || 'manual')} · ${escapeHtml(new Date(note.createdAt).toLocaleString('de-DE'))}</small></div>`).join('') : '<div class="empty-card">Noch keine IVA-Notizen.</div>'}</div><div class="composer"><textarea id="noteDraft" placeholder="Notiz, Wiedervorlage oder nächsten Schritt eintragen …"></textarea><button class="btn primary" id="saveNoteBtn">Speichern</button></div>
+          <div style="height:18px"></div><h2>Qonekto-Archiv <span class="tag">gelesen</span></h2><div class="note-list">${archiveNotes.length ? archiveNotes.slice(0, 20).map(note => `<div class="note"><b>${escapeHtml(note.text)}</b><small>${escapeHtml(note.meta)}</small></div>`).join('') : '<div class="empty-card">Keine Archivnotizen übermittelt.</div>'}</div>
+        </div>
+      </details>
+      <details class="record-section">
+        <summary><span class="section-icon">▱</span><span class="section-title"><b>Dokumente</b><small>${localFiles.length} Unterlagen · Grundrisse, Nachweise, Angebote und TMBs</small></span><span class="section-chevron">›</span></summary>
+        <div class="section-body"><h2>Dokumente in IVA <span class="tag">Kundenakte</span><button class="doc-plus" id="addDocumentInline" title="Dokumente hinzufügen" aria-label="Dokumente hinzufügen">+</button></h2><div class="document-hint">Alle Unterlagen bleiben direkt diesem Kunden zugeordnet.</div><div class="files">${localFiles.length ? localFiles.slice().sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''))).map(file => `<div class="file"><div class="file-copy"><span class="file-category">${escapeHtml(documentCategoryLabel(file.category))}</span><b>${escapeHtml(file.name)}</b><small>${escapeHtml(formatFileSize(file.bytes))} · ${escapeHtml(file.createdAt ? new Date(file.createdAt).toLocaleString('de-DE') : 'Datum unbekannt')}</small></div><button class="btn ghost open-file" data-file-id="${escapeHtml(file.id)}">Öffnen</button></div>`).join('') : '<div class="empty-card">Noch keine Dokumente. Klicke auf das Plus und ziehe mehrere Dateien direkt in die Kundenakte.</div>'}</div></div>
+      </details>
+      <details class="record-section">
+        <summary><span class="section-icon">⚙</span><span class="section-title"><b>Service & Vorgänge</b><small>Änderungen, Gesellschaften, LUMIT und Blau Direkt</small></span><span class="section-chevron">›</span></summary>
+        <div class="section-body"><div class="service-grid">
+          ${sourceIsLocal ? '<button class="service" id="transferLocalCustomerBtn"><b>↗ An Blau Direkt übertragen</b><small>Daten prüfen und Qonekto-Anlage separat bestätigen</small></button>' : ''}
+          <button class="service" id="editAddressBtn"><b>✎ Kontaktdaten bearbeiten</b><small>${sourceIsLocal ? 'Direkt in der IVA-Kundenakte speichern' : 'Bei Blau Direkt vorbereiten und ausdrücklich bestätigen'}</small></button>
+          <button class="service" id="messageCompanyBtn" ${contracts.length ? '' : 'disabled'}><b>✉ Gesellschaft anschreiben</b><small>Vertragsbezogenen Entwurf anlegen</small></button>
+          <button class="service" id="lumitApplicationBtn" ${sourceIsLocal ? 'disabled' : ''}><b>☀ LUMIT-Antrag</b><small>Online abschließen und als servicierten Antrag übernehmen</small></button>
+          ${sourceIsLocal ? '<button class="service danger" id="deleteLocalCustomerBtn"><b>× IVA-Kundenakte löschen</b><small>Löscht nur diese lokale IVA-Akte – niemals Pipedrive oder Blau Direkt</small></button>' : ''}
+        </div></div>
+      </details>
+      <details class="record-section">
+        <summary><span class="section-icon">⋯</span><span class="section-title"><b>Weitere Kundendaten</b><small>Zusätzliche Felder aus der angebundenen Datenquelle</small></span><span class="section-chevron">›</span></summary>
+        <div class="section-body">${rawCustomerFields(customer)}</div>
+      </details>
     </div>`;
   $('emptyState').hidden = true;
   detailRoot.hidden = false;
@@ -414,6 +452,7 @@ function bindDetailEvents(listId) {
   $('messageCompanyBtn')?.addEventListener('click', openMessageDialog);
   $('uploadDocumentBtn')?.addEventListener('click', openDocumentDialog);
   $('addDocumentInline')?.addEventListener('click', openDocumentDialog);
+  $('tmbAssistantBtn')?.addEventListener('click', openTmbAssistant);
   $('newConsultationBtn')?.addEventListener('click', openConsultation);
   $('lumitApplicationBtn')?.addEventListener('click', openLumitDialog);
   $('saveNoteBtn')?.addEventListener('click', saveNote);
@@ -545,6 +584,23 @@ function openConsultation() {
   const customer = currentCustomer();
   const query = new URLSearchParams({ customerId: customer.id || '', customerName: customer.name || '', customerEmail: customer.email || '', customerPhone: customer.mobile || customer.phone || '', customerAddress: sourceAddress(customer) });
   window.open(`/advice?${query}`, '_blank', 'noopener');
+}
+
+async function openTmbAssistant() {
+  const button = $('tmbAssistantBtn');
+  if (button) button.disabled = true;
+  showNotice('IVA übernimmt vorhandene CRM-, Qonekto- und PLAUD-Angaben in die TMB. Es wird noch nichts versendet.');
+  try {
+    const customerWorkspace = await ensureWorkspace(currentCustomer());
+    const result = await api(`/api/workspaces/${encodeURIComponent(customerWorkspace.id)}/tmb/prepare`, {
+      method: 'POST', body: JSON.stringify({ useAi: true }),
+    });
+    const query = new URLSearchParams({ mode: 'energie', id: result.workspace.id, assistant: '1', from: 'customers' });
+    location.href = `/workspace?${query}`;
+  } catch (error) {
+    showNotice(`TMB konnte nicht vorbereitet werden: ${error.message}`, 'error');
+    if (button) button.disabled = false;
+  }
 }
 
 function openAddressDialog() {

@@ -36,6 +36,73 @@ let adviceCatalog = { groups: [], modules: [], connectors: {} };
 let selectedAdviceModules = [];
 let adviceModuleData = {};
 let activeAdviceModuleId = '';
+let tmbAssistantWorkspaceId = null;
+const tmbChatState = { answered: new Set(), skipped: new Set(), history: [], currentId: '', fullForm: false };
+
+const TMB_CHAT_QUESTIONS = [
+  { id: 'customerName', group: 'Kunde', label: 'Wie lautet der vollständige Kundenname?', kind: 'text' },
+  { id: 'customerAddress', group: 'Kunde', label: 'Wie lautet die Objektadresse?', kind: 'text' },
+  { id: 'customerEmail', group: 'Kunde', label: 'Welche E-Mail-Adresse gehört zum Kunden?', kind: 'text', inputType: 'email' },
+  { id: 'customerPhone', group: 'Kunde', label: 'Unter welcher Telefonnummer ist der Kunde erreichbar?', kind: 'text' },
+  { id: 'visitDate', group: 'Aufnahme', label: 'Wann fand die Besichtigung statt?', kind: 'text', inputType: 'date' },
+  { id: 'adviser', group: 'Aufnahme', label: 'Wer hat die TMB aufgenommen?', kind: 'text' },
+  { id: 'salesRep', group: 'Aufnahme', label: 'Welche Vertriebsmitarbeiterin oder welcher Vertriebsmitarbeiter ist zugeordnet?', kind: 'text' },
+  { id: 'leadSource', group: 'Aufnahme', label: 'Über welche Leadquelle kam der Kunde?', kind: 'text' },
+  { id: 'buildingType', group: 'Gebäude', label: 'Um welchen Gebäudetyp handelt es sich?', kind: 'select', options: ['', 'Einfamilienhaus', 'Zweifamilienhaus', 'Mehrfamilienhaus', 'Gewerbe'] },
+  { id: 'buildingYear', group: 'Gebäude', label: 'In welchem Jahr wurde das Gebäude gebaut?', kind: 'text', inputMode: 'numeric' },
+  { id: 'buildingFloors', group: 'Gebäude', label: 'Wie viele Geschosse hat das Gebäude?', kind: 'text', inputMode: 'numeric' },
+  { id: 'floorHeight', group: 'Gebäude', label: 'Wie hoch sind die Räume beziehungsweise Geschosse in Metern?', kind: 'text', inputMode: 'decimal' },
+  { id: 'heatedArea', group: 'Gebäude', label: 'Wie groß ist die beheizte Fläche in Quadratmetern?', kind: 'text', inputMode: 'decimal' },
+  { id: 'buildingUnits', group: 'Gebäude', label: 'Wie viele Wohneinheiten gibt es?', kind: 'text', inputMode: 'numeric' },
+  { id: 'occupants', group: 'Gebäude', label: 'Wie viele Personen bewohnen das Gebäude?', kind: 'text', inputMode: 'numeric' },
+  { id: 'construction', group: 'Gebäude', label: 'Welche Bauweise liegt vor?', kind: 'text', placeholder: 'z. B. Massivbau' },
+  { id: 'glazing', group: 'Gebäude', label: 'Was ist über Fenster und Verglasung bekannt?', kind: 'text', placeholder: 'z. B. 2-fach, 1998' },
+  { id: 'roof', group: 'Gebäude', label: 'Wie ist das Dach ausgeführt?', kind: 'text', placeholder: 'z. B. Satteldach, 35°' },
+  { id: 'basement', group: 'Gebäude', label: 'Ist das Gebäude unterkellert und wenn ja, wie?', kind: 'text' },
+  { id: 'exteriorInsulation', group: 'Gebäude', label: 'Welche Fassadendämmung ist vorhanden?', kind: 'text' },
+  { id: 'roofInsulation', group: 'Gebäude', label: 'Welche Dachdämmung ist vorhanden?', kind: 'text' },
+  { id: 'basementInsulation', group: 'Gebäude', label: 'Welche Kellerdeckendämmung ist vorhanden?', kind: 'text' },
+  { id: 'energySource', group: 'Bestandsheizung', label: 'Welcher Energieträger wird aktuell genutzt?', kind: 'select', options: ['', 'Gas', 'Heizöl', 'Fernwärme', 'Pellets', 'Strom', 'Sonstiges'] },
+  { id: 'heatingManufacturer', group: 'Bestandsheizung', label: 'Von welchem Hersteller ist die bestehende Heizung?', kind: 'text' },
+  { id: 'heatingModel', group: 'Bestandsheizung', label: 'Welches Modell ist eingebaut?', kind: 'text' },
+  { id: 'heatingYear', group: 'Bestandsheizung', label: 'Aus welchem Baujahr stammt die Heizung?', kind: 'text', inputMode: 'numeric' },
+  { id: 'nominalPower', group: 'Bestandsheizung', label: 'Welche Nennleistung hat die Heizung in kW?', kind: 'text', inputMode: 'decimal' },
+  { id: 'boilerLocation', group: 'Bestandsheizung', label: 'Wo steht die bestehende Heizung?', kind: 'text' },
+  { id: 'systemType', group: 'Bestandsheizung', label: 'Wie wird die Wärme im Haus verteilt?', kind: 'text', placeholder: 'z. B. Heizkörper und Fußbodenheizung' },
+  { id: 'flowTemperature', group: 'Bestandsheizung', label: 'Welche Vorlauftemperatur wird aktuell gefahren?', kind: 'text', inputMode: 'decimal' },
+  { id: 'annualConsumption', group: 'Bestandsheizung', label: 'Wie hoch ist der Jahresverbrauch?', kind: 'text', inputMode: 'decimal' },
+  { id: 'consumptionUnit', group: 'Bestandsheizung', label: 'In welcher Einheit ist der Verbrauch angegeben?', kind: 'select', options: ['', 'kWh', 'Liter', 'm³', 'kg'], when: () => Boolean(val('annualConsumption')) },
+  { id: 'consumptionPeriod', group: 'Bestandsheizung', label: 'Für welchen Zeitraum gilt der Verbrauch?', kind: 'text', placeholder: 'z. B. 2025', when: () => Boolean(val('annualConsumption')) },
+  { id: 'billAvailable', group: 'Bestandsheizung', label: 'Liegt ein Verbrauchsnachweis vor?', kind: 'yesno', target: 'select' },
+  { id: 'desiredPosition', group: 'Wärmepumpe', label: 'Wo soll die Außeneinheit stehen?', kind: 'text' },
+  { id: 'indoorPosition', group: 'Wärmepumpe', label: 'Wo soll die Inneneinheit stehen?', kind: 'text' },
+  { id: 'hpDistance', group: 'Wärmepumpe', label: 'Wie groß ist die Entfernung zwischen außen und innen in Metern?', kind: 'text', inputMode: 'decimal' },
+  { id: 'accessWidth', group: 'Wärmepumpe', label: 'Wie breit ist die engste Stelle des Zugangs in Zentimetern?', kind: 'text', inputMode: 'decimal' },
+  { id: 'levelDifference', group: 'Wärmepumpe', label: 'Welcher Höhenunterschied muss überwunden werden?', kind: 'text', inputMode: 'decimal' },
+  { id: 'hpRoute', group: 'Wärmepumpe', label: 'Wie soll der Leitungsweg verlaufen?', kind: 'text' },
+  { id: 'refrigerantPreference', group: 'Wärmepumpe', label: 'Gibt es einen Kältemittelwunsch?', kind: 'text' },
+  { id: 'manufacturerPreference', group: 'Wärmepumpe', label: 'Gibt es einen Herstellerwunsch?', kind: 'text' },
+  { id: 'hpNotes', group: 'Wärmepumpe', label: 'Welche weiteren Hinweise gibt es zur Aufstellung?', kind: 'textarea' },
+  { id: 'accessNotes', group: 'Standort', label: 'Was ist bei Zufahrt, Zugang oder Montage zu beachten?', kind: 'textarea' },
+  { id: 'protectedBuilding', group: 'Standort', label: 'Steht das Gebäude unter Denkmalschutz?', kind: 'yesno', target: 'checkbox' },
+  { id: 'noiseSensitive', group: 'Standort', label: 'Ist das Umfeld geräuschsensibel?', kind: 'yesno', target: 'checkbox' },
+  { id: 'craneRequired', group: 'Standort', label: 'Wird für die Montage ein Kran benötigt?', kind: 'yesno', target: 'checkbox' },
+  { id: 'underfloorHeating', group: 'Hydraulik', label: 'Ist eine Fußbodenheizung vorhanden?', kind: 'yesno', target: 'checkbox' },
+  { id: 'circulationPumps', group: 'Hydraulik', label: 'Welche Umwälzpumpen sind vorhanden?', kind: 'text' },
+  { id: 'bufferTank', group: 'Hydraulik', label: 'Ist ein Pufferspeicher vorhanden und wenn ja, welcher?', kind: 'text' },
+  { id: 'hydraulicNotes', group: 'Hydraulik', label: 'Welche weiteren hydraulischen Hinweise gibt es?', kind: 'textarea' },
+  { id: 'serviceAmps', group: 'Elektro & PV', label: 'Wie ist der Hausanschluss abgesichert?', kind: 'text' },
+  { id: 'meterType', group: 'Elektro & PV', label: 'Welche Zählerart ist vorhanden?', kind: 'text' },
+  { id: 'freeSlots', group: 'Elektro & PV', label: 'Wie viele freie Plätze gibt es in der Verteilung?', kind: 'text' },
+  { id: 'upgradeNeeded', group: 'Elektro & PV', label: 'Ist ein Umbau der Elektroverteilung nötig?', kind: 'select', options: [['unknown', 'Noch zu prüfen'], ['yes', 'Ja'], ['no', 'Nein']] },
+  { id: 'pvPresent', group: 'Elektro & PV', label: 'Ist eine Photovoltaikanlage vorhanden?', kind: 'yesno', target: 'checkbox' },
+  { id: 'pvPower', group: 'Elektro & PV', label: 'Welche Leistung hat die PV-Anlage in kWp?', kind: 'text', inputMode: 'decimal', when: () => checked('pvPresent') },
+  { id: 'batteryPresent', group: 'Elektro & PV', label: 'Ist ein Batteriespeicher vorhanden?', kind: 'yesno', target: 'checkbox', when: () => checked('pvPresent') },
+  { id: 'batteryCapacity', group: 'Elektro & PV', label: 'Welche Kapazität hat der Speicher in kWh?', kind: 'text', inputMode: 'decimal', when: () => checked('batteryPresent') },
+  { id: 'solarThermal', group: 'Elektro & PV', label: 'Ist Solarthermie vorhanden?', kind: 'yesno', target: 'checkbox' },
+  { id: 'rooms', group: 'Räume & Heizkörper', label: 'Welche Räume und Heizkörper sollen in die TMB?', kind: 'rooms' },
+  { id: 'reviewedBy', group: 'Prüfung', label: 'Wer übernimmt die abschließende fachliche Prüfung?', kind: 'text', placeholder: 'z. B. Nadine Sell' },
+];
 
 function headers(extra = {}) {
   return { Authorization: 'Bearer ' + (localStorage.getItem(LS_TOKEN) || ''), ...extra };
@@ -68,6 +135,291 @@ function setVal(id, value) {
 
 function setChecked(id, value) {
   if ($(id)) $(id).checked = Boolean(value);
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
+  })[character]);
+}
+
+function tmbPrefillField(questionId) {
+  return (current?.data?.prefill?.fields || []).find(field => field.fieldId === questionId) || null;
+}
+
+function tmbQuestionApplies(question) {
+  return typeof question.when !== 'function' || question.when();
+}
+
+function tmbQuestionAnswered(question) {
+  if (!tmbQuestionApplies(question)) return true;
+  if (question.kind === 'rooms') return rooms.length > 0;
+  if (question.kind === 'yesno') return tmbChatState.answered.has(question.id) || Boolean(tmbPrefillField(question.id));
+  const value = val(question.id);
+  if (!value) return false;
+  if (question.id === 'upgradeNeeded' && value === 'unknown' && !tmbPrefillField(question.id) && !tmbChatState.answered.has(question.id)) return false;
+  if (question.id === 'consumptionUnit' && value === 'kWh' && !tmbPrefillField(question.id) && !tmbChatState.answered.has(question.id)) return false;
+  return true;
+}
+
+function tmbQuestionValue(question) {
+  if (question.kind === 'rooms') return rooms.length
+    ? rooms.map(room => [room.floor, room.name, room.area && `${room.area} m²`, room.height && `${room.height} m`, room.radiators?.map(radiator => [radiator.type, radiator.panelType, radiator.width && `${radiator.width} mm`, radiator.height && `${radiator.height} mm`, radiator.notes].filter(Boolean).join(' ')).filter(Boolean).join(', ')].filter(Boolean).join(' · ')).join('\n')
+    : '';
+  if (question.kind === 'yesno') {
+    if (!tmbQuestionAnswered(question)) return '';
+    const value = question.target === 'checkbox' ? checked(question.id) : val(question.id) === 'true';
+    return value ? 'Ja' : 'Nein';
+  }
+  const value = val(question.id);
+  if (question.id === 'upgradeNeeded') return ({ yes: 'Ja', no: 'Nein', unknown: 'Noch zu prüfen' })[value] || value;
+  return value;
+}
+
+function appendTmbBubble(text, role = 'iva', meta = '') {
+  const log = $('tmbChatLog');
+  if (!log) return;
+  const bubble = document.createElement('div');
+  bubble.className = `chat-bubble ${role}`;
+  bubble.textContent = text;
+  if (meta) {
+    const small = document.createElement('small');
+    small.textContent = meta;
+    bubble.appendChild(small);
+  }
+  log.appendChild(bubble);
+  log.scrollTop = log.scrollHeight;
+}
+
+function tmbApplicableQuestions() {
+  return TMB_CHAT_QUESTIONS.filter(tmbQuestionApplies);
+}
+
+function updateTmbChatProgress() {
+  const applicable = tmbApplicableQuestions();
+  const completed = applicable.filter(question => tmbQuestionAnswered(question)).length;
+  const percent = applicable.length ? Math.round((completed / applicable.length) * 100) : 100;
+  if ($('tmbChatProgressFill')) $('tmbChatProgressFill').style.width = `${percent}%`;
+  if ($('tmbChatProgressText')) $('tmbChatProgressText').textContent = `${completed} von ${applicable.length} Angaben · ${percent} %`;
+}
+
+function nextOpenTmbQuestion() {
+  return TMB_CHAT_QUESTIONS.find(question => tmbQuestionApplies(question) && !tmbQuestionAnswered(question) && !tmbChatState.skipped.has(question.id)) || null;
+}
+
+function tmbRoomLines() {
+  return rooms.map(room => {
+    const radiator = room.radiators?.[0] || {};
+    const radiatorText = [radiator.type, radiator.panelType && `Typ ${radiator.panelType}`, radiator.width && `${radiator.width}x${radiator.height || '?'} mm`, radiator.notes].filter(Boolean).join(' ');
+    return [room.floor, room.name, room.area, room.height, radiatorText].join(' | ');
+  }).join('\n');
+}
+
+function parseTmbRoomLines(value) {
+  const parsed = String(value || '').split(/\n+/).map(line => line.trim()).filter(Boolean).map(line => {
+    const [floor = '', name = '', area = '', height = '', radiatorText = ''] = line.split('|').map(part => part.trim());
+    return normalizeRoom({
+      id: uid(), floor, name, area, height: height || val('floorHeight'), use: '',
+      radiators: radiatorText ? [{ id: uid(), notes: radiatorText }] : [],
+    }, val('floorHeight'));
+  });
+  if (!parsed.length || parsed.some(room => !room.name)) throw new Error('Bitte pro Zeile mindestens den Raumnamen eintragen. Nutze: Etage | Raum | Fläche | Höhe | Heizkörper.');
+  return parsed;
+}
+
+function renderTmbChatControl(question) {
+  const root = $('tmbChatControl');
+  root.replaceChildren();
+  let control;
+  if (question.kind === 'select') {
+    control = document.createElement('select');
+    for (const rawOption of question.options || []) {
+      const [value, label] = Array.isArray(rawOption) ? rawOption : [rawOption, rawOption || 'Bitte wählen'];
+      const option = document.createElement('option'); option.value = value; option.textContent = label; control.appendChild(option);
+    }
+    control.value = val(question.id);
+  } else if (question.kind === 'yesno') {
+    control = document.createElement('select');
+    control.innerHTML = '<option value="">Bitte wählen</option><option value="true">Ja</option><option value="false">Nein</option>';
+    if (tmbQuestionAnswered(question)) control.value = question.target === 'checkbox' ? String(checked(question.id)) : String(val(question.id) === 'true');
+  } else if (question.kind === 'textarea' || question.kind === 'rooms') {
+    control = document.createElement('textarea');
+    control.value = question.kind === 'rooms' ? tmbRoomLines() : val(question.id);
+    control.placeholder = question.kind === 'rooms' ? 'EG | Wohnzimmer | 32 | 2,50 | Plattenheizkörper Typ 22 1600x600 mm' : (question.placeholder || 'Antwort eingeben');
+  } else {
+    control = document.createElement('input');
+    control.type = question.inputType || 'text';
+    control.inputMode = question.inputMode || '';
+    control.placeholder = question.placeholder || 'Antwort eingeben';
+    control.value = val(question.id);
+  }
+  control.id = 'tmbChatInput';
+  root.appendChild(control);
+  if (question.kind === 'rooms') {
+    const hint = document.createElement('div'); hint.className = 'tmb-room-format'; hint.textContent = 'Eine Zeile pro Raum: Etage | Raum | Fläche m² | Höhe m | Heizkörper. Heizkörperdetails können anschließend in der Formularansicht ergänzt werden.'; root.appendChild(hint);
+  }
+  setTimeout(() => control.focus(), 0);
+}
+
+function renderTmbQuestion(question = nextOpenTmbQuestion()) {
+  if (!question) return renderTmbReview();
+  tmbChatState.currentId = question.id;
+  $('tmbReview').hidden = true;
+  $('tmbChatComposer').hidden = false;
+  $('tmbChatQuestion').textContent = question.label;
+  renderTmbChatControl(question);
+  $('tmbChatBackBtn').disabled = tmbChatState.history.length === 0;
+  updateTmbChatProgress();
+}
+
+function acceptTmbChatAnswer() {
+  const question = TMB_CHAT_QUESTIONS.find(item => item.id === tmbChatState.currentId);
+  const input = $('tmbChatInput');
+  if (!question || !input) return;
+  const raw = String(input.value ?? '').trim();
+  if (!raw) return status('Bitte eine Antwort wählen oder „Später beantworten“ nutzen.', 'err');
+  try {
+    if (question.kind === 'rooms') {
+      rooms = parseTmbRoomLines(raw);
+      renderRooms();
+    } else if (question.kind === 'yesno') {
+      if (question.target === 'checkbox') setChecked(question.id, raw === 'true');
+      else setVal(question.id, raw);
+    } else setVal(question.id, raw);
+    tmbChatState.answered.add(question.id);
+    tmbChatState.skipped.delete(question.id);
+    tmbChatState.history.push(question.id);
+    appendTmbBubble(tmbQuestionValue(question), 'user', question.group);
+    updateCompletion(); renderPhotoChecklist();
+    renderTmbQuestion();
+  } catch (error) { status(error.message, 'err'); }
+}
+
+function skipTmbChatQuestion() {
+  const question = TMB_CHAT_QUESTIONS.find(item => item.id === tmbChatState.currentId);
+  if (!question) return;
+  tmbChatState.skipped.add(question.id);
+  tmbChatState.history.push(question.id);
+  appendTmbBubble('Diese Angabe prüfe ich später.', 'user', question.group);
+  renderTmbQuestion();
+}
+
+function backTmbChatQuestion() {
+  const id = tmbChatState.history.pop();
+  const question = TMB_CHAT_QUESTIONS.find(item => item.id === id);
+  if (!question) return;
+  tmbChatState.currentId = id;
+  tmbChatState.skipped.delete(id);
+  renderTmbQuestion(question);
+}
+
+function tmbReviewGroups() {
+  const groups = new Map();
+  for (const question of TMB_CHAT_QUESTIONS) {
+    if (!tmbQuestionApplies(question)) continue;
+    if (!groups.has(question.group)) groups.set(question.group, []);
+    groups.get(question.group).push(question);
+  }
+  return groups;
+}
+
+function renderTmbReview() {
+  tmbChatState.currentId = '';
+  $('tmbChatComposer').hidden = true;
+  const root = $('tmbReview');
+  root.hidden = false;
+  const open = TMB_CHAT_QUESTIONS.filter(question => tmbQuestionApplies(question) && !tmbQuestionAnswered(question));
+  const sections = [...tmbReviewGroups()].map(([group, questions]) => `
+    <section class="tmb-review-section"><h3>${escapeHtml(group)}</h3>${questions.map(question => {
+      const source = tmbPrefillField(question.id);
+      const value = tmbQuestionValue(question) || 'Offen';
+      const sourceLabel = source ? ` · aus ${source.source}` : '';
+      return `<div class="tmb-review-row"><span>${escapeHtml(question.label)}</span><b title="${escapeHtml(source?.evidence || '')}">${escapeHtml(value)}${escapeHtml(sourceLabel)}</b><button class="mini-btn tmb-review-edit" type="button" data-question-id="${escapeHtml(question.id)}">Ändern</button></div>`;
+    }).join('')}</section>`).join('');
+  root.innerHTML = `<div class="tmb-review-intro"><strong>Jetzt kommt deine Kontrolle vor der Freigabe.</strong><br>${open.length ? `${open.length} Angaben sind noch offen und bleiben im Ergebnis als nicht angegeben erkennbar.` : 'Alle im geführten Dialog vorgesehenen Angaben sind befüllt.'} Noch wurde nichts an einen externen Dienst gesendet.</div>${sections}<div class="tmb-review-actions"><button class="btn" id="continueTmbQuestionsBtn" type="button">Offene Angaben bearbeiten</button><button class="btn primary" id="approveTmbReviewBtn" type="button">Geprüft speichern & freigeben</button></div>`;
+  root.querySelectorAll('.tmb-review-edit').forEach(button => button.addEventListener('click', () => {
+    const question = TMB_CHAT_QUESTIONS.find(item => item.id === button.dataset.questionId);
+    if (question) { tmbChatState.skipped.delete(question.id); renderTmbQuestion(question); }
+  }));
+  $('continueTmbQuestionsBtn').addEventListener('click', () => {
+    tmbChatState.skipped.clear();
+    renderTmbQuestion(nextOpenTmbQuestion() || TMB_CHAT_QUESTIONS.find(question => tmbQuestionApplies(question)));
+  });
+  $('approveTmbReviewBtn').addEventListener('click', approveTmbReview);
+  updateTmbChatProgress();
+}
+
+async function approveTmbReview() {
+  const button = $('approveTmbReviewBtn');
+  if (button) button.disabled = true;
+  try {
+    setChecked('reviewed', true);
+    if (!val('reviewedBy')) setVal('reviewedBy', 'Nadine Sell');
+    if (!val('reviewedAt')) setVal('reviewedAt', new Date().toLocaleDateString('sv-SE'));
+    await save();
+    current = await api(`/api/workspaces/${current.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'review', data: { tmbReview: { status: 'reviewed', reviewedAt: new Date().toISOString(), reviewedBy: val('reviewedBy'), interface: 'guided-chat', schemaVersion: 'iva-tmb-1.0' } } }),
+    });
+    apply(current);
+    renderTmbReviewed();
+    status('TMB wurde nach deiner Kontrolle als geprüft gespeichert.', 'ok');
+  } catch (error) {
+    status('TMB-Prüfung konnte nicht gespeichert werden: ' + error.message, 'err');
+    if (button) button.disabled = false;
+  }
+}
+
+function renderTmbReviewed() {
+  $('tmbChatComposer').hidden = true;
+  const root = $('tmbReview');
+  root.hidden = false;
+  root.innerHTML = '<div class="tmb-reviewed"><strong>TMB geprüft und im bestehenden IVA-TMB-1.0-Format gespeichert.</strong><span>CRM-/PLAUD-Werte und deine Ergänzungen sind zusammengeführt. Die Freigabe ist dokumentiert; es wurde durch diesen Schritt keine separate Nachricht an den Kunden versendet.</span></div><div class="tmb-review-actions"><button class="btn" id="editReviewedTmbBtn" type="button">Noch einmal kontrollieren</button><button class="btn primary" id="downloadReviewedTmbBtn" type="button">TMB-PDF herunterladen</button></div>';
+  $('editReviewedTmbBtn').addEventListener('click', renderTmbReview);
+  $('downloadReviewedTmbBtn').addEventListener('click', downloadTmbPdf);
+}
+
+function renderTmbSourceSummary() {
+  const root = $('tmbSourceSummary');
+  root.replaceChildren();
+  const meta = current?.data?.prefill || {};
+  const text = document.createElement('span');
+  text.textContent = meta.appliedCount ? `${meta.appliedCount} Angaben automatisch übernommen:` : 'Noch keine belegten Angaben automatisch übernommen.';
+  root.appendChild(text);
+  for (const source of meta.sources || []) {
+    const chip = document.createElement('span');
+    chip.className = `source-chip${source.kind === 'PLAUD' ? ' plaud' : ''}`;
+    chip.textContent = `${source.kind} · ${source.label}`;
+    root.appendChild(chip);
+  }
+}
+
+function setTmbFormView(showForm) {
+  tmbChatState.fullForm = showForm;
+  document.body.classList.toggle('tmb-chat-mode', mode === 'energie' && !showForm);
+  if ($('toggleTmbFormBtn')) $('toggleTmbFormBtn').textContent = showForm ? 'Zurück zum Dialog' : 'Alle Felder öffnen';
+}
+
+function initTmbAssistant() {
+  if (mode !== 'energie') return;
+  const key = current?.id || 'new-energy';
+  $('tmbAssistantCard').hidden = false;
+  setTmbFormView(tmbChatState.fullForm);
+  renderTmbSourceSummary();
+  if (tmbAssistantWorkspaceId === key) {
+    updateTmbChatProgress();
+    return;
+  }
+  tmbAssistantWorkspaceId = key;
+  tmbChatState.answered = new Set();
+  tmbChatState.skipped = new Set();
+  tmbChatState.history = [];
+  tmbChatState.currentId = '';
+  $('tmbChatLog').replaceChildren();
+  const inherited = Number(current?.data?.prefill?.appliedCount || 0);
+  appendTmbBubble(`Ich habe zuerst die vorhandene Kundenakte geprüft${inherited ? ` und ${inherited} belegte Angaben übernommen` : ''}. Bereits bekannte Werte frage ich nicht noch einmal ab. Wir gehen jetzt nur durch die Lücken.`, 'iva', 'IVA TMB-Assistent');
+  if (current?.data?.tmbReview?.status === 'reviewed') renderTmbReviewed();
+  else renderTmbQuestion();
 }
 
 function uid() {
@@ -691,11 +1043,14 @@ function showMode() {
   for (const name of Object.keys(MODES)) $(name + 'Card').hidden = name !== mode;
   document.querySelectorAll('[data-energy-card]').forEach(card => { card.hidden = mode !== 'energie'; });
   $('roomsCard').hidden = mode !== 'energie';
+  $('tmbAssistantCard').hidden = mode !== 'energie';
   $('pdfBtn').textContent = mode === 'energie' ? 'TMB-PDF erstellen' : 'PDF-Vorschau';
   $('pdfBtn2').hidden = mode !== 'energie';
   $('modeLabel').textContent = MODES[mode].label;
   $('pageSub').textContent = MODES[mode].sub;
   document.title = 'IVA · ' + MODES[mode].label;
+  if (mode === 'energie') initTmbAssistant();
+  else document.body.classList.remove('tmb-chat-mode');
 }
 
 function presentationInputProfile() {
@@ -767,6 +1122,7 @@ function fresh(nextMode = mode) {
   selectedAdviceModules = [];
   adviceModuleData = {};
   activeAdviceModuleId = '';
+  tmbChatState.fullForm = false;
   history.replaceState({}, '', location.pathname + '?mode=' + mode);
   document.querySelectorAll('input:not([type=file]),textarea').forEach(input => {
     if (input.type === 'checkbox') input.checked = false;
@@ -1740,6 +2096,15 @@ $('closePrintPreview').addEventListener('click', () => document.body.classList.r
 $('printPreviewPrint').addEventListener('click', () => window.print());
 $('calculateEnergyBtn').addEventListener('click', calculateEnergy);
 $('openPvCalculatorBtn')?.addEventListener('click', openPvCalculator);
+$('toggleTmbFormBtn').addEventListener('click', () => setTmbFormView(!tmbChatState.fullForm));
+$('tmbChatAnswerBtn').addEventListener('click', acceptTmbChatAnswer);
+$('tmbChatSkipBtn').addEventListener('click', skipTmbChatQuestion);
+$('tmbChatBackBtn').addEventListener('click', backTmbChatQuestion);
+$('tmbChatControl').addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.shiftKey && event.target?.tagName !== 'TEXTAREA') {
+    event.preventDefault(); acceptTmbChatAnswer();
+  }
+});
 $('addRoomBtn').addEventListener('click', addRoom);
 $('addNoteBtn').addEventListener('click', addNote);
 $('addAdviceModule').addEventListener('click', () => {
