@@ -241,6 +241,7 @@ try {
   const deviceAgentLaunchdSource = await readFile(new URL('../local-mac-helper/device-agent-launchd.mjs', import.meta.url), 'utf8');
   assert.match(deviceAgentLaunchdSource, /previousPlist/);
   assert.match(deviceAgentLaunchdSource, /vorheriger Agent wurde wiederhergestellt/);
+  assert.match(deviceAgentLaunchdSource, /IVA_DEVICE_RUNTIME_SOURCE/);
   const planbarForecastSource = await readFile(new URL('../local-mac-helper/planbar-forecast-mail.mjs', import.meta.url), 'utf8');
   assert.match(planbarForecastSource, /IVA_PLANBAR_OUTPUT_ROOT/);
   const dedicatedInstallerSource = await readFile(new URL('../local-mac-helper/install-imac-device-agent.mjs', import.meta.url), 'utf8');

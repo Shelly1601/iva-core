@@ -122,7 +122,8 @@ export async function installImacDeviceAgentLaunchd() {
   const plist = imacDeviceAgentPlistFile();
   const runnerPath = imacDeviceAgentLocalRunnerFile();
   const workspace = authoritativeWorkspace();
-  const helperSource = path.join(workspace, 'local-mac-helper');
+  const runtimeSource = path.resolve(process.env.IVA_DEVICE_RUNTIME_SOURCE || workspace);
+  const helperSource = path.join(runtimeSource, 'local-mac-helper');
   const helperTarget = path.dirname(runnerPath);
   const forecastSource = path.join(workspace, 'outputs', 'planbar-weekly');
   const forecastRoot = imacDeviceAgentLocalForecastRoot();
