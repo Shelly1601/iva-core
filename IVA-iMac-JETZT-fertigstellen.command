@@ -2,8 +2,8 @@
 set -euo pipefail
 
 workspace="$HOME/Library/Mobile Documents/com~apple~CloudDocs/IVA-Assistent/iva-core"
-commit="a3536718295835984a68f9fb1e1f32a25b1b4f79"
-archive_sha256="b16b19ea5e7b9470bacecebe4ff70090240c66aac19a465dc49d21c827d315a2"
+commit="260c479a96fb6179312d3dd9a04dff6fc97b3103"
+archive_sha256="8a3a8b7f625c9801d65f60e47968b71c1fe0879dd66bf17f39102c5dd06fc6ba"
 
 model="$(/usr/sbin/sysctl -n hw.model 2>/dev/null || true)"
 if [[ "$model" != iMac* ]]; then
