@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
-import { chmod, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { chmod, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -16,6 +16,7 @@ const RELEASE = 'imac-icloud-v2';
 const MODULE_PATH = fileURLToPath(import.meta.url);
 const WORKSPACE = path.resolve(process.env.IVA_DEVICE_WORKSPACE || path.join(path.dirname(MODULE_PATH), '..'));
 const WORKSPACE_RUNNER = path.join(WORKSPACE, 'local-mac-helper', 'device-agent-runner.mjs');
+const WORKSPACE_AGENT = path.join(WORKSPACE, 'local-mac-helper', 'device-agent.mjs');
 const ALLOWED_ACTIONS = Object.freeze([
   'agent.status',
   'app.open',
@@ -32,6 +33,7 @@ const ALLOWED_ACTIONS = Object.freeze([
 ]);
 
 let deviceAgentModule = null;
+let deviceAgentSourceFingerprint = '';
 
 // Der iMac darf den Bildschirm weiterhin ausschalten. Nur der Systemschlaf bei
 // Netzbetrieb wird verhindert, damit der ausgehende Agent erreichbar bleibt.
@@ -111,8 +113,17 @@ async function updateLocalRunnerFromIcloud() {
 }
 
 async function loadDeviceAgent() {
+  try {
+    const info = await stat(WORKSPACE_AGENT);
+    const fingerprint = `${info.size}:${info.mtimeMs}`;
+    if (deviceAgentSourceFingerprint && fingerprint !== deviceAgentSourceFingerprint) deviceAgentModule = null;
+    deviceAgentSourceFingerprint = fingerprint;
+  } catch {
+    // Der anschließende Import liefert den präzisen Fehler und wird im Loop
+    // erneut versucht; die eigenständigen Heartbeats bleiben davon unberührt.
+  }
   if (deviceAgentModule) return deviceAgentModule;
-  const moduleUrl = pathToFileURL(path.join(WORKSPACE, 'local-mac-helper', 'device-agent.mjs'));
+  const moduleUrl = pathToFileURL(WORKSPACE_AGENT);
   moduleUrl.searchParams.set('runner', String(Date.now()));
   deviceAgentModule = await import(moduleUrl.href);
   return deviceAgentModule;

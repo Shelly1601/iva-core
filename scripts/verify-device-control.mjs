@@ -228,12 +228,16 @@ try {
   assert.match(deviceAgentRunnerSource, /'X-IVA-Agent-Workspace': metadata\.workspace/);
   assert.match(deviceAgentRunnerSource, /spawn\('\/usr\/bin\/caffeinate', \['-s', '-w'/);
   assert.match(deviceAgentRunnerSource, /updateLocalRunnerFromIcloud/);
+  assert.match(deviceAgentRunnerSource, /deviceAgentSourceFingerprint/);
   assert.ok(
     deviceAgentRunnerSource.indexOf('await reportBootstrapHeartbeat()') < deviceAgentRunnerSource.indexOf('await loadDeviceAgent()'),
     'der eigenständige Heartbeat läuft vor dem vollständigen iCloud-Modulimport',
   );
 
   const { assertImacExecutionHost, imacDeviceAgentPolicy, isAllowedImacExecutionHost, isAuthoritativeIcloudWorkspace } = await import('../local-mac-helper/device-agent.mjs');
+  const deviceAgentSource = await readFile(new URL('../local-mac-helper/device-agent.mjs', import.meta.url), 'utf8');
+  assert.match(deviceAgentSource, /status_probe/);
+  assert.match(deviceAgentSource, /probe-retry-required/);
   assert.equal(isAllowedImacExecutionHost('iMac-von-Nadine.local'), true);
   assert.equal(isAllowedImacExecutionHost('MacBook-Air-von-Nadine.local'), false);
   assert.equal(isAllowedImacExecutionHost('Arbeitsrechner.local', 'Arbeitsrechner.local'), true);

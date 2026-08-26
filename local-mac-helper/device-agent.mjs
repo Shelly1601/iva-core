@@ -139,11 +139,27 @@ function openApplication(appName) {
 
 async function executeDeviceCommand(command) {
   if (command.action === 'agent.status') {
-    const { imacDeviceAgentLaunchdStatus } = await import('./device-agent-launchd.mjs');
+    let launchd;
+    try {
+      const moduleUrl = new URL('./device-agent-launchd.mjs', import.meta.url);
+      moduleUrl.searchParams.set('status_probe', String(Date.now()));
+      const { imacDeviceAgentLaunchdStatus } = await import(moduleUrl.href);
+      launchd = await imacDeviceAgentLaunchdStatus();
+    } catch (error) {
+      // Ein vorübergehendes iCloud-EAGAIN darf den attestierten Gerätekanal
+      // nicht als fehlgeschlagen markieren. Der nächste Statusbefehl lädt das
+      // Modul über eine frische URL erneut und kann die Detailprobe nachholen.
+      launchd = {
+        loaded: null,
+        state: 'probe-retry-required',
+        pollSeconds: 15,
+        error: String(error?.message || error).slice(0, 300),
+      };
+    }
     return {
       online: true,
       ...imacDeviceAgentMetadata(),
-      launchd: await imacDeviceAgentLaunchdStatus(),
+      launchd,
     };
   }
   if (command.action === 'computer.status') {
