@@ -297,6 +297,13 @@ export async function updateCodexTaskProgress(jobId, phase, detail = '') {
   return updated;
 }
 
+export function inferProjectWorkflowStatus(lastMessage = '') {
+  const text = String(lastMessage || '');
+  return /(?:^|\n)\s*Status\s*:\s*(?:\*\*)?\s*(?:(?:fachlich|technisch)\s+)?blockiert\b/i.test(text)
+    ? 'blocked'
+    : '';
+}
+
 export async function runCodexTask(jobId) {
   const paths = jobPaths(jobId);
   const request = await readJson(paths.request);
@@ -324,9 +331,13 @@ export async function runCodexTask(jobId) {
   await logHandle.close();
   const completedAt = new Date().toISOString();
   const current = await readJson(paths.state).catch(() => ({}));
+  const resultPreview = clean(await readFile(paths.lastMessage, 'utf8').catch(() => ''), 1800);
+  const inferredWorkflowStatus = request.mode === 'project-workflow'
+    ? inferProjectWorkflowStatus(resultPreview)
+    : '';
   const status = timedOut
     ? 'timed_out'
-    : current.status === 'blocked'
+    : current.status === 'blocked' || inferredWorkflowStatus === 'blocked'
       ? 'blocked'
       : exitCode !== 0
         ? 'failed'
@@ -339,11 +350,17 @@ export async function runCodexTask(jobId) {
     jobId, title: request.title, requestId: request.requestId, status,
     phase: status === 'completed' ? 'completed' : current.phase,
     progress: finalProgress,
-    detail: status === 'incomplete' ? 'Codex endete, bevor alle Pflichtschritte einschließlich Live-Prüfung bestätigt waren.' : current.detail,
+    detail: status === 'incomplete'
+      ? 'Codex endete, bevor alle Pflichtschritte einschließlich Live-Prüfung bestätigt waren.'
+      : inferredWorkflowStatus === 'blocked' && current.status !== 'blocked'
+        ? 'Der Workflow endete mit einem fachlichen oder technischen Blocker. Details stehen im Ergebnis.'
+        : current.detail,
+    error: inferredWorkflowStatus === 'blocked' && current.status !== 'blocked'
+      ? 'Der Workflow endete mit einem fachlichen oder technischen Blocker.'
+      : current.error,
     createdAt: request.createdAt, startedAt, completedAt, exitCode,
     updatedAt: completedAt, workspace: REPO_ROOT,
   });
-  const resultPreview = clean(await readFile(paths.lastMessage, 'utf8').catch(() => ''), 1800);
   await reportTaskState(request, finalState, resultPreview);
   return finalState;
 }

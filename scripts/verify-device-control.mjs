@@ -93,7 +93,7 @@ try {
   const plist = buildImacDeviceAgentLaunchAgent({ nodePath: '/node', cliPath: '/repo/local-mac-helper/cli.mjs' });
   assert.match(plist, /run-imac-device-agent-once/);
   assert.match(plist, /<integer>15<\/integer>/);
-  const { codexTaskPolicy } = await import('../local-mac-helper/codex-tasks.mjs');
+  const { codexTaskPolicy, inferProjectWorkflowStatus } = await import('../local-mac-helper/codex-tasks.mjs');
   const codexPolicy = codexTaskPolicy();
   assert.equal(codexPolicy.arbitraryWorkspace, false);
   assert.equal(codexPolicy.sandbox, 'workspace-write');
@@ -101,6 +101,9 @@ try {
   const codexTaskSource = await readFile(new URL('../local-mac-helper/codex-tasks.mjs', import.meta.url), 'utf8');
   assert.match(codexTaskSource, /'exec', '--approve-for-me'/);
   assert.doesNotMatch(codexTaskSource, /'--sandbox'[^\n]+?'--approve-for-me'/, 'Codex CLI erlaubt --sandbox nicht zusammen mit --approve-for-me');
+  assert.equal(inferProjectWorkflowStatus('Status: **fachlich blockiert**.\n\nGrund: Pflichtdaten fehlen.'), 'blocked');
+  assert.equal(inferProjectWorkflowStatus('Status: technisch blockiert\nKeine Schreibaktion.'), 'blocked');
+  assert.equal(inferProjectWorkflowStatus('Status: erfolgreich\nKeine Blocker vorhanden.'), '');
 
   const { imacDeviceAgentPolicy } = await import('../local-mac-helper/device-agent.mjs');
   const devicePolicy = imacDeviceAgentPolicy();
