@@ -25,15 +25,24 @@ function summarizeSnapshot(snapshot) {
   if (snapshot.kfwAccountConfirmedByCredentials && !presentDocumentIds.includes('kfw_account_confirmation')) {
     presentDocumentIds.push('kfw_account_confirmation');
   }
-  const missingBaseDocumentIds = FUNDING_BASE_REQUIRED_DOCUMENTS.filter(id => !presentDocumentIds.includes(id));
+  const requiredDocumentIds = snapshot.stage === 'Angebot veröffentlicht'
+    ? ['signed_offer']
+    : [
+        ...FUNDING_BASE_REQUIRED_DOCUMENTS,
+        ...(snapshot.incomeBonusRequested === true ? ['tax_assessment_2023', 'tax_assessment_2024'] : []),
+      ];
+  const missingBaseDocumentIds = requiredDocumentIds.filter(id => !presentDocumentIds.includes(id));
   const unknownFiles = snapshot.documents.filter(document => document.type === 'unknown').map(document => document.fileName);
   return {
     dealId: snapshot.dealId,
     dealTitle: snapshot.dealTitle || null,
     customerName: snapshot.customerName,
+    customerEmail: snapshot.customerEmail || null,
     stage: snapshot.stage,
     location: snapshot.location,
     orderNumber: snapshot.orderNumber,
+    phoneNumber: snapshot.phoneNumber || null,
+    plant: snapshot.plant || null,
     vpName: snapshot.vpName,
     vpEmail: snapshot.vpEmail,
     files: snapshot.files,
@@ -45,10 +54,11 @@ function summarizeSnapshot(snapshot) {
     kfwCredentialInvalidationNoteIds: snapshot.kfwCredentialInvalidationNoteIds || [],
     ivaFundingRequestNotes: snapshot.ivaFundingRequestNotes || [],
     presentDocumentIds,
+    requiredDocumentIds,
     missingBaseDocumentIds,
     unknownFiles,
     incomeBonusRequested: snapshot.incomeBonusRequested ?? null,
-    reviewRequired: unknownFiles.length > 0 || snapshot.incomeBonusRequested == null,
+    reviewRequired: unknownFiles.length > 0 || (snapshot.stage !== 'Angebot veröffentlicht' && snapshot.incomeBonusRequested == null),
   };
 }
 

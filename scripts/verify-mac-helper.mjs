@@ -4,6 +4,8 @@ import path from 'node:path';
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import {
   FUNDING_DOCUMENTS,
+  FUNDING_ESCALATION_DELAY_DAYS,
+  FUNDING_ESCALATION_RECIPIENTS,
   FUNDING_PRIMARY_RECIPIENT_EMAIL,
   FUNDING_SUPERVISORS,
   FUNDING_SENDER_EMAIL,
@@ -12,14 +14,27 @@ import {
   extractEmailAddress,
   firstNameFromContactName,
   renderFundingMissingDocumentsEmail,
+  renderFundingMinorChildrenQuestionEmail,
+  renderFundingNoResponseEscalationDraft,
   renderFundingSignatureHtml,
   renderFundingSignaturePlain,
   resolveFundingRecipients,
+  resolveFundingNoResponseEscalationRecipient,
   resolveFundingSupervisor,
   withFundingSender,
 } from '../local-mac-helper/funding.mjs';
+import {
+  FUNDING_WORKFLOW_NAMES,
+  FUNDING_WORKFLOW_ORDER,
+  FUNDING_WORKFLOW_POLICY,
+  assertFundingWorkflowOrder,
+  buildFundingCalculationNote,
+  buildFundingSheetRow,
+  isImacFundingHost,
+  resolveFundingSheetColumns,
+} from '../local-mac-helper/funding-workflows.mjs';
 import { matchDirectSalesPartner } from '../local-mac-helper/direct-sales-roster.mjs';
-import { buildDeleteDraftsAppleScript, buildDraftAppleScript, normalizeDraftPayload } from '../local-mac-helper/outlook.mjs';
+import { buildDeleteDraftsAppleScript, buildDraftAppleScript, buildForwardDraftAppleScript, normalizeDraftPayload } from '../local-mac-helper/outlook.mjs';
 import {
   FUNDING_BATCH_MODE,
   FUNDING_ROLLBACK_CONFIRMATION,
@@ -42,6 +57,7 @@ import {
   normalizeWhatsAppPhone,
 } from '../local-mac-helper/whatsapp-mac.mjs';
 import {
+  assessExistingFundingDealFile,
   buildPipedriveFieldProposals,
   classifyFundingDocumentName,
   parseFundingDocumentPages,
@@ -53,12 +69,14 @@ import {
   applyPipedriveFundingFieldUpdates,
   assertPipedriveFileActionAllowed,
   renderPipedriveFundingInformationNote,
+  resolvePipedriveFundingStageTransition,
 } from '../local-mac-helper/chrome-pipedrive.mjs';
 import { cleanupFundingWorkingCopy, stageFundingWorkingCopy } from '../local-mac-helper/local-working-files.mjs';
 import { fundingMessageFingerprint } from '../local-mac-helper/funding-monitor-state.mjs';
 import { assessRegistrationCertificateDate, fundingDocumentPipelinePolicy } from '../local-mac-helper/funding-document-pipeline.mjs';
 import { loadFundingReview, saveFundingReview } from '../local-mac-helper/funding-review-queue.mjs';
 import { cleanupCompletedFundingReview, fundingLocalCleanupPolicy, recordFundingReviewCompletion } from '../local-mac-helper/funding-local-cleanup.mjs';
+import { FUNDING_DONE_FOLDER, validateFundingMailCompletion } from '../local-mac-helper/funding-mail-completion.mjs';
 
 assert.equal(Object.keys(FUNDING_DOCUMENTS).length, 7);
 assert.equal(FUNDING_SENDER_EMAIL, 'foerderung@heat-hero.com');
@@ -67,6 +85,8 @@ assert.equal(FUNDING_SUPERVISORS.ekd.email, 'f.bolz@heat-hero.com');
 assert.equal(FUNDING_SUPERVISORS.direct_sales.email, 'n.zielinski@heat-hero.com');
 assert.equal(FUNDING_SIGNATURE.email, 'n.sell@heat-hero.com');
 assert.equal(FUNDING_SIGNATURE.website, 'https://www.heat-hero.com');
+assert.equal(FUNDING_ESCALATION_DELAY_DAYS, 7);
+assert.equal(FUNDING_ESCALATION_RECIPIENTS.ekd.email, 'k.bolz@heat-hero.com');
 assert.equal(withFundingSender({}).from, FUNDING_SENDER_EMAIL);
 let activationAttempts = 0;
 let activationWaits = 0;
@@ -84,29 +104,31 @@ assert.equal(firstNameFromContactName('Herr Holger von Ameln'), 'Holger');
 assert.equal(buildFundingCaseReference({ customerName: 'Max Mustermann', orderNumber: 'A-4711', location: 'Bremen' }).text, 'Max Mustermann - A-4711');
 assert.equal(buildFundingCaseReference({ customerName: 'Max Mustermann', location: 'Bremen' }).text, 'Max Mustermann - Bremen');
 assert.equal(buildFundingCaseReference({ customerName: 'Max Mustermann' }).text, 'Max Mustermann');
-const namedRecipients = resolveFundingRecipients({ vpName: 'Holger von Ameln', vpEmail: 'holger@example.com (Büro)', directSalesRoster: { members: [] } });
-assert.deepEqual(namedRecipients.to, ['p.germer@heat-hero.com']);
+const namedRecipients = resolveFundingRecipients({ customerName: 'Max Mustermann', customerEmail: 'max@example.com', vpName: 'Holger von Ameln', vpEmail: 'holger@example.com (Büro)', directSalesRoster: { members: [] } });
+assert.deepEqual(namedRecipients.to, ['max@example.com']);
 assert.deepEqual(namedRecipients.cc, ['holger@example.com']);
-assert.equal(namedRecipients.greeting, 'Hallo Patrick, hallo Holger,');
+assert.equal(namedRecipients.greeting, 'Guten Tag Max Mustermann,');
 const directRoster = { members: ['Mirwais Barak', 'Anton Roschnow', 'Katrin Müller'] };
 assert.equal(matchDirectSalesPartner({ vpName: 'Mirwais Barak', vpEmail: 'm.barak@ekd-solar.de' }, directRoster).memberName, 'Mirwais Barak');
 assert.equal(matchDirectSalesPartner({ vpEmail: 'a.roschnow@sol-living.de' }, directRoster).memberName, 'Anton Roschnow');
 assert.equal(resolveFundingSupervisor({ fundingRoute: 'direct_sales', vpEmail: 'm.barak@ekd-solar.de' }).email, 'n.zielinski@heat-hero.com');
 assert.equal(resolveFundingSupervisor({ vpEmail: 'external@ekd-solar.de', directSalesRoster: { members: [] } }).email, 'f.bolz@heat-hero.com');
 assert.equal(resolveFundingSupervisor({ vpEmail: 'external@example.com', directSalesRoster: { members: [] } }).email, 'p.germer@heat-hero.com');
-const emailOnlyRecipients = resolveFundingRecipients({ vpName: 'vp@example.com', directSalesRoster: { members: [] } });
+const emailOnlyRecipients = resolveFundingRecipients({ customerName: 'Max Mustermann', customerEmail: 'max@example.com', vpName: 'vp@example.com', directSalesRoster: { members: [] } });
 assert.deepEqual(emailOnlyRecipients.cc, ['vp@example.com']);
-assert.equal(emailOnlyRecipients.greeting, 'Hallo Patrick,');
-assert.throws(() => resolveFundingRecipients({ to: ['falsch@example.com'] }), /An-Feld/);
-assert.throws(() => resolveFundingRecipients({ vpEmail: 'vp@example.com', cc: ['andere@example.com'] }), /stimmt nicht/);
+assert.equal(emailOnlyRecipients.greeting, 'Guten Tag Max Mustermann,');
+assert.throws(() => resolveFundingRecipients({ customerName: 'Max Mustermann' }), /Kunden-E-Mail-Adresse/);
+assert.throws(() => resolveFundingRecipients({ customerName: 'Max Mustermann', customerEmail: 'max@example.com', to: ['falsch@example.com'] }), /An-Feld/);
+assert.throws(() => resolveFundingRecipients({ customerName: 'Max Mustermann', customerEmail: 'max@example.com', vpEmail: 'vp@example.com', cc: ['andere@example.com'] }), /stimmt nicht/);
 const rendered = renderFundingMissingDocumentsEmail({
   customerName: 'Max Mustermann',
+  customerEmail: 'max@example.com',
   orderNumber: 'A-4711',
   vpName: 'Maria',
   missingDocumentIds: ['signed_offer', 'identity_card'],
 });
 assert.equal(rendered.subject, 'Max Mustermann - A-4711 - fehlende Unterlagen');
-assert.match(rendered.body, /^Hallo Patrick, hallo Maria,/);
+assert.match(rendered.body, /^Guten Tag Max Mustermann,/);
 assert.match(rendered.body, /Unterschriebenes Angebot/);
 assert.match(rendered.body, /Personalausweis/);
 assert.deepEqual(rendered.missingDocuments.map(item => item.id), ['signed_offer', 'identity_card']);
@@ -120,21 +142,42 @@ assert.match(rendered.html, /https:\/\/www\.heat-hero\.com/);
 assert.doesNotMatch(rendered.html, /hornetsecurity|trendmicro/i);
 assert.equal((rendered.body.match(/Nadine Sell - Sales Operations Manager/g) || []).length, 1);
 assert.equal((rendered.html.match(/Nadine Sell - Sales Operations Manager/g) || []).length, 1);
-const renderedWithoutOrder = renderFundingMissingDocumentsEmail({
-  customerName: 'Erika Musterfrau',
-  location: 'Bremen',
-  missingDocumentIds: ['signed_offer'],
+assert.throws(() => renderFundingMissingDocumentsEmail({
+  customerName: 'Erika Musterfrau', customerEmail: 'erika@example.com', location: 'Bremen', missingDocumentIds: ['signed_offer'],
+}), /Auftragsnummer/);
+const childQuestion = renderFundingMinorChildrenQuestionEmail({
+  customerName: 'Max Mustermann', customerEmail: 'max@example.com', orderNumber: 'A-4711', vpEmail: 'vp@example.com',
 });
-assert.equal(renderedWithoutOrder.subject, 'Erika Musterfrau - Bremen - fehlende Unterlagen');
-assert.match(renderedWithoutOrder.body, /Ort: Bremen/);
-assert.doesNotMatch(renderedWithoutOrder.body, /Angebots-\/Auftragsnummer:/);
-const renderedNameOnly = renderFundingMissingDocumentsEmail({
-  customerName: 'Erika Musterfrau',
-  missingDocumentIds: ['signed_offer'],
-});
-assert.equal(renderedNameOnly.subject, 'Erika Musterfrau - fehlende Unterlagen');
+assert.deepEqual(childQuestion.recipients.to, ['max@example.com']);
+assert.deepEqual(childQuestion.recipients.cc, ['vp@example.com']);
+assert.match(childQuestion.body, /Kind unter 18 Jahren/);
+assert.equal(resolveFundingNoResponseEscalationRecipient({ salesStructure: 'EKD' }).email, 'k.bolz@heat-hero.com');
+assert.equal(resolveFundingNoResponseEscalationRecipient({ vpEmail: 'anna@ekd-solar.de' }).email, 'k.bolz@heat-hero.com');
+assert.equal(resolveFundingNoResponseEscalationRecipient({ vpEmail: 'anna@beispiel.de' }).email, 'p.germer@heat-hero.com');
+const escalationDraft = renderFundingNoResponseEscalationDraft({
+  dealId: '7479', customerName: 'Max Mustermann', customerEmail: 'max@example.com', vpEmail: 'vp@ekd-solar.de',
+  orderNumber: 'A-4711', requestSentAt: '2026-08-01T08:00:00Z', originalSubject: 'Max Mustermann - A-4711 - fehlende Unterlagen', responses: [],
+}, new Date('2026-08-08T08:00:01Z'));
+assert.deepEqual(escalationDraft.to, ['k.bolz@heat-hero.com']);
+assert.equal(escalationDraft.draftOnly, true);
+assert.equal(escalationDraft.sent, false);
+assert.match(escalationDraft.subject, /^WG:/);
+const escalationForward = buildForwardDraftAppleScript(escalationDraft, new Date('2026-08-27T09:00:00+02:00'));
+assert.match(escalationForward.script, /forward originalMessage to requestedRecipient opening window false/);
+assert.match(escalationForward.script, /save forwardedMessage/);
+assert.doesNotMatch(escalationForward.script, /send forwardedMessage/);
+assert.equal(escalationForward.forward.to[0], 'k.bolz@heat-hero.com');
+assert.equal(escalationForward.forward.originalSubject, 'Max Mustermann - A-4711 - fehlende Unterlagen');
+assert.throws(() => renderFundingNoResponseEscalationDraft({
+  dealId: '7479', customerName: 'Max Mustermann', customerEmail: 'max@example.com', vpEmail: 'vp@example.com',
+  orderNumber: 'A-4711', requestSentAt: '2026-08-01T08:00:00Z', originalSubject: 'Fehlende Unterlagen',
+  responses: [{ senderEmail: 'max@example.com', receivedAt: '2026-08-05T09:00:00Z' }],
+}, new Date('2026-08-09T08:00:00Z')), /reagiert/);
 
 assert.equal(PIPEDRIVE_FUNDING_CONFIG.pipeline, 'Auftragsmachbarkeit');
+assert.equal(resolveFundingStage('Angebot veröffentlicht').key, 'offerPublished');
+const offerChecklist = buildFundingStageChecklist('Angebot veröffentlicht');
+assert.deepEqual(offerChecklist.requiredDocuments.map(item => item.id), ['signed_offer']);
 assert.equal(resolveFundingStage('Antrag eingereicht / Förderunterlagen einreichen').key, 'documents');
 const documentsChecklist = buildFundingStageChecklist('Antrag eingereicht / Förderunterlagen einreichen', { incomeBonusRequested: true });
 assert.equal(documentsChecklist.requiredDocuments.length, 7);
@@ -156,6 +199,11 @@ const moveDecision = decideFundingDealAction('Antrag eingereicht / Förderunterl
 assert.equal(moveDecision.action, 'move_to_funding_requested');
 assert.equal(moveDecision.moveAllowed, true);
 assert.equal(moveDecision.targetStage, 'Förderung beantragt');
+const offerMoveDecision = decideFundingDealAction('Angebot veröffentlicht', {
+  documentEvidence: { signed_offer: FUNDING_DOCUMENT_STATE.presentInPipedrive },
+});
+assert.equal(offerMoveDecision.action, 'move_to_documents');
+assert.equal(offerMoveDecision.targetStage, 'Antrag eingereicht / Förderunterlagen einreichen');
 const uploadDecision = decideFundingDealAction('Antrag eingereicht / Förderunterlagen einreichen', {
   incomeBonusRequested: false,
   documentEvidence: { ...allBaseDocuments, identity_card: FUNDING_DOCUMENT_STATE.availableInEmail },
@@ -182,17 +230,16 @@ const handoff = buildFundingHandoffWhatsApp({
   stageTransitionVerified: true,
 });
 assert.equal(handoff.recipientName, 'Viktoria Lambel');
-assert.equal(handoff.text, 'Max Mustermann - A-4711 ist fertig');
+assert.equal(handoff.text, 'Max Mustermann A-4711 fertig');
 assert.match(handoff.url, /^whatsapp:\/\/send\?phone=4915123456789&text=/);
 assert.equal(handoff.sent, false);
 const lockedHandoff = buildFundingHandoffWhatsApp({
   customerName: 'Max Mustermann', orderNumber: 'A-4711', phone: '0151 23456789', decision: lockedDecision,
 });
 assert.equal(lockedHandoff.ready, true);
-const fallbackHandoff = buildFundingHandoffWhatsApp({
+assert.throws(() => buildFundingHandoffWhatsApp({
   customerName: 'Erika Musterfrau', location: 'Bremen', phone: '0151 23456789', decision: lockedDecision,
-});
-assert.equal(fallbackHandoff.text, 'Erika Musterfrau - Bremen ist fertig');
+}), /Auftragsnummer fehlt/);
 assert.throws(() => buildFundingHandoffWhatsApp({
   customerName: 'Max Mustermann', orderNumber: 'A-4711', phone: '0151 23456789', decision: uploadDecision,
 }), /noch nicht vollständig/);
@@ -209,25 +256,65 @@ assert.equal(validatePipedriveFundingSnapshot({
   customerName: 'Erika Musterfrau',
 }).customerName, 'Erika Musterfrau');
 assert.equal(PIPEDRIVE_FILE_POLICY.delete, false);
+assert.deepEqual(assessExistingFundingDealFile({
+  fileName: 'Personalausweis Vorder- und Rueckseite - A-4711.pdf',
+  contentAnalysis: { document: { type: 'identity_card' }, textLayer: 'readable', ocr: { failedPages: [] } },
+  render: { visuallyRenderable: true },
+}), {
+  fileName: 'Personalausweis Vorder- und Rueckseite - A-4711.pdf',
+  type: 'identity_card', isPdf: true, namingCompliant: true, contentChecked: true, contentMatches: true, readable: true,
+  compliant: true, action: 'keep', reasons: [], deleteOriginalFromPipedrive: false, deleteManagedLocalCopyAfterVerifiedUpload: false,
+});
+const malformedExistingFile = assessExistingFundingDealFile({ fileName: 'Perso.jpg' });
+assert.equal(malformedExistingFile.action, 'download_correct_reupload');
+assert.equal(malformedExistingFile.deleteOriginalFromPipedrive, false);
+assert.equal(malformedExistingFile.deleteManagedLocalCopyAfterVerifiedUpload, true);
+const genericallyNamedExistingFile = assessExistingFundingDealFile({
+  fileName: 'Scan 001.pdf',
+  contentAnalysis: { document: { type: 'land_register' }, textLayer: 'native', ocr: { failedPages: [] } },
+  render: { visuallyRenderable: true },
+});
+assert.equal(genericallyNamedExistingFile.type, 'land_register');
+assert.equal(genericallyNamedExistingFile.action, 'download_correct_reupload');
+assert.deepEqual(genericallyNamedExistingFile.reasons, ['label_not_compliant']);
 assert.equal(assertPipedriveFileActionAllowed('download'), true);
 assert.throws(() => assertPipedriveFileActionAllowed('delete'), /unter keinen Umständen gelöscht/);
 const kfwInformationNote = renderPipedriveFundingInformationNote({
-  heading: 'KfW-Kontobestätigung',
+  heading: '✅ KfW-Konto erfolgreich geprüft',
   details: [
     { label: 'E-Mail-Adresse', value: 'kunde@example.com' },
-    { label: 'Passwort', value: 'NurEinTest123!' },
+    { label: 'Status', value: 'Login funktioniert; anschließend abgemeldet' },
   ],
 });
 assert.match(kfwInformationNote.content, /E-Mail-Adresse/);
-assert.match(kfwInformationNote.content, /Passwort/);
-assert.match(kfwInformationNote.content, /\(Notiz von IVA im Auftrag von Nadine\)<\/p>$/);
-assert.equal(IVA_PIPEDRIVE_NOTE_SIGNATURE, '(Notiz von IVA im Auftrag von Nadine)');
+assert.match(kfwInformationNote.content, /Login funktioniert/);
+assert.match(kfwInformationNote.content, /\(Notiz von Nadine via KI\)<\/p>$/);
+assert.equal(IVA_PIPEDRIVE_NOTE_SIGNATURE, '(Notiz von Nadine via KI)');
+assert.deepEqual(resolvePipedriveFundingStageTransition({
+  fromStage: 'Auftrag eingereicht / Förderunterlagen einreichen',
+  toStage: 'Förderung beantragen',
+}), {
+  fromKey: 'documents',
+  toKey: 'fundingRequested',
+  fromLabel: 'Antrag eingereicht / Förderunterlagen einreichen',
+  toLabel: 'Förderung beantragt',
+  fromAliases: PIPEDRIVE_FUNDING_CONFIG.stages.documents.aliases,
+  toAliases: PIPEDRIVE_FUNDING_CONFIG.stages.fundingRequested.aliases,
+});
+assert.throws(() => resolvePipedriveFundingStageTransition({
+  fromStage: 'Angebot veröffentlicht',
+  toStage: 'Förderung beantragen',
+}), /Nicht freigegebener/);
 assert.doesNotMatch(kfwInformationNote.content, /<p>\(Notiz von Nadine\)<\/p>$/);
 assert.doesNotMatch(kfwInformationNote.content, /IVA-(?:FUNDING|KFW)-/);
 assert.throws(() => renderPipedriveFundingInformationNote({
   heading: 'KfW-Kontobestätigung',
-  details: [{ label: 'Status', value: 'Im Förderpostfach vorhanden' }],
-}), /E-Mail-Adresse und Passwort/);
+  details: [{ label: 'Passwort', value: 'NurEinTest123!' }, { label: 'Status', value: 'geprüft' }],
+}), /niemals in einer Pipedrive-Notiz/);
+assert.throws(() => renderPipedriveFundingInformationNote({
+  heading: 'KfW-Kontobestätigung',
+  details: [{ label: 'E-Mail-Adresse', value: 'kunde@example.com' }],
+}), /Login-Prüfstatus/);
 const stableMailDescription = 'Unterhaltung, 2 Mitteilungen, Absender: Max Beispiel, Betreff: Förderunterlagen A-4711, Neueste Nachricht: 09.08.26, Hat Dateien, Nachrichtenvorschau: Anbei die Unterlagen';
 const changedMailPreview = 'Unterhaltung, 2 Mitteilungen, Absender: Max Beispiel, Betreff: Förderunterlagen A-4711, Geantwortet Neueste Nachricht: 09.08.26, Hat Dateien, Nachrichtenvorschau: Andere dynamische Vorschau';
 assert.equal(fundingMessageFingerprint(stableMailDescription), fundingMessageFingerprint(changedMailPreview));
@@ -237,6 +324,62 @@ assert.equal(assessRegistrationCertificateDate('Ausgestellt am 25.04.2023', new 
 assert.equal(assessRegistrationCertificateDate('Kein Datum lesbar', new Date('2026-08-10T12:00:00Z')).status, 'manual_review');
 assert.equal(fundingDocumentPipelinePolicy().identityFrontBackCombined, true);
 assert.equal(fundingDocumentPipelinePolicy().differentDocumentTypesRemainSeparate, true);
+assert.deepEqual(FUNDING_WORKFLOW_ORDER, ['completeness', 'amount', 'approval']);
+assert.equal(FUNDING_WORKFLOW_NAMES.completeness, 'Förderung 1 – Vollständigkeit & Unterlagen');
+assert.equal(FUNDING_WORKFLOW_POLICY.executionHost, 'imac-nadine');
+assert.equal(FUNDING_WORKFLOW_POLICY.emailMode, 'draft-only');
+assert.equal(FUNDING_WORKFLOW_POLICY.deletePipedrive, false);
+assert.equal(FUNDING_WORKFLOW_POLICY.deleteManagedLocalCopiesAfterVerifiedReplacement, true);
+assert.equal(FUNDING_WORKFLOW_POLICY.emptyWholeUserTrash, false);
+assert.equal(FUNDING_WORKFLOW_POLICY.noteSuffix, '(Notiz von Nadine via KI)');
+assert.equal(FUNDING_WORKFLOW_POLICY.processedMailFolder, 'fertig');
+assert.equal(assertFundingWorkflowOrder(), true);
+assert.throws(() => assertFundingWorkflowOrder(['amount', 'completeness', 'approval']), /Reihenfolge/);
+assert.equal(isImacFundingHost('iMac-von-Nadine.local'), true);
+assert.equal(isImacFundingHost('MacBook-Air-von-Nadine.local'), false);
+assert.deepEqual(buildFundingSheetRow({ customerName: 'Max Mustermann', date: '2026-08-26T12:00:00+02:00' }), {
+  Kundename: 'Max Mustermann', Datum: '26.08.2026', Bemerkung: '',
+});
+assert.deepEqual(resolveFundingSheetColumns(['✓', 'Kundename', 'Datum', 'Bemerkung']), {
+  customerName: 1, date: 2, remark: 3,
+  headers: { customerName: 'Kundename', date: 'Datum', remark: 'Bemerkung' },
+});
+assert.deepEqual(resolveFundingSheetColumns(['✓', 'Kundename', 'Bemerkung', 'Datum']), {
+  customerName: 1, date: 3, remark: 2,
+  headers: { customerName: 'Kundename', date: 'Datum', remark: 'Bemerkung' },
+});
+assert.equal(resolveFundingSheetColumns(['Name', 'Datum', 'Bemerkung']).customerName, 0);
+assert.throws(() => resolveFundingSheetColumns(['✓', 'Kundename', 'Bemerkung']), /Spalte „Datum“ fehlt/);
+const mfhNote = buildFundingCalculationNote({
+  result: { units: 2, estimatedGrant: 15_580, eligibleCosts: 41_000, noteSummary: '15.580,00 € - 30 % Gesamtgebäude / 46 % selbst genutzte WE', rulesAsOf: '2026-07-21', status: 'precheck-positive' },
+  sources: ['KfW-Merkblatt 07/2026'],
+});
+assert.match(mfhNote, /^15\.580,00 €/);
+assert.match(mfhNote, /\(Notiz von Nadine via KI\)$/);
+assert.equal(FUNDING_DONE_FOLDER, 'fertig');
+assert.deepEqual(validateFundingMailCompletion({
+  messageFingerprint: 'mail-123',
+  messageDescription: stableMailDescription,
+  dealId: '7479',
+  uploadedFileNames: ['Personalausweis.pdf'],
+  pipedriveFilesVerified: true,
+  textRelevant: true,
+  pipedriveTextVerified: true,
+}), {
+  messageFingerprint: 'mail-123',
+  messageDescription: stableMailDescription,
+  dealId: '7479',
+  uploadedFileNames: ['Personalausweis.pdf'],
+  textRelevant: true,
+  pipedriveFilesVerified: true,
+  pipedriveTextVerified: true,
+});
+assert.throws(() => validateFundingMailCompletion({
+  messageFingerprint: 'mail-124', messageDescription: stableMailDescription, dealId: '7479', pipedriveFilesVerified: false,
+}), /noch nicht vollständig verifiziert/);
+assert.throws(() => validateFundingMailCompletion({
+  messageFingerprint: 'mail-125', messageDescription: stableMailDescription, dealId: '7479', pipedriveFilesVerified: true, textRelevant: true,
+}), /Mailtext/);
 
 const localCleanupTestRoot = await mkdtemp(path.join(os.tmpdir(), 'iva-funding-local-cleanup-'));
 try {
@@ -272,11 +415,12 @@ try {
 }
 
 const documentAnalysis = parseFundingDocumentPages([
-  `Kundendaten\nAuftragsnummer: HH-AN-7-26-10926\nKundennummer: KD-8821\nTelefonnummer: +49 174 1234567\nSol-HEAT Wärmepumpenpaket 16kW - PANASONIC M-Serie T-CAP WH-WXG16ME8`,
+  `Kundendaten\nAuftragsnummer: HH-AN-7-26-10926\nKundennummer: KD-8821\nTelefonnummer: +49 174 1234567\nE-Mail: kunde@example.com\nSol-HEAT Wärmepumpenpaket 16kW - PANASONIC M-Serie T-CAP WH-WXG16ME8`,
 ], { sourceFile: 'Unterschriebenes Angebot.pdf' });
 assert.equal(documentAnalysis.fields.orderNumber.value, 'HH-AN-7-26-10926');
 assert.equal(documentAnalysis.fields.customerNumber.value, 'KD-8821');
 assert.equal(documentAnalysis.fields.phoneNumber.value, '+49 174 1234567');
+assert.equal(documentAnalysis.fields.customerEmail.value, 'kunde@example.com');
 assert.equal(documentAnalysis.fields.plant.value, 'Panasonic 16 kW');
 assert.equal(documentAnalysis.fields.plant.model, 'WH-WXG16ME8');
 assert.equal(documentAnalysis.fields.orderNumber.page, 1);
@@ -286,6 +430,7 @@ const fieldProposals = buildPipedriveFieldProposals({
 assert.equal(fieldProposals.proposals.find(item => item.field === 'orderNumber').action, 'propose_fill');
 assert.equal(fieldProposals.proposals.find(item => item.field === 'customerNumber').action, 'already_equal');
 assert.equal(fieldProposals.proposals.find(item => item.field === 'phoneNumber').action, 'conflict');
+assert.equal(fieldProposals.proposals.find(item => item.field === 'customerEmail').action, 'propose_fill');
 assert.equal(fieldProposals.proposals.find(item => item.field === 'plant').action, 'propose_fill');
 assert.equal(fieldProposals.mutated, false);
 const ambiguousAnalysis = parseFundingDocumentPages([
@@ -332,7 +477,7 @@ assert.match(built.script, /content:/);
 assert.match(built.script, /senderAccount is missing value then error/);
 assert.match(built.script, /make new to recipient/);
 assert.doesNotMatch(built.script, /send draftMessage/);
-assert.throws(() => renderFundingMissingDocumentsEmail({ customerName: 'Test', orderNumber: '1', missingDocumentIds: [] }), /keine Unterlagen/);
+assert.throws(() => renderFundingMissingDocumentsEmail({ customerName: 'Test', customerEmail: 'test@example.com', orderNumber: '1', missingDocumentIds: [] }), /keine Unterlagen/);
 assert.throws(() => normalizeDraftPayload({ subject: 'Test', body: 'Text', to: ['falsch'] }), /ungültige E-Mail/);
 
 const marker = buildFundingDraftMarker('11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222');
@@ -380,8 +525,8 @@ const batchService = new FundingBatchService({
   },
 });
 const batchCases = [
-  { customerName: 'Fall Eins', orderNumber: 'HH-1', missingDocumentIds: ['signed_offer'] },
-  { customerName: 'Fall Zwei', orderNumber: 'HH-2', missingDocumentIds: ['identity_card'] },
+  { customerName: 'Fall Eins', customerEmail: 'fall.eins@example.com', orderNumber: 'HH-1', missingDocumentIds: ['signed_offer'] },
+  { customerName: 'Fall Zwei', customerEmail: 'fall.zwei@example.com', orderNumber: 'HH-2', missingDocumentIds: ['identity_card'] },
 ];
 const previewBatch = batchService.preview(batchCases);
 assert.equal(previewBatch.mode, FUNDING_BATCH_MODE);
@@ -435,8 +580,8 @@ const partialRollback = await partialService.rollback('last', FUNDING_ROLLBACK_C
 assert.equal(partialRollback.batch.status, 'rolled_back');
 assert.equal(partialDeleteCalls[0].entries.length, 1);
 assert.throws(() => batchService.preview([
-  { customerName: 'Doppelt', orderNumber: 'HH-3', missingDocumentIds: ['signed_offer'] },
-  { customerName: 'Doppelt', orderNumber: 'HH-3', missingDocumentIds: ['identity_card'] },
+  { customerName: 'Doppelt', customerEmail: 'doppelt@example.com', orderNumber: 'HH-3', missingDocumentIds: ['signed_offer'] },
+  { customerName: 'Doppelt', customerEmail: 'doppelt@example.com', orderNumber: 'HH-3', missingDocumentIds: ['identity_card'] },
 ]), /Betreff.*mehrfach/);
 
 const cleanupTestRoot = await mkdtemp(path.join(os.tmpdir(), 'iva-funding-cleanup-'));

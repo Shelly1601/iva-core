@@ -42,6 +42,7 @@ assert.match(funding.noteSummary, /^80 % - Grund 30 %/);
 
 const rentedMfh = calculateKfw458Funding({
   applicantType: 'private-owner', selfUsed: false, existingBuildingAgeYears: 76, units: 3,
+  buildingStructure: 'unpartitioned',
   projectCosts: 41_170.55, applicationDate: '2026-08-10', eligibleCostsConfirmedByBza: true,
   contractConditional: true, applicationBeforeStart: true, hydraulicBalancingPlanned: true,
 }, new Date('2026-08-14T12:00:00+02:00'));
@@ -49,10 +50,11 @@ assert.equal(rentedMfh.eligibleCostCap, 58_000);
 assert.equal(rentedMfh.buildingBaseRate, 30);
 assert.equal(rentedMfh.estimatedGrant, 12_351.17);
 assert.equal(rentedMfh.effectiveBuildingRate, 30);
-assert.match(rentedMfh.noteSummary, /^30 % - Grund 30 %/);
+assert.match(rentedMfh.noteSummary, /^12\.351,17 € - 30 % Gesamtgebäude/);
 
 const selfUsedMfh = calculateKfw458Funding({
   applicantType: 'private-owner', selfUsed: true, existingBuildingAgeYears: 40, units: 3,
+  buildingStructure: 'unpartitioned',
   projectCosts: 58_000, householdIncome: 25_000, eligibleMinorChild: false, climateBonusEligible: true,
   applicationDate: '2026-08-10', eligibleCostsConfirmedByBza: true,
   contractConditional: true, applicationBeforeStart: true, hydraulicBalancingPlanned: true,
@@ -61,7 +63,7 @@ assert.equal(selfUsedMfh.selfUsedUnitEligibleCosts, 19_333.33);
 assert.equal(selfUsedMfh.selfUsedUnitRate, 80);
 assert.equal(selfUsedMfh.selfUsedUnitAdditionalGrant, 9_666.67);
 assert.equal(selfUsedMfh.estimatedGrant, 27_066.67);
-assert.match(selfUsedMfh.noteSummary, /^30 % Gesamtgebäude \/ 80 % selbst genutzte WE/);
+assert.match(selfUsedMfh.noteSummary, /^27\.066,67 € - 30 % Gesamtgebäude \/ 80 % selbst genutzte WE/);
 
 const cappedAtSeventy = calculateKfw458Funding({
   applicantType: 'private-owner', selfUsed: true, existingBuildingAgeYears: 40, units: 1,
@@ -80,5 +82,15 @@ const oldRulesBlocked = calculateKfw458Funding({
 }, new Date('2026-08-14T12:00:00+02:00'));
 assert.equal(oldRulesBlocked.status, 'precheck-incomplete');
 assert.match(oldRulesBlocked.blockers.join(' '), /frühere KfW-Regelwerk/);
+
+const ambiguousMfh = calculateKfw458Funding({
+  applicantType: 'private-owner', selfUsed: true, existingBuildingAgeYears: 40, units: 3,
+  projectCosts: 58_000, householdIncome: 25_000, personsInHousehold: 3,
+  applicationDate: '2026-08-10', eligibleCostsConfirmedByBza: true,
+  contractConditional: true, applicationBeforeStart: true, hydraulicBalancingPlanned: true,
+}, new Date('2026-08-14T12:00:00+02:00'));
+assert.equal(ambiguousMfh.status, 'precheck-incomplete');
+assert.match(ambiguousMfh.blockers.join(' '), /WEG oder ungeteiltes Mehrfamilienhaus/);
+assert.match(ambiguousMfh.blockers.join(' '), /Kind unter 18/);
 
 console.log('PASS Energie: Heizlast-Vorplanung, Pflichtfelder und KfW-458-Regelstand');

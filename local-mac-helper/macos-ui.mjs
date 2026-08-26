@@ -343,6 +343,24 @@ export async function inspectOutlookMessageAttachments(description) {
   return runMacUiBridge(['inspect-message-attachments', exactDescription], { timeoutMs: 30000 });
 }
 
+export async function moveOutlookMessageToFolder({ from, messageDescription, destinationFolder }) {
+  const exactDescription = String(messageDescription || '');
+  if (!exactDescription || !/(?:Betreff:|Kein Betreff)/i.test(exactDescription)) {
+    throw new Error('Für das Outlook-Verschieben fehlt die exakte Nachrichtenbeschreibung.');
+  }
+  const folder = String(destinationFolder || '').trim();
+  if (!folder) throw new Error('Für das Outlook-Verschieben fehlt der Zielordner.');
+  await openOutlookAccountFolder({ from, folder: 'Posteingang' });
+  const moved = await runMacUiBridge(['move-message-to-folder', exactDescription, folder], { timeoutMs: 30000 });
+  await openOutlookAccountFolder({ from, folder });
+  const target = await runMacUiBridge(['find', 'AXCell'], { timeoutMs: 30000 });
+  const targetMatches = (target.matches || []).filter(item => String(item.description || '') === exactDescription);
+  if (targetMatches.length !== 1) {
+    throw new Error(`Outlook-Verschieben nicht verifiziert: Im Ordner „${folder}“ wurden ${targetMatches.length} exakte Treffer gefunden.`);
+  }
+  return { ...moved, verifiedInDestination: true, destinationMatches: 1 };
+}
+
 function attachmentNameFromDescription(value) {
   return String(value || '').match(/^(.+?\.(?:pdf|png|jpe?g|heic|tiff?))(?:,\s+.*)?$/i)?.[1]?.trim() || null;
 }

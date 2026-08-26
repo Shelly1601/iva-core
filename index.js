@@ -1189,7 +1189,28 @@ app.post('/device-agent/:deviceId/project-workflow-runs', async (req, res) => {
   if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) {
     return res.status(401).json({ error: 'unauthorized' });
   }
-  try { res.status(201).json(await recordProjectWorkflowResult('heat-hero', req.body || {})); }
+  try {
+    const stored = await recordProjectWorkflowResult('heat-hero', req.body || {});
+    let telegramReport = null;
+    const fundingIds = new Set(['funding-daily-sequence', 'funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning']);
+    const terminal = ['completed', 'failed', 'blocked', 'timed_out', 'incomplete'].includes(String(req.body?.status || ''));
+    if (terminal && fundingIds.has(String(req.body?.workflowId || ''))) {
+      const mem = await loadMemory();
+      if (mem.chatId) {
+        const secretFreeSummary = String(req.body?.summary || req.body?.error || 'Kein Detailbericht vorhanden.')
+          .replace(/((?:passwort|kennwort|otp|einmalcode)\s*[:=\-]\s*)\S+/ig, '$1[ausgeblendet]')
+          .replace(/\b\d{10,11}\b/g, '[Steuer-ID ausgeblendet]')
+          .slice(0, 3300);
+        try {
+          await sendTelegram(mem.chatId, `**${String(req.body?.workflowName || 'Förderlauf').slice(0, 180)}**\nStatus: ${String(req.body?.status || 'unbekannt')}\n${secretFreeSummary}`);
+          telegramReport = { delivered: true };
+        } catch (error) {
+          telegramReport = { delivered: false, error: String(error.message || error).slice(0, 300) };
+        }
+      } else telegramReport = { delivered: false, error: 'Telegram-Chat-ID fehlt.' };
+    }
+    res.status(201).json({ ...stored, telegramReport });
+  }
   catch (error) { res.status(400).json({ error: error.message }); }
 });
 
@@ -1224,7 +1245,7 @@ app.post('/device-agent/:deviceId/planbar-search-index', async (req, res) => {
 app.get('/public-api/projects/heat-hero/automation-flags', async (_req, res) => {
   try {
     const project = await getProject('heat-hero');
-    const allowedIds = new Set(['kfw-approval-morning', 'montage-required-fields-morning', 'planbar-completion-morning']);
+    const allowedIds = new Set(['funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning', 'montage-required-fields-morning', 'planbar-completion-morning']);
     const automations = Object.fromEntries((project?.automations || [])
       .filter(item => allowedIds.has(item.id))
       .map(item => [item.id, { enabled: item.enabled === true, status: item.status }]));
@@ -2642,6 +2663,29 @@ const automationRunner = createAutomationOrchestrator({
       : `E-Mail-Zustellung fehlgeschlagen; Wochenreport ersatzweise per Telegram zugestellt. Grund: ${delivery.emailError}`;
     return { reportKey: report.key, delivery, summary };
   },
+  'funding-daily-sequence': async () => {
+    const project = await getProject('heat-hero');
+    const required = ['funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning'];
+    const disabled = required.filter(id => project?.automations?.find(item => item.id === id)?.enabled !== true);
+    if (disabled.length) return {
+      status: 'blocked',
+      summary: `Förderlauf nicht an den iMac übergeben: Projektschalter aus (${disabled.join(', ')}).`,
+      error: 'Mindestens ein Förder-Workflow ist in der Projektakte ausgeschaltet.',
+    };
+    const command = await enqueueDeviceCommand({
+      deviceId: IVA_IMAC_DEVICE_ID,
+      action: 'project.workflow.run',
+      payload: { projectId: 'heat-hero', workflowId: 'funding-daily-sequence', displayName: 'Förderung – Tageslauf 1 → 2 → 3' },
+      requestedBy: 'automation-funding-daily-sequence',
+      requestText: 'Täglicher Förderlauf um 05:00 Uhr ausschließlich auf dem iMac',
+    });
+    return {
+      commandId: command.id,
+      deviceId: IVA_IMAC_DEVICE_ID,
+      order: required,
+      summary: 'Geordneter Förderlauf wurde um 05:00 Uhr ausschließlich an den iMac übergeben.',
+    };
+  },
   'daily-briefing': async () => sendBriefing(),
   'marketing-morning-report': async () => sendMarketingMorningReport(),
   'heat-hero-too-often-replies': async () => runHeatHeroTooOftenReplies(),
@@ -2677,7 +2721,10 @@ const SERVER_MANUAL_PROJECT_WORKFLOWS = Object.freeze({
   'workflow-protocol-summaries': ['project-protocol-daily', 'project-protocol-weekly'],
 });
 const IMAC_MANUAL_PROJECT_WORKFLOWS = new Set([
+  'funding-daily-sequence',
   'funding-monitor',
+  'kfw-funding-amount-morning',
+  'kfw-approval-morning',
   'planbar-weekly-export',
   'planbar-completion-morning',
   'montage-required-fields-morning',

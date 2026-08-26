@@ -182,17 +182,23 @@ export function buildKfw458NoteSummary(result = {}) {
   const climate = bonuses.climateSpeed > 0 ? formatPercent(bonuses.climateSpeed) : 'nein';
   const components = `Grund ${formatPercent(bonuses.base || 0)} | Einkommen ${income} | Kind u18: ${child} | Klimageschwindigkeit ${climate}`;
   if (units > 1 && result.selfUsed === true) {
-    return `${formatPercent(result.buildingBaseRate || 0)} Gesamtgebäude / ${formatPercent(result.selfUsedUnitRate || 0)} selbst genutzte WE - ${components}${result.unitRateCapped ? ` | gedeckelt auf ${formatPercent(result.maximumUnitRate)}` : ''}`;
+    return `${round(result.estimatedGrant, 2).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € - ${formatPercent(result.buildingBaseRate || 0)} Gesamtgebäude / ${formatPercent(result.selfUsedUnitRate || 0)} selbst genutzte WE - ${components}${result.unitRateCapped ? ` | gedeckelt auf ${formatPercent(result.maximumUnitRate)}` : ''}`;
+  }
+  if (units > 1) {
+    return `${round(result.estimatedGrant, 2).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € - ${formatPercent(result.buildingBaseRate || 0)} Gesamtgebäude - ${components}`;
   }
   const displayedRate = result.selfUsed === true ? result.selfUsedUnitRate : result.buildingBaseRate;
   return `${formatPercent(displayedRate || 0)} - ${components}${result.unitRateCapped ? ` | gedeckelt auf ${formatPercent(result.maximumUnitRate)}` : ''}`;
 }
 
 export function calculateKfw458Funding(input = {}, now = new Date()) {
-  const units = Math.max(1, Math.floor(numberValue(input.units) || 1));
+  const suppliedUnits = numberValue(input.units);
+  const unitsKnown = suppliedUnits !== null && Number.isInteger(suppliedUnits) && suppliedUnits >= 1;
+  const units = unitsKnown ? suppliedUnits : 1;
   const projectCosts = Math.max(0, numberValue(input.projectCosts) || 0);
   const ageYears = numberValue(input.existingBuildingAgeYears);
   const privateOwner = input.applicantType === 'private-owner';
+  const selfUsedKnown = typeof input.selfUsed === 'boolean';
   const selfUsed = input.selfUsed === true;
   const climateBonus = selfUsed && input.climateBonusEligible === true ? climateSpeedBonusRate(now) : 0;
   const incomeBonus = selfUsed ? incomeBonusRate(input.householdIncome, input.eligibleMinorChild === true) : 0;
@@ -205,7 +211,9 @@ export function calculateKfw458Funding(input = {}, now = new Date()) {
   const eligibleCosts = Math.min(projectCosts, costCap);
   const buildingBaseRate = baseBonus;
   const buildingBaseGrant = round(eligibleCosts * buildingBaseRate / 100, 2);
-  const buildingStructure = input.buildingStructure === 'weg' ? 'weg' : 'unpartitioned';
+  const buildingStructure = units === 1
+    ? 'single-unit'
+    : ['weg', 'unpartitioned'].includes(input.buildingStructure) ? input.buildingStructure : null;
   const ownershipShareRaw = numberValue(input.ownershipSharePercent);
   const ownershipShare = ownershipShareRaw !== null && ownershipShareRaw > 0 ? ownershipShareRaw / 100 : null;
   let selfUsedUnitEligibleCosts = 0;
@@ -230,6 +238,13 @@ export function calculateKfw458Funding(input = {}, now = new Date()) {
   else checks.push('Regelstand ab 21.07.2026 anhand des Antragsdatums bestätigt.');
   if (!privateOwner) blockers.push('Programm 458 richtet sich hier an private Eigentümerinnen und Eigentümer von Wohngebäuden.');
   else checks.push('Private Eigentümerschaft angegeben.');
+  if (!unitsKnown) blockers.push('Die Anzahl der abgeschlossenen Wohneinheiten ist nicht eindeutig belegt.');
+  if (!selfUsedKnown) blockers.push('Eigennutzung oder Vermietung ist nicht eindeutig belegt.');
+  if (units > 1 && !buildingStructure) blockers.push('Bei mehreren Wohneinheiten fehlt die eindeutige Einordnung als WEG oder ungeteiltes Mehrfamilienhaus.');
+  if (selfUsed && typeof input.climateBonusEligible !== 'boolean') blockers.push('Die Voraussetzungen des Klimageschwindigkeitsbonus sind nicht eindeutig belegt.');
+  if (selfUsed && numberValue(input.personsInHousehold) > 2 && typeof input.eligibleMinorChild !== 'boolean') {
+    blockers.push('Bei mehr als zwei Haushaltsmitgliedern ist noch offen, ob ein förderrelevantes Kind unter 18 Jahren im Haushalt lebt.');
+  }
   if (ageYears === null) blockers.push('Alter des bestehenden Wohngebäudes bzw. Datum der Bauanzeige fehlt.');
   else if (ageYears < 5) blockers.push('Bauantrag/Bauanzeige des bestehenden Wohngebäudes muss zum Antragszeitpunkt mindestens fünf Jahre zurückliegen.');
   else checks.push('Mindestalter des bestehenden Gebäudes erfüllt.');

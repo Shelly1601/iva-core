@@ -17,6 +17,7 @@ export const DEVICE_ACTIONS = Object.freeze({
   'computer.status': Object.freeze({ description: 'Status des iMac-Helfers prüfen', mutating: false, requiresAttestedAgent: true }),
   'funding.monitor.status': Object.freeze({ description: 'Fördermonitor-Status prüfen', mutating: false, requiresAttestedAgent: true }),
   'funding.monitor.run': Object.freeze({ description: 'Fördermonitor einmal im gesperrten Review-Modus ausführen', mutating: false, requiresAttestedAgent: true }),
+  'funding.legacy-monitor.suspend': Object.freeze({ description: 'Veralteten lokalen 30-Minuten-Fördermonitor ohne Dateilöschung anhalten', mutating: true, requiresAttestedAgent: true }),
   'funding.reviews.list': Object.freeze({ description: 'Lokale Förder-Prüfwarteschlange zusammenfassen', mutating: false, requiresAttestedAgent: true }),
   'planbar.search.refresh': Object.freeze({ description: 'Sichtbaren Planbar-Terminindex rein lesend aktualisieren', mutating: false, requiresAttestedAgent: true }),
   'planbar.customer.schedule': Object.freeze({ description: 'Einen eindeutig belegten Kunden über den lokalen iMac-Workflow in Planbar terminieren', mutating: true, requiresAttestedAgent: true }),
@@ -188,7 +189,7 @@ function validatePayload(action, payload = {}) {
   if (action === 'project.workflow.run') {
     const projectId = cleanText(payload.projectId, 100);
     const workflowId = cleanText(payload.workflowId, 140);
-    const allowed = new Set(['funding-monitor', 'planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning']);
+    const allowed = new Set(['funding-daily-sequence', 'funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning', 'planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning']);
     if (projectId !== 'heat-hero' || !allowed.has(workflowId)) throw new Error('Dieser Projekt-Workflow ist für den manuellen iMac-Start nicht freigegeben.');
     return { projectId, workflowId, displayName: cleanText(payload.displayName, 220) || workflowId };
   }
@@ -234,7 +235,7 @@ export async function enqueueDeviceCommand({ deviceId = IVA_IMAC_DEVICE_ID, acti
   const normalizedPayload = validatePayload(actionName, payload);
   const now = new Date();
   const store = await loadStore();
-  if (actionName === 'planbar.customer.schedule') {
+  if (actionName === 'planbar.customer.schedule' || actionName === 'project.workflow.run') {
     const fingerprint = JSON.stringify(normalizedPayload);
     const existing = store.commands.find(item => item.deviceId === device
       && item.action === actionName
@@ -280,7 +281,8 @@ export async function claimNextDeviceCommand(deviceId = IVA_IMAC_DEVICE_ID, agen
   }
   const command = store.commands.find(item => item.deviceId === deviceId
     && item.status === 'queued'
-    && (!DEVICE_ACTIONS[item.action]?.requiresAttestedAgent || claimingAgent));
+    && (!DEVICE_ACTIONS[item.action]?.requiresAttestedAgent
+      || (claimingAgent && claimingAgent.allowedActions.includes(item.action))));
   if (!command) {
     if (changed) await saveStore(store);
     return null;

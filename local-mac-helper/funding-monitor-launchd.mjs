@@ -96,6 +96,15 @@ export async function uninstallFundingMonitorLaunchAgent() {
   return { installed: false, loaded: false, plistRemoved: true };
 }
 
+export async function suspendFundingMonitorLaunchAgent() {
+  const plist = fundingMonitorLaunchAgentFile();
+  const guiDomain = `gui/${process.getuid()}`;
+  await execFileAsync('/bin/launchctl', ['bootout', guiDomain, plist], { timeout: 10000 }).catch(() => {});
+  const status = await fundingMonitorLaunchAgentStatus();
+  if (status.loaded) throw new Error('Der veraltete 30-Minuten-Fördermonitor ist nach dem Anhalten weiterhin geladen.');
+  return { suspended: true, loaded: false, plistRetained: true, plist, replacement: 'Railway 05:00 → imac-nadine → Förderung 1 → 2 → 3' };
+}
+
 export async function readFundingMonitorLogs({ maxCharacters = 12000 } = {}) {
   const logs = path.join(dataRoot(), 'logs');
   const output = await readFile(path.join(logs, 'funding-monitor.out.log'), 'utf8').catch(() => '');

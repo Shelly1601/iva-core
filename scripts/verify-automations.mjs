@@ -26,6 +26,9 @@ check('CRM-Sync startet sicherheitshalber ausgeschaltet', initial.find(item => i
 check('E-Mail-Reports sind der aktive Hauptkanal', initial.filter(item => item.id.startsWith('report-email-')).every(item => item.enabled === true));
 check('Separater Telegram-Report startet ohne Doppelzustellung ausgeschaltet', initial.find(item => item.id === 'report-telegram-morning')?.enabled === false);
 check('Monatlicher Integrations-Check-up ist standardmäßig aktiv', initial.find(item => item.id === 'integration-checkup-monthly')?.enabled === true);
+const fundingSequence = initial.find(item => item.id === 'funding-daily-sequence');
+check('Förder-Tageslauf ist täglich um 05:00 Uhr aktiv', fundingSequence?.enabled === true && fundingSequence.cron === '0 5 * * *');
+check('Förder-Tageslauf benennt die feste Reihenfolge', /1 → 2 → 3/.test(fundingSequence?.name || ''));
 await store.setAutomationEnabled('crm-qonekto-sync', true);
 check('Schalter wird persistent gespeichert', (await store.getAutomation('crm-qonekto-sync')).enabled === true);
 

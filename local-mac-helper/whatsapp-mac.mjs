@@ -48,6 +48,7 @@ export function normalizeWhatsAppPhone(value) {
 
 export function buildFundingHandoffWhatsApp({ customerName, orderNumber, location, city, phone, decision, stageTransitionVerified = false } = {}) {
   const reference = buildFundingCaseReference({ customerName, orderNumber, location, city });
+  if (!reference.orderNumber) throw new Error('WhatsApp-Übergabe gesperrt: Die Auftragsnummer fehlt.');
   if (!decision?.documentsCompleteInPipedrive) {
     throw new Error('WhatsApp-Übergabe gesperrt: Die Pflichtunterlagen sind noch nicht vollständig in Pipedrive verifiziert.');
   }
@@ -58,7 +59,7 @@ export function buildFundingHandoffWhatsApp({ customerName, orderNumber, locatio
     throw new Error('WhatsApp-Übergabe gesperrt: unbekannte Pipedrive-Stufe.');
   }
   const normalizedPhone = normalizeWhatsAppPhone(phone);
-  const text = `${reference.text} ist fertig`;
+  const text = `${reference.customerName} ${reference.orderNumber} fertig`;
   return {
     recipientName: FUNDING_HANDOFF_RECIPIENT,
     phone: normalizedPhone,

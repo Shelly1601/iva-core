@@ -18,9 +18,9 @@ node local-mac-helper/cli.mjs portal-login <panasonic|bosch|pipedrive|airtable|p
 
 - hört nur auf `127.0.0.1`
 - jede fachliche Route verlangt `IVA_MAC_HELPER_TOKEN` mit mindestens 32 Zeichen
-- Originaldateien werden weder verändert noch gelöscht
+- In Pipedrive, Outlook, im Förderpostfach und in Google Drive wird keine Datei, Mail oder Akte gelöscht. Nach Nadines ausdrücklicher Freigabe vom 27.08.2026 dürfen ausschließlich verifiziert ersetzte IVA-Arbeitskopien im verwalteten lokalen Förderordner endgültig entfernt werden.
 - **Harte Pipedrive-Regel:** In Pipedrive wird keine Datei gelöscht. Der lokale Dienst lehnt jede Pipedrive-`DELETE`-Route ausdrücklich ab.
-- Für die Verarbeitung heruntergeladene Kopien werden in einen abgeschotteten IVA-Arbeitsordner verschoben und nach Auswertung beziehungsweise verifiziertem Upload vollständig lokal entfernt. Die Bereinigung darf ausschließlich diesen Arbeitsordner treffen.
+- Für die Verarbeitung heruntergeladene Kopien liegen im abgeschotteten IVA-Arbeitsordner. Nach verifiziertem Korrektur-Upload darf der tägliche Lauf nur diesen exakten Nachrichtenordner entfernen. Fremde Papierkorb-Inhalte bleiben unangetastet; der gesamte Benutzer-Papierkorb wird niemals pauschal geleert.
 - jeder Prüflauf erhält eine eigene Batch-ID; jeder darin erstellte Entwurf wird einzeln protokolliert
 - Entwürfe erhalten Fingerprint und interne Rückgängig-Kennung; identische Entwürfe werden nicht doppelt erzeugt
 - innerhalb eines Prüflaufs muss jeder Betreff eindeutig sein. Das verhindert, dass die Rückgängig-Funktion einen falschen Outlook-Entwurf treffen kann
@@ -51,6 +51,7 @@ Beispielstruktur für `fall.json`:
 ```json
 {
   "customerName": "Max Mustermann",
+  "customerEmail": "max.mustermann@example.com",
   "orderNumber": "A-4711",
   "vpName": "Maria Muster",
   "vpEmail": "maria.muster@example.com",
@@ -65,16 +66,18 @@ Beispielstruktur für `fall.json`:
 
 Der Absender muss in Falldateien nicht mehr eingetragen werden. Er wird für diesen Workflow immer fest als `foerderung@heat-hero.com` gesetzt. Ein abweichender übergebener Absender führt zum Abbruch.
 
-Das Feld **An** folgt einer festen Priorität: Mitglieder des lokal synchronisierten WhatsApp-Rosters **HEATHERO Direktvertrieb** gehen immer an Noah Zielinski (`n.zielinski@heat-hero.com`), auch wenn ihre Adresse oder der Deal zugleich EKD enthält. Andere eindeutige EKD-Fälle gehen an Florian Bolz (`f.bolz@heat-hero.com`); alles Übrige geht an Patrick Germer (`p.germer@heat-hero.com`). Die eindeutig zugeordnete VP-Adresse bleibt im **CC**. Name, Adresse oder Vertriebsweg werden niemals geraten.
+Das Feld **An** enthält ausschließlich die eindeutig aus dem Deal ermittelte Kundenadresse. Die eindeutig zugeordnete VP-Adresse steht im **CC**. Name, Adresse oder Vertriebsweg werden niemals geraten; ohne sichere Kundenadresse entsteht kein Entwurf.
 
-Die Fallreferenz wird in dieser Reihenfolge gebildet: **Kundenname + Auftragsnummer**, ersatzweise **Kundenname + Ort**, ansonsten nur **Kundenname**. Eine fehlende Auftragsnummer verhindert damit weder den Förderentwurf noch die spätere interne Fertigmeldung.
+Die Fallreferenz besteht aus **Kundenname + Angebots-/Auftragsnummer**. Ohne sichere Auftragsnummer entsteht weder ein Kundenentwurf noch die interne Fertigmeldung.
 
 ## Pipedrive-Förderprüfung
 
-IVA prüft ausschließlich die Pipeline **Auftragsmachbarkeit** und darin diese beiden Stufen:
+IVA prüft ausschließlich die Pipeline **Auftragsmachbarkeit** und darin diese drei Stufen in fester Reihenfolge:
+
+- **Angebot veröffentlicht:** Nur ein sichtbar unterschriebenes Angebot erlaubt den Wechsel zu **Antrag eingereicht / Förderunterlagen einreichen**. Auftragsnummer und Anlage werden aus dem belegten Dokument in leere Zielfelder übernommen; fehlende Kunden-E-Mail und Telefonnummer dürfen nur eindeutig aus der TMB ergänzt werden.
 
 - **Antrag eingereicht / Förderunterlagen einreichen:** vollständige Prüfung aller benötigten Unterlagen in Pipedrive und in den zugeordneten Förder-E-Mails. Fehlende, eindeutig zugeordnete Mail-Anlagen werden zuerst korrekt benannt und in den Deal hochgeladen. Erst wenn anschließend jede Pflichtunterlage in Pipedrive als vollständig bestätigt ist, darf der Deal nach **Förderung beantragt** verschoben werden.
-- **Förderung beantragt:** dieselbe vollständige Prüfung und gegebenenfalls Nachpflege aus den Förder-E-Mails. Der Deal bleibt aber immer in dieser Stufe und wird von IVA nicht weitergeschoben.
+- **Förderung beantragt:** Ein Deal wird nur bei einem eindeutig zugeordneten offiziellen KfW-Zusageschreiben auf **Gewonnen** gesetzt. Anschließend muss der Übergang zu **Montage einplanen** erneut gelesen und bestätigt werden.
 
 Eine nur in Outlook gefundene Datei zählt nicht als vollständig. Reihenfolge: richtigen Deal und Dokumenttyp bestätigen → gegebenenfalls Bilder je Unterlage zu einer PDF zusammenfügen → eindeutig benennen → in Pipedrive hochladen → Upload verifizieren → gesamte Checkliste erneut prüfen → erst dann gegebenenfalls die erlaubte Stufenänderung ausführen.
 
@@ -84,7 +87,7 @@ Der verifizierte Upload nutzt die bereits angemeldete Pipedrive-Sitzung in Chrom
 node local-mac-helper/cli.mjs upload-pipedrive-files <deal-id> <pdf-ordner> --commit
 ```
 
-Nach erfolgreich erstellten Outlook-Entwürfen können die zugehörigen, idempotenten Pipedrive-Notizen als eigener bestätigter Schritt angelegt werden. Jede Notiz listet nur die tatsächlich angefragten Unterlagen und nennt den nach derselben Priorität ermittelten Verantwortlichen sowie - falls eindeutig vorhanden - den Vertriebspartner. Sichtbar endet jede IVA-Notiz mit **(Notiz von Nadine)**; technische IVA-Kennungen werden nicht in den Dealtext geschrieben. Eine in der Akte dokumentierte KfW-E-Mail-Adresse samt Passwort gilt als KfW-Kontobestätigung; Passwörter werden in Statusausgaben konsequent ausgeblendet. Relevante schriftliche Hinweise aus einer eindeutig zugeordneten Fördermail werden als kurze, konkrete Informationsnotiz übernommen. Bei KfW-Zugangsdaten sind E-Mail-Adresse und Passwort Pflichtangaben; ein bloßer Verweis auf das Förderpostfach ist nicht zulässig.
+Nach erfolgreich erstellten Outlook-Entwürfen können die zugehörigen, idempotenten Pipedrive-Notizen als eigener bestätigter Schritt angelegt werden. Der fachliche Hauptsatz steht immer in der ersten Zeile. Sichtbar endet jede IVA-Notiz exakt mit **(Notiz von Nadine via KI)**; technische IVA-Kennungen werden nicht in den Dealtext geschrieben. Eine in der Akte dokumentierte KfW-E-Mail-Adresse samt Passwort gilt erst nach einem erfolgreichen Login-Test als bestätigter Zugang; Passwörter und Einmalcodes werden in Statusausgaben konsequent ausgeblendet.
 
 ```bash
 node local-mac-helper/cli.mjs create-pipedrive-funding-notes /pfad/notizen.json --commit
@@ -94,7 +97,7 @@ node local-mac-helper/cli.mjs direct-sales-roster-status
 node local-mac-helper/cli.mjs sync-direct-sales-roster --commit
 ```
 
-Nach der Verarbeitung gilt: Lokale Download-, OCR-, Bild- und PDF-Zwischenkopien werden erst entfernt, wenn (1) der Upload in den exakten Pipedrive-Deal verifiziert ist, (2) der passende E-Mail- oder WhatsApp-Ausgang bestätigt ist und (3) keine manuelle Dokumentprüfung mehr offen ist. Diese lokale Bereinigung verändert niemals E-Mails oder Originaldateien im Pipedrive-Verlauf. Dateien außerhalb von `~/Library/Application Support/IVA Mac Helper/incoming/<Nachrichten-Fingerprint>` werden von diesem Abschlussweg nicht gelöscht.
+Die folgenden Bereinigungsbefehle sind historische, ausdrücklich manuelle Werkzeuge. Sie werden vom täglichen Förderlauf nie aufgerufen und dürfen nur nach einer separaten, konkreten Löschfreigabe von Nadine verwendet werden.
 
 ```bash
 node local-mac-helper/cli.mjs funding-cleanup-policy
@@ -103,9 +106,11 @@ node local-mac-helper/cli.mjs cleanup-funding-review <nachrichten-fingerprint> -
 
 Der Kontakt hinter dem Pipedrive-Feld **Vertriebspartner** liefert Anzeigenamen und E-Mail-Adresse für Anrede und CC. Zum strukturierten, rein lokalen Auslesen der bereits angemeldeten Chrome-Sitzung muss einmal **Chrome → Ansicht → Entwickler → JavaScript von Apple Events erlauben** aktiviert werden. Zugangsdaten werden nicht in IVA-Dateien geschrieben.
 
-## Laufender Fördermonitor
+## Täglicher Förderlauf auf dem iMac
 
-Der 30-Minuten-Monitor besitzt einen persistenten Ausgangsstand unter `~/Library/Application Support/IVA Mac Helper/funding-monitor-state.json`. Bereits vorhandene Posteingangsmails und bei Aktivierung vollständige Deals werden beim ersten Lauf nicht rückwirkend verarbeitet oder an Viktoria gemeldet. Neue Nachrichten werden über einen stabilen Fingerprint aus Absender, Betreff, Datum und Gesprächsstand erkannt; wechselnde Outlook-Vorschautexte erzeugen dadurch keine falschen Neuzugänge. Der Monitor stellt ein geschlossenes Outlook-Hauptfenster vor der Ordnerwahl wieder her und quittiert eine Nachricht erst nach erfolgreich abgeschlossenem Vorgang.
+Railway löst täglich um **05:00 Uhr Europe/Berlin** genau einen sequenziellen Auftrag an `imac-nadine` aus. MacBook und iPhone sind ausschließlich Fernsteuerung; die Hostprüfung blockiert die Förderworkflows auf jedem anderen Rechner. Der erste produktive Lauf prüft alle relevanten Deals und zuordenbaren Fördermails. Danach werden neue Nachrichten inkrementell verarbeitet und alle weiterhin offenen Deals täglich erneut geprüft. Die vollständige fachliche Spezifikation und Reihenfolge steht in `FUNDING_WORKFLOWS.md`.
+
+Eine eindeutig zugeordnete Fördermail wird nach `fertig` verschoben, wenn ihre Dateien und – falls relevant – ihr Text im richtigen Pipedrive-Deal gespeichert und anschließend erneut verifiziert wurden. Der Helper prüft danach einen exakten Treffer im Zielordner und speichert den Nachrichtenfingerprint gegen Doppelverarbeitung. Teilweise bearbeitete oder unklare Mails bleiben im Posteingang.
 
 Bis zur ausdrücklichen Freigabe gilt `mode=review-only`, `emailSendEnabled=false` und `replyDraftsOnly=true`: IVA darf Dateien prüfen, verifiziert in Pipedrive hochladen und fehlende Unterlagen als Antwortentwurf vorbereiten, aber keine E-Mail versenden. Die spätere automatische Versandfreigabe ist ein separater Zustandswechsel.
 
@@ -132,7 +137,7 @@ Für diesen internen Abschluss-Hinweis nutzt IVA zunächst die lokal installiert
 1. WhatsApp Business auf dem iPhone unter **Einstellungen → Verknüpfte Geräte → Gerät hinzufügen** öffnen.
 2. `/Applications/WhatsApp.app` auf dem Mac starten und den dort angezeigten QR-Code scannen.
 3. Viktoria Lambels exakte Mobilnummer einmalig verifizieren und einen kontrollierten Test durchführen.
-4. Erst nach vollständig verifizierten Pipedrive-Unterlagen und gegebenenfalls erfolgreich bestätigter Verschiebung nach **Förderung beantragt** wird die feste Nachricht vorbereitet. Referenz: Auftragsnummer, sonst Ort, sonst Kundenname.
+4. Erst nach vollständig verifizierten Pipedrive-Unterlagen und erfolgreich bestätigter Verschiebung nach **Förderung beantragt** wird exakt `Vollständiger Kundenname AUFTRAGSNUMMER fertig` an Viktoria Lambel gesendet. Eine Ersatzreferenz ist nicht erlaubt.
 
 Bei einem Deal, der bereits in **Förderung beantragt** steht, ist keine weitere Stufenänderung erforderlich. Die Nachricht bleibt trotzdem gesperrt, bis alle Pflichtunterlagen tatsächlich in Pipedrive vorhanden sind. Doppelte Übergaben werden beim späteren Live-Versand über Deal-ID und Abschlussstand verhindert.
 
@@ -195,7 +200,7 @@ Routen:
 
 ## MacBook → iMac über IVA
 
-Der Geräteagent fragt IVA-Core alle 15 Sekunden über HTTPS nach einem eng freigegebenen Befehl. Der dauerhaft laufende Runner liegt lokal unter `~/Library/Application Support/IVA Mac Helper/device-agent/`, aktualisiert sich kontrolliert aus dem verbindlichen iCloud-Workspace und verhindert bei Netzbetrieb nur den Systemschlaf; der Bildschirm darf weiterhin schlafen. Die Installation gilt erst nach zwei zeitversetzten, fortlaufenden Railway-Heartbeats als erfolgreich. Der iMac öffnet keinen eingehenden Port und aktiviert weder SSH noch macOS Remote Login. Das Gerätetoken liegt im macOS-Schlüsselbund unter `de.iva.device-agent`; Railway erhält denselben Wert ausschließlich als Secret `IMAC_DEVICE_TOKEN`.
+Der Geräteagent fragt IVA-Core alle 15 Sekunden über HTTPS nach einem eng freigegebenen Befehl. Der dauerhaft laufende Runner liegt lokal unter `~/Library/Application Support/IVA Mac Helper/device-agent/` und aktualisiert sich kontrolliert aus dem verbindlichen iCloud-Workspace. Förderläufe halten Rechner und Bildschirm bis zum protokollierten Ende wach; anschließend wird die normale macOS-Energieeinstellung wieder freigegeben. Die Installation gilt erst nach zwei zeitversetzten, fortlaufenden Railway-Heartbeats als erfolgreich. Der iMac öffnet keinen eingehenden Port und aktiviert weder SSH noch macOS Remote Login. Das Gerätetoken liegt im macOS-Schlüsselbund unter `de.iva.device-agent`; Railway erhält denselben Wert ausschließlich als Secret `IMAC_DEVICE_TOKEN`.
 
 Freigegeben sind: Computer-/Fördermonitor-Status, Zusammenfassung der Förder-Review-Warteschlange, Planbar-Index, das Öffnen von Outlook, Chrome, WhatsApp oder Codex sowie ausdrücklich beauftragte IVA-Bauaufträge. Bauaufträge starten ausschließlich den lokalen Codex im festen `iva-core`-Workspace mit `workspace-write`-Sandbox und automatischer Freigabeprüfung; beliebige Arbeitsverzeichnisse sind gesperrt. Freie Shell-Befehle, beliebige Dateipfade und Zugangsdaten sind im Gerätekanal weiterhin nicht zulässig.
 

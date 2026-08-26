@@ -56,7 +56,7 @@ try {
     release: 'test-v2',
     workspace: '/Users/nadine/Library/Mobile Documents/com~apple~CloudDocs/IVA-Assistent/iva-core',
     iCloudAuthoritative: true,
-    allowedActions: ['agent.status', 'computer.status'],
+    allowedActions: ['agent.status', 'computer.status', 'funding.monitor.status', 'funding.legacy-monitor.suspend', 'project.workflow.run', 'planbar.search.refresh', 'planbar.customer.schedule', 'portal.login', 'portal.credentials.status', 'codex.task.start', 'codex.task.status', 'app.open'],
   };
   await assert.rejects(
     recordDeviceAgentHeartbeat({ deviceId: IVA_IMAC_DEVICE_ID, ...imacMetadata, hostname: 'MacBook-Air-von-Nadine.local' }),
@@ -146,6 +146,17 @@ try {
     payload: { projectId: 'heat-hero', workflowId: 'planbar-weekly-export', displayName: 'Meine Planbar-Liste' },
   });
   assert.deepEqual(projectWorkflowCommand.payload, { projectId: 'heat-hero', workflowId: 'planbar-weekly-export', displayName: 'Meine Planbar-Liste' });
+  const fundingSequenceCommand = await enqueueDeviceCommand({
+    action: 'project.workflow.run', requestedBy: 'test-funding-scheduler',
+    payload: { projectId: 'heat-hero', workflowId: 'funding-daily-sequence', displayName: 'Förderung – Tageslauf 1 → 2 → 3' },
+  });
+  assert.equal(fundingSequenceCommand.payload.workflowId, 'funding-daily-sequence');
+  const duplicateFundingSequence = await enqueueDeviceCommand({
+    action: 'project.workflow.run', requestedBy: 'test-funding-retry', payload: fundingSequenceCommand.payload,
+  });
+  assert.equal(duplicateFundingSequence.id, fundingSequenceCommand.id, 'derselbe offene Förder-Tageslauf wird nicht doppelt eingereiht');
+  const suspendLegacyFunding = await enqueueDeviceCommand({ action: 'funding.legacy-monitor.suspend', requestedBy: 'test' });
+  assert.equal(suspendLegacyFunding.action, 'funding.legacy-monitor.suspend');
   await assert.rejects(enqueueDeviceCommand({ action: 'project.workflow.run', payload: { projectId: 'heat-hero', workflowId: 'unbekannt' } }), /nicht freigegeben/);
   const portalLoginCommand = await enqueueDeviceCommand({ action: 'portal.login', payload: { service: 'Panasonic' }, requestedBy: 'test' });
   assert.equal(portalLoginCommand.action, 'portal.login');
@@ -325,6 +336,7 @@ try {
   assert.equal(devicePolicy.allowedActions.includes('portal.credentials.status'), true);
   assert.equal(devicePolicy.allowedActions.includes('project.workflow.run'), true);
   assert.equal(devicePolicy.allowedActions.includes('planbar.customer.schedule'), true);
+  assert.equal(devicePolicy.allowedActions.includes('funding.legacy-monitor.suspend'), true);
 
   const { builderSkill } = await import('../skills/builder.js');
   console.log('Device-Control: Builder-Werkzeug prüfen …');

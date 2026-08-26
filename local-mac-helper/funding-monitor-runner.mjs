@@ -85,6 +85,7 @@ async function processMessage(message, board) {
     messageFingerprint: fingerprint,
     dealId: String(snapshot.dealId),
     customerName: snapshot.customerName,
+    customerEmail: snapshot.customerEmail || null,
     orderNumber: snapshot.orderNumber || null,
     location: snapshot.location || null,
     stage: snapshot.stage,
@@ -113,7 +114,7 @@ async function processMessage(message, board) {
   await saveFundingReview({
     ...base,
     ...recommendation,
-    recipients: { to: recipients.to, cc: recipients.cc, route: recipients.route, warnings: recipients.warnings },
+    recipients: { to: recipients.to, cc: recipients.cc, warnings: recipients.warnings },
     downloaded: { directory, expectedCount: download.expectedCount, downloadedCount: download.downloadedCount, verified: download.verified },
     documents: {
       outputs: prepared.outputs,
@@ -149,11 +150,19 @@ export async function runFundingMonitorOnce({ ignoreIdle = false } = {}) {
       }
     }
     const detected = await detectNewFundingMessages();
-    if (!detected.newMessageCount) {
-      await audit({ category: 'monitor-run', status: 'no_new_mail', startedAt, completedAt: new Date().toISOString() });
-      return { status: 'no_new_mail', newMessageCount: 0, sent: false, pipedriveMutated: false };
-    }
     const board = await scanPipedriveFundingBoard({ persist: true });
+    if (!detected.newMessageCount) {
+      const result = {
+        status: 'open_deals_checked_no_new_mail',
+        newMessageCount: 0,
+        dealsChecked: board.read,
+        boardCounts: board.boardCounts,
+        sent: false,
+        pipedriveMutated: false,
+      };
+      await audit({ category: 'monitor-run', ...result, startedAt, completedAt: new Date().toISOString() });
+      return result;
+    }
     const results = [];
     for (const message of detected.messages) {
       try { results.push(await processMessage(message, board)); }

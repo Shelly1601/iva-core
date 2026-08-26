@@ -49,8 +49,7 @@ const HEAT_HERO_PROJECT = {
     weeklySchedule: 'Sonntag · 23:58 Uhr',
     cleanupSchedule: 'Täglich · 00:20 Uhr',
     expectedWorkflows: [
-      { workflowId: 'funding-monitor', workflowName: 'Fördermonitor und Pipedrive-Nachlauf', cadence: 'daily', weekday: null },
-      { workflowId: 'kfw-approval-morning', workflowName: 'KfW-Zusagen morgens prüfen', cadence: 'daily', weekday: null },
+      { workflowId: 'funding-daily-sequence', workflowName: 'Förderung – Tageslauf 1 → 2 → 3', cadence: 'daily', weekday: null },
       { workflowId: 'montage-required-fields-morning', workflowName: 'Montage-Pflichtfelder morgens prüfen', cadence: 'daily', weekday: null },
       { workflowId: 'planbar-completion-morning', workflowName: 'Planbar Vervollständigung', cadence: 'daily', weekday: null },
       { workflowId: 'heat-hero-too-often-replies', workflowName: 'Rückmeldungen „Zu oft n.e.“', cadence: 'daily', weekday: null },
@@ -179,25 +178,39 @@ const HEAT_HERO_PROJECT = {
     },
     {
       id: 'funding-monitor',
-      name: 'Fördermonitor und Pipedrive-Nachlauf',
+      specVersion: 6,
+      name: 'Förderung 1 – Vollständigkeit & Unterlagen',
       status: 'active',
-      schedule: 'Täglich · 23:00 Uhr',
-      execution: 'iMac · Outlook, Pipedrive und lokaler IVA-Helfer',
-      purpose: 'Förderfälle vollständig neu lesen, eingegangene Unterlagen zuordnen und sichere Entwürfe beziehungsweise Nachfassaktionen vorbereiten.',
-      safety: 'Abgelaufene Pipedrive-Sitzungen werden neu geladen und erneut geprüft. Fremde Notizen werden nie geändert oder gelöscht; Fehler werden ohne CRM-Folgeaktion protokolliert.',
-      nextStep: 'Jeden Lauf automatisch an das zentrale Tages- und Wochenprotokoll melden.',
+      enabled: true,
+      schedule: 'Täglich · 05:00 Uhr · Schritt 1 von 3',
+      execution: 'Railway-Auslöser → ausschließlich iMac · Outlook, Chrome/Pipedrive, Meine KfW, native WhatsApp-App und Google Tabelle',
+      purpose: 'Unterschriebene Angebote erkennen, Auftragsnummer/Anlage/Kontaktdaten befüllen, Fördermails und PDFs eindeutig zuordnen, KfW-Konten prüfen, fehlende Unterlagen als Kundenentwurf vorbereiten und vollständige Fälle nach Förderung beantragt übergeben.',
+      safety: 'Kundenmails bleiben Entwürfe. Kein Löschen. Nur eindeutige Belege und verifizierte Schreibschritte; WhatsApp an Viktoria und Tabellenzeile erst nach bestätigter Vollständigkeit und Phasenwechsel, jeweils genau einmal.',
+      nextStep: 'Läuft als erster Schritt des täglichen geordneten Förderlaufs und meldet jede Dealaktion in Telegram und Projektprotokoll.',
+    },
+    {
+      id: 'kfw-funding-amount-morning',
+      specVersion: 1,
+      name: 'Förderung 2 – Förderhöhe prüfen',
+      status: 'active',
+      enabled: true,
+      schedule: 'Täglich · 05:00 Uhr · Schritt 2 von 3, nach Vollständigkeit',
+      execution: 'Railway-Auslöser → ausschließlich iMac · vollständige Pipedrive-Fallakte und versionierter KfW-458-Rechenkern',
+      purpose: 'Angebotspreis, BzA, Gebäude-/Wohneinheitenstruktur, Eigennutzung, Steuerbescheide, Familien- und Klimabonus vollständig prüfen und die aktuelle rechtssichere KfW-Förderberechnung im Deal dokumentieren.',
+      safety: 'Aktueller offizieller KfW-Regelstand; keine Schätzung bei EFH/MFH, Wohneinheiten, BzA, Einkommen oder Familie. Kundenrückfragen nur als Outlook-Entwurf an Kunde mit VP im CC. MFH-Notizen beginnen mit Eurobetrag, alle Notizen enden mit (Notiz von Nadine via KI).',
+      nextStep: 'Läuft nur nach Schritt 1; offene Tatsachen werden GELB und konkret gemeldet, nicht geraten.',
     },
     {
       id: 'kfw-approval-morning',
-      specVersion: 2,
-      name: 'KfW-Zusagen morgens prüfen',
-      status: 'blocked',
-      enabled: false,
-      schedule: 'Täglich · 07:00 Uhr',
-      execution: 'Noch kein ausführbarer Job registriert · Pipedrive-Anmeldung und Feldschema fehlen',
-      purpose: 'Geplant: In Förderung beantragen neue offizielle KfW-Zusagen prüfen, den belegten Zuschussbetrag in das echte Pipedrive-Feld eintragen, Pflichtfelder absichern und vollständig belegte Deals auf Gewonnen setzen.',
-      safety: 'Keine Statusänderung ohne echte Zuschusszusage und widerspruchsfreie Pflichtfelder. Abgelaufene Pipedrive-Sitzungen werden selbstständig erneuert; bei der Gerätegrenze dürfen andere Pipedrive-Sitzungen abgemeldet werden.',
-      nextStep: 'In Pipedrive anmelden, exakten Feldnamen/-typ lesen, eine echte KfW-Zusage kontrolliert auswerten und erst nach Schreib-/Leserückprüfung als aktiv schalten.',
+      specVersion: 6,
+      name: 'Förderung 3 – KfW-Zusagen prüfen',
+      status: 'active',
+      enabled: true,
+      schedule: 'Täglich · 05:00 Uhr · Schritt 3 von 3, nach Förderhöhe',
+      execution: 'Railway-Auslöser → ausschließlich iMac · Chrome/Pipedrive',
+      purpose: 'Deals in Förderung beantragt auf ein offizielles eindeutig zugeordnetes KfW-Zusageschreiben prüfen, bestätigte Fälle auf Gewonnen speichern und den Übergang nach Montage einplanen verifizieren.',
+      safety: 'Keine Statusänderung ohne genau eine belegte offizielle KfW-Zusage im richtigen Deal. Speichern und Zielstatus werden erneut gelesen; keine Wiederholung auf Verdacht und kein Löschen.',
+      nextStep: 'Läuft nur nach Schritt 2 und schließt den täglichen Telegram- und Projektbericht ab.',
     },
     {
       id: 'montage-required-fields-morning',
@@ -628,11 +641,15 @@ async function loadStore() {
     const heatSeed = seeds.find(item => item.id === 'heat-hero');
     const heatProject = projects.find(item => item.id === 'heat-hero');
     const storedHeat = storedProjects.find(item => item.id === 'heat-hero');
-    const kfwSeed = heatSeed?.automations?.find(item => item.id === 'kfw-approval-morning');
-    const storedKfw = storedHeat?.automations?.find(item => item.id === 'kfw-approval-morning');
-    if (heatProject && kfwSeed && Number(kfwSeed.specVersion || 0) > Number(storedKfw?.specVersion || 0)) {
-      const index = heatProject.automations.findIndex(item => item.id === 'kfw-approval-morning');
-      if (index >= 0) heatProject.automations[index] = normalizeAutomation({}, kfwSeed);
+    if (heatProject && heatSeed) {
+      for (const seedAutomation of heatSeed.automations || []) {
+        if (!Number(seedAutomation.specVersion || 0)) continue;
+        const storedAutomation = storedHeat?.automations?.find(item => item.id === seedAutomation.id);
+        if (Number(seedAutomation.specVersion || 0) <= Number(storedAutomation?.specVersion || 0)) continue;
+        const index = heatProject.automations.findIndex(item => item.id === seedAutomation.id);
+        if (index >= 0) heatProject.automations[index] = normalizeAutomation({}, seedAutomation);
+        else heatProject.automations.push(normalizeAutomation({}, seedAutomation));
+      }
     }
     for (const item of storedProjects.filter(item => !deletedProjectIds.includes(item.id) && !seeds.some(seed => seed.id === item.id))) projects.push(normalizeProject(item));
     return { version: 2, deletedProjectIds, projects };

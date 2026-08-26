@@ -86,6 +86,73 @@ export function buildDraftAppleScript(input = {}) {
   return { script: lines.join('\n'), draft };
 }
 
+export function buildForwardDraftAppleScript(input = {}, now = new Date()) {
+  const from = email(input.from, 'Absender');
+  const to = recipients(input.to, 'An');
+  const sourceSubject = String(input.originalSubject || input.sourceSubject || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 240);
+  const subject = String(input.subject || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 240);
+  const body = String(input.body || '').replace(/\0/g, '').trim().slice(0, 100000);
+  const sentAt = new Date(input.requestSentAt || input.sourceSentAt);
+  const checkedAt = now instanceof Date ? now : new Date(now);
+  if (to.length !== 1) throw new Error('Der interne Weiterleitungsentwurf benötigt genau einen An-Empfänger.');
+  if (!sourceSubject || !subject || !body) throw new Error('Für den Weiterleitungsentwurf fehlen Originalbetreff, Betreff oder Begleittext.');
+  if (Number.isNaN(sentAt.getTime()) || Number.isNaN(checkedAt.getTime())) throw new Error('Für den Weiterleitungsentwurf fehlt der echte Versandzeitpunkt.');
+  const ageSeconds = Math.round((checkedAt.getTime() - sentAt.getTime()) / 1000);
+  if (ageSeconds < 0 || ageSeconds > 180 * 24 * 60 * 60) throw new Error('Der Originalversand liegt außerhalb des sicher prüfbaren Zeitfensters.');
+  const toleranceSeconds = 15 * 60;
+  const dedupeNeedle = String(input.dealId || '').replace(/[^a-z0-9-]/gi, '').slice(0, 100);
+  if (!dedupeNeedle) throw new Error('Für den internen Weiterleitungsentwurf fehlt die eindeutige Deal-ID.');
+  const lines = [
+    'tell application id "com.microsoft.Outlook"',
+    `set requestedSender to ${appleScriptString(from)}`,
+    `set requestedRecipient to ${appleScriptString(to[0])}`,
+    `set originalSubject to ${appleScriptString(sourceSubject)}`,
+    `set requestedSubject to ${appleScriptString(subject)}`,
+    `set prependBody to ${appleScriptString(body)}`,
+    `set dedupeNeedle to ${appleScriptString(`Deal-ID: ${dedupeNeedle}`)}`,
+  ];
+  appendExactAccountLookup(lines);
+  lines.push(
+    'if senderAccount is missing value then error "Das gewünschte Outlook-Absenderkonto ist für die Weiterleitung nicht verfügbar." number 580',
+    'set targetDrafts to drafts of senderAccount',
+    'set existingMatches to {}',
+    'repeat with draftMessage in (every outgoing message of targetDrafts whose subject is requestedSubject)',
+    'if ((plain text content of draftMessage as text) contains dedupeNeedle) then set end of existingMatches to draftMessage',
+    'end repeat',
+    'if (count of existingMatches) > 1 then error "Weiterleitungsentwurf ist bereits mehrfach vorhanden." number 581',
+    'if (count of existingMatches) is 1 then return "already_present|" & requestedSubject',
+    `set earliestTime to (current date) - ${ageSeconds + toleranceSeconds}`,
+    `set latestTime to (current date) - ${Math.max(0, ageSeconds - toleranceSeconds)}`,
+    'set targetSent to sent items of senderAccount',
+    'set sourceMatches to {}',
+    'repeat with sourceMessage in (every outgoing message of targetSent whose subject is originalSubject)',
+    'set sentTime to time sent of sourceMessage',
+    'if sentTime is greater than or equal to earliestTime and sentTime is less than or equal to latestTime then set end of sourceMatches to sourceMessage',
+    'end repeat',
+    'if (count of sourceMatches) is not 1 then error "Die ursprünglich versandte Fehlunterlagen-Mail wurde im Gesendet-Ordner nicht eindeutig gefunden." number 582',
+    'set originalMessage to item 1 of sourceMatches',
+    'set forwardedMessage to forward originalMessage to requestedRecipient opening window false',
+    'set subject of forwardedMessage to requestedSubject',
+    'set originalForwardBody to plain text content of forwardedMessage as text',
+    'set plain text content of forwardedMessage to prependBody & linefeed & linefeed & originalForwardBody',
+    'save forwardedMessage',
+    'set actualRecipients to every to recipient of forwardedMessage',
+    'if (count of actualRecipients) is not 1 then error "Der Weiterleitungsentwurf besitzt nicht genau einen Empfänger." number 583',
+    'set actualRecipient to address of email address of item 1 of actualRecipients as text',
+    'ignoring case',
+    'if actualRecipient is not requestedRecipient then error "Der Empfänger des Weiterleitungsentwurfs stimmt nicht exakt überein." number 584',
+    'end ignoring',
+    'if (subject of forwardedMessage as text) is not requestedSubject then error "Der Betreff des Weiterleitungsentwurfs stimmt nicht exakt überein." number 585',
+    'if not ((plain text content of forwardedMessage as text) contains dedupeNeedle) then error "Der Weiterleitungsentwurf konnte nicht inhaltlich verifiziert werden." number 586',
+    'return "created|" & requestedSubject',
+    'end tell',
+  );
+  return {
+    script: lines.join('\n'),
+    forward: { from, to, originalSubject: sourceSubject, subject, body, requestSentAt: sentAt.toISOString(), dealId: dedupeNeedle },
+  };
+}
+
 function appendExactAccountLookup(lines) {
   lines.push(
     'set senderAccount to missing value',
@@ -404,6 +471,29 @@ export async function createOutlookDraft(input = {}) {
     senderSelectionRequired: false,
     sent: false,
     channel: 'outlook-applescript',
+  };
+}
+
+export async function createOutlookForwardDraft(input = {}) {
+  const { script, forward } = buildForwardDraftAppleScript(input);
+  const diagnosis = await diagnoseOutlook();
+  if (!diagnosis.outlook.installed || !diagnosis.outlook.running || !diagnosis.outlook.available) {
+    throw new Error('Microsoft Outlook ist für den echten Weiterleitungsentwurf nicht über die native Schnittstelle verfügbar. Es wurde nichts erstellt.');
+  }
+  const result = await runAppleScript(script, { timeoutMs: 30000 });
+  if (!/^(?:created|already_present)\|/.test(result)) throw new Error('Outlook hat den Weiterleitungsentwurf nicht eindeutig bestätigt.');
+  return {
+    created: result.startsWith('created|'),
+    alreadyPresent: result.startsWith('already_present|'),
+    subject: forward.subject,
+    originalSubject: forward.originalSubject,
+    recipients: { to: forward.to, cc: [], bcc: [] },
+    requestedFrom: forward.from,
+    sourceSentAt: forward.requestSentAt,
+    trueForward: true,
+    savedInDrafts: true,
+    sent: false,
+    channel: 'outlook-applescript-forward-draft',
   };
 }
 

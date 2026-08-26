@@ -26,6 +26,7 @@ const ALLOWED_ACTIONS = Object.freeze([
   'agent.status',
   'computer.status',
   'funding.monitor.status',
+  'funding.legacy-monitor.suspend',
   'funding.reviews.list',
   'planbar.search.refresh',
   'planbar.customer.schedule',
@@ -205,7 +206,11 @@ async function executeDeviceCommand(command) {
     };
   }
   if (command.action === 'funding.monitor.run') {
-    throw new Error('Außerplanmäßige Fördermonitorläufe sind deaktiviert. Der lokale Lauf startet einmal täglich um 23:00 Uhr.');
+    throw new Error('Der alte Einzelmonitor ist deaktiviert. Der vollständige Förderlauf startet täglich um 05:00 Uhr als Reihenfolge 1 → 2 → 3 auf dem iMac.');
+  }
+  if (command.action === 'funding.legacy-monitor.suspend') {
+    const { suspendFundingMonitorLaunchAgent } = await import('./funding-monitor-launchd.mjs');
+    return suspendFundingMonitorLaunchAgent();
   }
   if (command.action === 'funding.reviews.list') {
     const { listFundingReviews } = await import('./funding-review-queue.mjs');

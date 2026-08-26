@@ -3,12 +3,12 @@ import { loadDirectSalesRosterSync, matchDirectSalesPartner } from './direct-sal
 
 export const FUNDING_DOCUMENTS = Object.freeze({
   signed_offer: 'Unterschriebenes Angebot',
-  identity_card: 'Personalausweis (Vorder- und Rückseite gemeinsam in einer PDF)',
-  registration_certificate: 'Meldebescheinigung (nicht älter als 3 Monate)',
+  identity_card: 'Personalausweis (Vorder- und Rückseite)',
+  registration_certificate: 'Meldebescheinigung (so aktuell wie möglich)',
   land_register: 'Vollständiger und leserlicher Grundbuchauszug (ca. 10 Seiten)',
   tax_assessment_2023: 'Einkommensteuerbescheid 2023',
   tax_assessment_2024: 'Einkommensteuerbescheid 2024',
-  kfw_account_confirmation: 'Bestätigung, dass das KfW-Konto angelegt und der Aktivierungslink bestätigt wurde',
+  kfw_account_confirmation: 'Zugangsdaten des bestätigten KfW-Kontos',
 });
 
 export const FUNDING_SENDER_EMAIL = 'foerderung@heat-hero.com';
@@ -28,6 +28,11 @@ export const FUNDING_SIGNATURE = Object.freeze({
   postalCity: '28279 Bremen',
   website: 'https://www.heat-hero.com',
 });
+export const FUNDING_ESCALATION_RECIPIENTS = Object.freeze({
+  ekd: Object.freeze({ name: 'Kati Bolz', email: 'k.bolz@heat-hero.com' }),
+  default: Object.freeze({ name: 'Patrick Germer', email: 'p.germer@heat-hero.com' }),
+});
+export const FUNDING_ESCALATION_DELAY_DAYS = 7;
 
 const signatureLogoDataUri = `data:image/png;base64,${readFileSync(new URL('./assets/heat-hero-logo.png', import.meta.url)).toString('base64')}`;
 
@@ -99,11 +104,84 @@ export function resolveFundingSupervisor(input = {}) {
   return { ...FUNDING_SUPERVISORS.default, rosterMatch };
 }
 
+export function resolveFundingNoResponseEscalationRecipient(input = {}) {
+  const evidence = [input.salesStructure, input.vertriebsstruktur, input.fundingRoute, input.route, input.vpEmail, input.vertriebspartnerEmail]
+    .map(value => clean(value, 300)).join(' ');
+  return /(?:^|\W)ekd(?:\W|$)|@[a-z0-9.-]*ekd[a-z0-9.-]*\.[a-z]{2,}\b/i.test(evidence)
+    ? { route: 'ekd', ...FUNDING_ESCALATION_RECIPIENTS.ekd }
+    : { route: 'default', ...FUNDING_ESCALATION_RECIPIENTS.default };
+}
+
+export function assessFundingNoResponseEscalation(input = {}, now = new Date()) {
+  const requestSentAt = new Date(input.requestSentAt);
+  const checkedAt = now instanceof Date ? now : new Date(now);
+  if (Number.isNaN(requestSentAt.getTime())) throw new Error('Für die 7-Tage-Prüfung fehlt der echte Versandzeitpunkt der Fehlunterlagen-Mail.');
+  if (Number.isNaN(checkedAt.getTime())) throw new Error('Für die 7-Tage-Prüfung fehlt ein gültiger Prüfzeitpunkt.');
+  const customerEmail = extractEmailAddress(input.customerEmail);
+  const vpEmail = extractEmailAddress(input.vpEmail || input.vertriebspartnerEmail);
+  const validSenders = new Set([customerEmail, vpEmail].filter(Boolean));
+  const responses = (Array.isArray(input.responses) ? input.responses : []).map(item => ({
+    senderEmail: extractEmailAddress(item?.senderEmail || item?.from),
+    receivedAt: new Date(item?.receivedAt || item?.date),
+    role: clean(item?.role, 40).toLowerCase(),
+  })).filter(item => !Number.isNaN(item.receivedAt.getTime()) && item.receivedAt > requestSentAt);
+  const response = responses.find(item => validSenders.has(item.senderEmail) || ['customer', 'kunde', 'vp', 'vertriebspartner'].includes(item.role));
+  const dueAt = new Date(requestSentAt.getTime() + FUNDING_ESCALATION_DELAY_DAYS * 24 * 60 * 60 * 1000);
+  return {
+    status: response ? 'answered' : checkedAt >= dueAt ? 'due' : 'waiting',
+    requestSentAt: requestSentAt.toISOString(),
+    dueAt: dueAt.toISOString(),
+    checkedAt: checkedAt.toISOString(),
+    answeredAt: response?.receivedAt.toISOString() || null,
+    eligible: !response && checkedAt >= dueAt,
+  };
+}
+
+export function renderFundingNoResponseEscalationDraft(input = {}, now = new Date()) {
+  const assessment = assessFundingNoResponseEscalation(input, now);
+  if (!assessment.eligible) throw new Error(assessment.status === 'answered'
+    ? 'Keine Eskalation: Kunde oder VP hat auf die Fehlunterlagen-Mail reagiert.'
+    : 'Keine Eskalation: Die Frist von sieben vollen Tagen ist noch nicht abgelaufen.');
+  const reference = buildFundingCaseReference(input);
+  if (!reference.orderNumber) throw new Error('Für die interne Eskalation fehlt die Angebots-/Auftragsnummer.');
+  const dealId = clean(input.dealId, 100);
+  if (!dealId) throw new Error('Für die interne Eskalation fehlt die eindeutige Pipedrive-Deal-ID.');
+  const originalSubject = clean(input.originalSubject || input.subject, 240);
+  if (!originalSubject) throw new Error('Für die interne Eskalation fehlt der Betreff der ursprünglich versandten Fehlunterlagen-Mail.');
+  const recipient = resolveFundingNoResponseEscalationRecipient(input);
+  const subject = /^\s*(?:WG|FW|FWD)\s*:/i.test(originalSubject) ? originalSubject : `WG: ${originalSubject}`;
+  const body = `Hallo ${recipient.name.split(/\s+/)[0]},
+
+auf die am ${new Intl.DateTimeFormat('de-DE', { timeZone: 'Europe/Berlin', dateStyle: 'medium' }).format(new Date(assessment.requestSentAt))} versandte Fehlunterlagen-Mail zu ${reference.customerName}, Angebots-/Auftragsnummer ${reference.orderNumber}, liegt nach sieben vollen Tagen weder vom Kunden noch vom Vertriebspartner eine Antwort vor.
+
+Bitte übernimm die weitere Nachverfolgung.
+
+Deal-ID: ${dealId}
+Ursprünglicher Betreff: ${originalSubject}`;
+  return {
+    from: FUNDING_SENDER_EMAIL,
+    to: [recipient.email],
+    cc: [],
+    subject,
+    body,
+    originalSubject,
+    requestSentAt: assessment.requestSentAt,
+    dealId,
+    originalMessageMustBeForwarded: true,
+    draftOnly: true,
+    sent: false,
+    recipient,
+    assessment,
+    deduplicationKey: `${dealId}:${reference.orderNumber}:${assessment.requestSentAt}`.toLowerCase(),
+  };
+}
+
 export function resolveFundingRecipients(input = {}) {
-  const supervisor = resolveFundingSupervisor(input);
+  const customerEmail = extractEmailAddress(input.customerEmail || input.email || input.kundenEmail);
+  if (!customerEmail) throw new Error('Für den Förderentwurf fehlt die eindeutige Kunden-E-Mail-Adresse aus den Dealinformationen oder der TMB.');
   const suppliedTo = Array.isArray(input.to) ? input.to.map(extractEmailAddress).filter(Boolean) : [];
-  if (suppliedTo.length && (suppliedTo.length !== 1 || suppliedTo[0] !== supervisor.email)) {
-    throw new Error(`Der Förderentwurf muss für den erkannten Vertriebsweg im An-Feld an ${supervisor.email} adressiert werden.`);
+  if (suppliedTo.length && (suppliedTo.length !== 1 || suppliedTo[0] !== customerEmail)) {
+    throw new Error(`Der Förderentwurf muss im An-Feld ausschließlich an den Kunden ${customerEmail} adressiert werden.`);
   }
 
   const suppliedCc = Array.isArray(input.cc) ? input.cc.map(extractEmailAddress).filter(Boolean) : [];
@@ -114,22 +192,21 @@ export function resolveFundingRecipients(input = {}) {
   if (suppliedCc.length && vpEmail && suppliedCc[0] !== vpEmail) {
     throw new Error('Die übergebene CC-Adresse stimmt nicht mit der erkannten Vertriebspartner-E-Mail überein.');
   }
-  const vpFirstName = firstNameFromContactName(input.vpFirstName || vpName);
   const warnings = [];
   if (rawVpEmail && !vpEmail) warnings.push('Die Vertriebspartner-E-Mail ist nicht eindeutig gültig und wurde nicht ins CC übernommen.');
-  if (!vpEmail) warnings.push(`Keine eindeutige Vertriebspartner-E-Mail vorhanden; der Entwurf geht nur an ${supervisor.firstName}.`);
+  if (!vpEmail) warnings.push('Keine eindeutige Vertriebspartner-E-Mail vorhanden; der Entwurf bleibt ohne CC und muss kontrolliert werden.');
+  const salutation = /^(herr|frau)$/i.test(clean(input.customerSalutation || input.salutation))
+    ? `${clean(input.customerSalutation || input.salutation)} `
+    : '';
+  const customerName = clean(input.customerName);
 
   return {
-    to: [supervisor.email],
-    cc: vpEmail && vpEmail !== supervisor.email ? [vpEmail] : [],
+    to: [customerEmail],
+    cc: vpEmail && vpEmail !== customerEmail ? [vpEmail] : [],
+    customerEmail,
     vpName,
-    vpFirstName,
     vpEmail: vpEmail || null,
-    supervisor,
-    route: supervisor.route,
-    greeting: vpFirstName && vpFirstName.toLowerCase() !== supervisor.firstName.toLowerCase()
-      ? `Hallo ${supervisor.firstName}, hallo ${vpFirstName},`
-      : `Hallo ${supervisor.firstName},`,
+    greeting: `Guten Tag ${salutation}${customerName},`,
     warnings,
   };
 }
@@ -179,26 +256,15 @@ export function renderFundingMissingDocumentsEmail(input = {}) {
   const unknown = missingDocumentIds.filter(id => !FUNDING_DOCUMENTS[id]);
   if (unknown.length) throw new Error(`Unbekannte Förderunterlage: ${unknown.join(', ')}`);
   if (!missingDocumentIds.length) throw new Error('Es fehlen keine Unterlagen; deshalb wird kein Entwurf erzeugt.');
+  if (!orderNumber) throw new Error('Für den Förderentwurf fehlt die Angebots-/Auftragsnummer. Sie muss zuerst aus dem unterschriebenen Angebot oder den Dealinformationen übernommen werden.');
 
   const missingDocuments = missingDocumentIds.map(id => ({ id, label: FUNDING_DOCUMENTS[id] }));
   const greeting = recipients.greeting;
   const list = missingDocuments.map(item => `- ${item.label}`).join('\n');
-  const identityLines = [
-    `Kunde: ${customerName}`,
-    ...(orderNumber ? [`Angebots-/Auftragsnummer: ${orderNumber}`] : []),
-    ...(!orderNumber && location ? [`Ort: ${location}`] : []),
-  ];
-  const identityHtml = [
-    `<strong>Kunde:</strong> ${html(customerName)}`,
-    ...(orderNumber ? [`<strong>Angebots-/Auftragsnummer:</strong> ${html(orderNumber)}`] : []),
-    ...(!orderNumber && location ? [`<strong>Ort:</strong> ${html(location)}`] : []),
-  ].join('<br>');
   const subject = `${reference.text} - fehlende Unterlagen`;
   const body = `${greeting}
 
-bei der Überprüfung der Förderunterlagen ist uns aufgefallen, dass für den folgenden Kunden noch Unterlagen fehlen:
-
-${identityLines.join('\n')}
+bei der Überprüfung der Förderunterlagen ist uns aufgefallen, dass für Ihren Förderantrag zu Angebots-/Auftragsnummer: ${orderNumber} noch folgende Unterlagen fehlen:
 
 Noch benötigte Unterlagen:
 
@@ -213,15 +279,14 @@ Wichtig:
 - Die PDF-Dateien bitte eindeutig benennen, beispielsweise „Personalausweis“, „Grundbuchauszug“ oder „Steuerbescheid 2023“.
 - Bitte darauf achten, dass alle Dokumente vollständig und gut lesbar sind.
 
-So können wir die Unterlagen schnell zuordnen, beim Kunden hinterlegen und den Förderprozess ohne zusätzliche Verzögerungen weiterbearbeiten.
+So können wir die Unterlagen schnell zuordnen, hinterlegen und den Förderprozess ohne zusätzliche Verzögerungen weiterbearbeiten.
 
 Vielen Dank!
 
 ${renderFundingSignaturePlain()}`;
   const htmlBody = `<div style="font-family: Aptos, Arial, sans-serif; font-size: 11pt; line-height: 1.5; color: #1f1f1f;">
   <p>${html(greeting)}</p>
-  <p>bei der Überprüfung der Förderunterlagen ist uns aufgefallen, dass für den folgenden Kunden noch Unterlagen fehlen:</p>
-  <p>${identityHtml}</p>
+  <p>bei der Überprüfung der Förderunterlagen ist uns aufgefallen, dass für Ihren Förderantrag zu <strong>Angebots-/Auftragsnummer:</strong> ${html(orderNumber)} noch folgende Unterlagen fehlen:</p>
   <p><strong>Noch benötigte Unterlagen:</strong></p>
   <ul>${missingDocuments.map(item => `<li>${html(item.label)}</li>`).join('')}</ul>
   <p>Bitte sende alle Unterlagen gesammelt in einer E-Mail an <strong>foerderung@heat-hero.com</strong>.</p>
@@ -233,7 +298,7 @@ ${renderFundingSignaturePlain()}`;
     <li>Die PDF-Dateien bitte eindeutig benennen, beispielsweise „Personalausweis“, „Grundbuchauszug“ oder „Steuerbescheid 2023“.</li>
     <li>Bitte darauf achten, dass alle Dokumente vollständig und gut lesbar sind.</li>
   </ul>
-  <p>So können wir die Unterlagen schnell zuordnen, beim Kunden hinterlegen und den Förderprozess ohne zusätzliche Verzögerungen weiterbearbeiten.</p>
+  <p>So können wir die Unterlagen schnell zuordnen, hinterlegen und den Förderprozess ohne zusätzliche Verzögerungen weiterbearbeiten.</p>
   <p>Vielen Dank!</p>
   ${renderFundingSignatureHtml()}
 </div>`;
@@ -250,4 +315,31 @@ ${renderFundingSignaturePlain()}`;
     recipients,
     missingDocuments,
   };
+}
+
+export function renderFundingMinorChildrenQuestionEmail(input = {}) {
+  const reference = buildFundingCaseReference(input);
+  if (!reference.orderNumber) throw new Error('Für die Rückfrage zu minderjährigen Kindern fehlt die Angebots-/Auftragsnummer.');
+  const recipients = resolveFundingRecipients(input);
+  const subject = `${reference.text} - kurze Rückfrage zur Förderberechnung`;
+  const body = `${recipients.greeting}
+
+für die korrekte Berechnung Ihrer möglichen KfW-Förderung benötigen wir noch eine kurze Angabe:
+
+Lebt in der selbst genutzten Wohneinheit mindestens ein Kind unter 18 Jahren, für das in Ihrem Haushalt eine Kindergeldberechtigung besteht?
+
+Bitte antworten Sie kurz mit „Ja“ oder „Nein“. Bei „Ja“ benötigen wir für die spätere Prüfung zusätzlich einen aktuellen Meldenachweis des Kindes und den Nachweis der Kindergeldberechtigung.
+
+Vielen Dank!
+
+${renderFundingSignaturePlain()}`;
+  const htmlBody = `<div style="font-family: Aptos, Arial, sans-serif; font-size: 11pt; line-height: 1.5; color: #1f1f1f;">
+  <p>${html(recipients.greeting)}</p>
+  <p>für die korrekte Berechnung Ihrer möglichen KfW-Förderung benötigen wir noch eine kurze Angabe:</p>
+  <p><strong>Lebt in der selbst genutzten Wohneinheit mindestens ein Kind unter 18 Jahren, für das in Ihrem Haushalt eine Kindergeldberechtigung besteht?</strong></p>
+  <p>Bitte antworten Sie kurz mit „Ja“ oder „Nein“. Bei „Ja“ benötigen wir für die spätere Prüfung zusätzlich einen aktuellen Meldenachweis des Kindes und den Nachweis der Kindergeldberechtigung.</p>
+  <p>Vielen Dank!</p>
+  ${renderFundingSignatureHtml()}
+</div>`;
+  return { subject, body, html: htmlBody, recipients, reference };
 }

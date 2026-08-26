@@ -85,18 +85,20 @@ export async function initializeFundingMonitor({ fundingScan, persist = true } =
     .filter(item => Array.isArray(item.missingBaseDocumentIds) && item.missingBaseDocumentIds.length === 0)
     .map(item => String(item.dealId));
   const state = {
-    version: 1,
+    version: 2,
     mode: 'review-only',
     initializedAt,
     lastCheckedAt: initializedAt,
     intervalMinutes: 30,
     emailSendEnabled: false,
     replyDraftsOnly: true,
-    processedMessageFingerprints: [...new Set(messageDescriptions.map(fundingMessageFingerprint))],
+    initialFullScanPending: true,
+    processedMessageFingerprints: [],
     baselineMessageCount: messageDescriptions.length,
-    completedDealIdsAtBaseline: [...new Set(completedDealIds)],
+    completedDealIdsAtBaseline: [],
     whatsappSentDealIds: [],
     replyDraftDealIds: [],
+    escalationDraftKeys: [],
     lastRun: null,
   };
   const savedTo = persist ? await saveState(state) : null;
@@ -129,6 +131,7 @@ export async function acknowledgeFundingMessages(fingerprints, { filePath = defa
   }
   const state = await loadFundingMonitorState(filePath);
   state.processedMessageFingerprints = [...new Set([...(state.processedMessageFingerprints || []), ...values])];
+  state.initialFullScanPending = false;
   state.lastCheckedAt = new Date().toISOString();
   state.lastRun = { acknowledgedAt: state.lastCheckedAt, messageCount: values.length };
   await saveState(state, filePath);
@@ -147,6 +150,11 @@ export async function recordFundingMonitorOutcome(input = {}, { filePath = defau
   if (input.whatsappSent === true) {
     state.whatsappSentDealIds = [...new Set([...(state.whatsappSentDealIds || []), dealId])];
   }
+  const escalationKey = String(input.escalationDraftKey || '').trim().slice(0, 500);
+  if (input.escalationDraftCreated === true) {
+    if (!escalationKey) throw new Error('Eskalationsentwurf ohne Deduplizierungskennung.');
+    state.escalationDraftKeys = [...new Set([...(state.escalationDraftKeys || []), escalationKey])];
+  }
   if (fingerprintValue) {
     state.processedMessageFingerprints = [...new Set([...(state.processedMessageFingerprints || []), fingerprintValue])];
   }
@@ -157,6 +165,8 @@ export async function recordFundingMonitorOutcome(input = {}, { filePath = defau
     messageFingerprint: fingerprintValue || null,
     replyDraftCreated: input.replyDraftCreated === true,
     whatsappSent: input.whatsappSent === true,
+    escalationDraftCreated: input.escalationDraftCreated === true,
+    escalationDraftKey: escalationKey || null,
     status: String(input.status || '').slice(0, 120) || null,
   };
   await saveState(state, filePath);

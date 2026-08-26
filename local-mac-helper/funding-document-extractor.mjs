@@ -29,6 +29,13 @@ const FIELD_SPECS = Object.freeze({
     valueGroup: 2,
     normalize: normalizePhoneForComparison,
   }),
+  customerEmail: Object.freeze({
+    targetField: 'E-Mail',
+    label: 'E-Mail-Adresse',
+    regex: /\b(E[- ]?Mail(?:-Adresse)?|E-Mail-Adresse)\s*[:#]?\s*([a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,})\b/giu,
+    valueGroup: 2,
+    normalize: value => String(value || '').trim().toLowerCase(),
+  }),
 });
 
 const PLANT_SPEC = Object.freeze({
@@ -308,6 +315,7 @@ export function buildPipedriveFieldProposals(snapshot = {}, analysis = {}) {
     ['orderNumber', 'orderNumber'],
     ['customerNumber', 'customerNumber'],
     ['phoneNumber', 'phoneNumber'],
+    ['customerEmail', 'customerEmail'],
     ['plant', 'plant'],
   ];
   const proposals = mappings.map(([fieldKey, snapshotKey]) => {
@@ -394,4 +402,53 @@ export function classifyFundingDocumentName(value) {
     return { type: 'offer', confidence: 0.9, fileName };
   }
   return { type: 'unknown', confidence: 0, fileName };
+}
+
+const COMPLIANT_FUNDING_FILE_NAMES = Object.freeze({
+  signed_offer: /unterschriebenes angebot/i,
+  identity_card: /personalausweis.*(?:vorder|front).*(?:r(?:ü|ue)ck|back)|personalausweis.*(?:vorder\s*-?\s*und\s*-?\s*r(?:ü|ue)ckseite)/i,
+  registration_certificate: /meldebescheinigung/i,
+  land_register: /grundbuchauszug/i,
+  tax_assessment_2023: /(?:einkommensteuer|steuerbescheid).*2023/i,
+  tax_assessment_2024: /(?:einkommensteuer|steuerbescheid).*2024/i,
+  kfw_account_confirmation: /kfw.*(?:konto|best(?:ä|ae)tigung|zugang)/i,
+});
+
+export function assessExistingFundingDealFile({ fileName, contentAnalysis = null, render = null } = {}) {
+  const name = path.basename(String(fileName || ''));
+  const classification = classifyFundingDocumentName(name);
+  const isPdf = path.extname(name).toLowerCase() === '.pdf';
+  const contentChecked = Boolean(contentAnalysis);
+  const contentType = contentAnalysis?.document?.type || contentAnalysis?.type || null;
+  const type = classification.type === 'unknown' && COMPLIANT_FUNDING_FILE_NAMES[contentType]
+    ? contentType
+    : classification.type;
+  const namingPattern = COMPLIANT_FUNDING_FILE_NAMES[type];
+  const namingCompliant = Boolean(namingPattern?.test(name));
+  const contentMatches = contentChecked && contentType === type;
+  const readable = contentChecked
+    && !['ocr_required'].includes(contentAnalysis?.textLayer)
+    && !(contentAnalysis?.ocr?.failedPages || []).length
+    && (render ? render.visuallyRenderable === true : true);
+  const reasons = [
+    ...(!isPdf ? ['not_pdf'] : []),
+    ...(!namingCompliant ? ['label_not_compliant'] : []),
+    ...(!contentChecked ? ['content_not_checked'] : []),
+    ...(contentChecked && !contentMatches ? ['content_type_mismatch'] : []),
+    ...(contentChecked && !readable ? ['not_fully_readable'] : []),
+  ];
+  return {
+    fileName: name,
+    type,
+    isPdf,
+    namingCompliant,
+    contentChecked,
+    contentMatches,
+    readable,
+    compliant: reasons.length === 0,
+    action: reasons.length ? 'download_correct_reupload' : 'keep',
+    reasons,
+    deleteOriginalFromPipedrive: false,
+    deleteManagedLocalCopyAfterVerifiedUpload: reasons.length > 0,
+  };
 }

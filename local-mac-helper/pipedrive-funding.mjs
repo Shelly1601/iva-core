@@ -7,8 +7,16 @@ export const PIPEDRIVE_FUNDING_CONFIG = Object.freeze({
   orderNumberFields: ['Auftragsnummer', 'Angebotsnummer'],
   customerNumberFields: ['Kundennummer', 'Kunden-Nr.'],
   phoneNumberFields: ['Telefonnummer', 'Telefon', 'Mobilnummer'],
+  emailFields: ['E-Mail', 'E-Mail-Adresse', 'Email'],
   locationFields: ['Ort', 'Stadt', 'Kundenort'],
   stages: Object.freeze({
+    offerPublished: Object.freeze({
+      label: 'Angebot veröffentlicht',
+      aliases: ['Angebot veröffentlicht'],
+      checkMode: 'signed-offer-gate',
+      moveWhenCompleteTo: 'Antrag eingereicht / Förderunterlagen einreichen',
+      stayInStage: false,
+    }),
     documents: Object.freeze({
       label: 'Antrag eingereicht / Förderunterlagen einreichen',
       aliases: [
@@ -51,6 +59,20 @@ export function resolveFundingStage(value) {
 
 export function buildFundingStageChecklist(stageValue, { incomeBonusRequested } = {}) {
   const stage = resolveFundingStage(stageValue);
+  if (stage.key === 'offerPublished') {
+    return {
+      pipeline: PIPEDRIVE_FUNDING_CONFIG.pipeline,
+      stage,
+      requiredDocuments: [{ id: 'signed_offer', label: FUNDING_DOCUMENTS.signed_offer }],
+      scanSources: ['Pipedrive-Dateien'],
+      requireCompleteReview: true,
+      movementRule: 'Der Deal darf erst bei eindeutig erkanntem unterschriebenem Angebot nach „Antrag eingereicht / Förderunterlagen einreichen“ verschoben werden.',
+      stayInStage: false,
+      moveWhenCompleteTo: stage.moveWhenCompleteTo,
+      canCreateFinalDraftAutomatically: false,
+      openQuestions: [],
+    };
+  }
   const requiredDocumentIds = [
     'signed_offer',
     'identity_card',
@@ -104,7 +126,11 @@ export function decideFundingDealAction(stageValue, { incomeBonusRequested, docu
   if (hasOpenQuestions) action = 'resolve_open_questions';
   else if (uploadFromEmail.length) action = 'upload_email_documents_then_recheck';
   else if (!blockingDocuments.length && documentsCompleteInPipedrive) {
-    action = checklist.stage.stayInStage ? 'keep_in_funding_requested' : 'move_to_funding_requested';
+    action = checklist.stage.stayInStage
+      ? 'keep_in_funding_requested'
+      : checklist.stage.key === 'offerPublished'
+        ? 'move_to_documents'
+        : 'move_to_funding_requested';
   }
 
   return {
@@ -116,8 +142,8 @@ export function decideFundingDealAction(stageValue, { incomeBonusRequested, docu
     blockingDocuments,
     openQuestions: checklist.openQuestions,
     documentsCompleteInPipedrive,
-    moveAllowed: action === 'move_to_funding_requested',
-    targetStage: action === 'move_to_funding_requested' ? checklist.stage.moveWhenCompleteTo : null,
+    moveAllowed: ['move_to_documents', 'move_to_funding_requested'].includes(action),
+    targetStage: ['move_to_documents', 'move_to_funding_requested'].includes(action) ? checklist.stage.moveWhenCompleteTo : null,
     stageLocked: checklist.stage.stayInStage,
     rules: [
       'Ein Dokument aus einer E-Mail gilt erst nach erfolgreichem Upload in den richtigen Pipedrive-Deal als vollständig.',

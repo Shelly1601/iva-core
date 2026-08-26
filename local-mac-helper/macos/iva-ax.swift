@@ -1088,6 +1088,55 @@ do {
         exit(0)
     }
 
+    if command == "move-message-to-folder" {
+        guard arguments.count >= 3 else { throw HelperError.message("move-message-to-folder benötigt die exakte Nachrichtenbeschreibung und den Zielordner.") }
+        let messageDescription = arguments[1]
+        let targetFolder = normalizedAXText(arguments[2])
+        guard !targetFolder.isEmpty else { throw HelperError.message("Der Outlook-Zielordner fehlt.") }
+        let found = nodes.filter { matches($0, role: "AXCell", description: messageDescription) }
+        guard found.count == 1 else { throw HelperError.message("Outlook-Nachricht ist vor dem Verschieben nicht eindeutig: \(found.count) Treffer.") }
+        _ = AXUIElementPerformAction(found[0].element, "AXScrollToVisible" as CFString)
+        usleep(200_000)
+        let selected = AXUIElementSetAttributeValue(found[0].element, kAXSelectedAttribute as CFString, kCFBooleanTrue)
+        if selected != .success { try click(found[0].element) }
+        usleep(300_000)
+
+        let selectedNodes = collect(focusedRoot(appElement), maxDepth: 18, maxNodes: 6000)
+        let moveLabels = ["Verschieben", "Move"]
+        let moveButtons = selectedNodes.filter { node in
+            guard node.role == "AXButton" || node.role == "AXMenuButton" else { return false }
+            let values = [node.description, node.title, safeValue(node.element)].map(normalizedAXText)
+            return values.contains { value in moveLabels.contains(value) }
+        }
+        guard moveButtons.count == 1 else { throw HelperError.message("Outlooks Schaltfläche „Verschieben“ ist nicht eindeutig: \(moveButtons.count) Treffer.") }
+        let moveResult = AXUIElementPerformAction(moveButtons[0].element, kAXPressAction as CFString)
+        if moveResult != .success { try click(moveButtons[0].element) }
+        usleep(500_000)
+
+        let menuNodes = collect(appElement, maxDepth: 20, maxNodes: 8000)
+        let folderCandidates = menuNodes.filter { node in
+            guard ["AXMenuItem", "AXCell", "AXRow", "AXStaticText"].contains(node.role) else { return false }
+            let values = [node.description, node.title, safeValue(node.element)].map(normalizedAXText)
+            return values.contains(targetFolder)
+        }
+        guard folderCandidates.count == 1 else { throw HelperError.message("Outlooks Zielordner „\(targetFolder)“ ist im Verschieben-Menü nicht eindeutig: \(folderCandidates.count) Treffer.") }
+        let folderResult = AXUIElementPerformAction(folderCandidates[0].element, kAXPressAction as CFString)
+        if folderResult != .success { try click(folderCandidates[0].element) }
+        usleep(900_000)
+
+        let remaining = collect(focusedRoot(appElement), maxDepth: 18, maxNodes: 6000).filter {
+            matches($0, role: "AXCell", description: messageDescription)
+        }
+        guard remaining.isEmpty else { throw HelperError.message("Die Outlook-Nachricht ist nach dem Verschieben weiterhin im Quellordner sichtbar.") }
+        try writeJSON([
+            "moved": true,
+            "sourceMessage": messageDescription,
+            "destinationFolder": targetFolder,
+            "removedFromSource": true,
+        ])
+        exit(0)
+    }
+
     if command == "download-open-message-attachments" {
         guard arguments.count >= 2 else { throw HelperError.message("download-open-message-attachments benötigt einen absoluten Zielordner.") }
         let destination = URL(fileURLWithPath: arguments[1]).standardizedFileURL.path

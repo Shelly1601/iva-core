@@ -95,5 +95,7 @@ export function fundingLocalCleanupPolicy() {
     deletesEmail: false,
     deletesPipedriveFiles: false,
     deletesOnlyManagedLocalCopies: true,
+    emptiesOnlyManagedIvaScope: true,
+    emptiesWholeUserTrash: false,
   });
 }

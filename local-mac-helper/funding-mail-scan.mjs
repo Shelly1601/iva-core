@@ -189,7 +189,10 @@ export async function scanFundingMailbox({ fundingScan, persist = true, onProgre
       .filter(document => document.confidence >= 0.9 && document.type !== 'unknown')
       .map(document => document.type);
     const presentDocumentIds = [...new Set(currentPipedriveEvidence)];
-    const missingBaseDocumentIds = FUNDING_BASE_REQUIRED_DOCUMENTS.filter(id => !presentDocumentIds.includes(id));
+    const requiredDocumentIds = Array.isArray(item.requiredDocumentIds) && item.requiredDocumentIds.length
+      ? item.requiredDocumentIds
+      : FUNDING_BASE_REQUIRED_DOCUMENTS;
+    const missingBaseDocumentIds = requiredDocumentIds.filter(id => !presentDocumentIds.includes(id));
     const ambiguousMailAttachments = mailSummaries.some(message => message.hasAttachments);
     return {
       ...item,

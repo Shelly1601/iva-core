@@ -2,10 +2,11 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, writeFile } from 'node:fs/promises';
 import { accessSync, constants as fsConstants } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { materializeIcloudWorkspace } from './icloud-workspace.mjs';
+import { assertImacFundingHost } from './funding-workflows.mjs';
 
 const MODULE_PATH = fileURLToPath(import.meta.url);
 const REPO_ROOT = path.resolve(process.env.IVA_DEVICE_WORKSPACE || path.join(path.dirname(MODULE_PATH), '..'));
@@ -211,10 +212,25 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
 }
 
 const PROJECT_WORKFLOW_TASKS = Object.freeze({
+  'funding-daily-sequence': Object.freeze({
+    title: 'Förderung – Tageslauf 1 → 2 → 3',
+    prompt: 'Lies FUNDING_WORKFLOWS.md vollständig und führe den dort beschriebenen Tageslauf exakt in der Reihenfolge „Förderung 1 – Vollständigkeit & Unterlagen“ → „Förderung 2 – Förderhöhe prüfen“ → „Förderung 3 – KfW-Zusagen prüfen“ aus. Arbeite ausschließlich auf diesem iMac. Prüfe beim ersten produktiven Lauf alle relevanten Deals, bereits vorhandenen Deal-Dateien und zuordenbaren Fördermails, danach inkrementell plus tägliche Offenfall- und 7-Tage-Reaktionsprüfung. Prüfe die Google-Liste vor vollständigen Deal-Folgeaktionen auf genau eine Spalte Kundename/Name, Datum und Bemerkung; schreibe bei fehlender oder mehrdeutiger Überschrift keinesfalls in eine Ersatzspalte. Kunden- und interne Eskalationsmails bleiben ausnahmslos Outlook-Entwürfe und werden nicht versandt. Die ausdrücklich vorgesehenen echten Folgeaktionen bei eindeutig vollständigen Deals – verifizierte Pipedrive-Felder/Phasen, native WhatsApp an Viktoria, deduplizierter Eintrag in die Google-Tabelle und Verschieben vollständig in Pipedrive verarbeiteter Fördermails in Outlook nach „fertig“ – sind freigegeben. Unklare oder unvollständig verarbeitete Mails bleiben im Eingang. In Fachsystemen nichts löschen. Nach verifiziertem Korrektur-Upload darfst du ausschließlich die exakt zugehörigen Dateien im verwalteten lokalen IVA-Förderordner endgültig entfernen; leere nie den gesamten Benutzer-Papierkorb. Beende den Lauf mit einem kurzen Deal-für-Deal-Bericht; Geheimnisse und Steuerdetails auslassen.',
+    acceptanceCriteria: ['Alle drei Workflows laufen in der dokumentierten Reihenfolge und nie parallel.', 'Der Lauf wurde durch die iMac-Hostprüfung zugelassen; MacBook und iPhone waren nur Fernsteuerung.', 'Kunden- und Eskalationsmails sind ausschließlich Entwürfe; kein Mailversand und keine Löschung in Fachsystemen.', 'Bereits vorhandene Deal-Dateien wurden auf PDF-Format, Standardbezeichnung, Lesbarkeit und Vollständigkeit geprüft.', 'Jede Pipedrive-, WhatsApp-, Tabellen- und Mailverschiebeaktion ist eindeutig zugeordnet, dedupliziert und nach der Aktion verifiziert.', 'Nur vollständig in Pipedrive verarbeitete Fördermails wurden nach „fertig“ verschoben.', 'Nach sieben vollen Tagen ohne Antwort wurde EKD intern an Kati, alles andere an Patrick als echter Weiterleitungsentwurf vorbereitet.', 'Lokale Löschung traf ausschließlich verifiziert ersetzte IVA-Arbeitskopien; fremde Papierkorb-Inhalte blieben erhalten.', 'Der Abschluss enthält je Deal die tatsächlich ausgeführten Änderungen oder den konkreten offenen Punkt.'],
+  }),
   'funding-monitor': Object.freeze({
-    title: 'Fördermonitor manuell ausführen',
-    prompt: 'Führe den bestehenden lokalen Fördermonitor jetzt genau einmal im fest gesperrten Review-only-Modus aus. Verwende die vorhandenen lokalen Module und Zustände, versende keine E-Mail, verändere Pipedrive nicht und lege ausschließlich nachvollziehbare Prüffälle für neue eindeutig erkannte Eingänge an. Beachte Lock, Idempotenz, Audit und die vorhandenen Sicherheitsregeln.',
-    acceptanceCriteria: ['Der Lauf bleibt review-only, versendet nichts und verändert Pipedrive nicht.', 'Neue Eingänge werden dedupliziert und nachvollziehbar in die Prüfliste übernommen.', 'Laufergebnis oder konkreter technischer Blocker ist im Audit festgehalten.'],
+    title: 'Förderung 1 – Vollständigkeit & Unterlagen',
+    prompt: 'Lies FUNDING_WORKFLOWS.md vollständig und führe ausschließlich „Förderung 1 – Vollständigkeit & Unterlagen“ genau einmal auf diesem iMac aus. Prüfe auch bereits im Deal vorhandene Dateien und die 7-Tage-Reaktionsfrist. Kunden- und interne Eskalationsmails bleiben Entwürfe; alle dort ausdrücklich genannten, eindeutig belegten Pipedrive-, native-WhatsApp-, Tabellen- und Mailverschiebeaktionen nach „fertig“ sind freigegeben. Unvollständig verarbeitete Mails bleiben im Eingang. In Fachsystemen nichts löschen; nur verifiziert ersetzte lokale IVA-Arbeitskopien im verwalteten Förderordner dürfen endgültig entfernt werden, niemals der gesamte Benutzer-Papierkorb. Berichte jede Dealaktion oder den konkreten Blocker.',
+    acceptanceCriteria: ['Angebot-veröffentlicht-Deals, offene Förderunterlagen, bestehende Deal-Dateien und neue Fördermails sind vollständig geprüft.', 'Nur eindeutig belegte leere Felder und erlaubte Vorwärtsphasen wurden gespeichert und erneut gelesen.', 'Kunden- und 7-Tage-Eskalationsmails sind Entwürfe; WhatsApp und Tabelle folgen nur nach verifizierter Vollständigkeit und genau einmal.', 'Nur vollständig verarbeitete Fördermails wurden verifiziert nach „fertig“ verschoben.', 'Nur verifiziert ersetzte lokale IVA-Arbeitskopien wurden entfernt; in Fachsystemen und im fremden Papierkorb wurde nichts gelöscht.'],
+  }),
+  'kfw-funding-amount-morning': Object.freeze({
+    title: 'Förderung 2 – Förderhöhe prüfen',
+    prompt: 'Lies FUNDING_WORKFLOWS.md vollständig und führe ausschließlich „Förderung 2 – Förderhöhe prüfen“ genau einmal auf diesem iMac aus. Prüfe immer die vollständige Dealakte und verwende den versionierten KfW-Rechenkern mit dem zum Antragsdatum passenden offiziellen Regelstand. Offene Kundenfragen nur als Outlook-Entwurf an Kunde mit VP im CC. Nichts löschen.',
+    acceptanceCriteria: ['Keine Förderzahl ohne belegte Gebäude-/Wohneinheitenstruktur, Antragsdatum und Kostenquelle.', 'MFH-Berechnungen verwenden die korrekte Kostenstaffel und beginnen in der Notiz mit dem Eurobetrag.', 'Notizen haben das Wichtigste zuerst und enden mit (Notiz von Nadine via KI).', 'Kundenmails sind nur Entwürfe; nichts wurde gelöscht.'],
+  }),
+  'kfw-approval-morning': Object.freeze({
+    title: 'Förderung 3 – KfW-Zusagen prüfen',
+    prompt: 'Lies FUNDING_WORKFLOWS.md vollständig und führe ausschließlich „Förderung 3 – KfW-Zusagen prüfen“ genau einmal auf diesem iMac aus. Setze nur Deals mit eindeutig zugeordnetem offiziellen KfW-Zusageschreiben aus Förderung beantragt auf Gewonnen, bestätige das Speichern und verifiziere den Übergang zu Montage einplanen. Nichts löschen.',
+    acceptanceCriteria: ['Jeder Statuswechsel besitzt genau eine offizielle eindeutig zugeordnete KfW-Zusage als Beleg.', 'Gewonnen und der Übergang nach Montage einplanen sind nach dem Speichern erneut gelesen.', 'Unklare Fälle bleiben unverändert und werden konkret gemeldet.', 'Nichts wurde gelöscht.'],
   }),
   'planbar-weekly-export': Object.freeze({
     title: 'Planbar-Forecast manuell ausführen',
@@ -237,6 +253,26 @@ export async function startProjectWorkflowTask({ workflowId, findPreparedForecas
   const normalizedWorkflowId = clean(workflowId, 140);
   const definition = PROJECT_WORKFLOW_TASKS[normalizedWorkflowId];
   if (!definition) throw new Error('Dieser Projekt-Workflow ist für den operativen Codex-Start nicht freigegeben.');
+  if (['funding-daily-sequence', 'funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning'].includes(normalizedWorkflowId)) {
+    assertImacFundingHost();
+  }
+  if (normalizedWorkflowId === 'funding-daily-sequence') {
+    const berlinDay = value => new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date(value));
+    const today = berlinDay(Date.now());
+    const entries = await readdir(TASK_ROOT, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const paths = jobPaths(entry.name);
+      const request = await readJson(paths.request).catch(() => null);
+      if (request?.mode !== 'project-workflow' || request?.workflowId !== normalizedWorkflowId || berlinDay(request.createdAt) !== today) continue;
+      const state = await readJson(paths.state).catch(() => null);
+      if (state && ['queued', 'running', 'completed'].includes(state.status)) {
+        return { jobId: request.jobId, status: state.status, title: request.title, workspace: 'iva-core', startedLocally: state.status !== 'completed', deduplicated: true };
+      }
+    }
+  }
   if (normalizedWorkflowId === 'planbar-weekly-export') {
     const mail = typeof findPreparedForecast === 'function' && typeof sendPreparedForecast === 'function'
       ? null

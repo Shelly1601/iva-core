@@ -3,12 +3,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { renderFundingMissingDocumentsEmail, withFundingSender } from './funding.mjs';
-import { createOutlookDraft, deleteOutlookDrafts, diagnoseOutlook, normalizeDraftPayload, updateOutlookDrafts } from './outlook.mjs';
+import { createOutlookDraft, createOutlookForwardDraft, deleteOutlookDrafts, diagnoseOutlook, normalizeDraftPayload, updateOutlookDrafts } from './outlook.mjs';
 import {
   createPipedriveFundingRequestNotes,
   createPipedriveFundingInformationNote,
   diagnosePipedriveChrome,
+  markPipedriveFundingDealWon,
   readPipedriveFundingDeal,
+  transitionPipedriveFundingStage,
   uploadPipedriveDealFiles,
   updatePipedriveFundingRequestNotes,
 } from './chrome-pipedrive.mjs';
@@ -62,6 +64,7 @@ import {
   credentialBrokerStatus,
 } from './credential-broker.mjs';
 import { ensurePortalLogin, portalAuthPolicy } from './portal-auth.mjs';
+import { completeFundingMail } from './funding-mail-completion.mjs';
 
 async function readJson(filePath) {
   if (!filePath) throw new Error('Pfad zu einer JSON-Datei fehlt.');
@@ -93,7 +96,7 @@ const batchService = new FundingBatchService({
 });
 
 async function main() {
-  const [command, filePath, confirmation, extra] = process.argv.slice(2);
+  const [command, filePath, confirmation, extra, final] = process.argv.slice(2);
   if (command === 'credential-policy') return console.log(JSON.stringify({ keychain: credentialBrokerPolicy(), portalLogin: portalAuthPolicy() }, null, 2));
   if (command === 'credential-status') return console.log(JSON.stringify(await credentialBrokerStatus(filePath), null, 2));
   if (command === 'credential-setup') {
@@ -134,6 +137,31 @@ async function main() {
   if (command === 'upload-pipedrive-files') {
     if (extra !== '--commit') throw new Error('Pipedrive-Dateien wurden nicht hochgeladen. Zum Bestätigen --commit anhängen.');
     return console.log(JSON.stringify(await uploadPipedriveDealFiles({ dealId: filePath, directory: confirmation }), null, 2));
+  }
+  if (command === 'transition-pipedrive-funding-stage') {
+    if (final !== '--commit') throw new Error('Pipedrive-Phase wurde nicht geändert. Zum Bestätigen --commit anhängen.');
+    return console.log(JSON.stringify(await transitionPipedriveFundingStage({
+      dealId: filePath,
+      fromStage: confirmation,
+      toStage: extra,
+      confirmApply: true,
+    }), null, 2));
+  }
+  if (command === 'mark-pipedrive-funding-won') {
+    if (extra !== '--commit') throw new Error('Der Deal wurde nicht auf „Gewonnen“ gesetzt. Zum Bestätigen --commit anhängen.');
+    return console.log(JSON.stringify(await markPipedriveFundingDealWon({
+      dealId: filePath,
+      approvalFileName: confirmation,
+      confirmApply: true,
+    }), null, 2));
+  }
+  if (command === 'complete-funding-mail') {
+    if (confirmation !== '--commit') throw new Error('Die Fördermail wurde nicht verschoben. Zum Bestätigen --commit anhängen.');
+    return console.log(JSON.stringify(await completeFundingMail(await readJson(filePath)), null, 2));
+  }
+  if (command === 'create-funding-escalation-forward') {
+    if (confirmation !== '--commit') throw new Error('Der interne Weiterleitungsentwurf wurde nicht erstellt. Zum Bestätigen --commit anhängen.');
+    return console.log(JSON.stringify(await createOutlookForwardDraft(await readJson(filePath)), null, 2));
   }
   if (command === 'create-pipedrive-funding-notes') {
     if (confirmation !== '--commit') throw new Error('Pipedrive-Notizen wurden nicht erstellt. Zum Bestätigen --commit anhängen.');
@@ -272,6 +300,10 @@ async function main() {
   node local-mac-helper/cli.mjs sync-direct-sales-roster --commit
   node local-mac-helper/cli.mjs read-pipedrive-deal <deal-id>
   node local-mac-helper/cli.mjs upload-pipedrive-files <deal-id> <pdf-ordner> --commit
+  node local-mac-helper/cli.mjs transition-pipedrive-funding-stage <deal-id> <von-phase> <nach-phase> --commit
+  node local-mac-helper/cli.mjs mark-pipedrive-funding-won <deal-id> <zusagedateiname.pdf> --commit
+  node local-mac-helper/cli.mjs complete-funding-mail /pfad/abschluss.json --commit
+  node local-mac-helper/cli.mjs create-funding-escalation-forward /pfad/weiterleitung.json --commit
   node local-mac-helper/cli.mjs create-pipedrive-funding-notes /pfad/notizen.json --commit
   node local-mac-helper/cli.mjs create-pipedrive-funding-info-note /pfad/notiz.json --commit
   node local-mac-helper/cli.mjs update-pipedrive-funding-notes /pfad/notizen.json --commit
