@@ -122,6 +122,10 @@ export async function fetchImacDeviceAgentStatus() {
   return request(`/device-agent/${IMAC_DEVICE_ID}/status`);
 }
 
+export async function fetchFundingRuntimeReconcileStatus() {
+  return request(`/device-agent/${IMAC_DEVICE_ID}/funding-runtime-status`);
+}
+
 export async function reportOperationalRun(input = {}) {
   return request(`/device-agent/${IMAC_DEVICE_ID}/operational-runs`, { method: 'POST', body: input });
 }

@@ -265,7 +265,7 @@ import {
   listDeviceCommands,
   recordDeviceAgentHeartbeat,
 } from './device-control/store.js';
-import { reconcileFundingImacRuntime } from './device-control/funding-runtime-reconciler.js';
+import { reconcileFundingImacRuntime, summarizeFundingRuntimeCommands } from './device-control/funding-runtime-reconciler.js';
 import { createInvestmentModule } from './investment/index.js';
 
 const app = express();
@@ -1134,6 +1134,22 @@ app.post('/device-agent/:deviceId/heartbeat', async (req, res) => {
 app.get('/device-agent/:deviceId/status', async (req, res) => {
   if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
   res.json(await deviceAgentStatus(req.params.deviceId));
+});
+app.get('/device-agent/:deviceId/funding-runtime-status', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
+  const [agent, commands] = await Promise.all([
+    deviceAgentStatus(req.params.deviceId),
+    listDeviceCommands({ deviceId: req.params.deviceId, limit: 100 }),
+  ]);
+  res.json({
+    deviceId: agent.deviceId,
+    online: agent.online === true,
+    attested: agent.attested === true,
+    lastSeenAt: agent.lastSeenAt || null,
+    runtimeActionsCurrent: Array.isArray(agent.allowedActions)
+      && agent.allowedActions.includes('funding.legacy-monitor.suspend'),
+    ...summarizeFundingRuntimeCommands(commands),
+  });
 });
 app.get('/device-agent/:deviceId/commands/next', async (req, res) => {
   if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);

@@ -93,3 +93,28 @@ export async function reconcileFundingImacRuntime({
     commandId: command.id,
   };
 }
+
+export function summarizeFundingRuntimeCommands(commands = []) {
+  const relevant = (Array.isArray(commands) ? commands : [])
+    .filter(command => command.action === FUNDING_RUNTIME_REQUIRED_ACTION
+      || (command.action === 'codex.task.start' && command.payload?.requestId === FUNDING_RUNTIME_MARKER));
+  const summarize = command => command ? {
+    id: command.id,
+    action: command.action,
+    status: command.status,
+    createdAt: command.createdAt,
+    startedAt: command.startedAt || null,
+    completedAt: command.completedAt || null,
+    attempts: command.attempts,
+    jobId: command.result?.jobId || null,
+    suspended: command.result?.suspended === true,
+    loaded: typeof command.result?.loaded === 'boolean' ? command.result.loaded : null,
+    plistRetained: command.result?.plistRetained === true,
+    error: command.error || null,
+  } : null;
+  return {
+    runtimeUpdate: summarize(relevant.find(command => command.action === 'codex.task.start')),
+    legacyMonitorSuspension: summarize(relevant.find(command => command.action === FUNDING_RUNTIME_REQUIRED_ACTION
+      && String(command.requestText || '').includes(FUNDING_RUNTIME_MARKER))),
+  };
+}

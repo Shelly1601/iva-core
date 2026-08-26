@@ -345,7 +345,7 @@ try {
   assert.equal(devicePolicy.allowedActions.includes('funding.legacy-monitor.suspend'), true);
 
   console.log('Device-Control: selbstheilenden Förderlaufzeit-Abgleich prüfen …');
-  const { FUNDING_RUNTIME_MARKER, fundingRuntimeUpdatePrompt, reconcileFundingImacRuntime } = await import('../device-control/funding-runtime-reconciler.js');
+  const { FUNDING_RUNTIME_MARKER, fundingRuntimeUpdatePrompt, reconcileFundingImacRuntime, summarizeFundingRuntimeCommands } = await import('../device-control/funding-runtime-reconciler.js');
   assert.match(fundingRuntimeUpdatePrompt(), /install-imac-device-agent --commit/);
   assert.match(fundingRuntimeUpdatePrompt(), /Starte keinen Förderlauf/);
   let queuedRuntimeCommand = null;
@@ -377,6 +377,13 @@ try {
   });
   assert.equal(runtimeReady.status, 'ready');
   assert.equal(runtimeReady.legacyMonitorSuspended, true);
+  const diagnostic = summarizeFundingRuntimeCommands([
+    { id: 'runtime-update', action: 'codex.task.start', status: 'completed', payload: { requestId: FUNDING_RUNTIME_MARKER }, result: { jobId: 'job-1' } },
+    { id: 'legacy-suspend', action: 'funding.legacy-monitor.suspend', status: 'completed', requestText: `[${FUNDING_RUNTIME_MARKER}] geprüft`, result: { suspended: true, loaded: false, plistRetained: true } },
+  ]);
+  assert.equal(diagnostic.runtimeUpdate.jobId, 'job-1');
+  assert.equal(diagnostic.legacyMonitorSuspension.suspended, true);
+  assert.equal(diagnostic.legacyMonitorSuspension.loaded, false);
 
   const { builderSkill } = await import('../skills/builder.js');
   console.log('Device-Control: Builder-Werkzeug prüfen …');
