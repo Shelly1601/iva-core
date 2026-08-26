@@ -188,6 +188,17 @@ try {
   });
   assert.equal(verifiedConnection.verified, true);
   assert.equal(verifiedConnection.secondVerifiedHeartbeatAt, '2026-08-26T10:00:20.000Z');
+  await assert.rejects(
+    verifyImacDeviceAgentConnection({
+      baselineLastSeenAt: '2026-08-26T10:00:00.000Z',
+      getStatus: async () => ({ online: true, lastSeenAt: '2026-08-26T10:00:05.000Z' }),
+      timeoutMs: 20,
+      pollMs: 1,
+      minimumAdvanceMs: 10_000,
+    }),
+    /keine zwei fortlaufenden Railway-Heartbeats/,
+    'ein einzelner oder stehengebliebener Heartbeat darf die Installation nicht grün melden',
+  );
   const { codexTaskPolicy, inferProjectWorkflowStatus, startProjectWorkflowTask } = await import('../local-mac-helper/codex-tasks.mjs');
   const codexPolicy = codexTaskPolicy();
   assert.equal(codexPolicy.arbitraryWorkspace, false);
