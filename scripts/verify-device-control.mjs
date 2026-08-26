@@ -220,6 +220,7 @@ try {
   assert.doesNotMatch(bootstrapSource, /local-mac-helper\/cli\.mjs install-imac-device-agent/);
   assert.match(bootstrapSource, /local-mac-helper\/install-imac-device-agent\.mjs/);
   assert.match(bootstrapSource, /IVA lädt die aktuelle iMac-Komponente aus iCloud/);
+  assert.match(bootstrapSource, /IVA-DIREKTSTART 8817760/);
   assert.match(bootstrapSource, /Zwei fortlaufende Railway-Heartbeats wurden bestätigt/);
   const finalBootstrapSource = await readFile(new URL('../IVA-iMac-JETZT-fertigstellen.command', import.meta.url), 'utf8');
   assert.match(finalBootstrapSource, /8817760c6fbb986a028ec583974513042f531c58/);

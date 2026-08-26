@@ -14,6 +14,8 @@ if [[ ! -d "$workspace" ]]; then
   exit 1
 fi
 
+print "IVA-DIREKTSTART 8817760 – iCloud-Code wird nicht mehr als Laufzeit verwendet."
+
 # Holt bei Bedarf die bereits in iCloud veröffentlichte Agent-Version lokal auf
 # den iMac. Die Downloads laufen im Hintergrund, damit das Fenster nie wieder
 # scheinbar ohne Rückmeldung hängen bleibt.
