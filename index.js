@@ -251,9 +251,11 @@ import {
   IVA_IMAC_DEVICE_ID,
   claimNextDeviceCommand,
   completeDeviceCommand,
+  deviceAgentStatus,
   deviceCommandStatus,
   enqueueDeviceCommand,
   listDeviceCommands,
+  recordDeviceAgentHeartbeat,
 } from './device-control/store.js';
 import { createInvestmentModule } from './investment/index.js';
 
@@ -1030,12 +1032,37 @@ function authorizedImacAgent(req) {
   return crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
 }
 
+function imacAgentMetadataFromRequest(req) {
+  return {
+    hostname: String(req.headers['x-iva-agent-host'] || ''),
+    protocolVersion: Number(req.headers['x-iva-agent-protocol'] || 0),
+    release: String(req.headers['x-iva-agent-release'] || ''),
+    workspace: String(req.headers['x-iva-agent-workspace'] || ''),
+    iCloudAuthoritative: String(req.headers['x-iva-agent-icloud'] || '').toLowerCase() === 'true',
+  };
+}
+
 // Der iMac baut die Verbindung ausschließlich ausgehend zu Railway auf. Diese
 // Endpunkte verwenden ein eigenes Gerätetoken statt des Cockpit-Tokens.
+app.post('/device-agent/:deviceId/heartbeat', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
+  try {
+    const headerMetadata = imacAgentMetadataFromRequest(req);
+    const bodyMetadata = req.body || {};
+    if (String(bodyMetadata.hostname || '').toLowerCase().replace(/\.local$/, '') !== headerMetadata.hostname.toLowerCase().replace(/\.local$/, '')
+      || Number(bodyMetadata.protocolVersion || 0) !== headerMetadata.protocolVersion
+      || String(bodyMetadata.release || '') !== headerMetadata.release
+      || String(bodyMetadata.workspace || '') !== headerMetadata.workspace
+      || (bodyMetadata.iCloudAuthoritative === true) !== headerMetadata.iCloudAuthoritative) {
+      return res.status(409).json({ error: 'Geräte-Attestierung abgelehnt: Heartbeat und Agent-Header widersprechen sich.' });
+    }
+    res.json(await recordDeviceAgentHeartbeat({ deviceId: req.params.deviceId, ...bodyMetadata }));
+  } catch (error) { res.status(403).json({ error: error.message }); }
+});
 app.get('/device-agent/:deviceId/commands/next', async (req, res) => {
   if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
-  try { res.json({ command: await claimNextDeviceCommand(req.params.deviceId) }); }
-  catch (error) { res.status(500).json({ error: error.message }); }
+  try { res.json({ command: await claimNextDeviceCommand(req.params.deviceId, imacAgentMetadataFromRequest(req)) }); }
+  catch (error) { res.status(/Attestierung/.test(error.message) ? 403 : 500).json({ error: error.message }); }
 });
 app.post('/device-agent/:deviceId/commands/:commandId/complete', async (req, res) => {
   if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
@@ -1047,6 +1074,7 @@ app.post('/device-agent/:deviceId/commands/:commandId/complete', async (req, res
       ok: req.body?.ok === true,
       result: req.body?.result || null,
       error: req.body?.error || '',
+      agentMetadata: imacAgentMetadataFromRequest(req),
     }));
   } catch (error) { res.status(409).json({ error: error.message }); }
 });
@@ -1309,6 +1337,7 @@ app.get('/api/control/status', async (_req, res) => {
   try { res.json(await controlSnapshot()); }
   catch (error) { res.status(500).json({ error: error.message }); }
 });
+app.get('/api/device-agent/status', async (_req, res) => res.json(await deviceAgentStatus()));
 app.get('/api/control/runs', async (req, res) => res.json(await listAgentRuns({ limit: req.query?.limit, status: String(req.query?.status || ''), agentId: String(req.query?.agentId || '') })));
 app.get('/api/control/approvals', async (req, res) => res.json(await listApprovals({ limit: req.query?.limit, status: String(req.query?.status || '') })));
 app.get('/api/control/audit', async (req, res) => res.json(await listAudit({ limit: req.query?.limit, category: String(req.query?.category || '') })));

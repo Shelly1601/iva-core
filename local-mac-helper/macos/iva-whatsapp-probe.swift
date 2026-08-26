@@ -77,6 +77,13 @@ let scrollMembersIndex = commandArguments.firstIndex(of: "--scroll-members")
 let requestedScrollSteps = scrollMembersIndex.flatMap { index in
     commandArguments.indices.contains(index + 1) ? Int32(commandArguments[index + 1]) : nil
 }
+let sendMessageIndex = commandArguments.firstIndex(of: "--send-message")
+let requestedSendChat = sendMessageIndex.flatMap { index in
+    commandArguments.indices.contains(index + 1) ? commandArguments[index + 1] : nil
+}
+let requestedMessage = sendMessageIndex.flatMap { index in
+    commandArguments.indices.contains(index + 2) ? commandArguments[index + 2] : nil
+}
 var cursor = 0
 var nodeCount = 0
 var textFieldCount = 0
@@ -87,6 +94,7 @@ var hasLoginIndicator = false
 var hasChatIndicator = false
 var textNodes: [[String: Any]] = []
 var chatButtons: [(element: AXUIElement, description: String, identifier: String)] = []
+var composerElements: [AXUIElement] = []
 let qrNeedles = ["qr-code", "qr code", "qr‑code", "telefonnummer verknüpfen", "gerät verknüpfen"]
 let loginNeedles = ["willkommen bei whatsapp", "weiter, um whatsapp", "loslegen"]
 let chatNeedles = ["neuer chat", "neue unterhaltung", "chatliste", "chats", "archiviert", "ungelesen"]
@@ -106,6 +114,9 @@ while cursor < queue.count && nodeCount < 8000 {
             description: elementDescription,
             identifier: text(element, kAXIdentifierAttribute)
         ))
+    }
+    if role == "AXTextArea" && text(element, kAXIdentifierAttribute) == "ChatBar_ComposerTextView" {
+        composerElements.append(element)
     }
     let combined = [
         text(element, kAXTitleAttribute),
@@ -133,6 +144,78 @@ while cursor < queue.count && nodeCount < 8000 {
     if depth < 22 {
         for child in children(element) { queue.append((child, depth + 1)) }
     }
+}
+
+if let requestedSendChat, let requestedMessage, !requestedSendChat.isEmpty, !requestedMessage.isEmpty {
+    let normalized: (String) -> String = { value in
+        value.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .replacingOccurrences(of: "[\\u{200b}-\\u{200f}\\u{202a}-\\u{202e}\\u{2066}-\\u{2069}]", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    let expectedChat = normalized(requestedSendChat)
+    let activeHeaders = chatButtons.filter {
+        $0.identifier == "NavigationBar_HeaderViewButton" && normalized($0.description).contains(expectedChat)
+    }
+    guard activeHeaders.count == 1 else {
+        let visibleHeaders = chatButtons
+            .filter { $0.identifier == "NavigationBar_HeaderViewButton" }
+            .map { ["description": $0.description, "normalized": normalized($0.description)] }
+        writeJSON(["sent": false, "verified": false, "error": "Der erwartete WhatsApp-Chat ist nicht eindeutig aktiv.", "activeHeaderMatches": activeHeaders.count, "expectedNormalized": expectedChat, "visibleHeaders": visibleHeaders])
+        exit(2)
+    }
+    let existingMessages = textNodes.compactMap { $0["description"] as? String }
+    if existingMessages.contains(where: { normalized($0).contains(normalized(requestedMessage)) && normalized($0).contains("deine nachricht") }) {
+        writeJSON(["sent": false, "verified": true, "idempotent": true, "chat": requestedSendChat, "message": requestedMessage])
+        exit(0)
+    }
+    guard composerElements.count == 1 else {
+        writeJSON(["sent": false, "verified": false, "error": "Das WhatsApp-Nachrichtenfeld ist nicht eindeutig verfügbar.", "composerMatches": composerElements.count])
+        exit(2)
+    }
+    activateApplication(app)
+    if let mainWindow = windows.first {
+        _ = AXUIElementSetAttributeValue(mainWindow, kAXMainAttribute as CFString, kCFBooleanTrue)
+        _ = AXUIElementSetAttributeValue(mainWindow, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        _ = AXUIElementPerformAction(mainWindow, kAXRaiseAction as CFString)
+    }
+    let composer = composerElements[0]
+    _ = AXUIElementSetAttributeValue(composer, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    let setResult = AXUIElementSetAttributeValue(composer, kAXValueAttribute as CFString, requestedMessage as CFString)
+    guard setResult == .success else {
+        writeJSON(["sent": false, "verified": false, "error": "Die WhatsApp-Nachricht konnte nicht in das Eingabefeld gesetzt werden.", "axError": setResult.rawValue])
+        exit(3)
+    }
+    usleep(250_000)
+    let source = CGEventSource(stateID: .hidSystemState)
+    CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: true)?.post(tap: .cghidEventTap)
+    CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: false)?.post(tap: .cghidEventTap)
+    usleep(1_600_000)
+
+    var verifyQueue: [(AXUIElement, Int)] = (attribute(appElement, kAXWindowsAttribute) as? [AXUIElement] ?? []).map { ($0, 0) }
+    var verifyCursor = 0
+    var verifiedDescription = ""
+    while verifyCursor < verifyQueue.count && verifyCursor < 8000 {
+        let (element, depth) = verifyQueue[verifyCursor]
+        verifyCursor += 1
+        let identifier = text(element, kAXIdentifierAttribute)
+        let description = text(element, kAXDescriptionAttribute)
+        if identifier == "WAMessageBubbleTableViewCell",
+           normalized(description).contains(normalized(requestedMessage)),
+           normalized(description).contains("deine nachricht"),
+           normalized(description).contains(expectedChat) {
+            verifiedDescription = description
+            break
+        }
+        if depth < 22 {
+            for child in children(element) { verifyQueue.append((child, depth + 1)) }
+        }
+    }
+    guard !verifiedDescription.isEmpty else {
+        writeJSON(["sent": true, "verified": false, "error": "Die Nachricht wurde ausgelöst, ist aber im aktiven Chat noch nicht sichtbar.", "chat": requestedSendChat])
+        exit(4)
+    }
+    writeJSON(["sent": true, "verified": true, "idempotent": false, "chat": requestedSendChat, "message": requestedMessage, "evidence": verifiedDescription])
+    exit(0)
 }
 
 if let requestedScrollSteps, requestedScrollSteps != 0 {

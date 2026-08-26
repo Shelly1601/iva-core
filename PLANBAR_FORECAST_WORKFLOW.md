@@ -42,13 +42,21 @@ Die Zeilen sind nach Kalenderwoche und Kunde sortiert. Kopfzeile und Filter blei
 
 ## Technische Prüfung vor Versand
 
-1. Der Spreadsheet-Workflow erzeugt im aktuellen Laufordner Gesamt- und Herstellerdateien sowie `xlsx-manifest.json`.
+1. Der Spreadsheet-Workflow erzeugt im aktuellen Laufordner Gesamt- und Herstellerdateien sowie `manifest.json` (alternativ kompatibel: `xlsx-manifest.json`) und `qa.json`.
 2. Jede erzeugte XLSX wird wieder eingelesen und auf Struktur und Formel-/Dateifehler geprüft.
 3. Jedes Tabellenblatt wird gerendert und visuell auf abgeschnittene oder unlesbare Inhalte kontrolliert.
 4. Das Manifest muss genau eine Gesamtdatei und genau eine nichtleere Datei je Hersteller enthalten.
 5. Das Manifest muss die beiden Ausschlüsse `David Service` und `Antonio Lausich`, eine vollständige Spaltenzuordnung und die Zahl der entfernten Termine ausweisen.
 6. Dateiendungen aller Anlagen müssen `.xlsx` sein; bei `.pdf` bricht der Versand ab.
 7. Vor dem sichtbaren Outlook-Versand Manifest und Anhänge erneut validieren, Doppelversand über `send-log.json` und Outlook `Gesendet` ausschließen und die gesendete Nachricht anschließend in Outlook verifizieren.
+
+Der Versand erfolgt ausschließlich mit dem deterministischen iMac-Sender:
+
+```bash
+node local-mac-helper/planbar-forecast-mail.mjs "/absoluter/iCloud-Laufordner" --commit
+```
+
+Der Sender übernimmt nur die exakten vollständigen XLSX-Pfade aus dem Manifest. Finder-, Spotlight- oder Outlook-Dateisuche ist für Anlagen verboten. Vor dem Senden werden Absender, Empfänger, Betreff und die vollständige sichtbare Anhangsliste erneut verglichen; jede zusätzliche oder fehlende Datei und jede PDF führen zum Abbruch. Nach geschlossenem Verfassen-Fenster wird die Nachricht über Outlooks natives `Gesendet`-Postfach anhand Betreff, Empfänger und exakter Anlagenliste geprüft. Wurde das Senden bereits bestätigt, darf ein noch ausstehender Gesendet-Nachweis niemals einen erneuten Versand auslösen.
 
 ## Protokollierung
 

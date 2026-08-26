@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { assertImacExecutionHost } from './device-agent.mjs';
 
 const execFileAsync = promisify(execFile);
 export const IMAC_DEVICE_AGENT_LABEL = 'de.iva.device-agent';
@@ -44,6 +45,7 @@ export async function imacDeviceAgentLaunchdStatus() {
 }
 
 export async function installImacDeviceAgentLaunchd() {
+  assertImacExecutionHost();
   const plist = imacDeviceAgentPlistFile();
   const guiDomain = `gui/${process.getuid()}`;
   await mkdir(path.dirname(plist), { recursive: true, mode: 0o700 });

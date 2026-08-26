@@ -9,11 +9,14 @@ try {
   console.log('Device-Control: Store laden …');
   const {
     IVA_IMAC_DEVICE_ID,
+    DEVICE_AGENT_PROTOCOL_VERSION,
     claimNextDeviceCommand,
     completeDeviceCommand,
+    deviceAgentStatus,
     deviceCommandStatus,
     enqueueDeviceCommand,
     listDeviceCommands,
+    recordDeviceAgentHeartbeat,
   } = await import('../device-control/store.js');
   const command = await enqueueDeviceCommand({
     action: 'funding.monitor.status',
@@ -41,6 +44,48 @@ try {
   assert.equal(completed.status, 'completed');
   assert.equal((await deviceCommandStatus(command.id)).result.online, true);
   assert.equal((await listDeviceCommands({ deviceId: IVA_IMAC_DEVICE_ID })).length, 1);
+
+  console.log('Device-Control: iMac-Attestierung und Migrationssperre prüfen …');
+  const imacMetadata = {
+    hostname: 'iMac-von-Nadine.local',
+    protocolVersion: DEVICE_AGENT_PROTOCOL_VERSION,
+    release: 'test-v2',
+    workspace: '/Users/nadine/Library/Mobile Documents/com~apple~CloudDocs/IVA-Assistent/iva-core',
+    iCloudAuthoritative: true,
+    allowedActions: ['agent.status', 'computer.status'],
+  };
+  await assert.rejects(
+    recordDeviceAgentHeartbeat({ deviceId: IVA_IMAC_DEVICE_ID, ...imacMetadata, hostname: 'MacBook-Air-von-Nadine.local' }),
+    /kein iMac/,
+  );
+  const heartbeat = await recordDeviceAgentHeartbeat({ deviceId: IVA_IMAC_DEVICE_ID, ...imacMetadata });
+  assert.equal(heartbeat.attested, true);
+  assert.equal(heartbeat.hostname, 'imac-von-nadine');
+  assert.equal((await deviceAgentStatus()).online, true);
+  const agentStatusCommand = await enqueueDeviceCommand({ action: 'agent.status', requestedBy: 'test' });
+  await assert.rejects(claimNextDeviceCommand(IVA_IMAC_DEVICE_ID), /Attestierung/);
+  await assert.rejects(
+    claimNextDeviceCommand(IVA_IMAC_DEVICE_ID, { ...imacMetadata, hostname: 'iMac-Ersatz.local' }),
+    /gebundene iMac/,
+  );
+  const attestedClaim = await claimNextDeviceCommand(IVA_IMAC_DEVICE_ID, imacMetadata);
+  assert.equal(attestedClaim.id, agentStatusCommand.id);
+  assert.equal(attestedClaim.claimedBy.hostname, 'imac-von-nadine');
+  await assert.rejects(completeDeviceCommand({
+    deviceId: IVA_IMAC_DEVICE_ID,
+    commandId: agentStatusCommand.id,
+    leaseToken: attestedClaim.leaseToken,
+    ok: true,
+    agentMetadata: { ...imacMetadata, hostname: 'iMac-Ersatz.local' },
+  }), /Attestierung/);
+  await completeDeviceCommand({
+    deviceId: IVA_IMAC_DEVICE_ID,
+    commandId: agentStatusCommand.id,
+    leaseToken: attestedClaim.leaseToken,
+    ok: true,
+    result: { online: true },
+    agentMetadata: imacMetadata,
+  });
   const planbarCommand = await enqueueDeviceCommand({ action: 'planbar.search.refresh', requestedBy: 'test' });
   assert.equal(planbarCommand.action, 'planbar.search.refresh');
   assert.deepEqual(planbarCommand.payload, {});
@@ -107,8 +152,17 @@ try {
   const deviceAgentRunnerSource = await readFile(new URL('../local-mac-helper/device-agent-runner.mjs', import.meta.url), 'utf8');
   assert.match(deviceAgentRunnerSource, /DEVICE_AGENT_HARD_TIMEOUT_MS = 240_000/, 'der äußere Agent darf die 180-Sekunden-Planbar-Prüfung nicht vorzeitig abbrechen');
 
-  const { imacDeviceAgentPolicy } = await import('../local-mac-helper/device-agent.mjs');
+  const { assertImacExecutionHost, imacDeviceAgentPolicy, isAllowedImacExecutionHost, isAuthoritativeIcloudWorkspace } = await import('../local-mac-helper/device-agent.mjs');
+  assert.equal(isAllowedImacExecutionHost('iMac-von-Nadine.local'), true);
+  assert.equal(isAllowedImacExecutionHost('MacBook-Air-von-Nadine.local'), false);
+  assert.equal(isAllowedImacExecutionHost('Arbeitsrechner.local', 'Arbeitsrechner.local'), true);
+  assert.throws(() => assertImacExecutionHost('MacBook-Air-von-Nadine.local'), /darf auf diesem Rechner nicht laufen/);
+  assert.equal(isAuthoritativeIcloudWorkspace('/Users/nadine/Library/Mobile Documents/com~apple~CloudDocs/IVA-Assistent/iva-core'), true);
+  assert.equal(isAuthoritativeIcloudWorkspace('/Users/nadine/iva-core'), false);
   const devicePolicy = imacDeviceAgentPolicy();
+  assert.equal(devicePolicy.protocolVersion, DEVICE_AGENT_PROTOCOL_VERSION);
+  assert.equal(devicePolicy.iCloudAuthoritative, true);
+  assert.equal(devicePolicy.allowedActions.includes('agent.status'), true);
   assert.equal(devicePolicy.allowedActions.includes('portal.login'), true);
   assert.equal(devicePolicy.allowedActions.includes('portal.credentials.status'), true);
   assert.equal(devicePolicy.allowedActions.includes('project.workflow.run'), true);

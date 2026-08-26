@@ -446,6 +446,81 @@ func pasteText(_ text: String, into element: AXUIElement) throws {
     restorePasteboard(pasteboard, snapshot: previous)
 }
 
+func xlsxNames(in nodes: [AXNode]) throws -> [String] {
+    let regex = try NSRegularExpression(pattern: #"[A-Z0-9ÄÖÜäöüß._-]+\.xlsx"#, options: [.caseInsensitive])
+    var names = Set<String>()
+    for node in nodes {
+        let searchable = "\(node.title) \(node.description) \(safeValue(node.element))"
+        let range = NSRange(searchable.startIndex..<searchable.endIndex, in: searchable)
+        for match in regex.matches(in: searchable, range: range) {
+            if let swiftRange = Range(match.range, in: searchable) {
+                names.insert(String(searchable[swiftRange]))
+            }
+        }
+    }
+    return Array(names).sorted()
+}
+
+func composeRecipientEmails(in nodes: [AXNode]) throws -> [String] {
+    let regex = try NSRegularExpression(pattern: "[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", options: [.caseInsensitive])
+    var emails = Set<String>()
+    for node in nodes {
+        let searchable = "\(node.title) \(node.description) \(safeValue(node.element))"
+        let range = NSRange(searchable.startIndex..<searchable.endIndex, in: searchable)
+        for match in regex.matches(in: searchable, range: range) {
+            if let swiftRange = Range(match.range, in: searchable) {
+                emails.insert(String(searchable[swiftRange]).lowercased())
+            }
+        }
+    }
+    return Array(emails).sorted()
+}
+
+func largestComposeTextArea(_ nodes: [AXNode]) throws -> AXNode {
+    let ranked = nodes.filter { $0.role == "AXTextArea" }.compactMap { node -> (AXNode, CGFloat)? in
+        guard let frame = elementFrame(node.element), frame.width > 20, frame.height > 20 else { return nil }
+        return (node, frame.width * frame.height)
+    }.sorted { $0.1 > $1.1 }
+    guard let selected = ranked.first, ranked.count == 1 || selected.1 > ranked[1].1 else {
+        throw HelperError.message("Der Outlook-Mailtext ist nicht eindeutig auswählbar.")
+    }
+    return selected.0
+}
+
+func pasteFileAttachments(_ filePaths: [String], into element: AXUIElement) throws {
+    guard !filePaths.isEmpty else { throw HelperError.message("Es wurden keine Anlagen übergeben.") }
+    let urls = try filePaths.map { filePath -> NSURL in
+        guard filePath.hasPrefix("/") else { throw HelperError.message("Anlagenpfad ist nicht absolut: \(filePath)") }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: filePath, isDirectory: &isDirectory), !isDirectory.boolValue else {
+            throw HelperError.message("Anlage wurde nicht als Datei gefunden: \(filePath)")
+        }
+        return NSURL(fileURLWithPath: filePath)
+    }
+    let pasteboard = NSPasteboard.general
+    let previous = snapshotPasteboard(pasteboard)
+    pasteboard.clearContents()
+    guard pasteboard.writeObjects(urls) else {
+        restorePasteboard(pasteboard, snapshot: previous)
+        throw HelperError.message("Die exakten Anlagendateien konnten nicht in die Zwischenablage gelegt werden.")
+    }
+    _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    try click(element)
+    usleep(150_000)
+    try keyboardEvent(125, flags: .maskCommand) // Ans Ende des Mailtexts, ohne den Inhalt zu markieren.
+    usleep(100_000)
+    try commandShortcut(9) // Befehl+V fügt exakt die übergebenen Datei-URLs als Anlagen ein.
+    usleep(2_000_000)
+    restorePasteboard(pasteboard, snapshot: previous)
+}
+
+struct ComposeSendExpectation: Decodable {
+    let from: String
+    let subject: String
+    let to: [String]
+    let attachments: [String]
+}
+
 do {
     let arguments = Array(CommandLine.arguments.dropFirst())
     let command = arguments.first ?? "doctor"
@@ -685,28 +760,107 @@ do {
     }
 
     if command == "compose-summary" {
-        let composeNodes = collect(appElement, maxDepth: 22, maxNodes: 12000)
+        let composeRoot = focusedRoot(appElement)
+        let composeNodes = collect(composeRoot, maxDepth: 22, maxNodes: 12000)
         let accountPickers = composeNodes.filter { matches($0, role: "AXPopUpButton", description: "accountPicker") }
         let subjectFields = composeNodes.filter { matches($0, role: "AXTextField", description: "subjectTextField") }
         guard accountPickers.count == 1 && subjectFields.count == 1 else {
             throw HelperError.message("Entwurfsprüfung abgebrochen: Das Verfassen-Fenster ist nicht eindeutig sichtbar.")
         }
-        let emailPattern = try NSRegularExpression(pattern: "[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", options: [.caseInsensitive])
-        var emails = Set<String>()
-        for node in composeNodes {
-            let searchable = "\(node.title) \(node.description) \(safeValue(node.element))"
-            let range = NSRange(searchable.startIndex..<searchable.endIndex, in: searchable)
-            for match in emailPattern.matches(in: searchable, range: range) {
-                if let swiftRange = Range(match.range, in: searchable) {
-                    emails.insert(String(searchable[swiftRange]).lowercased())
-                }
+        let emails = try composeRecipientEmails(in: composeNodes)
+        let attachmentGrids = composeNodes.filter { $0.role == "AXGroup" && $0.identifier == "attachmentGrid" }
+        let attachmentNodes = attachmentGrids.flatMap { grid in
+            collect(grid.element, maxDepth: 10, maxNodes: 1000).filter { node in
+                !node.description.isEmpty || !node.title.isEmpty || !safeValue(node.element).isEmpty
             }
         }
         try writeJSON([
             "account": safeValue(accountPickers[0].element),
             "subject": safeValue(subjectFields[0].element),
-            "recipientEmails": Array(emails).sorted(),
+            "recipientEmails": emails,
+            "attachmentNames": try xlsxNames(in: composeNodes),
+            "attachmentGridCount": attachmentGrids.count,
+            "attachmentNodes": attachmentNodes.map(dictionary),
             "focusedWindowTitle": focusedWindowTitle(appElement),
+        ])
+        exit(0)
+    }
+
+    if command == "paste-file-attachments" {
+        guard arguments.count >= 2 else { throw HelperError.message("paste-file-attachments benötigt eine JSON-Datei.") }
+        let data = try Data(contentsOf: URL(fileURLWithPath: arguments[1]))
+        let filePaths = try JSONDecoder().decode([String].self, from: data)
+        let composeRoot = focusedRoot(appElement)
+        let composeNodes = collect(composeRoot, maxDepth: 22, maxNodes: 12000)
+        let textArea = try largestComposeTextArea(composeNodes)
+        try pasteFileAttachments(filePaths, into: textArea.element)
+        let refreshed = collect(focusedRoot(appElement), maxDepth: 22, maxNodes: 12000)
+        try writeJSON([
+            "attached": true,
+            "requestedCount": filePaths.count,
+            "attachmentNames": try xlsxNames(in: refreshed),
+            "focusedWindowTitle": focusedWindowTitle(appElement),
+        ])
+        exit(0)
+    }
+
+    if command == "send-verified-compose" {
+        guard arguments.count >= 2 else { throw HelperError.message("send-verified-compose benötigt eine JSON-Datei.") }
+        let data = try Data(contentsOf: URL(fileURLWithPath: arguments[1]))
+        let expected = try JSONDecoder().decode(ComposeSendExpectation.self, from: data)
+        let composeRoot = focusedRoot(appElement)
+        let composeNodes = collect(composeRoot, maxDepth: 22, maxNodes: 12000)
+        let accountPickers = composeNodes.filter { matches($0, role: "AXPopUpButton", description: "accountPicker") }
+        let subjectFields = composeNodes.filter { matches($0, role: "AXTextField", description: "subjectTextField") }
+        guard accountPickers.count == 1 && subjectFields.count == 1 else {
+            throw HelperError.message("Versand abgebrochen: Das Outlook-Verfassen-Fenster ist nicht eindeutig sichtbar.")
+        }
+        let account = safeValue(accountPickers[0].element).lowercased()
+        guard account.contains(expected.from.lowercased()) else {
+            throw HelperError.message("Versand abgebrochen: Das erwartete Absenderkonto ist nicht ausgewählt.")
+        }
+        guard safeValue(subjectFields[0].element) == expected.subject else {
+            throw HelperError.message("Versand abgebrochen: Der Betreff stimmt nicht exakt überein.")
+        }
+        let actualRecipients = try composeRecipientEmails(in: composeNodes)
+        let expectedRecipients = expected.to.map { $0.lowercased() }
+        guard expectedRecipients.allSatisfy({ actualRecipients.contains($0) }) else {
+            throw HelperError.message("Versand abgebrochen: Die erwarteten An-Empfänger sind nicht vollständig sichtbar.")
+        }
+        let actualAttachments = Set(try xlsxNames(in: composeNodes))
+        let expectedAttachments = Set(expected.attachments)
+        guard !expectedAttachments.isEmpty && actualAttachments == expectedAttachments else {
+            throw HelperError.message("Versand abgebrochen: Die sichtbaren XLSX-Anlagen stimmen nicht exakt mit dem Manifest überein.")
+        }
+        let containsPdf = composeNodes.contains { node in
+            "\(node.title) \(node.description) \(safeValue(node.element))".lowercased().contains(".pdf")
+        }
+        guard !containsPdf else { throw HelperError.message("Versand abgebrochen: Im Entwurf wurde eine PDF-Anlage erkannt.") }
+        let sendButtons = composeNodes.filter { node in
+            guard node.role == "AXButton", (attribute(node.element, kAXEnabledAttribute) as? Bool ?? true) else { return false }
+            let label = "\(node.title) \(node.description) \(node.identifier)".lowercased()
+            return label == "senden  " || label == "send  " || label.contains("sendbutton") || label.split(separator: " ").contains("senden") || label.split(separator: " ").contains("send")
+        }
+        guard sendButtons.count == 1 else {
+            throw HelperError.message("Versand abgebrochen: Outlooks Senden-Schaltfläche ist nicht eindeutig: \(sendButtons.count) Treffer.")
+        }
+        let windowCountBefore = (attribute(appElement, kAXWindowsAttribute) as? [AXUIElement])?.count ?? 0
+        let pressResult = AXUIElementPerformAction(sendButtons[0].element, kAXPressAction as CFString)
+        if pressResult != .success { try click(sendButtons[0].element) }
+        usleep(1_500_000)
+        let windowCountAfter = (attribute(appElement, kAXWindowsAttribute) as? [AXUIElement])?.count ?? 0
+        let remainingCompose = collect(focusedRoot(appElement), maxDepth: 16, maxNodes: 6000)
+            .filter { matches($0, role: "AXTextField", description: "subjectTextField") && safeValue($0.element) == expected.subject }
+        guard remainingCompose.isEmpty && windowCountAfter < windowCountBefore else {
+            throw HelperError.message("Versand konnte nicht bestätigt werden: Das Verfassen-Fenster ist weiterhin geöffnet.")
+        }
+        try writeJSON([
+            "sent": true,
+            "subject": expected.subject,
+            "recipients": expectedRecipients,
+            "attachments": Array(expectedAttachments).sorted(),
+            "windowCountBefore": windowCountBefore,
+            "windowCountAfter": windowCountAfter,
         ])
         exit(0)
     }
@@ -1232,6 +1386,15 @@ do {
         guard arguments.count >= 3 else { throw HelperError.message("click benötigt AX-Rolle und exakte Beschriftung.") }
         let found = nodes.filter { matches($0, role: arguments[1], description: arguments[2]) }
         guard found.count == 1 else { throw HelperError.message("Bedienelement ist nicht eindeutig: \(found.count) Treffer.") }
+        try click(found[0].element)
+        try writeJSON(["clicked": true, "element": dictionary(found[0])])
+        exit(0)
+    }
+
+    if command == "click-app" {
+        guard arguments.count >= 3 else { throw HelperError.message("click-app benötigt AX-Rolle und exakte Beschriftung.") }
+        let found = collect(appElement, maxDepth: 22, maxNodes: 12000).filter { matches($0, role: arguments[1], description: arguments[2]) }
+        guard found.count == 1 else { throw HelperError.message("Bedienelement ist appweit nicht eindeutig: \(found.count) Treffer.") }
         try click(found[0].element)
         try writeJSON(["clicked": true, "element": dictionary(found[0])])
         exit(0)

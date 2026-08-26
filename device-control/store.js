@@ -7,9 +7,12 @@ const STORE_FILE = path.join(DATA_DIR, 'device-commands.json');
 const MAX_COMMANDS = 500;
 const DEFAULT_TTL_MS = 15 * 60_000;
 const LEASE_MS = 5 * 60_000;
+const AGENT_ONLINE_MS = 60_000;
 
 export const IVA_IMAC_DEVICE_ID = 'imac-nadine';
+export const DEVICE_AGENT_PROTOCOL_VERSION = 2;
 export const DEVICE_ACTIONS = Object.freeze({
+  'agent.status': Object.freeze({ description: 'Attestierten iMac-Agent und iCloud-Workspace prüfen', mutating: false }),
   'computer.status': Object.freeze({ description: 'Status des iMac-Helfers prüfen', mutating: false }),
   'funding.monitor.status': Object.freeze({ description: 'Fördermonitor-Status prüfen', mutating: false }),
   'funding.monitor.run': Object.freeze({ description: 'Fördermonitor einmal im gesperrten Review-Modus ausführen', mutating: false }),
@@ -27,10 +30,14 @@ export const DEVICE_ACTIONS = Object.freeze({
 async function loadStore() {
   try {
     const value = JSON.parse(await fs.readFile(STORE_FILE, 'utf8'));
-    return { version: 1, commands: Array.isArray(value.commands) ? value.commands : [] };
+    return {
+      version: 2,
+      commands: Array.isArray(value.commands) ? value.commands : [],
+      agents: value.agents && typeof value.agents === 'object' ? value.agents : {},
+    };
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error;
-    return { version: 1, commands: [] };
+    return { version: 2, commands: [], agents: {} };
   }
 }
 
@@ -38,10 +45,11 @@ async function saveStore(store) {
   await fs.mkdir(path.dirname(STORE_FILE), { recursive: true });
   const temporary = `${STORE_FILE}.${process.pid}.${crypto.randomUUID()}.tmp`;
   const compact = {
-    version: 1,
+    version: 2,
     commands: store.commands
       .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
       .slice(-MAX_COMMANDS),
+    agents: store.agents && typeof store.agents === 'object' ? store.agents : {},
   };
   try {
     await fs.writeFile(temporary, JSON.stringify(compact, null, 2));
@@ -53,6 +61,94 @@ async function saveStore(store) {
 
 function cleanText(value, max = 240) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+function normalizedHostname(value) {
+  return cleanText(value, 160).toLowerCase().replace(/\.local$/, '');
+}
+
+function isIcloudIvaWorkspace(value) {
+  const workspace = cleanText(value, 1000);
+  return workspace.includes('/Library/Mobile Documents/com~apple~CloudDocs/IVA-Assistent/iva-core');
+}
+
+function normalizedAgentMetadata(input = {}) {
+  return {
+    hostname: normalizedHostname(input.hostname),
+    protocolVersion: Number(input.protocolVersion || 0),
+    release: cleanText(input.release, 120),
+    workspace: cleanText(input.workspace, 1000),
+    iCloudAuthoritative: input.iCloudAuthoritative === true,
+    allowedActions: [...new Set((Array.isArray(input.allowedActions) ? input.allowedActions : [])
+      .map(value => cleanText(value, 100)).filter(value => DEVICE_ACTIONS[value]))].sort(),
+  };
+}
+
+function assertAttestedImacMetadata(metadata) {
+  if (!metadata.hostname || !metadata.hostname.includes('imac')) {
+    throw new Error('Geräte-Attestierung abgelehnt: Der Ausführungsrechner ist kein iMac.');
+  }
+  if (!Number.isInteger(metadata.protocolVersion) || metadata.protocolVersion < DEVICE_AGENT_PROTOCOL_VERSION) {
+    throw new Error(`Geräte-Attestierung abgelehnt: Protokoll ${DEVICE_AGENT_PROTOCOL_VERSION} oder neuer ist erforderlich.`);
+  }
+  if (!metadata.iCloudAuthoritative || !isIcloudIvaWorkspace(metadata.workspace)) {
+    throw new Error('Geräte-Attestierung abgelehnt: Der verbindliche IVA-iCloud-Workspace ist nicht aktiv.');
+  }
+  if (!metadata.release) throw new Error('Geräte-Attestierung abgelehnt: Die Agent-Version fehlt.');
+}
+
+function assertClaimingAgent(store, deviceId, input = {}) {
+  const attested = store.agents?.[deviceId];
+  if (!attested?.attested) return null; // Einmalige, rückwärtskompatible Migration bis zum ersten v2-iMac-Heartbeat.
+  const metadata = normalizedAgentMetadata(input);
+  assertAttestedImacMetadata(metadata);
+  if (metadata.hostname !== attested.hostname) {
+    throw new Error(`Geräte-Attestierung abgelehnt: ${metadata.hostname || 'unbekannter Rechner'} ist nicht der gebundene iMac.`);
+  }
+  return metadata;
+}
+
+export async function recordDeviceAgentHeartbeat({ deviceId = IVA_IMAC_DEVICE_ID, ...input } = {}) {
+  if (cleanText(deviceId, 80) !== IVA_IMAC_DEVICE_ID) throw new Error('Unbekanntes IVA-Gerät.');
+  const metadata = normalizedAgentMetadata(input);
+  assertAttestedImacMetadata(metadata);
+  const store = await loadStore();
+  const previous = store.agents?.[deviceId];
+  if (previous?.attested && previous.hostname !== metadata.hostname) {
+    throw new Error(`Geräte-Attestierung abgelehnt: Der Gerätekanal ist bereits an ${previous.hostname} gebunden.`);
+  }
+  const now = new Date().toISOString();
+  store.agents = store.agents || {};
+  store.agents[deviceId] = {
+    deviceId,
+    ...metadata,
+    attested: true,
+    firstAttestedAt: previous?.firstAttestedAt || now,
+    lastSeenAt: now,
+  };
+  await saveStore(store);
+  return { ...store.agents[deviceId], online: true };
+}
+
+export async function deviceAgentStatus(deviceId = IVA_IMAC_DEVICE_ID) {
+  const store = await loadStore();
+  const agent = store.agents?.[cleanText(deviceId, 80)];
+  if (!agent) {
+    return {
+      deviceId: IVA_IMAC_DEVICE_ID,
+      attested: false,
+      online: false,
+      requiredProtocolVersion: DEVICE_AGENT_PROTOCOL_VERSION,
+      detail: 'Der neue iMac-Agent hat sich noch nicht mit dem iCloud-Workspace attestiert.',
+    };
+  }
+  const online = Date.now() - Date.parse(agent.lastSeenAt || 0) <= AGENT_ONLINE_MS;
+  return {
+    ...agent,
+    online,
+    requiredProtocolVersion: DEVICE_AGENT_PROTOCOL_VERSION,
+    detail: online ? 'Attestierter iMac-Agent ist online.' : 'Der attestierte iMac-Agent hat sich zuletzt nicht innerhalb von 60 Sekunden gemeldet.',
+  };
 }
 
 function validatePayload(action, payload = {}) {
@@ -162,8 +258,9 @@ export async function enqueueDeviceCommand({ deviceId = IVA_IMAC_DEVICE_ID, acti
   return command;
 }
 
-export async function claimNextDeviceCommand(deviceId = IVA_IMAC_DEVICE_ID) {
+export async function claimNextDeviceCommand(deviceId = IVA_IMAC_DEVICE_ID, agentMetadata = {}) {
   const store = await loadStore();
+  const claimingAgent = assertClaimingAgent(store, deviceId, agentMetadata);
   const now = Date.now();
   let changed = false;
   for (const command of store.commands) {
@@ -189,15 +286,22 @@ export async function claimNextDeviceCommand(deviceId = IVA_IMAC_DEVICE_ID) {
   command.attempts = Number(command.attempts || 0) + 1;
   command.leaseToken = crypto.randomBytes(24).toString('hex');
   command.leaseExpiresAt = new Date(Date.now() + LEASE_MS).toISOString();
+  if (claimingAgent) command.claimedBy = claimingAgent;
   await saveStore(store);
   return { ...command };
 }
 
-export async function completeDeviceCommand({ deviceId, commandId, leaseToken, ok, result = null, error = '' } = {}) {
+export async function completeDeviceCommand({ deviceId, commandId, leaseToken, ok, result = null, error = '', agentMetadata = {} } = {}) {
   const store = await loadStore();
   const command = store.commands.find(item => item.id === String(commandId) && item.deviceId === String(deviceId));
   if (!command || command.status !== 'running') throw new Error('Aktiver iMac-Befehl wurde nicht gefunden.');
   if (!leaseToken || leaseToken !== command.leaseToken) throw new Error('iMac-Befehlslease ist ungültig.');
+  if (command.claimedBy) {
+    const completingAgent = assertClaimingAgent(store, deviceId, agentMetadata);
+    if (!completingAgent || completingAgent.hostname !== command.claimedBy.hostname) {
+      throw new Error('Geräte-Attestierung abgelehnt: Der Befehl darf nur vom attestierten iMac abgeschlossen werden.');
+    }
+  }
   command.status = ok === true ? 'completed' : 'failed';
   command.completedAt = new Date().toISOString();
   command.result = ok === true ? result : null;

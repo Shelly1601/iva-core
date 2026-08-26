@@ -106,6 +106,87 @@ async function fillRecipientField(identifier, values) {
   await runMacUiBridge(['replace-text-app-and-confirm', 'AXTextField', identifier, addresses.join('; ')], { timeoutMs: 30000 });
 }
 
+async function withTemporaryJsonFile(value, callback) {
+  await mkdir(TEMP_DIR, { recursive: true, mode: 0o700 });
+  const file = path.join(TEMP_DIR, `${randomUUID()}.json`);
+  try {
+    await writeFile(file, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+    return await callback(file);
+  } finally {
+    await unlink(file).catch(() => {});
+  }
+}
+
+function exactXlsxAttachmentNames(attachments = []) {
+  const paths = [...new Set((Array.isArray(attachments) ? attachments : []).map(value => path.resolve(String(value))))];
+  if (!paths.length) throw new Error('Outlook-Versand abgebrochen: Es wurden keine XLSX-Anlagen übergeben.');
+  if (paths.some(file => path.extname(file).toLowerCase() !== '.xlsx')) {
+    throw new Error('Outlook-Versand abgebrochen: Für diesen Versand sind ausschließlich XLSX-Anlagen zulässig.');
+  }
+  const names = paths.map(file => path.basename(file));
+  if (new Set(names).size !== names.length) throw new Error('Outlook-Versand abgebrochen: Die Anlagendateinamen sind nicht eindeutig.');
+  return { paths, names: names.sort((a, b) => a.localeCompare(b, 'de')) };
+}
+
+export function verifyOutlookXlsxComposeSnapshot(snapshot = {}, expected = {}) {
+  const requestedFrom = normalizeEmail(expected.from);
+  const selectedFrom = emailFromAccountPicker(snapshot.account);
+  if (selectedFrom !== requestedFrom) {
+    throw new Error(`Outlook-Versand abgebrochen: ausgewählt ist ${selectedFrom || 'kein eindeutiger Absender'}, erwartet wird ${requestedFrom}.`);
+  }
+  if (String(snapshot.subject || '') !== String(expected.subject || '')) {
+    throw new Error('Outlook-Versand abgebrochen: Der sichtbare Betreff stimmt nicht exakt überein.');
+  }
+  const recipients = new Set((snapshot.recipientEmails || []).map(normalizeEmail));
+  const missingRecipients = (expected.to || []).map(normalizeEmail).filter(address => !recipients.has(address));
+  if (missingRecipients.length) {
+    throw new Error(`Outlook-Versand abgebrochen: An-Empfänger nicht sichtbar: ${missingRecipients.join(', ')}.`);
+  }
+  const actualNames = [...new Set(snapshot.attachmentNames || [])].sort((a, b) => a.localeCompare(b, 'de'));
+  const expectedNames = [...new Set(expected.attachments || [])].sort((a, b) => a.localeCompare(b, 'de'));
+  if (JSON.stringify(actualNames) !== JSON.stringify(expectedNames)) {
+    throw new Error('Outlook-Versand abgebrochen: Die sichtbaren XLSX-Anlagen stimmen nicht exakt mit dem Manifest überein.');
+  }
+  return { from: requestedFrom, subject: String(expected.subject), to: [...(expected.to || [])], attachments: expectedNames };
+}
+
+export async function sendVerifiedOutlookXlsxMessageViaUi({ from, subject, body, html = '', to = [], cc = [], bcc = [], attachments = [] }) {
+  const exactAttachments = exactXlsxAttachmentNames(attachments);
+  let composeOpened = false;
+  try {
+    await runMacUiBridge(['new-message'], { timeoutMs: 30000 });
+    composeOpened = true;
+    await selectExactOutlookComposeSender(from);
+    await fillRecipientField('toTextField', to);
+    if (cc.length) {
+      await runMacUiBridge(['press', 'AXButton', 'ccShowButton']);
+      await fillRecipientField('ccTextField', cc);
+    }
+    if (bcc.length) {
+      await runMacUiBridge(['press', 'AXButton', 'bccShowButton']);
+      await fillRecipientField('bccTextField', bcc);
+    }
+    await fillVerifiedOutlookCompose({ from, subject, body, html });
+    await withTemporaryJsonFile(exactAttachments.paths, file => runMacUiBridge(['paste-file-attachments', file], { timeoutMs: 60000 }));
+    const snapshot = await runMacUiBridge(['compose-summary'], { timeoutMs: 30000 });
+    const expectation = verifyOutlookXlsxComposeSnapshot(snapshot, {
+      from,
+      subject,
+      to,
+      attachments: exactAttachments.names,
+    });
+    const sent = await withTemporaryJsonFile(expectation, file => runMacUiBridge(['send-verified-compose', file], { timeoutMs: 60000 }));
+    composeOpened = false;
+    return { ...sent, channel: 'macos-accessibility-exact-files', verifiedBeforeSend: true };
+  } catch (error) {
+    if (composeOpened) {
+      await runMacUiBridge(['close-window'], { timeoutMs: 15000 }).catch(() => {});
+      await runMacUiBridge(['press', 'AXButton', 'Verwerfen'], { timeoutMs: 15000 }).catch(() => {});
+    }
+    throw error;
+  }
+}
+
 export async function createOutlookDraftViaUi({ from, subject, body, html = '', to = [], cc = [], bcc = [], attachments = [] }) {
   if (attachments.length) {
     throw new Error('Outlook-UI-Abbruch: Anlagen werden über den Oberflächenweg noch nicht sicher unterstützt. Es wurde kein Entwurf geöffnet.');

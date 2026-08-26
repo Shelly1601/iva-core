@@ -3,9 +3,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 
 const execFileAsync = promisify(execFile);
 export const IMAC_DEVICE_ID = 'imac-nadine';
+export const DEVICE_AGENT_PROTOCOL_VERSION = 2;
+export const DEVICE_AGENT_RELEASE = 'imac-icloud-v2';
 const KEYCHAIN_SERVICE = 'de.iva.device-agent';
 const KEYCHAIN_ACCOUNT = IMAC_DEVICE_ID;
 const DEFAULT_SERVER_URL = 'https://iva-core-production.up.railway.app';
@@ -16,6 +19,52 @@ const APP_ALLOWLIST = Object.freeze({
   Codex: '/Applications/Codex.app',
 });
 const UI_ACTIONS = new Set(['computer.status', 'planbar.search.refresh', 'planbar.customer.schedule', 'portal.login', 'app.open']);
+const AGENT_WORKSPACE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const ALLOWED_ACTIONS = Object.freeze([
+  'agent.status',
+  'computer.status',
+  'funding.monitor.status',
+  'funding.reviews.list',
+  'planbar.search.refresh',
+  'planbar.customer.schedule',
+  'project.workflow.run',
+  'portal.credentials.status',
+  'portal.login',
+  'codex.task.start',
+  'codex.task.status',
+  'app.open',
+]);
+
+function normalizedHost(value) {
+  return String(value || '').trim().toLowerCase().replace(/\.local$/, '');
+}
+
+export function isAllowedImacExecutionHost(hostname = os.hostname(), expectedHostname = process.env.IVA_IMAC_HOSTNAME) {
+  const actual = normalizedHost(hostname);
+  const expected = normalizedHost(expectedHostname);
+  if (expected) return actual === expected;
+  return actual.includes('imac');
+}
+
+export function assertImacExecutionHost(hostname = os.hostname(), expectedHostname = process.env.IVA_IMAC_HOSTNAME) {
+  if (isAllowedImacExecutionHost(hostname, expectedHostname)) return true;
+  throw new Error(`Der iMac-Geräteagent darf auf diesem Rechner nicht laufen (${normalizedHost(hostname) || 'unbekannt'}).`);
+}
+
+export function isAuthoritativeIcloudWorkspace(workspace = AGENT_WORKSPACE) {
+  return path.resolve(String(workspace || '')).includes('/Library/Mobile Documents/com~apple~CloudDocs/IVA-Assistent/iva-core');
+}
+
+export function imacDeviceAgentMetadata() {
+  return Object.freeze({
+    hostname: normalizedHost(os.hostname()),
+    protocolVersion: DEVICE_AGENT_PROTOCOL_VERSION,
+    release: DEVICE_AGENT_RELEASE,
+    workspace: AGENT_WORKSPACE,
+    iCloudAuthoritative: isAuthoritativeIcloudWorkspace(),
+    allowedActions: [...ALLOWED_ACTIONS],
+  });
+}
 
 function cleanServerUrl(value) {
   const url = new URL(String(value || DEFAULT_SERVER_URL));
@@ -39,9 +88,18 @@ export async function provisionImacDeviceToken() {
 async function request(pathname, { method = 'GET', body } = {}) {
   const server = cleanServerUrl(process.env.IVA_DEVICE_SERVER_URL);
   const token = await readImacDeviceToken();
+  const agent = imacDeviceAgentMetadata();
   const response = await fetch(`${server}${pathname}`, {
     method,
-    headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'X-IVA-Agent-Host': agent.hostname,
+      'X-IVA-Agent-Protocol': String(agent.protocolVersion),
+      'X-IVA-Agent-Release': agent.release,
+      'X-IVA-Agent-Workspace': agent.workspace,
+      'X-IVA-Agent-ICloud': agent.iCloudAuthoritative ? 'true' : 'false',
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(20000),
   });
@@ -50,6 +108,11 @@ async function request(pathname, { method = 'GET', body } = {}) {
   try { payload = text ? JSON.parse(text) : null; } catch {}
   if (!response.ok) throw new Error(`IVA-Gerätekanal HTTP ${response.status}: ${String(payload?.error || text || response.statusText).slice(0, 400)}`);
   return payload;
+}
+
+export async function reportImacDeviceAgentHeartbeat() {
+  const metadata = imacDeviceAgentMetadata();
+  return request(`/device-agent/${IMAC_DEVICE_ID}/heartbeat`, { method: 'POST', body: metadata });
 }
 
 export async function reportOperationalRun(input = {}) {
@@ -71,6 +134,14 @@ function openApplication(appName) {
 }
 
 async function executeDeviceCommand(command) {
+  if (command.action === 'agent.status') {
+    const { imacDeviceAgentLaunchdStatus } = await import('./device-agent-launchd.mjs');
+    return {
+      online: true,
+      ...imacDeviceAgentMetadata(),
+      launchd: await imacDeviceAgentLaunchdStatus(),
+    };
+  }
   if (command.action === 'computer.status') {
     const { diagnoseOutlook } = await import('./outlook.mjs');
     const { diagnosePipedriveChrome } = await import('./chrome-pipedrive.mjs');
@@ -104,8 +175,7 @@ async function executeDeviceCommand(command) {
     };
   }
   if (command.action === 'funding.monitor.run') {
-    const { runFundingMonitorOnce } = await import('./funding-monitor-runner.mjs');
-    return runFundingMonitorOnce({ ignoreIdle: true });
+    throw new Error('Außerplanmäßige Fördermonitorläufe sind deaktiviert. Der lokale Lauf startet einmal täglich um 23:00 Uhr.');
   }
   if (command.action === 'funding.reviews.list') {
     const { listFundingReviews } = await import('./funding-review-queue.mjs');
@@ -149,8 +219,8 @@ async function executeDeviceCommand(command) {
     return startCodexTask(command.payload || {});
   }
   if (command.action === 'codex.task.status') {
-    const { codexTaskStatus } = await import('./codex-tasks.mjs');
-    return codexTaskStatus(command.payload?.taskId);
+    const { getCodexTaskStatus } = await import('./codex-tasks.mjs');
+    return getCodexTaskStatus(command.payload?.jobId);
   }
   if (command.action === 'project.workflow.run') {
     const { startProjectWorkflowTask } = await import('./codex-tasks.mjs');
@@ -161,6 +231,15 @@ async function executeDeviceCommand(command) {
 }
 
 export async function runImacDeviceAgentOnce() {
+  assertImacExecutionHost();
+  if (!isAuthoritativeIcloudWorkspace()) {
+    throw new Error(`Der iMac-Geräteagent läuft nicht aus dem verbindlichen iCloud-Workspace (${AGENT_WORKSPACE}).`);
+  }
+  await reportImacDeviceAgentHeartbeat().catch(error => {
+    // Während der einmaligen Railway-Migration darf ein noch nicht deployter
+    // Heartbeat-Endpunkt den bisherigen Agentenabruf nicht unterbrechen.
+    if (!/HTTP 404\b/.test(String(error?.message || error))) throw error;
+  });
   const payload = await request(`/device-agent/${IMAC_DEVICE_ID}/commands/next`);
   const command = payload?.command;
   if (!command) return { status: 'no_command', deviceId: IMAC_DEVICE_ID };
@@ -190,9 +269,16 @@ export function imacDeviceAgentPolicy() {
     connection: 'outbound-https-only',
     server: cleanServerUrl(process.env.IVA_DEVICE_SERVER_URL),
     deviceId: IMAC_DEVICE_ID,
+    executionHost: os.hostname(),
+    executionHostAllowed: isAllowedImacExecutionHost(),
+    protocolVersion: DEVICE_AGENT_PROTOCOL_VERSION,
+    release: DEVICE_AGENT_RELEASE,
+    workspace: AGENT_WORKSPACE,
+    iCloudAuthoritative: isAuthoritativeIcloudWorkspace(),
+    expectedHostname: String(process.env.IVA_IMAC_HOSTNAME || '').trim() || 'Hostname enthält „iMac“',
     keychainService: KEYCHAIN_SERVICE,
     arbitraryShellCommands: false,
-    allowedActions: ['computer.status', 'funding.monitor.status', 'funding.monitor.run', 'funding.reviews.list', 'planbar.search.refresh', 'planbar.customer.schedule', 'project.workflow.run', 'portal.credentials.status', 'portal.login', 'codex.task.start', 'codex.task.status', 'app.open'],
+    allowedActions: [...ALLOWED_ACTIONS],
     allowedApps: Object.keys(APP_ALLOWLIST),
   });
 }

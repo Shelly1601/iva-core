@@ -1,6 +1,7 @@
 import { access, stat } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { createOutlookDraftViaUi, deleteOutlookDraftsViaUi, updateOutlookDraftsViaUi, updateOutlookDraftViaUi } from './macos-ui.mjs';
+import path from 'node:path';
+import { createOutlookDraftViaUi, deleteOutlookDraftsViaUi, sendVerifiedOutlookXlsxMessageViaUi, updateOutlookDraftsViaUi, updateOutlookDraftViaUi } from './macos-ui.mjs';
 
 const OUTLOOK_APP = '/Applications/Microsoft Outlook.app';
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -83,6 +84,84 @@ export function buildDraftAppleScript(input = {}) {
   for (const filePath of draft.attachments) lines.push(`make new attachment at draftMessage with properties {file:(POSIX file ${appleScriptString(filePath)} as alias)}`);
   lines.push('return "created|" & (subject of draftMessage)', 'end tell');
   return { script: lines.join('\n'), draft };
+}
+
+export function buildSentVerificationAppleScript({ from, subject, to = [], attachments = [], lookbackSeconds = 900 } = {}) {
+  const requestedFrom = email(from, 'Absender');
+  const requestedSubject = String(subject || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 240);
+  const requestedTo = recipients(to, 'An');
+  const expectedAttachments = [...new Set((Array.isArray(attachments) ? attachments : []).map(value => path.basename(String(value))))].sort();
+  const seconds = Math.max(60, Math.min(3600, Number(lookbackSeconds) || 900));
+  if (!requestedSubject || !requestedTo.length || !expectedAttachments.length) throw new Error('Die Gesendet-Prüfung benötigt Absender, Betreff, Empfänger und Anlagen.');
+  const lines = [
+    'tell application id "com.microsoft.Outlook"',
+    `set requestedSender to ${appleScriptString(requestedFrom)}`,
+    `set requestedSubject to ${appleScriptString(requestedSubject)}`,
+    `set earliestTime to (current date) - ${seconds}`,
+    'set senderAccount to missing value',
+    'repeat with accountCandidate in exchange accounts',
+    'ignoring case',
+    'if (email address of accountCandidate as text) is requestedSender then set senderAccount to accountCandidate',
+    'end ignoring',
+    'end repeat',
+    'if senderAccount is missing value then',
+    'repeat with accountCandidate in imap accounts',
+    'ignoring case',
+    'if (email address of accountCandidate as text) is requestedSender then set senderAccount to accountCandidate',
+    'end ignoring',
+    'end repeat',
+    'end if',
+    'if senderAccount is missing value then',
+    'repeat with accountCandidate in pop accounts',
+    'ignoring case',
+    'if (email address of accountCandidate as text) is requestedSender then set senderAccount to accountCandidate',
+    'end ignoring',
+    'end repeat',
+    'end if',
+    'if senderAccount is missing value then error "Gesendet-Prüfung: Das Absenderkonto ist nicht verfügbar." number 560',
+    'set targetSent to sent items of senderAccount',
+    'set recentMatches to {}',
+    'repeat 20 times',
+    'set recentMatches to {}',
+    'repeat with candidate in (every outgoing message of targetSent whose subject is requestedSubject)',
+    'if (time sent of candidate) is greater than or equal to earliestTime and (was sent of candidate) is true then set end of recentMatches to candidate',
+    'end repeat',
+    'if (count of recentMatches) is 1 then exit repeat',
+    'if (count of recentMatches) > 1 then error "Gesendet-Prüfung: Mehrere neue Nachrichten mit demselben Betreff gefunden." number 561',
+    'delay 1',
+    'end repeat',
+    'if (count of recentMatches) is not 1 then error "Gesendet-Prüfung: Die Nachricht wurde nicht eindeutig im Gesendet-Ordner gefunden." number 562',
+    'set sentMessage to item 1 of recentMatches',
+    'set recipientAddresses to {}',
+    'repeat with recipientItem in (every to recipient of sentMessage)',
+    'set end of recipientAddresses to (address of email address of recipientItem as text)',
+    'end repeat',
+    'set attachmentNames to {}',
+    'repeat with attachmentItem in (every attachment of sentMessage)',
+    'set end of attachmentNames to (name of attachmentItem as text)',
+    'end repeat',
+    'set AppleScript\'s text item delimiters to tab',
+    'set recipientText to recipientAddresses as text',
+    'set attachmentText to attachmentNames as text',
+    'set AppleScript\'s text item delimiters to ""',
+    'return (subject of sentMessage as text) & linefeed & recipientText & linefeed & attachmentText',
+    'end tell',
+  ];
+  return { script: lines.join('\n'), expected: { from: requestedFrom, subject: requestedSubject, to: requestedTo, attachments: expectedAttachments } };
+}
+
+export async function verifyOutlookSentMessage(input = {}) {
+  const { script, expected } = buildSentVerificationAppleScript(input);
+  const output = await runAppleScript(script, { timeoutMs: 30000 });
+  const [subject = '', recipientLine = '', attachmentLine = ''] = output.split(/\r?\n/);
+  const actualRecipients = recipientLine.split('\t').map(email => email.trim().toLowerCase()).filter(Boolean).sort();
+  const actualAttachments = attachmentLine.split('\t').map(name => name.trim()).filter(Boolean).sort();
+  if (subject !== expected.subject) throw new Error('Gesendet-Prüfung: Der Betreff stimmt nicht exakt überein.');
+  if (!expected.to.every(address => actualRecipients.includes(address))) throw new Error('Gesendet-Prüfung: Der An-Empfänger stimmt nicht exakt überein.');
+  if (JSON.stringify(actualAttachments) !== JSON.stringify(expected.attachments)) {
+    throw new Error('Gesendet-Prüfung: Die Anlagen stimmen nicht exakt mit dem versendeten Manifest überein.');
+  }
+  return { verified: true, folder: 'Gesendet', subject, recipients: actualRecipients, attachments: actualAttachments };
 }
 
 function normalizeDeleteEntries(entries = []) {
@@ -203,6 +282,32 @@ export async function createOutlookDraft(input = {}) {
   };
 }
 
+export async function sendVerifiedOutlookXlsxMessage(input = {}) {
+  const message = normalizeDraftPayload(input);
+  if (!message.attachments.length || message.attachments.some(file => path.extname(file).toLowerCase() !== '.xlsx')) {
+    throw new Error('Outlook-Versand abgebrochen: Es sind ausschließlich eine oder mehrere XLSX-Anlagen zulässig.');
+  }
+  await validateAttachmentPaths(message.attachments);
+  const diagnosis = await diagnoseOutlook();
+  if (!diagnosis.outlook.installed || !diagnosis.outlook.running) {
+    throw new Error('Microsoft Outlook ist nicht geöffnet. Es wurde nichts versendet.');
+  }
+  if (!diagnosis.capabilities.sharedSenderUiPrerequisitesReady) {
+    throw new Error('Outlook-Versand abgebrochen: Die freigegebene macOS-Oberflächenprüfung ist nicht verfügbar.');
+  }
+  const sent = await sendVerifiedOutlookXlsxMessageViaUi(message);
+  try {
+    const sentFolder = await verifyOutlookSentMessage(message);
+    return { ...sent, sentFolderVerified: true, sentFolder };
+  } catch (error) {
+    return {
+      ...sent,
+      sentFolderVerified: false,
+      sentFolderVerificationError: String(error?.message || error).slice(0, 500),
+    };
+  }
+}
+
 export async function deleteOutlookDrafts(input = {}) {
   const { script, entries, from } = buildDeleteDraftsAppleScript(input);
   if (!entries.length) return { deletedMarkers: [], missingMarkers: [], recoverableFromDeletedItems: true, sent: false };
@@ -297,6 +402,7 @@ end tell`;
       sharedSenderUiPrerequisitesReady: accessibilityEnabled,
       readVisibleOutlookUi: accessibilityEnabled,
       sendMail: false,
+      sendVerifiedXlsxMail: installed && running && accessibilityEnabled,
     },
   };
 }

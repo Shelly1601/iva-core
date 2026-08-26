@@ -129,6 +129,51 @@ function dumpShowsActiveChat(dump, chatName) {
     && normalizeChatName(node.description) === expected);
 }
 
+export async function sendExactWhatsAppGroupMessage({
+  chatName,
+  message,
+  expectedInfoMarker = 'Heat Hero',
+} = {}) {
+  const expectedChat = String(chatName || '').trim();
+  const exactMessage = String(message || '').trim();
+  const infoMarker = String(expectedInfoMarker || '').trim().toLocaleLowerCase('de');
+  if (!expectedChat || !exactMessage) throw new Error('WhatsApp-Gruppe und Nachricht müssen vollständig angegeben sein.');
+  const diagnosis = await diagnoseWhatsAppMac();
+  if (!diagnosis.installed || !diagnosis.running || !diagnosis.linkedAccountVerified) {
+    throw new Error('Die native WhatsApp-App ist nicht vollständig geöffnet und verknüpft.');
+  }
+  for (let index = 0; index < 3; index += 1) {
+    const closed = await runWhatsAppProbe(['--press-description', 'Fertig']).then(() => true).catch(() => false);
+    if (!closed) break;
+  }
+  let dump = await runWhatsAppProbe(['--dump']);
+  if (!dumpShowsActiveChat(dump, expectedChat)) {
+    await runWhatsAppProbe(['--open-chat', expectedChat]);
+    dump = await runWhatsAppProbe(['--dump']);
+  }
+  if (!dumpShowsActiveChat(dump, expectedChat)) throw new Error(`Die WhatsApp-Gruppe „${expectedChat}“ ist nicht eindeutig aktiv.`);
+  await runWhatsAppProbe(['--press-identifier', 'NavigationBar_HeaderViewButton']);
+  const info = await runWhatsAppProbe(['--dump']);
+  const infoText = (info.textNodes || []).map(node => `${node?.description || ''} ${node?.value || ''}`).join(' ').toLocaleLowerCase('de');
+  if (infoMarker && !infoText.includes(infoMarker)) {
+    await runWhatsAppProbe(['--press-description', 'Fertig']).catch(() => {});
+    throw new Error(`Die aktive WhatsApp-Gruppe konnte nicht dem erwarteten Bereich „${expectedInfoMarker}“ zugeordnet werden.`);
+  }
+  await runWhatsAppProbe(['--press-description', 'Fertig']);
+  await new Promise(resolve => setTimeout(resolve, 1400));
+  const result = await runWhatsAppProbe(['--send-message', expectedChat, exactMessage]);
+  if (result.verified !== true) throw new Error(result.error || 'Die WhatsApp-Nachricht wurde nicht sichtbar verifiziert.');
+  return {
+    chatName: expectedChat,
+    message: exactMessage,
+    sent: result.sent === true,
+    idempotent: result.idempotent === true,
+    verified: true,
+    evidence: result.evidence || 'Nachricht bereits sichtbar vorhanden.',
+    nativeApp: true,
+  };
+}
+
 export async function syncDirectSalesRosterFromWhatsApp({ persist = true } = {}) {
   for (let index = 0; index < 3; index += 1) {
     const closed = await runWhatsAppProbe(['--press-description', 'Fertig'])
