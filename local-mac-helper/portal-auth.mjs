@@ -56,9 +56,10 @@ async function openPortalTab(profile) {
 activate
 if (count of windows) is 0 then make new window
 repeat with w in windows
-  repeat with t in tabs of w
+  repeat with tabIndex from 1 to (count of tabs of w)
+    set t to tab tabIndex of w
     if ${condition} then
-      set active tab index of w to (index of t)
+      set active tab index of w to tabIndex
       set index of w to 1
       return "FOUND"
     end if

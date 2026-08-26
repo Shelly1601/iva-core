@@ -315,9 +315,10 @@ func focusPanasonicOtpInChrome() throws {
     tell application "Google Chrome"
       activate
       repeat with w in windows
-        repeat with t in tabs of w
+        repeat with tabIndex from 1 to (count of tabs of w)
+          set t to tab tabIndex of w
           if (URL of t contains "hvac-key.eu.panasonic.com/u/mfa-otp-challenge") then
-            set active tab index of w to (index of t)
+            set active tab index of w to tabIndex
             set index of w to 1
             execute t javascript "(() => { const e = document.querySelector('#code, input[name=code], input[autocomplete=one-time-code]'); if (!e) return 'NO_FIELD'; e.focus(); e.select?.(); return 'FOCUSED'; })()"
             return "FOCUSED"
