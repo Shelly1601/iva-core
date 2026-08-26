@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const FILE = `${DATA_DIR}/automation-control.json`;
 const RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
+const STALE_RUN_GRACE_MS = 60_000;
 let writeQueue = Promise.resolve();
 
 export const AUTOMATION_DEFINITIONS = Object.freeze([
@@ -11,6 +12,7 @@ export const AUTOMATION_DEFINITIONS = Object.freeze([
   { id: 'report-email-weekly', name: 'Wöchentlicher Workflow-Report: E-Mail mit Telegram-Ersatz', category: 'Reporting', schedule: 'Montag · 06:50 Uhr', cron: '50 6 * * 1', cadence: 'weekly', weekday: 1, hour: 6, minute: 50, defaultEnabled: true, maxSlotAttempts: 3, timeoutMs: 30_000, description: 'Sendet den Wochenreport bevorzugt per E-Mail; bei nicht möglicher E-Mail-Zustellung folgt genau ein Telegram-Ersatzreport.' },
   { id: 'daily-briefing', name: 'IVA Morning-Briefing', category: 'Kommunikation', schedule: 'Täglich · 07:00 Uhr', cron: '0 7 * * *', cadence: 'daily', hour: 7, minute: 0, defaultEnabled: true, maxSlotAttempts: 2, timeoutMs: 120_000, description: 'Termine, Todos und CRM-Handlungsbedarf als täglicher Telegram-Überblick.' },
   { id: 'marketing-morning-report', name: 'Marketing-Morgenreport', category: 'Marketing', schedule: 'Täglich · 07:10 Uhr', cron: '10 7 * * *', cadence: 'daily', hour: 7, minute: 10, defaultEnabled: true, maxSlotAttempts: 2, timeoutMs: 60_000, description: 'Erzeugt den aktuellen Marketing-Entscheidungsreport und stellt ihn separat per Telegram zu.' },
+  { id: 'heat-hero-too-often-replies', name: 'HeatHero-Rückmeldungen „Zu oft n.e.“', category: 'Kunden & CRM', schedule: 'Täglich · 08:15 Uhr', cron: '15 8 * * *', cadence: 'daily', hour: 8, minute: 15, defaultEnabled: true, maxSlotAttempts: 2, timeoutMs: 300_000, description: 'Liest Kundenantworten aus dem Gmail-Label, reklamiert eindeutige Absagen im eigenständigen großen HeatHero CRM mit Sonstiges-Anmerkung und Mail-PDF oder setzt konkrete Rückrufwünsche als Wiedervorlage an den Setter.' },
   { id: 'report-telegram-morning', name: 'Separater Workflow-Report per Telegram', category: 'Reporting', schedule: 'Täglich · 07:20 Uhr', cron: '20 7 * * *', cadence: 'daily', hour: 7, minute: 20, defaultEnabled: false, maxSlotAttempts: 3, timeoutMs: 30_000, description: 'Zusätzlicher Telegram-Direktreport; standardmäßig aus, weil Telegram bereits automatisch einspringt, wenn der bevorzugte E-Mail-Versand scheitert.' },
   { id: 'opportunity-weekly', name: 'Chancenradar-Wochenlauf', category: 'Chancenradar', schedule: 'Montag · 08:30 Uhr', cron: '30 8 * * 1', cadence: 'weekly', weekday: 1, hour: 8, minute: 30, defaultEnabled: true, maxSlotAttempts: 2, timeoutMs: 300_000, description: 'Sammelt öffentliche Signale, bewertet Chancen und sendet den Wochenpitch höchstens einmal je Kalenderwoche.' },
   { id: 'integration-checkup-monthly', name: 'Monatlicher KI- & Integrations-Check-up', category: 'Systempflege', schedule: 'Am 1. des Monats · 09:00 Uhr', cron: '0 9 1 * *', cadence: 'monthly', day: 1, hour: 9, minute: 0, defaultEnabled: true, maxSlotAttempts: 3, timeoutMs: 180_000, description: 'Prüft KI-Modelle und wichtige externe Dienste, ersetzt ein abgeschaltetes Gemini-Flash-Modell nach erfolgreichem Live-Test automatisch und meldet das Ergebnis per Telegram.' },
@@ -106,6 +108,21 @@ export async function beginAutomationRun(automationId, input = {}) {
   const definition = automationDefinition(automationId);
   if (!definition) throw new Error('Automation nicht gefunden.');
   return mutate(store => {
+    const nowMs = Date.now();
+    const completedAt = new Date(nowMs).toISOString();
+    for (const run of store.runs) {
+      if (run.status !== 'running') continue;
+      const runDefinition = automationDefinition(run.automationId);
+      const timeoutMs = Math.max(30_000, Number(runDefinition?.timeoutMs) || 300_000);
+      const startedAtMs = Date.parse(run.startedAt || '');
+      if (!Number.isFinite(startedAtMs) || startedAtMs + timeoutMs + STALE_RUN_GRACE_MS >= nowMs) continue;
+      run.status = 'failed';
+      run.summary = 'Automationslauf nach Serverneustart als abgebrochen erkannt.';
+      run.error = `Der Lauf blieb länger als ${Math.ceil((timeoutMs + STALE_RUN_GRACE_MS) / 1000)} Sekunden ohne Abschluss und wurde für einen sicheren Wiederholungsversuch freigegeben.`;
+      run.result = {};
+      run.completedAt = completedAt;
+      run.durationMs = Math.max(0, nowMs - startedAtMs);
+    }
     const slotKey = clean(input.slotKey, 160);
     const sameSlot = store.runs.filter(item => item.automationId === definition.id && slotKey && item.slotKey === slotKey);
     const existing = sameSlot.find(item => ['running', 'completed', 'blocked', 'skipped'].includes(item.status));
