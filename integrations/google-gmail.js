@@ -210,6 +210,85 @@ function headerValue(headers, name) {
   return (headers || []).find(item => String(item?.name || '').toLowerCase() === name.toLowerCase())?.value || '';
 }
 
+function decodeBase64Url(value) {
+  const normalized = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
+  if (!normalized) return '';
+  try { return Buffer.from(normalized, 'base64').toString('utf8'); }
+  catch { return ''; }
+}
+
+function htmlToPlainText(value) {
+  return String(value || '')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:p|div|li|tr|h[1-6])>/gi, '\n')
+    .replace(/<li\b[^>]*>/gi, '- ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&#(\d+);/g, (match, code) => {
+      const point = Number(code);
+      return Number.isInteger(point) && point >= 0 && point <= 0x10FFFF ? String.fromCodePoint(point) : match;
+    })
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim();
+}
+
+function decodePayload(payload) {
+  const plain = [];
+  const html = [];
+  const attachments = [];
+  function walk(part) {
+    if (!part || typeof part !== 'object') return;
+    const mimeType = String(part.mimeType || '').toLowerCase();
+    const filename = String(part.filename || '').trim();
+    const data = decodeBase64Url(part.body?.data);
+    if (filename || part.body?.attachmentId) {
+      attachments.push({
+        filename: filename || 'Anhang',
+        mimeType: part.mimeType || 'application/octet-stream',
+        size: Number(part.body?.size || 0),
+        attachmentId: part.body?.attachmentId || '',
+      });
+    } else if (data && mimeType === 'text/plain') plain.push(data);
+    else if (data && mimeType === 'text/html') html.push(data);
+    for (const child of (part.parts || [])) walk(child);
+  }
+  walk(payload);
+  const bodyHtml = html.join('\n\n').trim();
+  const bodyText = plain.join('\n\n').trim() || htmlToPlainText(bodyHtml);
+  return { bodyText, bodyHtml, attachments };
+}
+
+function normalizeMessageDetail(detail, { includeBody = false } = {}) {
+  const headers = detail.payload?.headers || [];
+  const decoded = includeBody ? decodePayload(detail.payload) : {};
+  return {
+    id: detail.id,
+    threadId: detail.threadId,
+    historyId: detail.historyId || '',
+    internalDate: detail.internalDate ? new Date(Number(detail.internalDate)).toISOString() : '',
+    labelIds: detail.labelIds || [],
+    from: headerValue(headers, 'From'),
+    replyTo: headerValue(headers, 'Reply-To'),
+    to: headerValue(headers, 'To'),
+    cc: headerValue(headers, 'Cc'),
+    deliveredTo: headerValue(headers, 'Delivered-To'),
+    subject: headerValue(headers, 'Subject') || '(kein Betreff)',
+    date: headerValue(headers, 'Date') || (detail.internalDate ? new Date(Number(detail.internalDate)).toISOString() : ''),
+    messageId: headerValue(headers, 'Message-ID'),
+    snippet: detail.snippet || '',
+    ...(includeBody ? { body: detail.payload || null, ...decoded } : {}),
+  };
+}
+
 async function countMessages(accessToken, query) {
   const result = await googleRequest(`/users/me/messages?maxResults=1&q=${encodeURIComponent(query)}`, { accessToken });
   return Number(result.resultSizeEstimate || 0);
@@ -269,27 +348,25 @@ export async function listGoogleGmailLabels() {
 
 export async function listGoogleGmailMessages({ limit = 20, query = 'in:inbox', includeBody = false } = {}) {
   const token = await validToken();
-  const maxResults = Math.min(Math.max(Number(limit) || 20, 1), 50);
+  const maxResults = Math.min(Math.max(Number(limit) || 20, 1), 100);
   const listed = await googleRequest(`/users/me/messages?maxResults=${maxResults}&q=${encodeURIComponent(query || 'in:inbox')}`, { accessToken: token.accessToken });
   const messages = await Promise.all((listed.messages || []).map(async item => {
     const format = includeBody ? 'full' : 'metadata';
-    const metadataHeaders = ['From', 'To', 'Delivered-To', 'Subject', 'Date'].map(value => `metadataHeaders=${encodeURIComponent(value)}`).join('&');
+    const metadataHeaders = ['From', 'Reply-To', 'To', 'Cc', 'Delivered-To', 'Subject', 'Date', 'Message-ID'].map(value => `metadataHeaders=${encodeURIComponent(value)}`).join('&');
     const detail = await googleRequest(`/users/me/messages/${encodeURIComponent(item.id)}?format=${format}${includeBody ? '' : `&${metadataHeaders}`}`, { accessToken: token.accessToken });
-    const headers = detail.payload?.headers || [];
-    return {
-      id: detail.id,
-      threadId: detail.threadId,
-      labelIds: detail.labelIds || [],
-      from: headerValue(headers, 'From'),
-      to: headerValue(headers, 'To'),
-      deliveredTo: headerValue(headers, 'Delivered-To'),
-      subject: headerValue(headers, 'Subject') || '(kein Betreff)',
-      date: headerValue(headers, 'Date'),
-      snippet: detail.snippet || '',
-      body: includeBody ? detail.payload || null : undefined,
-    };
+    return normalizeMessageDetail(detail, { includeBody });
   }));
   return { query, resultSizeEstimate: Number(listed.resultSizeEstimate || 0), messages };
+}
+
+export async function getGoogleGmailMessage(id, { includeBody = true } = {}) {
+  const messageId = String(id || '').trim();
+  if (!messageId) throw new Error('Gmail-Nachrichten-ID fehlt.');
+  const token = await validToken();
+  const format = includeBody ? 'full' : 'metadata';
+  const metadataHeaders = ['From', 'Reply-To', 'To', 'Cc', 'Delivered-To', 'Subject', 'Date', 'Message-ID'].map(value => `metadataHeaders=${encodeURIComponent(value)}`).join('&');
+  const detail = await googleRequest(`/users/me/messages/${encodeURIComponent(messageId)}?format=${format}${includeBody ? '' : `&${metadataHeaders}`}`, { accessToken: token.accessToken });
+  return normalizeMessageDetail(detail, { includeBody });
 }
 
 export async function probeGoogleGmail() {

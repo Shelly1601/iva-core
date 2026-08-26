@@ -53,7 +53,8 @@ const HEAT_HERO_PROJECT = {
       { workflowId: 'kfw-approval-morning', workflowName: 'KfW-Zusagen morgens prüfen', cadence: 'daily', weekday: null },
       { workflowId: 'montage-required-fields-morning', workflowName: 'Montage-Pflichtfelder morgens prüfen', cadence: 'daily', weekday: null },
       { workflowId: 'planbar-completion-morning', workflowName: 'Planbar Vervollständigung', cadence: 'daily', weekday: null },
-      { workflowId: 'planbar-weekly-export', workflowName: 'Planbar-Kundenliste und Hersteller-PDFs', cadence: 'weekly', weekday: 5 },
+      { workflowId: 'heat-hero-too-often-replies', workflowName: 'Rückmeldungen „Zu oft n.e.“', cadence: 'daily', weekday: null },
+      { workflowId: 'planbar-weekly-export', workflowName: 'Planbar-Forecast als Excel-Listen', cadence: 'weekly', weekday: 5 },
     ],
     note: 'Jede Datei zeigt Typ, Aufbewahrungsdauer und konkretes automatisches Löschdatum als Tags.',
   },
@@ -118,9 +119,9 @@ const HEAT_HERO_PROJECT = {
       nextStep: 'Ordnerzugriff auf dem iMac testen; CRM-Statusänderungen bleiben vorerst gesperrt.',
     },
     {
-      id: 'planbar', name: 'Planbar und Herstellerlisten', status: 'active', owner: 'IVA Operations',
-      summary: 'Zehn-Wochen-Kundenliste und Hersteller-PDFs freitags erzeugen, vollständig prüfen und an Angelo senden.',
-      nextStep: 'Jeden Lauf mit Zeitraum, Umfang, Anhängen und Versandprüfung im Projektprotokoll dokumentieren.',
+      id: 'planbar', name: 'Planbar und Herstellerlisten', status: 'active', owner: 'IVA Operations', specVersion: 5,
+      summary: 'Morgens bestehende Planbar-Termine aus WhatsApp-, Pipedrive-, Angebots- und TMB-Belegen vervollständigen; freitags den Zehn-Wochen-Forecast ab der übernächsten Woche als geprüfte Gesamt- und Hersteller-XLSX an Angelo senden.',
+      nextStep: 'Morgenlauf und Freitagsforecast jeweils mit Eingangsbelegen, Änderungen beziehungsweise Versand und sichtbarer Ergebnisprüfung protokollieren.',
     },
     {
       id: 'mac-automations', name: 'iMac-Automationen', status: 'prepared', owner: 'IVA Operations',
@@ -154,6 +155,17 @@ const HEAT_HERO_PROJECT = {
       nextStep: 'Weitere Workflow-Quellen über den einheitlichen Ergebnis-Endpunkt anbinden und fehlende Meldungen als Lücke anzeigen.',
     },
     {
+      id: 'planbar-weekly-export',
+      specVersion: 4,
+      name: 'Planbar-Forecast als Excel-Listen',
+      status: 'active',
+      schedule: 'Freitag · 19:00 Uhr',
+      execution: 'iMac · Chrome und Outlook',
+      purpose: 'Die unmittelbar folgende Kalenderwoche auslassen und zehn Kalenderwochen ab der übernächsten Woche aus Planbar ohne David Service und Antonio Lausich als Gesamt-XLSX plus je Hersteller eine eigene XLSX an Angelo senden; PDFs sind ausgeschlossen.',
+      safety: 'Kein Versand bei fehlender Planbar-Spaltenzuordnung, enthaltenen Terminen aus David Service oder Antonio Lausich, fehlender Anmeldung, PDF-Anhängen, leeren/unvollständigen Excel-Dateien, falschem Absender/Empfänger, Manifest-Abweichung oder Doppelversand.',
+      nextStep: 'Nächsten Freitagslauf ausschließlich mit Gesamt-XLSX und einzelnen Hersteller-XLSX ausführen und im Projektprotokoll verifizieren.',
+    },
+    {
       id: 'planbar-completion-morning',
       specVersion: 4,
       name: 'Planbar Vervollständigung',
@@ -164,16 +176,6 @@ const HEAT_HERO_PROJECT = {
       purpose: 'Nadines Nachrichten aus „Terminierungen Dispo“ vom Vortag Kunden und KW zuordnen, vorhandene HH-Einträge als reine Formatbeispiele lesen und beim bestehenden Planbar-Termin ausschließlich Auftragsnummer und belegte Kurzbeschreibung vervollständigen.',
       safety: 'Nur eindeutige Einzelfälle bearbeiten; Pipedrive und HH-Beispiele rein lesend, nichts in Planbar anlegen, löschen oder verschieben. Unklare Dokumente oder TMB-Maße blockieren den Fall. Maximal 20 Minuten, danach Display genau einmal aus.',
       nextStep: 'Ersten automatischen Morgenlauf anhand des detaillierten E-Mail-Berichts, eines möglichen Telegram-Ersatzberichts und des Projektprotokolls prüfen.',
-    },
-    {
-      id: 'planbar-weekly-export',
-      name: 'Planbar-Kundenliste und Hersteller-PDFs',
-      status: 'active',
-      schedule: 'Freitag · 18:00 Uhr',
-      execution: 'iMac · Chrome und Outlook',
-      purpose: 'Zehn kommende Kalenderwochen aus Planbar aufbereiten, Gesamt-XLSX und Hersteller-PDFs prüfen und an Angelo senden.',
-      safety: 'Kein Versand bei fehlender Anmeldung, unvollständigen Dateien, falschem Absender/Empfänger oder erkanntem Doppelversand.',
-      nextStep: 'Nächsten Freitagslauf über zehn Wochen ausführen und im Projektprotokoll verifizieren.',
     },
     {
       id: 'funding-monitor',
@@ -228,6 +230,18 @@ const HEAT_HERO_PROJECT = {
       purpose: 'Belegte CRM-Fortschritte ohne doppeltes Eintragen in die Herstellerportale zurückmelden.',
       safety: 'Nur feste CRM-/Hersteller-ID-Zuordnung, erlaubte Vorwärtsübergänge und sichtbare Portalverifikation; keine Statusvermutung.',
       nextStep: 'Reale Statuslisten in beiden Portalen aufnehmen und Mapping fachlich freigeben.',
+    },
+    {
+      id: 'heat-hero-too-often-replies',
+      specVersion: 1,
+      name: 'Rückmeldungen „Zu oft n.e.“',
+      status: 'active',
+      enabled: true,
+      schedule: 'Täglich · 08:15 Uhr',
+      execution: 'IVA Core auf Railway · Gmail API und HeatHero-CRM-Gateway',
+      purpose: 'Kundenantworten aus dem Gmail-Label „Heat Hero/Zu oft n.e.“ eindeutig einem Lead im eigenständigen großen HeatHero CRM zuordnen. Klare Absagen werden über „Reklamieren“ mit „Sonstiges“, „Siehe Anhang“ und Mail-PDF dokumentiert; konkrete Rückrufwünsche werden als Wiedervorlage an den Setter gesetzt.',
+      safety: 'Nur eindeutige HeatHero-CRM-Treffer und klar belegte Aussagen werden automatisch verarbeitet; Fragen, Widersprüche und Rückrufwünsche ohne konkreten Zeitpunkt bleiben in der Prüfung. Jede Gmail-ID ist ein Idempotenzschlüssel. Kundendaten werden nie automatisch gelöscht.',
+      nextStep: 'Tagesläufe und offene manuelle Prüffälle im IVA-Kontrollzentrum beobachten.',
     },
     {
       id: 'customer-preflight',
@@ -451,30 +465,36 @@ function seedProjects() {
 
 function normalizeArea(area = {}, fallback = {}) {
   const id = clean(area.id || fallback.id, 100) || crypto.randomUUID();
+  const useFallbackSpec = Number(fallback.specVersion || 0) > Number(area.specVersion || 0);
+  const source = useFallbackSpec ? fallback : area;
   return {
     id,
-    name: clean(area.name || fallback.name, 180) || 'Neuer Bereich',
+    specVersion: Math.max(Number(area.specVersion || 0), Number(fallback.specVersion || 0)),
+    name: clean(source.name || fallback.name, 180) || 'Neuer Bereich',
     status: AREA_STATUSES.has(area.status) ? area.status : (AREA_STATUSES.has(fallback.status) ? fallback.status : 'planned'),
-    owner: clean(area.owner || fallback.owner, 160),
-    summary: clean(area.summary || fallback.summary, 3000),
-    nextStep: clean(area.nextStep || fallback.nextStep, 2000),
+    owner: clean(source.owner || fallback.owner, 160),
+    summary: clean(source.summary || fallback.summary, 3000),
+    nextStep: clean(source.nextStep || fallback.nextStep, 2000),
   };
 }
 
 function normalizeAutomation(automation = {}, fallback = {}) {
   const status = AUTOMATION_STATUSES.has(automation.status) ? automation.status : (AUTOMATION_STATUSES.has(fallback.status) ? fallback.status : 'planned');
   const runnable = ['active', 'paused'].includes(status);
+  const useFallbackSpec = Number(fallback.specVersion || 0) > Number(automation.specVersion || 0);
+  const source = useFallbackSpec ? fallback : automation;
   return {
     id: clean(automation.id || fallback.id, 100) || crypto.randomUUID(),
-    name: clean(automation.name || fallback.name, 220) || 'Neue Automation',
+    specVersion: Math.max(Number(automation.specVersion || 0), Number(fallback.specVersion || 0)),
+    name: clean(source.name || fallback.name, 220) || 'Neue Automation',
     status,
     enabled: runnable && (typeof automation.enabled === 'boolean' ? automation.enabled : (typeof fallback.enabled === 'boolean' ? fallback.enabled : status === 'active')),
     toggleAvailable: runnable,
-    schedule: clean(automation.schedule || fallback.schedule, 300),
-    execution: clean(automation.execution || fallback.execution, 300),
-    purpose: clean(automation.purpose || fallback.purpose, 3000),
-    safety: clean(automation.safety || fallback.safety, 3000),
-    nextStep: clean(automation.nextStep || fallback.nextStep, 2000),
+    schedule: clean(source.schedule || fallback.schedule, 300),
+    execution: clean(source.execution || fallback.execution, 300),
+    purpose: clean(source.purpose || fallback.purpose, 3000),
+    safety: clean(source.safety || fallback.safety, 3000),
+    nextStep: clean(source.nextStep || fallback.nextStep, 2000),
   };
 }
 

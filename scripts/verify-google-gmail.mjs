@@ -39,12 +39,21 @@ globalThis.fetch = async (input, options = {}) => {
       threadId: 'thread-1',
       labelIds: ['INBOX'],
       snippet: 'Testnachricht',
-      payload: { headers: [
-        { name: 'From', value: 'Förderung <foerderung@heat-hero.com>' },
-        { name: 'To', value: 'nadine.iva.inbox@gmail.com' },
-        { name: 'Subject', value: 'Förderungs-Test' },
-        { name: 'Date', value: 'Fri, 21 Aug 2026 18:00:00 +0200' },
-      ] },
+      payload: {
+        mimeType: 'multipart/mixed',
+        headers: [
+          { name: 'From', value: 'Förderung <foerderung@heat-hero.com>' },
+          { name: 'To', value: 'nadine.iva.inbox@gmail.com' },
+          { name: 'Cc', value: 'archiv@example.test' },
+          { name: 'Subject', value: 'Förderungs-Test' },
+          { name: 'Date', value: 'Fri, 21 Aug 2026 18:00:00 +0200' },
+          { name: 'Message-ID', value: '<mail-1@example.test>' },
+        ],
+        parts: [
+          { mimeType: 'text/plain', filename: '', body: { data: Buffer.from('Vollständiger Testtext.').toString('base64url'), size: 26 } },
+          { mimeType: 'application/pdf', filename: 'anlage.pdf', body: { attachmentId: 'attachment-1', size: 1234 } },
+        ],
+      },
     });
   }
   return new Response(JSON.stringify({ error: { message: `Unerwarteter Testaufruf: ${url.href}` } }), { status: 500 });
@@ -89,6 +98,12 @@ try {
   assert.equal(messages.messages.length, 1);
   assert.equal(messages.messages[0].subject, 'Förderungs-Test');
   assert.equal(messages.messages[0].labelIds[0], 'INBOX');
+
+  const messagesWithBody = await listGoogleGmailMessages({ limit: 5, query: 'label:"Heat Hero/Zu oft n.e."', includeBody: true });
+  assert.equal(messagesWithBody.messages[0].bodyText, 'Vollständiger Testtext.');
+  assert.equal(messagesWithBody.messages[0].attachments[0].filename, 'anlage.pdf');
+  assert.equal(messagesWithBody.messages[0].cc, 'archiv@example.test');
+  assert.equal(messagesWithBody.messages[0].messageId, '<mail-1@example.test>');
 
   console.log('Google-Gmail-OAuth erfolgreich verifiziert.');
 } finally {

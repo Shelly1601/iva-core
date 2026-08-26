@@ -182,6 +182,13 @@ import {
   listGoogleGmailMessages,
   probeGoogleGmail,
 } from './integrations/google-gmail.js';
+import { classifyTooOftenReplyWithAi } from './heat-hero/too-often-classifier.js';
+import {
+  TOO_OFTEN_LABEL_NAME,
+  buildTooOftenGatewayRequest,
+  createTooOftenReplyStore,
+  runTooOftenReplyWorkflow,
+} from './heat-hero/too-often-replies.js';
 import {
   attachLumitCustomerPackage,
   calculateLumitPriceQuote,
@@ -268,6 +275,7 @@ app.use(express.json({
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const MEM_FILE = DATA_DIR + '/memory.json';
+const tooOftenReplyStore = createTooOftenReplyStore({ dataDir: DATA_DIR });
 const investment = createInvestmentModule({ dataDir: DATA_DIR });
 const HEATHERO_LEADS_URL = 'https://thbvjafssbealqsswhdv.supabase.co/functions/v1/api-gateway/v1/leads';
 const MEINCRM_REST_URL = 'https://qqyoqshjwpkmerilhjus.supabase.co/rest/v1/leads';
@@ -574,7 +582,7 @@ async function syncStrategyCustomersToQonekto({ force = false } = {}) {
   });
 }
 
-async function heatHeroGateway(path = '', { method = 'GET', body } = {}) {
+async function heatHeroGateway(path = '', { method = 'GET', body, timeoutMs = 8000 } = {}) {
   const key = process.env.HEATHERO_API_KEY;
   if (!key) throw new Error('kein HEATHERO_API_KEY gesetzt');
   const r = await fetchWithTimeout(`${HEATHERO_LEADS_URL}${path}`, {
@@ -584,7 +592,7 @@ async function heatHeroGateway(path = '', { method = 'GET', body } = {}) {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
-  }, 8000);
+  }, timeoutMs);
   const text = await r.text();
   const payload = safeJson(text);
   if (!r.ok) {
@@ -629,6 +637,67 @@ async function searchHeatHeroLeads(search, limit = 20) {
     count: resolution.candidates.length,
     leads: resolution.candidates.map(candidate => candidate.lead),
   };
+}
+
+function tooOftenRepliesWriteEnabled() {
+  return process.env.HEATHERO_TOO_OFTEN_REPLIES_WRITE_ENABLED !== 'false';
+}
+
+async function submitTooOftenReplyAction({ leadId, action }) {
+  if (!tooOftenRepliesWriteEnabled()) throw new Error('Der Live-Schreibschalter für Rückmeldungen ist nicht aktiv.');
+  const request = buildTooOftenGatewayRequest(leadId, action);
+  const payload = await heatHeroGateway(request.path, { method: request.method, body: request.body, timeoutMs: 45_000 });
+  return {
+    ...((payload && typeof payload === 'object') ? payload : {}),
+    verified: payload?.verified === true,
+    idempotentReplay: payload?.idempotentReplay === true || payload?.idempotent_replay === true,
+  };
+}
+
+async function tooOftenReplyWorkflowStatus() {
+  const [gmail, state] = await Promise.all([
+    googleGmailStatus().catch(error => ({ ready: false, error: error.message })),
+    tooOftenReplyStore.summary(),
+  ]);
+  const endpointConfigured = true;
+  const writeEnabled = tooOftenRepliesWriteEnabled();
+  const missing = [];
+  if (!gmail.ready) missing.push('Google-Gmail-Verbindung');
+  if (!process.env.HEATHERO_API_KEY) missing.push('HEATHERO_API_KEY');
+  if (!writeEnabled) missing.push('HEATHERO_TOO_OFTEN_REPLIES_WRITE_ENABLED ist deaktiviert');
+  return {
+    label: TOO_OFTEN_LABEL_NAME,
+    schedule: 'Täglich · 08:15 Uhr',
+    gmailReady: gmail.ready === true,
+    endpointConfigured,
+    writeEnabled,
+    liveReady: gmail.ready === true && Boolean(process.env.HEATHERO_API_KEY) && endpointConfigured && writeEnabled,
+    missing,
+    state,
+  };
+}
+
+async function runHeatHeroTooOftenReplies() {
+  const status = await tooOftenReplyWorkflowStatus();
+  if (!status.gmailReady) return { status: 'blocked', error: 'Google-Gmail-Verbindung fehlt.', summary: 'Rückmeldungsworkflow blockiert: Google-Gmail-Verbindung fehlt.' };
+  const result = await runTooOftenReplyWorkflow({
+    listMessages: listGoogleGmailMessages,
+    findLead: searchHeatHeroLeads,
+    submitAction: submitTooOftenReplyAction,
+    classifyUnclear: classifyTooOftenReplyWithAi,
+    store: tooOftenReplyStore,
+    writeEnabled: status.liveReady,
+    limit: 100,
+  });
+  if (!status.liveReady) {
+    return {
+      ...result,
+      status: 'blocked',
+      error: `Livegang fehlt: ${status.missing.join(', ')}`,
+      summary: `${result.summary} Livegang fehlt: ${status.missing.join(', ')}.`,
+    };
+  }
+  return result;
 }
 
 async function updateHeatHeroLeadStatus(id, status, reason) {
@@ -1221,7 +1290,7 @@ function connector(id, label, ready, missing = [], detail = '') {
 }
 
 async function controlSnapshot() {
-  const [ops, agentRunsResult, qonektoResult, syncResult, voiceResult, knowledgeResult, opportunityResult, learningResult, automationsResult, automationRunsResult, googleGmailResult, deviceCommandsResult, projectsResult, protocolRunsResult] = await Promise.all([
+  const [ops, agentRunsResult, qonektoResult, syncResult, voiceResult, knowledgeResult, opportunityResult, learningResult, automationsResult, automationRunsResult, googleGmailResult, tooOftenResult, deviceCommandsResult, projectsResult, protocolRunsResult] = await Promise.all([
     operationsSummary(),
     listAgentRuns({ limit: 300 }).catch(() => []),
     qonektoStatus().catch(error => ({ configured: envReady('QONEKTO_MCP_TOKEN'), reachable: false, error: error.message })),
@@ -1233,6 +1302,7 @@ async function controlSnapshot() {
     automationSummary().catch(error => ({ enabled: 0, disabled: 0, running: 0, failedToday: 0, reports: 0, error: error.message })),
     listAutomationRuns({ limit: 500 }).catch(() => []),
     googleGmailStatus().catch(error => ({ configured: false, authorized: false, ready: false, missing: ['Google-Gmail-Verbindung'], error: error.message })),
+    tooOftenReplyWorkflowStatus().catch(error => ({ liveReady: false, missing: ['Rückmeldungsworkflow'], error: error.message, state: {} })),
     listDeviceCommands({ limit: 500 }).catch(() => []),
     listProjects().catch(() => []),
     listProjectWorkflowRuns('heat-hero', { limit: 500 }).catch(() => []),
@@ -1277,6 +1347,15 @@ async function controlSnapshot() {
     connector('crm-goals', 'CRM · Goals & Concepts', envReady('MEINCRM_SERVICE_KEY', 'GOALS_CONCEPTS_PROJECT_ID'), ['MEINCRM_SERVICE_KEY', 'GOALS_CONCEPTS_PROJECT_ID'], `${projectIds} CRM-Projektzuordnungen hinterlegt.`),
     connector('crm-heathero', 'HeatHero CRM', envReady('HEATHERO_API_KEY'), ['HEATHERO_API_KEY'], 'Eigener Lead-Zugang.'),
     connector(
+      'crm-heathero-too-often-replies',
+      'HeatHero · Rückmeldungen „Zu oft n.e.“',
+      tooOftenResult.liveReady,
+      tooOftenResult.missing || ['CRM-Anhangsweg und Live-Freigabe'],
+      tooOftenResult.liveReady
+        ? `Täglicher Lauf bereit; ${tooOftenResult.state?.completed || 0} Mails abgeschlossen.`
+        : 'Der tägliche Gmail-Lauf ist aktiv; die fehlende Verbindung ist oben konkret aufgeführt.',
+    ),
+    connector(
       'crm-qonekto-sync',
       'Strategiegespraech → Qonekto',
       Boolean(syncResult.enabled && syncResult.projectConfigured),
@@ -1307,6 +1386,7 @@ async function controlSnapshot() {
   ];
   const uniqueConnectors = [...new Map(connectors.map(item => [item.id, item])).values()];
   const agents = listAgents();
+  const imacAgent = await deviceAgentStatus().catch(error => ({ deviceId: IVA_IMAC_DEVICE_ID, attested: false, online: false, error: error.message }));
   return {
     generatedAt: new Date().toISOString(),
     agents,
@@ -1325,6 +1405,8 @@ async function controlSnapshot() {
       opportunityRadar: opportunityResult,
       reporting: reportingStatus(),
       googleGmail: googleGmailResult,
+      tooOftenReplies: tooOftenResult,
+      imacAgent,
     },
     buildProgress,
     activity,
@@ -2545,6 +2627,7 @@ const automationRunner = createAutomationOrchestrator({
   },
   'daily-briefing': async () => sendBriefing(),
   'marketing-morning-report': async () => sendMarketingMorningReport(),
+  'heat-hero-too-often-replies': async () => runHeatHeroTooOftenReplies(),
   'report-telegram-morning': async ({ now }) => {
     const mem = await loadMemory();
     if (!mem.chatId) return { status: 'blocked', summary: 'Workflow-Report nicht versandt: Telegram-Chat-ID fehlt.', error: 'Telegram-Chat-ID fehlt.' };
@@ -2660,6 +2743,14 @@ app.get('/api/integration-checkup', async (_req, res) => {
 });
 app.post('/api/integration-checkup/run', async (_req, res) => {
   try { res.json(await automationRunner.runAutomation('integration-checkup-monthly', { trigger: 'manual', slotKey: `integration-checkup-monthly:manual:${Date.now()}` })); }
+  catch (error) { res.status(500).json({ error: error.message }); }
+});
+app.get('/api/heat-hero/too-often-replies/status', async (_req, res) => {
+  try { res.json(await tooOftenReplyWorkflowStatus()); }
+  catch (error) { res.status(500).json({ error: error.message }); }
+});
+app.post('/api/heat-hero/too-often-replies/run', async (_req, res) => {
+  try { res.json(await automationRunner.runAutomation('heat-hero-too-often-replies', { trigger: 'manual', slotKey: `heat-hero-too-often-replies:manual:${Date.now()}` })); }
   catch (error) { res.status(500).json({ error: error.message }); }
 });
 
