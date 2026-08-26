@@ -23,13 +23,13 @@ fi
 /usr/bin/brctl download "$workspace/outputs/planbar-weekly" >/dev/null 2>&1 || true
 
 for _ in {1..30}; do
-  if /usr/bin/grep -q "imac-icloud-v2" "$workspace/local-mac-helper/device-agent.mjs" 2>/dev/null; then
+  if /usr/bin/grep -q "imac-local-v3" "$workspace/local-mac-helper/device-agent.mjs" 2>/dev/null; then
     break
   fi
   /bin/sleep 1
 done
 
-if ! /usr/bin/grep -q "imac-icloud-v2" "$workspace/local-mac-helper/device-agent.mjs" 2>/dev/null; then
+if ! /usr/bin/grep -q "imac-local-v3" "$workspace/local-mac-helper/device-agent.mjs" 2>/dev/null; then
   print -u2 "FEHLER: Die aktuelle IVA-Agent-Version ist auf diesem iMac noch nicht aus iCloud geladen worden."
   exit 1
 fi

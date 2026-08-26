@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 const execFileAsync = promisify(execFile);
 export const IMAC_DEVICE_ID = 'imac-nadine';
 export const DEVICE_AGENT_PROTOCOL_VERSION = 2;
-export const DEVICE_AGENT_RELEASE = 'imac-icloud-v2';
+export const DEVICE_AGENT_RELEASE = 'imac-local-v3';
 const KEYCHAIN_SERVICE = 'de.iva.device-agent';
 const KEYCHAIN_ACCOUNT = IMAC_DEVICE_ID;
 const DEFAULT_SERVER_URL = 'https://iva-core-production.up.railway.app';
