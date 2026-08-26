@@ -194,6 +194,11 @@ try {
   const deviceAgentRunnerSource = await readFile(new URL('../local-mac-helper/device-agent-runner.mjs', import.meta.url), 'utf8');
   assert.match(deviceAgentRunnerSource, /DEVICE_AGENT_HARD_TIMEOUT_MS = 240_000/, 'der äußere Agent darf die 180-Sekunden-Planbar-Prüfung nicht vorzeitig abbrechen');
   assert.match(deviceAgentRunnerSource, /DEVICE_AGENT_POLL_INTERVAL_MS = 15_000/);
+  assert.match(deviceAgentRunnerSource, /await reportBootstrapHeartbeat\(\)/);
+  assert.ok(
+    deviceAgentRunnerSource.indexOf('await reportBootstrapHeartbeat()') < deviceAgentRunnerSource.indexOf('await loadDeviceAgent()'),
+    'der eigenständige Heartbeat läuft vor dem vollständigen iCloud-Modulimport',
+  );
 
   const { assertImacExecutionHost, imacDeviceAgentPolicy, isAllowedImacExecutionHost, isAuthoritativeIcloudWorkspace } = await import('../local-mac-helper/device-agent.mjs');
   assert.equal(isAllowedImacExecutionHost('iMac-von-Nadine.local'), true);
