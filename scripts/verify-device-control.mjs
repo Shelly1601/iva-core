@@ -222,8 +222,8 @@ try {
   assert.match(bootstrapSource, /IVA lädt die aktuelle iMac-Komponente aus iCloud/);
   assert.match(bootstrapSource, /Zwei fortlaufende Railway-Heartbeats wurden bestätigt/);
   const finalBootstrapSource = await readFile(new URL('../IVA-iMac-JETZT-fertigstellen.command', import.meta.url), 'utf8');
-  assert.match(finalBootstrapSource, /aedf36bb28d8f9e02dd8e584ed556880b81e1b7a/);
-  assert.match(finalBootstrapSource, /50a933ec46398c0ea3290304bd3d6e7241415e64a53bc83a5d60409b4b908af8/);
+  assert.match(finalBootstrapSource, /8817760c6fbb986a028ec583974513042f531c58/);
+  assert.match(finalBootstrapSource, /c5b2a1fcfb007c74a7cb85ed6d11601218be722772186c3158a0a2bb9db04171/);
   assert.match(finalBootstrapSource, /IVA_DEVICE_RUNTIME_SOURCE="\$snapshot"/);
   assert.match(finalBootstrapSource, /4\/4 – Dauerverbindung wird umgeschaltet und doppelt geprüft/);
   const codexTaskSource = await readFile(new URL('../local-mac-helper/codex-tasks.mjs', import.meta.url), 'utf8');

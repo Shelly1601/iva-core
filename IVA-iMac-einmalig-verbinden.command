@@ -95,8 +95,30 @@ if [[ -z "$node_bin" ]]; then
   fi
 fi
 
-cd "$workspace"
-print "Aktuelle Komponente geladen. IVA richtet jetzt die Dauerverbindung ein …"
-"$node_bin" local-mac-helper/install-imac-device-agent.mjs
+bootstrap_commit="8817760c6fbb986a028ec583974513042f531c58"
+bootstrap_sha256="c5b2a1fcfb007c74a7cb85ed6d11601218be722772186c3158a0a2bb9db04171"
+bootstrap_dir="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/iva-imac-bootstrap.XXXXXX")"
+cleanup_bootstrap() {
+  if [[ -n "${bootstrap_dir:-}" && -d "$bootstrap_dir" ]]; then
+    /bin/rm -rf "$bootstrap_dir"
+  fi
+}
+trap cleanup_bootstrap EXIT
+bootstrap_archive="$bootstrap_dir/iva-core.tar.gz"
+
+print "Aktuelle Komponente geladen. Geprüftes IVA-Paket wird direkt geladen …"
+/usr/bin/curl --fail --show-error --location --progress-bar --proto '=https' --tlsv1.2 \
+  "https://github.com/Shelly1601/iva-core/archive/${bootstrap_commit}.tar.gz" -o "$bootstrap_archive"
+actual_bootstrap_sha256="$(/usr/bin/shasum -a 256 "$bootstrap_archive" | /usr/bin/awk '{ print $1 }')"
+if [[ "$actual_bootstrap_sha256" != "$bootstrap_sha256" ]]; then
+  print -u2 "FEHLER: Das direkt geladene IVA-Paket hat die fest hinterlegte SHA-256-Prüfsumme nicht bestanden."
+  exit 1
+fi
+/usr/bin/tar -xzf "$bootstrap_archive" -C "$bootstrap_dir"
+bootstrap_source="$bootstrap_dir/iva-core-${bootstrap_commit}"
+
+print "IVA richtet jetzt die vollständig lokale Dauerverbindung ein …"
+IVA_DEVICE_WORKSPACE="$workspace" IVA_DEVICE_RUNTIME_SOURCE="$bootstrap_source" \
+  "$node_bin" "$bootstrap_source/local-mac-helper/install-imac-device-agent.mjs"
 
 print "IVA ist jetzt dauerhaft mit diesem iMac und dem zentralen iCloud-Ordner verbunden. Zwei fortlaufende Railway-Heartbeats wurden bestätigt."
