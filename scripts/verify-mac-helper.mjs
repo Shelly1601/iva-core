@@ -49,6 +49,7 @@ import {
 import {
   IVA_PIPEDRIVE_NOTE_SIGNATURE,
   PIPEDRIVE_FILE_POLICY,
+  activatePipedriveDealTab,
   applyPipedriveFundingFieldUpdates,
   assertPipedriveFileActionAllowed,
   renderPipedriveFundingInformationNote,
@@ -67,6 +68,16 @@ assert.equal(FUNDING_SUPERVISORS.direct_sales.email, 'n.zielinski@heat-hero.com'
 assert.equal(FUNDING_SIGNATURE.email, 'n.sell@heat-hero.com');
 assert.equal(FUNDING_SIGNATURE.website, 'https://www.heat-hero.com');
 assert.equal(withFundingSender({}).from, FUNDING_SENDER_EMAIL);
+let activationAttempts = 0;
+let activationWaits = 0;
+const activation = await activatePipedriveDealTab('7479', {
+  run: async () => { activationAttempts += 1; return activationAttempts >= 3 ? 'activated' : 'missing'; },
+  waitFn: async () => { activationWaits += 1; },
+  timeoutMs: 5_000,
+});
+assert.deepEqual(activation, { dealId: '7479', activated: true });
+assert.equal(activationAttempts, 3);
+assert.equal(activationWaits, 2);
 assert.throws(() => withFundingSender({ from: 'privat@example.com' }), /ausschließlich/);
 assert.equal(extractEmailAddress('holger@example.com (Büro)'), 'holger@example.com');
 assert.equal(firstNameFromContactName('Herr Holger von Ameln'), 'Holger');

@@ -338,10 +338,10 @@ end repeat
 end tell`, { timeoutMs: 20000 });
 }
 
-async function activatePipedriveDealTab(dealId) {
+export async function activatePipedriveDealTab(dealId, { run = runAppleScript, waitFn = wait, timeoutMs = 12_000 } = {}) {
   const id = String(dealId || '').replace(/\D/g, '');
   if (!id) throw new Error('Pipedrive-Deal-ID fehlt.');
-  const result = await runAppleScript(`tell application "Google Chrome"
+  const script = `tell application "Google Chrome"
 repeat with w in windows
   set tabCount to count of tabs of w
   repeat with i from 1 to tabCount
@@ -354,8 +354,21 @@ repeat with w in windows
   end repeat
 end repeat
 return "missing"
-end tell`, { timeoutMs: 10000 });
-  if (result !== 'activated') throw new Error(`Pipedrive-Deal ${id} konnte nicht aktiviert werden.`);
+end tell`;
+  const startedAt = Date.now();
+  let lastError = '';
+  do {
+    try {
+      const remainingMs = Math.max(500, Number(timeoutMs) - (Date.now() - startedAt));
+      const result = await run(script, { timeoutMs: Math.min(3_000, remainingMs) });
+      if (result === 'activated') return { dealId: id, activated: true };
+      lastError = String(result || 'missing');
+    } catch (error) {
+      lastError = String(error?.message || error).slice(0, 300);
+    }
+    if (Date.now() - startedAt < Number(timeoutMs)) await waitFn(250);
+  } while (Date.now() - startedAt < Number(timeoutMs));
+  throw new Error(`Pipedrive-Deal ${id} konnte nach wiederholter Tab-Suche nicht aktiviert werden.${lastError ? ` Letzter Zustand: ${lastError}` : ''}`);
 }
 
 async function warmPipedriveDealTabs(dealIds) {
