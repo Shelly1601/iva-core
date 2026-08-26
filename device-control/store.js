@@ -6,25 +6,26 @@ const DATA_DIR = process.env.DATA_DIR || '/data';
 const STORE_FILE = path.join(DATA_DIR, 'device-commands.json');
 const MAX_COMMANDS = 500;
 const DEFAULT_TTL_MS = 15 * 60_000;
+const DEFERRED_IMAC_COMMAND_TTL_MS = 24 * 60 * 60_000;
 const LEASE_MS = 5 * 60_000;
 const AGENT_ONLINE_MS = 60_000;
 
 export const IVA_IMAC_DEVICE_ID = 'imac-nadine';
 export const DEVICE_AGENT_PROTOCOL_VERSION = 2;
 export const DEVICE_ACTIONS = Object.freeze({
-  'agent.status': Object.freeze({ description: 'Attestierten iMac-Agent und iCloud-Workspace prüfen', mutating: false }),
-  'computer.status': Object.freeze({ description: 'Status des iMac-Helfers prüfen', mutating: false }),
-  'funding.monitor.status': Object.freeze({ description: 'Fördermonitor-Status prüfen', mutating: false }),
-  'funding.monitor.run': Object.freeze({ description: 'Fördermonitor einmal im gesperrten Review-Modus ausführen', mutating: false }),
-  'funding.reviews.list': Object.freeze({ description: 'Lokale Förder-Prüfwarteschlange zusammenfassen', mutating: false }),
-  'planbar.search.refresh': Object.freeze({ description: 'Sichtbaren Planbar-Terminindex rein lesend aktualisieren', mutating: false }),
-  'planbar.customer.schedule': Object.freeze({ description: 'Einen eindeutig belegten Kunden über den lokalen iMac-Workflow in Planbar terminieren', mutating: true }),
-  'project.workflow.run': Object.freeze({ description: 'Einen freigegebenen Projekt-Workflow einmalig manuell starten', mutating: true }),
-  'portal.credentials.status': Object.freeze({ description: 'Nur die Belegung von IVAs lokalem macOS-Schlüsselbund prüfen', mutating: false }),
-  'portal.login': Object.freeze({ description: 'Bei einem vorab freigegebenen Portal mit lokalem Schlüsselbund anmelden', mutating: false }),
-  'app.open': Object.freeze({ description: 'Eine freigegebene App auf dem iMac öffnen', mutating: true }),
-  'codex.task.start': Object.freeze({ description: 'Einen ausdrücklich beauftragten IVA-Bauauftrag im lokalen Codex starten', mutating: true }),
-  'codex.task.status': Object.freeze({ description: 'Status eines lokalen Codex-Bauauftrags lesen', mutating: false }),
+  'agent.status': Object.freeze({ description: 'Attestierten iMac-Agent und iCloud-Workspace prüfen', mutating: false, requiresAttestedAgent: true }),
+  'computer.status': Object.freeze({ description: 'Status des iMac-Helfers prüfen', mutating: false, requiresAttestedAgent: true }),
+  'funding.monitor.status': Object.freeze({ description: 'Fördermonitor-Status prüfen', mutating: false, requiresAttestedAgent: true }),
+  'funding.monitor.run': Object.freeze({ description: 'Fördermonitor einmal im gesperrten Review-Modus ausführen', mutating: false, requiresAttestedAgent: true }),
+  'funding.reviews.list': Object.freeze({ description: 'Lokale Förder-Prüfwarteschlange zusammenfassen', mutating: false, requiresAttestedAgent: true }),
+  'planbar.search.refresh': Object.freeze({ description: 'Sichtbaren Planbar-Terminindex rein lesend aktualisieren', mutating: false, requiresAttestedAgent: true }),
+  'planbar.customer.schedule': Object.freeze({ description: 'Einen eindeutig belegten Kunden über den lokalen iMac-Workflow in Planbar terminieren', mutating: true, requiresAttestedAgent: true }),
+  'project.workflow.run': Object.freeze({ description: 'Einen freigegebenen Projekt-Workflow einmalig manuell starten', mutating: true, requiresAttestedAgent: true }),
+  'portal.credentials.status': Object.freeze({ description: 'Nur die Belegung von IVAs lokalem macOS-Schlüsselbund prüfen', mutating: false, requiresAttestedAgent: true }),
+  'portal.login': Object.freeze({ description: 'Bei einem vorab freigegebenen Portal mit lokalem Schlüsselbund anmelden', mutating: false, requiresAttestedAgent: true }),
+  'app.open': Object.freeze({ description: 'Eine freigegebene App auf dem iMac öffnen', mutating: true, requiresAttestedAgent: true }),
+  'codex.task.start': Object.freeze({ description: 'Einen ausdrücklich beauftragten IVA-Bauauftrag im lokalen Codex starten', mutating: true, requiresAttestedAgent: true }),
+  'codex.task.status': Object.freeze({ description: 'Status eines lokalen Codex-Bauauftrags lesen', mutating: false, requiresAttestedAgent: true }),
 });
 
 async function loadStore() {
@@ -250,7 +251,7 @@ export async function enqueueDeviceCommand({ deviceId = IVA_IMAC_DEVICE_ID, acti
     requestedBy: cleanText(requestedBy, 120) || 'iva',
     requestText: cleanText(requestText, 500),
     createdAt: now.toISOString(),
-    expiresAt: new Date(now.getTime() + DEFAULT_TTL_MS).toISOString(),
+    expiresAt: new Date(now.getTime() + (DEVICE_ACTIONS[actionName].requiresAttestedAgent ? DEFERRED_IMAC_COMMAND_TTL_MS : DEFAULT_TTL_MS)).toISOString(),
     attempts: 0,
   };
   store.commands.push(command);
@@ -276,7 +277,9 @@ export async function claimNextDeviceCommand(deviceId = IVA_IMAC_DEVICE_ID, agen
       changed = true;
     }
   }
-  const command = store.commands.find(item => item.deviceId === deviceId && item.status === 'queued');
+  const command = store.commands.find(item => item.deviceId === deviceId
+    && item.status === 'queued'
+    && (!DEVICE_ACTIONS[item.action]?.requiresAttestedAgent || claimingAgent));
   if (!command) {
     if (changed) await saveStore(store);
     return null;

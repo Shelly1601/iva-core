@@ -26,26 +26,18 @@ try {
   console.log('Device-Control: Queue und Lease prüfen …');
   assert.equal(command.deviceId, IVA_IMAC_DEVICE_ID);
   assert.equal(command.status, 'queued');
-  const claimed = await claimNextDeviceCommand(IVA_IMAC_DEVICE_ID);
-  assert.equal(claimed.id, command.id);
-  assert.equal(claimed.status, 'running');
-  assert.ok(claimed.leaseToken.length >= 32);
-  await assert.rejects(
-    completeDeviceCommand({ deviceId: IVA_IMAC_DEVICE_ID, commandId: command.id, leaseToken: 'falsch', ok: true }),
-    /ungültig/,
-  );
-  const completed = await completeDeviceCommand({
-    deviceId: IVA_IMAC_DEVICE_ID,
-    commandId: command.id,
-    leaseToken: claimed.leaseToken,
-    ok: true,
-    result: { online: true },
-  });
-  assert.equal(completed.status, 'completed');
-  assert.equal((await deviceCommandStatus(command.id)).result.online, true);
+  assert.ok(Date.parse(command.expiresAt) - Date.now() > 23 * 60 * 60_000, 'iMac-Befehl wartet mindestens 23 Stunden auf die Attestierung');
+  assert.equal(await claimNextDeviceCommand(IVA_IMAC_DEVICE_ID), null, 'der alte Agent darf keinen Befehl mehr verbrauchen');
+  assert.equal((await deviceCommandStatus(command.id)).status, 'queued');
   assert.equal((await listDeviceCommands({ deviceId: IVA_IMAC_DEVICE_ID })).length, 1);
 
   console.log('Device-Control: iMac-Attestierung und Migrationssperre prüfen …');
+  const deferredProjectCommand = await enqueueDeviceCommand({
+    action: 'project.workflow.run', requestedBy: 'test-deferred',
+    payload: { projectId: 'heat-hero', workflowId: 'planbar-weekly-export', displayName: 'Planbar-Forecast' },
+  });
+  assert.ok(Date.parse(deferredProjectCommand.expiresAt) - Date.now() > 23 * 60 * 60_000, 'iMac-Workflow wartet mindestens 23 Stunden auf die Attestierung');
+  assert.equal(await claimNextDeviceCommand(IVA_IMAC_DEVICE_ID), null, 'auch der Forecast bleibt bis zum v2-Heartbeat unangetastet');
   const imacMetadata = {
     hostname: 'iMac-von-Nadine.local',
     protocolVersion: DEVICE_AGENT_PROTOCOL_VERSION,
@@ -62,26 +54,53 @@ try {
   assert.equal(heartbeat.attested, true);
   assert.equal(heartbeat.hostname, 'imac-von-nadine');
   assert.equal((await deviceAgentStatus()).online, true);
-  const agentStatusCommand = await enqueueDeviceCommand({ action: 'agent.status', requestedBy: 'test' });
   await assert.rejects(claimNextDeviceCommand(IVA_IMAC_DEVICE_ID), /Attestierung/);
   await assert.rejects(
     claimNextDeviceCommand(IVA_IMAC_DEVICE_ID, { ...imacMetadata, hostname: 'iMac-Ersatz.local' }),
     /gebundene iMac/,
   );
+  const initialAttestedClaim = await claimNextDeviceCommand(IVA_IMAC_DEVICE_ID, imacMetadata);
+  assert.equal(initialAttestedClaim.id, command.id);
+  assert.ok(initialAttestedClaim.leaseToken.length >= 32);
+  await assert.rejects(
+    completeDeviceCommand({ deviceId: IVA_IMAC_DEVICE_ID, commandId: command.id, leaseToken: 'falsch', ok: true, agentMetadata: imacMetadata }),
+    /ungültig/,
+  );
+  const initialCompleted = await completeDeviceCommand({
+    deviceId: IVA_IMAC_DEVICE_ID,
+    commandId: command.id,
+    leaseToken: initialAttestedClaim.leaseToken,
+    ok: true,
+    result: { online: true },
+    agentMetadata: imacMetadata,
+  });
+  assert.equal(initialCompleted.status, 'completed');
+  assert.equal((await deviceCommandStatus(command.id)).result.online, true);
   const attestedClaim = await claimNextDeviceCommand(IVA_IMAC_DEVICE_ID, imacMetadata);
-  assert.equal(attestedClaim.id, agentStatusCommand.id);
+  assert.equal(attestedClaim.id, deferredProjectCommand.id, 'der Forecast wird erst nach dem v2-iMac-Heartbeat freigegeben');
   assert.equal(attestedClaim.claimedBy.hostname, 'imac-von-nadine');
   await assert.rejects(completeDeviceCommand({
     deviceId: IVA_IMAC_DEVICE_ID,
-    commandId: agentStatusCommand.id,
+    commandId: deferredProjectCommand.id,
     leaseToken: attestedClaim.leaseToken,
     ok: true,
     agentMetadata: { ...imacMetadata, hostname: 'iMac-Ersatz.local' },
   }), /Attestierung/);
   await completeDeviceCommand({
     deviceId: IVA_IMAC_DEVICE_ID,
-    commandId: agentStatusCommand.id,
+    commandId: deferredProjectCommand.id,
     leaseToken: attestedClaim.leaseToken,
+    ok: true,
+    result: { online: true },
+    agentMetadata: imacMetadata,
+  });
+  const agentStatusCommand = await enqueueDeviceCommand({ action: 'agent.status', requestedBy: 'test' });
+  const agentStatusClaim = await claimNextDeviceCommand(IVA_IMAC_DEVICE_ID, imacMetadata);
+  assert.equal(agentStatusClaim.id, agentStatusCommand.id);
+  await completeDeviceCommand({
+    deviceId: IVA_IMAC_DEVICE_ID,
+    commandId: agentStatusCommand.id,
+    leaseToken: agentStatusClaim.leaseToken,
     ok: true,
     result: { online: true },
     agentMetadata: imacMetadata,
@@ -161,7 +180,7 @@ try {
   assert.equal(isAuthoritativeIcloudWorkspace('/Users/nadine/iva-core'), false);
   const devicePolicy = imacDeviceAgentPolicy();
   assert.equal(devicePolicy.protocolVersion, DEVICE_AGENT_PROTOCOL_VERSION);
-  assert.equal(devicePolicy.iCloudAuthoritative, true);
+  assert.equal(devicePolicy.iCloudAuthoritative, isAuthoritativeIcloudWorkspace(devicePolicy.workspace));
   assert.equal(devicePolicy.allowedActions.includes('agent.status'), true);
   assert.equal(devicePolicy.allowedActions.includes('portal.login'), true);
   assert.equal(devicePolicy.allowedActions.includes('portal.credentials.status'), true);
