@@ -1,8 +1,9 @@
 import os from 'node:os';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { chmod, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const DEVICE_AGENT_HARD_TIMEOUT_MS = 240_000;
 export const DEVICE_AGENT_POLL_INTERVAL_MS = 15_000;
@@ -12,7 +13,9 @@ const DEVICE_ID = 'imac-nadine';
 const KEYCHAIN_SERVICE = 'de.iva.device-agent';
 const SERVER_URL = 'https://iva-core-production.up.railway.app';
 const RELEASE = 'imac-icloud-v2';
-const WORKSPACE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const MODULE_PATH = fileURLToPath(import.meta.url);
+const WORKSPACE = path.resolve(process.env.IVA_DEVICE_WORKSPACE || path.join(path.dirname(MODULE_PATH), '..'));
+const WORKSPACE_RUNNER = path.join(WORKSPACE, 'local-mac-helper', 'device-agent-runner.mjs');
 const ALLOWED_ACTIONS = Object.freeze([
   'agent.status',
   'app.open',
@@ -29,6 +32,11 @@ const ALLOWED_ACTIONS = Object.freeze([
 ]);
 
 let deviceAgentModule = null;
+
+// Der iMac darf den Bildschirm weiterhin ausschalten. Nur der Systemschlaf bei
+// Netzbetrieb wird verhindert, damit der ausgehende Agent erreichbar bleibt.
+const wakeGuard = spawn('/usr/bin/caffeinate', ['-s', '-w', String(process.pid)], { stdio: 'ignore' });
+wakeGuard.unref();
 
 function hostname() {
   return String(os.hostname() || '').trim().toLowerCase().replace(/\.local$/, '');
@@ -77,9 +85,36 @@ async function reportBootstrapHeartbeat() {
   if (!response.ok) throw new Error(`IVA-Bootstrap-Heartbeat HTTP ${response.status}`);
 }
 
+async function updateLocalRunnerFromIcloud() {
+  if (path.resolve(MODULE_PATH) === path.resolve(WORKSPACE_RUNNER)) return false;
+  try {
+    const [installed, source] = await Promise.all([
+      readFile(MODULE_PATH, { signal: AbortSignal.timeout(5_000) }),
+      readFile(WORKSPACE_RUNNER, { signal: AbortSignal.timeout(5_000) }),
+    ]);
+    if (installed.equals(source)) return false;
+    const temporary = `${MODULE_PATH}.${process.pid}.tmp.mjs`;
+    try {
+      await writeFile(temporary, source, { mode: 0o700 });
+      await execFileAsync(process.execPath, ['--check', temporary], { timeout: 10_000 });
+      await rename(temporary, MODULE_PATH);
+      await chmod(MODULE_PATH, 0o700);
+    } finally {
+      await unlink(temporary).catch(() => {});
+    }
+    console.log('Der lokale IVA-Geräterunner wurde sicher aus iCloud aktualisiert.');
+    return true;
+  } catch (error) {
+    console.error(`Runner-Aktualisierung wird später erneut versucht: ${error?.message || error}`);
+    return false;
+  }
+}
+
 async function loadDeviceAgent() {
   if (deviceAgentModule) return deviceAgentModule;
-  deviceAgentModule = await import(`./device-agent.mjs?runner=${Date.now()}`);
+  const moduleUrl = pathToFileURL(path.join(WORKSPACE, 'local-mac-helper', 'device-agent.mjs'));
+  moduleUrl.searchParams.set('runner', String(Date.now()));
+  deviceAgentModule = await import(moduleUrl.href);
   return deviceAgentModule;
 }
 
@@ -104,6 +139,7 @@ async function runWithTimeout() {
 
 for (;;) {
   try {
+    if (await updateLocalRunnerFromIcloud()) process.exit(75);
     console.log(JSON.stringify(await runWithTimeout(), null, 2));
   } catch (error) {
     deviceAgentModule = null;

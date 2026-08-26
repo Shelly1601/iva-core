@@ -164,12 +164,30 @@ try {
   await assert.rejects(enqueueDeviceCommand({ action: 'shell.run', payload: { command: 'rm -rf /' } }), /nicht freigegeben/);
   await assert.rejects(enqueueDeviceCommand({ action: 'app.open', payload: { app: 'Terminal' } }), /nicht freigegeben/);
 
-  const { buildImacDeviceAgentLaunchAgent } = await import('../local-mac-helper/device-agent-launchd.mjs');
+  const { buildImacDeviceAgentLaunchAgent, verifyImacDeviceAgentConnection } = await import('../local-mac-helper/device-agent-launchd.mjs');
   console.log('Device-Control: LaunchAgent und Codex-Policy prüfen …');
-  const plist = buildImacDeviceAgentLaunchAgent({ nodePath: '/node', cliPath: '/repo/local-mac-helper/cli.mjs' });
-  assert.match(plist, /run-imac-device-agent-once/);
+  const plist = buildImacDeviceAgentLaunchAgent({
+    nodePath: '/node',
+    runnerPath: '/Users/nadine/Library/Application Support/IVA Mac Helper/device-agent/device-agent-runner.mjs',
+    workspace: '/Users/nadine/Library/Mobile Documents/com~apple~CloudDocs/IVA-Assistent/iva-core',
+  });
+  assert.match(plist, /Application Support\/IVA Mac Helper\/device-agent\/device-agent-runner\.mjs/);
+  assert.match(plist, /<key>IVA_DEVICE_WORKSPACE<\/key>/);
   assert.match(plist, /<key>KeepAlive<\/key><true\/>/);
   assert.doesNotMatch(plist, /StartInterval/);
+  const connectionStatuses = [
+    { online: true, deviceId: IVA_IMAC_DEVICE_ID, hostname: 'imac-von-nadine', release: 'test-v2', lastSeenAt: '2026-08-26T10:00:05.000Z' },
+    { online: true, deviceId: IVA_IMAC_DEVICE_ID, hostname: 'imac-von-nadine', release: 'test-v2', lastSeenAt: '2026-08-26T10:00:20.000Z' },
+  ];
+  const verifiedConnection = await verifyImacDeviceAgentConnection({
+    baselineLastSeenAt: '2026-08-26T10:00:00.000Z',
+    getStatus: async () => connectionStatuses.shift() || connectionStatuses.at(-1),
+    timeoutMs: 100,
+    pollMs: 1,
+    minimumAdvanceMs: 10_000,
+  });
+  assert.equal(verifiedConnection.verified, true);
+  assert.equal(verifiedConnection.secondVerifiedHeartbeatAt, '2026-08-26T10:00:20.000Z');
   const { codexTaskPolicy, inferProjectWorkflowStatus, startProjectWorkflowTask } = await import('../local-mac-helper/codex-tasks.mjs');
   const codexPolicy = codexTaskPolicy();
   assert.equal(codexPolicy.arbitraryWorkspace, false);
@@ -184,7 +202,8 @@ try {
   const bootstrapSource = await readFile(new URL('../IVA-iMac-einmalig-verbinden.command', import.meta.url), 'utf8');
   assert.match(bootstrapSource, /nodejs\.org\/dist\/\$\{node_version\}/);
   assert.match(bootstrapSource, /shasum -a 256/);
-  assert.match(bootstrapSource, /run-imac-device-agent-once/);
+  assert.doesNotMatch(bootstrapSource, /run-imac-device-agent-once/);
+  assert.match(bootstrapSource, /Zwei fortlaufende Railway-Heartbeats wurden bestätigt/);
   const codexTaskSource = await readFile(new URL('../local-mac-helper/codex-tasks.mjs', import.meta.url), 'utf8');
   assert.match(codexTaskSource, /'exec', '--approve-for-me'/);
   assert.doesNotMatch(codexTaskSource, /'--sandbox'[^\n]+?'--approve-for-me'/, 'Codex CLI erlaubt --sandbox nicht zusammen mit --approve-for-me');
@@ -196,6 +215,8 @@ try {
   assert.match(deviceAgentRunnerSource, /DEVICE_AGENT_POLL_INTERVAL_MS = 15_000/);
   assert.match(deviceAgentRunnerSource, /await reportBootstrapHeartbeat\(\)/);
   assert.match(deviceAgentRunnerSource, /'X-IVA-Agent-Workspace': metadata\.workspace/);
+  assert.match(deviceAgentRunnerSource, /spawn\('\/usr\/bin\/caffeinate', \['-s', '-w'/);
+  assert.match(deviceAgentRunnerSource, /updateLocalRunnerFromIcloud/);
   assert.ok(
     deviceAgentRunnerSource.indexOf('await reportBootstrapHeartbeat()') < deviceAgentRunnerSource.indexOf('await loadDeviceAgent()'),
     'der eigenständige Heartbeat läuft vor dem vollständigen iCloud-Modulimport',

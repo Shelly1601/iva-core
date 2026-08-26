@@ -91,6 +91,5 @@ fi
 
 cd "$workspace"
 "$node_bin" local-mac-helper/cli.mjs install-imac-device-agent --commit
-"$node_bin" local-mac-helper/cli.mjs run-imac-device-agent-once
 
-print "IVA ist jetzt dauerhaft mit diesem iMac und dem zentralen iCloud-Ordner verbunden."
+print "IVA ist jetzt dauerhaft mit diesem iMac und dem zentralen iCloud-Ordner verbunden. Zwei fortlaufende Railway-Heartbeats wurden bestätigt."

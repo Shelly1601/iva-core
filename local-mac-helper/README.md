@@ -195,7 +195,7 @@ Routen:
 
 ## MacBook → iMac über IVA
 
-Der Geräteagent fragt IVA-Core alle 15 Sekunden über HTTPS nach einem eng freigegebenen Befehl. Der iMac öffnet keinen eingehenden Port und aktiviert weder SSH noch macOS Remote Login. Das Gerätetoken liegt im macOS-Schlüsselbund unter `de.iva.device-agent`; Railway erhält denselben Wert ausschließlich als Secret `IMAC_DEVICE_TOKEN`.
+Der Geräteagent fragt IVA-Core alle 15 Sekunden über HTTPS nach einem eng freigegebenen Befehl. Der dauerhaft laufende Runner liegt lokal unter `~/Library/Application Support/IVA Mac Helper/device-agent/`, aktualisiert sich kontrolliert aus dem verbindlichen iCloud-Workspace und verhindert bei Netzbetrieb nur den Systemschlaf; der Bildschirm darf weiterhin schlafen. Die Installation gilt erst nach zwei zeitversetzten, fortlaufenden Railway-Heartbeats als erfolgreich. Der iMac öffnet keinen eingehenden Port und aktiviert weder SSH noch macOS Remote Login. Das Gerätetoken liegt im macOS-Schlüsselbund unter `de.iva.device-agent`; Railway erhält denselben Wert ausschließlich als Secret `IMAC_DEVICE_TOKEN`.
 
 Freigegeben sind: Computer-/Fördermonitor-Status, Zusammenfassung der Förder-Review-Warteschlange, Planbar-Index, das Öffnen von Outlook, Chrome, WhatsApp oder Codex sowie ausdrücklich beauftragte IVA-Bauaufträge. Bauaufträge starten ausschließlich den lokalen Codex im festen `iva-core`-Workspace mit `workspace-write`-Sandbox und automatischer Freigabeprüfung; beliebige Arbeitsverzeichnisse sind gesperrt. Freie Shell-Befehle, beliebige Dateipfade und Zugangsdaten sind im Gerätekanal weiterhin nicht zulässig.
 

@@ -1129,6 +1129,10 @@ app.post('/device-agent/:deviceId/heartbeat', async (req, res) => {
     res.json(await recordDeviceAgentHeartbeat({ deviceId: req.params.deviceId, ...bodyMetadata }));
   } catch (error) { res.status(403).json({ error: error.message }); }
 });
+app.get('/device-agent/:deviceId/status', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
+  res.json(await deviceAgentStatus(req.params.deviceId));
+});
 app.get('/device-agent/:deviceId/commands/next', async (req, res) => {
   if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
   try { res.json({ command: await claimNextDeviceCommand(req.params.deviceId, imacAgentMetadataFromRequest(req)) }); }
