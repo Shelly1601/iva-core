@@ -107,7 +107,11 @@ function assertClaimingAgent(store, deviceId, input = {}) {
   if (metadata.hostname !== attested.hostname) {
     throw new Error(`Geräte-Attestierung abgelehnt: ${metadata.hostname || 'unbekannter Rechner'} ist nicht der gebundene iMac.`);
   }
-  return metadata;
+  // Die Positivliste wurde bereits über den signierten Heartbeat attestiert.
+  // Der anschließende GET-Abruf enthält bewusst keinen JSON-Body und damit
+  // keine allowedActions; verwende deshalb die zuletzt serverseitig gebundene
+  // Liste, statt alle wartenden Befehle fälschlich zu blockieren.
+  return { ...metadata, allowedActions: [...(attested.allowedActions || [])] };
 }
 
 export async function recordDeviceAgentHeartbeat({ deviceId = IVA_IMAC_DEVICE_ID, ...input } = {}) {

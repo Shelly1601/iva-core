@@ -107,8 +107,10 @@ try {
     agentMetadata: imacMetadata,
   });
   const agentStatusCommand = await enqueueDeviceCommand({ action: 'agent.status', requestedBy: 'test' });
-  const agentStatusClaim = await claimNextDeviceCommand(IVA_IMAC_DEVICE_ID, imacMetadata);
+  const { allowedActions: _omittedForHeaderOnlyClaim, ...headerOnlyMetadata } = imacMetadata;
+  const agentStatusClaim = await claimNextDeviceCommand(IVA_IMAC_DEVICE_ID, headerOnlyMetadata);
   assert.equal(agentStatusClaim.id, agentStatusCommand.id);
+  assert.equal(agentStatusClaim.claimedBy.allowedActions.includes('agent.status'), true, 'der GET-Abruf übernimmt die zuvor attestierte Positivliste');
   await completeDeviceCommand({
     deviceId: IVA_IMAC_DEVICE_ID,
     commandId: agentStatusCommand.id,
