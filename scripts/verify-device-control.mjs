@@ -174,9 +174,14 @@ try {
   assert.deepEqual(codexCommand.payload.acceptanceCriteria, ['Tests grün']);
   const operationalCodexCommand = await enqueueDeviceCommand({
     action: 'codex.task.start', requestedBy: 'test-operation',
-    payload: { title: 'iMac-Dateiprüfung', prompt: 'Prüfe den gemeinsamen Arbeitsordner auf dem iMac rein lesend.', mode: 'operational' },
+    payload: { title: 'iMac-Dateiprüfung', requestId: 'test-operation-1', prompt: 'Prüfe den gemeinsamen Arbeitsordner auf dem iMac rein lesend.', mode: 'operational' },
   });
   assert.equal(operationalCodexCommand.payload.mode, 'operational');
+  const duplicateOperationalCodexCommand = await enqueueDeviceCommand({
+    action: 'codex.task.start', requestedBy: 'test-operation-retry',
+    payload: { title: 'Anderer Titel', requestId: 'test-operation-1', prompt: 'Dieser Auftrag darf nicht zusätzlich eingereiht werden.', mode: 'operational' },
+  });
+  assert.equal(duplicateOperationalCodexCommand.id, operationalCodexCommand.id, 'dieselbe offene iMac-Operations-ID wird nur einmal eingereiht');
   const chatGptCommand = await enqueueDeviceCommand({ action: 'app.open', payload: { app: 'ChatGPT' }, requestedBy: 'test' });
   assert.deepEqual(chatGptCommand.payload, { app: 'ChatGPT' });
   await assert.rejects(enqueueDeviceCommand({ action: 'codex.task.status', payload: { jobId: '../falsch' } }), /Ungültige/);
@@ -282,6 +287,7 @@ try {
   assert.match(deviceAgentRunnerSource, /DEVICE_AGENT_HARD_TIMEOUT_MS = 240_000/, 'der äußere Agent darf die 180-Sekunden-Planbar-Prüfung nicht vorzeitig abbrechen');
   assert.match(deviceAgentRunnerSource, /DEVICE_AGENT_POLL_INTERVAL_MS = 15_000/);
   assert.match(deviceAgentRunnerSource, /await reportBootstrapHeartbeat\(\)/);
+  assert.match(deviceAgentRunnerSource, /'funding\.legacy-monitor\.suspend'/);
   assert.match(deviceAgentRunnerSource, /'X-IVA-Agent-Workspace': metadata\.workspace/);
   assert.match(deviceAgentRunnerSource, /spawn\('\/usr\/bin\/caffeinate', \['-s', '-w'/);
   assert.match(deviceAgentRunnerSource, /updateLocalRunnerFromIcloud/);
@@ -337,6 +343,40 @@ try {
   assert.equal(devicePolicy.allowedActions.includes('project.workflow.run'), true);
   assert.equal(devicePolicy.allowedActions.includes('planbar.customer.schedule'), true);
   assert.equal(devicePolicy.allowedActions.includes('funding.legacy-monitor.suspend'), true);
+
+  console.log('Device-Control: selbstheilenden Förderlaufzeit-Abgleich prüfen …');
+  const { FUNDING_RUNTIME_MARKER, fundingRuntimeUpdatePrompt, reconcileFundingImacRuntime } = await import('../device-control/funding-runtime-reconciler.js');
+  assert.match(fundingRuntimeUpdatePrompt(), /install-imac-device-agent --commit/);
+  assert.match(fundingRuntimeUpdatePrompt(), /Starte keinen Förderlauf/);
+  let queuedRuntimeCommand = null;
+  const updateQueued = await reconcileFundingImacRuntime({
+    getStatus: async () => ({ ...imacMetadata, attested: true, online: true, allowedActions: ['codex.task.start', 'agent.status'] }),
+    enqueue: async input => { queuedRuntimeCommand = { id: 'runtime-update', ...input }; return queuedRuntimeCommand; },
+    listCommands: async () => [],
+  });
+  assert.equal(updateQueued.status, 'runtime_update_queued');
+  assert.equal(queuedRuntimeCommand.action, 'codex.task.start');
+  assert.equal(queuedRuntimeCommand.payload.requestId, FUNDING_RUNTIME_MARKER);
+  assert.equal(queuedRuntimeCommand.payload.mode, 'operational');
+  let queuedSuspendCommand = null;
+  const suspendQueued = await reconcileFundingImacRuntime({
+    getStatus: async () => ({ ...imacMetadata, attested: true, online: true }),
+    enqueue: async input => { queuedSuspendCommand = { id: 'legacy-suspend', ...input }; return queuedSuspendCommand; },
+    listCommands: async () => [],
+  });
+  assert.equal(suspendQueued.status, 'legacy_monitor_suspend_queued');
+  assert.equal(queuedSuspendCommand.action, 'funding.legacy-monitor.suspend');
+  const runtimeReady = await reconcileFundingImacRuntime({
+    getStatus: async () => ({ ...imacMetadata, attested: true, online: true }),
+    enqueue: async () => { throw new Error('bei verifiziertem Abschluss darf nichts neu eingereiht werden'); },
+    listCommands: async () => [{
+      id: 'legacy-suspend', action: 'funding.legacy-monitor.suspend', status: 'completed',
+      requestText: `[${FUNDING_RUNTIME_MARKER}] geprüft`,
+      result: { suspended: true, loaded: false, plistRetained: true },
+    }],
+  });
+  assert.equal(runtimeReady.status, 'ready');
+  assert.equal(runtimeReady.legacyMonitorSuspended, true);
 
   const { builderSkill } = await import('../skills/builder.js');
   console.log('Device-Control: Builder-Werkzeug prüfen …');

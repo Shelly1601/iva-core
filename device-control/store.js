@@ -235,6 +235,14 @@ export async function enqueueDeviceCommand({ deviceId = IVA_IMAC_DEVICE_ID, acti
   const normalizedPayload = validatePayload(actionName, payload);
   const now = new Date();
   const store = await loadStore();
+  if (actionName === 'codex.task.start' && normalizedPayload.requestId) {
+    const existing = store.commands.find(item => item.deviceId === device
+      && item.action === actionName
+      && ['queued', 'running'].includes(item.status)
+      && Date.parse(item.expiresAt) > now.getTime()
+      && item.payload?.requestId === normalizedPayload.requestId);
+    if (existing) return { ...existing };
+  }
   if (actionName === 'planbar.customer.schedule' || actionName === 'project.workflow.run') {
     const fingerprint = JSON.stringify(normalizedPayload);
     const existing = store.commands.find(item => item.deviceId === device

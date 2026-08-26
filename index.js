@@ -265,6 +265,7 @@ import {
   listDeviceCommands,
   recordDeviceAgentHeartbeat,
 } from './device-control/store.js';
+import { reconcileFundingImacRuntime } from './device-control/funding-runtime-reconciler.js';
 import { createInvestmentModule } from './investment/index.js';
 
 const app = express();
@@ -2869,3 +2870,24 @@ app.get('/health/voice', async (_req, res) => res.json(await voiceLabSummary()))
 app.get('/', (_req, res) => res.send('IVA laeuft.'));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => { console.log('IVA-Core auf Port ' + PORT); setupTelegramWebhook(); setBotCommands(); });
+
+let lastFundingRuntimeReconcileStatus = '';
+async function runFundingRuntimeReconcile() {
+  try {
+    const result = await reconcileFundingImacRuntime({
+      getStatus: deviceAgentStatus,
+      enqueue: enqueueDeviceCommand,
+      listCommands: listDeviceCommands,
+    });
+    if (result.status !== lastFundingRuntimeReconcileStatus) {
+      console.log(`iMac-Förderlaufzeit: ${result.status}`);
+      lastFundingRuntimeReconcileStatus = result.status;
+    }
+  } catch (error) {
+    console.error(`iMac-Förderlaufzeit konnte noch nicht abgeglichen werden: ${error?.message || error}`);
+  }
+}
+const initialFundingRuntimeReconcile = setTimeout(() => { void runFundingRuntimeReconcile(); }, 10_000);
+initialFundingRuntimeReconcile.unref?.();
+const fundingRuntimeReconcileInterval = setInterval(() => { void runFundingRuntimeReconcile(); }, 60_000);
+fundingRuntimeReconcileInterval.unref?.();

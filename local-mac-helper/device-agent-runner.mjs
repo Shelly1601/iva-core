@@ -37,6 +37,7 @@ const ALLOWED_ACTIONS = Object.freeze([
   'codex.task.status',
   'computer.status',
   'funding.monitor.status',
+  'funding.legacy-monitor.suspend',
   'funding.reviews.list',
   'planbar.customer.schedule',
   'planbar.search.refresh',
