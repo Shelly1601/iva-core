@@ -390,7 +390,7 @@ async function refreshPlanbarSearch() {
       body: { action: 'planbar.search.refresh', requestedBy: 'projects-planbar-search', requestText: 'Planbar-Suchindex rein lesend aktualisieren' },
     });
     let command = queued.command;
-    for (let attempt = 0; attempt < 60 && !['completed', 'failed', 'expired'].includes(command.status); attempt += 1) {
+    for (let attempt = 0; attempt < 60 && !['completed', 'failed', 'expired', 'canceled'].includes(command.status); attempt += 1) {
       await pause(2000);
       command = (await api(`/api/devices/imac-nadine/commands/${encodeURIComponent(command.id)}`)).command;
     }

@@ -256,6 +256,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import {
   IVA_IMAC_DEVICE_ID,
+  cancelDeviceCommand,
   claimNextDeviceCommand,
   completeDeviceCommand,
   deviceAgentStatus,
@@ -1572,6 +1573,17 @@ app.get('/api/devices/:deviceId/commands/:commandId', async (req, res) => {
     if (!command || command.deviceId !== req.params.deviceId) return res.status(404).json({ error: 'command not found' });
     res.json({ command });
   } catch (error) { res.status(500).json({ error: error.message }); }
+});
+app.post('/api/devices/:deviceId/commands/:commandId/cancel', async (req, res) => {
+  try {
+    if (req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.status(404).json({ error: 'device not found' });
+    const command = await cancelDeviceCommand({
+      deviceId: req.params.deviceId,
+      commandId: req.params.commandId,
+      reason: req.body?.reason,
+    });
+    res.json({ canceled: true, command });
+  } catch (error) { res.status(409).json({ error: error.message }); }
 });
 app.post('/api/devices/:deviceId/commands', async (req, res) => {
   try {

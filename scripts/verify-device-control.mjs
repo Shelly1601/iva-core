@@ -10,6 +10,7 @@ try {
   const {
     IVA_IMAC_DEVICE_ID,
     DEVICE_AGENT_PROTOCOL_VERSION,
+    cancelDeviceCommand,
     claimNextDeviceCommand,
     completeDeviceCommand,
     deviceAgentStatus,
@@ -30,6 +31,17 @@ try {
   assert.equal(await claimNextDeviceCommand(IVA_IMAC_DEVICE_ID), null, 'der alte Agent darf keinen Befehl mehr verbrauchen');
   assert.equal((await deviceCommandStatus(command.id)).status, 'queued');
   assert.equal((await listDeviceCommands({ deviceId: IVA_IMAC_DEVICE_ID })).length, 1);
+
+  console.log('Device-Control: wartenden Versandabbruch prüfen …');
+  const canceledCommand = await enqueueDeviceCommand({ action: 'agent.status', requestedBy: 'test-cancel' });
+  const canceled = await cancelDeviceCommand({
+    commandId: canceledCommand.id,
+    reason: 'Erst die dauerhafte iMac-Verbindung prüfen.',
+  });
+  assert.equal(canceled.status, 'canceled');
+  assert.equal(canceled.cancelReason, 'Erst die dauerhafte iMac-Verbindung prüfen.');
+  assert.equal(await claimNextDeviceCommand(IVA_IMAC_DEVICE_ID), null, 'abgebrochene Befehle werden nicht mehr ausgeführt');
+  await assert.rejects(cancelDeviceCommand({ commandId: canceledCommand.id }), /Nur ein wartender/);
 
   console.log('Device-Control: iMac-Attestierung und Migrationssperre prüfen …');
   const deferredProjectCommand = await enqueueDeviceCommand({

@@ -315,6 +315,21 @@ export async function completeDeviceCommand({ deviceId, commandId, leaseToken, o
   return { ...command };
 }
 
+export async function cancelDeviceCommand({ deviceId = IVA_IMAC_DEVICE_ID, commandId, reason = '' } = {}) {
+  const store = await loadStore();
+  const command = store.commands.find(item => item.id === String(commandId) && item.deviceId === String(deviceId));
+  if (!command) throw new Error('iMac-Befehl wurde nicht gefunden.');
+  if (command.status !== 'queued') {
+    throw new Error(`Nur ein wartender iMac-Befehl kann abgebrochen werden (Status: ${command.status}).`);
+  }
+  command.status = 'canceled';
+  command.completedAt = new Date().toISOString();
+  command.cancelReason = cleanText(reason, 500) || 'Vom Auftraggeber vor Ausführung abgebrochen.';
+  await saveStore(store);
+  const { leaseToken, ...safe } = command;
+  return safe;
+}
+
 export async function listDeviceCommands({ deviceId = IVA_IMAC_DEVICE_ID, limit = 50 } = {}) {
   const store = await loadStore();
   return store.commands
