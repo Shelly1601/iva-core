@@ -224,6 +224,7 @@ import {
   recordAudit,
   resolveApprovalByExternalKey,
 } from './operations/store.js';
+import { buildJobsNeedingRefresh, buildProgressSnapshot, CURRENT_BUILD_RELEASE } from './operations/build-progress.js';
 import {
   AUTOMATION_DEFINITIONS,
   automationSummary,
@@ -1181,7 +1182,7 @@ function connector(id, label, ready, missing = [], detail = '') {
 }
 
 async function controlSnapshot() {
-  const [ops, qonektoResult, syncResult, voiceResult, knowledgeResult, opportunityResult, learningResult, automationsResult, googleGmailResult] = await Promise.all([
+  const [ops, qonektoResult, syncResult, voiceResult, knowledgeResult, opportunityResult, learningResult, automationsResult, googleGmailResult, deviceCommandsResult] = await Promise.all([
     operationsSummary(),
     qonektoStatus().catch(error => ({ configured: envReady('QONEKTO_MCP_TOKEN'), reachable: false, error: error.message })),
     crmQonektoSyncStatus().catch(error => ({ enabled: false, error: error.message })),
@@ -1191,7 +1192,19 @@ async function controlSnapshot() {
     listVoiceLearning().catch(() => ({ improvementRequests: [] })),
     automationSummary().catch(error => ({ enabled: 0, disabled: 0, running: 0, failedToday: 0, reports: 0, error: error.message })),
     googleGmailStatus().catch(error => ({ configured: false, authorized: false, ready: false, missing: ['Google-Gmail-Verbindung'], error: error.message })),
+    listDeviceCommands({ limit: 200 }).catch(() => []),
   ]);
+  const improvementRequests = learningResult.improvementRequests || [];
+  const buildRefreshJobs = buildJobsNeedingRefresh({ requests: improvementRequests, commands: deviceCommandsResult });
+  if (buildRefreshJobs.length) {
+    await Promise.all(buildRefreshJobs.map(job => enqueueDeviceCommand({
+      action: 'codex.task.status',
+      payload: { jobId: job.jobId },
+      requestedBy: 'control-center',
+      requestText: `Baufortschritt: ${job.title || job.requestId}`,
+    }).catch(() => null)));
+  }
+  const buildProgress = buildProgressSnapshot({ requests: improvementRequests, commands: deviceCommandsResult, release: CURRENT_BUILD_RELEASE });
   const marketing = marketingConnectorStatus();
   const transcription = transcriptionProviderStatus();
   const metaWhatsApp = whatsappStatus();
@@ -1262,7 +1275,8 @@ async function controlSnapshot() {
       reporting: reportingStatus(),
       googleGmail: googleGmailResult,
     },
-    buildBacklog: (learningResult.improvementRequests || []).filter(item => !['done', 'rejected'].includes(item.status)).slice(-30).reverse(),
+    buildProgress,
+    buildBacklog: improvementRequests.filter(item => !['done', 'rejected'].includes(item.status)).slice(-30).reverse(),
   };
 }
 

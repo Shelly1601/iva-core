@@ -8,9 +8,19 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const MODULE_PATH = fileURLToPath(import.meta.url);
 const REPO_ROOT = path.resolve(path.dirname(MODULE_PATH), '..');
-const TASK_ROOT = path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper', 'codex-tasks');
+const TASK_ROOT = process.env.IVA_CODEX_TASK_ROOT || path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper', 'codex-tasks');
 const MAX_PROMPT_LENGTH = 12_000;
 const MAX_RUNTIME_MS = 3 * 60 * 60_000;
+const BUILD_PHASES = Object.freeze({
+  planning: 10,
+  implementing: 30,
+  testing: 50,
+  committing: 65,
+  pushing: 75,
+  deploying: 88,
+  live_verification: 96,
+  completed: 100,
+});
 const CODEX_CANDIDATES = Object.freeze([
   '/Applications/ChatGPT.app/Contents/Resources/codex',
   '/Applications/Codex.app/Contents/Resources/codex',
@@ -65,9 +75,21 @@ ${request.prompt}
 
 ${request.acceptanceCriteria?.length ? `Abnahmekriterien:\n${request.acceptanceCriteria.map(item => `- ${item}`).join('\n')}` : ''}`.trim();
   }
+  const progressCommand = phase => `node local-mac-helper/codex-tasks.mjs progress ${request.jobId} ${phase}`;
   return `Nadine hat diesen Auftrag ausdrücklich über ihren IVA-Chat erteilt. Setze ihn jetzt vollständig und eigenständig um, ohne eine weitere Planbestätigung von Nadine zu verlangen.
 
 Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace. Lies und befolge AGENTS.md vollständig. Bewahre fremde und nicht zum Auftrag gehörende Änderungen. Fertig bedeutet gemäß Projektregel: implementieren, angemessen testen, Fehler beheben, nur die eigenen Änderungen committen, pushen, Railway deployen und die öffentliche Live-URL prüfen. Falls ein echter externer Blocker besteht, dokumentiere ihn konkret im Endergebnis; erfinde keinen Erfolg.
+
+Melde Nadine im IVA-Kontrollzentrum ausschließlich tatsächlich begonnene Meilensteine. Führe dafür jeweils beim Start des Schritts genau den passenden lokalen Befehl aus:
+- Planung: ${progressCommand('planning')}
+- Umsetzung: ${progressCommand('implementing')}
+- Tests: ${progressCommand('testing')}
+- Commit: ${progressCommand('committing')}
+- Push: ${progressCommand('pushing')}
+- Railway-Deploy: ${progressCommand('deploying')}
+- öffentliche Live-Prüfung: ${progressCommand('live_verification')}
+- erst nach erfolgreicher Live-Prüfung: ${progressCommand('completed')}
+Bei einem echten Blocker: node local-mac-helper/codex-tasks.mjs progress ${request.jobId} blocked "kurzer konkreter Grund". Überspringe keine Anzeige vorab und melde niemals einen noch nicht begonnenen Schritt.
 
 Auftrag:
 ${request.prompt}
@@ -78,6 +100,8 @@ ${request.acceptanceCriteria?.length ? `Abnahmekriterien:\n${request.acceptanceC
 export function codexTaskPolicy() {
   return Object.freeze({
     workspace: REPO_ROOT,
+    taskStateDirectory: TASK_ROOT,
+    taskStateWritableForCodex: true,
     arbitraryWorkspace: false,
     sandbox: 'workspace-write',
     automaticApprovalReview: true,
@@ -103,7 +127,7 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
     createdAt: new Date().toISOString(),
   };
   await writeFile(paths.request, JSON.stringify(request, null, 2));
-  await writeState(paths, { jobId, title: request.title, requestId: request.requestId, status: 'queued', createdAt: request.createdAt, workspace: REPO_ROOT });
+  await writeState(paths, { jobId, title: request.title, requestId: request.requestId, status: 'queued', phase: request.mode === 'build' ? 'planning' : 'queued', progress: request.mode === 'build' ? 5 : 0, detail: 'Auftrag wartet auf den lokalen Codex-Start.', createdAt: request.createdAt, updatedAt: request.createdAt, workspace: REPO_ROOT });
   const child = spawn(process.execPath, [MODULE_PATH, 'run', jobId], { detached: true, stdio: 'ignore' });
   child.unref();
   return { jobId, status: 'queued', title: request.title, workspace: 'iva-core', startedLocally: true };
@@ -146,21 +170,41 @@ export async function getCodexTaskStatus(jobId) {
   const paths = jobPaths(jobId);
   const state = await readJson(paths.state);
   let resultPreview = '';
-  if (['completed', 'failed', 'timed_out'].includes(state.status)) {
+  if (['completed', 'failed', 'blocked', 'timed_out', 'incomplete'].includes(state.status)) {
     resultPreview = clean(await readFile(paths.lastMessage, 'utf8').catch(() => ''), 1800);
   }
   return { ...state, resultPreview };
+}
+
+export async function updateCodexTaskProgress(jobId, phase, detail = '') {
+  const paths = jobPaths(jobId);
+  const state = await readJson(paths.state);
+  const nextPhase = clean(phase, 60);
+  const isBlocked = nextPhase === 'blocked';
+  if (!isBlocked && !Object.hasOwn(BUILD_PHASES, nextPhase)) throw new Error('Unbekannter IVA-Baumeilenstein.');
+  const currentProgress = Number(state.progress) || 0;
+  const nextProgress = isBlocked ? currentProgress : nextPhase === 'completed' ? 99 : BUILD_PHASES[nextPhase];
+  if (!isBlocked && nextProgress < currentProgress) throw new Error('Ein abgeschlossener Baumeilenstein kann nicht zurückgesetzt werden.');
+  return writeState(paths, {
+    ...state,
+    status: isBlocked ? 'blocked' : 'running',
+    phase: isBlocked ? (state.phase || 'planning') : nextPhase,
+    progress: nextProgress,
+    detail: clean(detail, 1000) || (isBlocked ? 'Der Bauauftrag ist blockiert.' : `${nextPhase} wurde begonnen.`),
+    error: isBlocked ? clean(detail, 1000) : '',
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 export async function runCodexTask(jobId) {
   const paths = jobPaths(jobId);
   const request = await readJson(paths.request);
   const startedAt = new Date().toISOString();
-  await writeState(paths, { jobId, title: request.title, requestId: request.requestId, status: 'running', createdAt: request.createdAt, startedAt, workspace: REPO_ROOT });
+  await writeState(paths, { jobId, title: request.title, requestId: request.requestId, status: 'running', phase: request.mode === 'build' ? 'planning' : 'running', progress: request.mode === 'build' ? 10 : 5, detail: request.mode === 'build' ? 'Planung wurde begonnen.' : 'Workflow wurde gestartet.', createdAt: request.createdAt, startedAt, updatedAt: startedAt, workspace: REPO_ROOT });
   const logHandle = await open(paths.log, 'a');
   const command = codexBinary();
   const args = [
-    'exec', '--sandbox', 'workspace-write', '--approve-for-me',
+    'exec', '--sandbox', 'workspace-write', '--approve-for-me', '--add-dir', paths.directory,
     '-C', REPO_ROOT, '--output-last-message', paths.lastMessage,
     buildCodexPrompt(request),
   ];
@@ -177,15 +221,32 @@ export async function runCodexTask(jobId) {
   clearTimeout(timer);
   await logHandle.close();
   const completedAt = new Date().toISOString();
-  const status = timedOut ? 'timed_out' : exitCode === 0 ? 'completed' : 'failed';
+  const current = await readJson(paths.state).catch(() => ({}));
+  const status = timedOut
+    ? 'timed_out'
+    : current.status === 'blocked'
+      ? 'blocked'
+      : exitCode !== 0
+        ? 'failed'
+        : request.mode === 'build' && current.phase !== 'completed'
+          ? 'incomplete'
+          : 'completed';
+  const finalProgress = status === 'completed' ? 100 : Number(current.progress) || 0;
   return writeState(paths, {
+    ...current,
     jobId, title: request.title, requestId: request.requestId, status,
+    phase: status === 'completed' ? 'completed' : current.phase,
+    progress: finalProgress,
+    detail: status === 'incomplete' ? 'Codex endete, bevor alle Pflichtschritte einschließlich Live-Prüfung bestätigt waren.' : current.detail,
     createdAt: request.createdAt, startedAt, completedAt, exitCode,
-    workspace: REPO_ROOT,
+    updatedAt: completedAt, workspace: REPO_ROOT,
   });
 }
 
-if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url && process.argv[2] === 'run') {
+if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url && process.argv[2] === 'progress') {
+  try { await updateCodexTaskProgress(process.argv[3], process.argv[4], process.argv.slice(5).join(' ')); }
+  catch (error) { console.error(error.message); process.exitCode = 1; }
+} else if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url && process.argv[2] === 'run') {
   try { await runCodexTask(process.argv[3]); }
   catch (error) {
     const paths = jobPaths(process.argv[3]);

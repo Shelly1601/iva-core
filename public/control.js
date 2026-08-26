@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id);
 const TOKEN_KEY = 'iva_token';
-const state = { status:null, approvals:[], runs:[], audit:[], automations:[], automationRuns:[], reports:[] };
+const state = { status:null, approvals:[], runs:[], audit:[], automations:[], automationRuns:[], reports:[], loading:false };
 function token(){ return localStorage.getItem(TOKEN_KEY) || ''; }
 function esc(value){ return String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char])); }
 function fmt(value){ if(!value)return '–'; try{return new Date(value).toLocaleString('de-DE',{dateStyle:'short',timeStyle:'short'});}catch{return value;} }
@@ -8,6 +8,30 @@ function duration(ms){ if(!Number.isFinite(Number(ms)))return '–'; return Numb
 function setStatus(kind,text){ $('status').className='status'+(kind?' '+kind:''); $('status').querySelector('span').textContent=text; }
 async function api(path,options={}){ const response=await fetch(path,{...options,headers:{Authorization:'Bearer '+token(),...(options.body?{'Content-Type':'application/json'}:{}),...(options.headers||{})},body:options.body?JSON.stringify(options.body):undefined}); const payload=await response.json().catch(()=>({})); if(!response.ok)throw new Error(payload.error||'HTTP '+response.status); return payload; }
 function empty(text){ return `<div class="empty">${esc(text)}</div>`; }
+
+function buildTaskCard(item){
+  const blocked=item.status==='blocked';
+  const steps=(item.steps||[]).map(step=>`<div class="milestone ${esc(step.state)}" title="${esc(step.label)}"><i></i><span>${esc(step.label)}</span></div>`).join('');
+  return `<article class="build-task"><div class="build-title"><div><h3>${esc(item.title)}</h3><p>${esc(item.phaseLabel)} · ${esc(item.status==='running'?'läuft':item.status==='queued'?'wartet':item.status==='blocked'?'blockiert':'fertig')}</p></div><div class="build-percent">${esc(item.progress||0)} %</div></div><div class="progress-track" role="progressbar" aria-label="${esc(item.title)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${esc(item.progress||0)}"><div class="progress-fill${blocked?' blocked':''}" style="width:${Math.max(0,Math.min(100,Number(item.progress)||0))}%"></div></div><div class="milestones">${steps}</div><div class="build-detail${blocked?' error':''}">${esc(item.blocker||item.detail||'')}</div><div class="meta">Aktualisiert: ${fmt(item.updatedAt)}</div></article>`;
+}
+function miniBuild(item,{blocked=false}={}){
+  return `<div class="mini-build-row${blocked?' blocked':''}"><b>${esc(item.title)}</b><small>${esc(blocked?(item.blocker||item.detail):(item.phaseLabel+' · '+(item.progress||0)+' %'))}</small><small>${fmt(item.updatedAt||item.createdAt)}</small></div>`;
+}
+function renderBuildProgress(){
+  const build=state.status?.buildProgress||{};
+  const active=build.active||[];
+  $('currentBuilds').innerHTML=active.length
+    ? active.map(buildTaskCard).join('')
+    : `<div class="build-task"><div class="build-title"><div><h3>Aktuell läuft kein Bauauftrag</h3><p>${(build.queued||[]).length?'Der nächste Auftrag wartet bereits in der Warteschlange.':'IVA ist bereit für den nächsten Auftrag.'}</p></div><div class="build-percent">0 %</div></div><div class="progress-track"><div class="progress-fill" style="width:0%"></div></div></div>`;
+  $('buildQueue').innerHTML=(build.queued||[]).length?(build.queued||[]).slice(0,5).map(item=>miniBuild(item)).join(''):'<div class="muted">Keine wartenden Aufträge.</div>';
+  $('buildBlocked').innerHTML=(build.blocked||[]).length?(build.blocked||[]).slice(0,5).map(item=>miniBuild(item,{blocked:true})).join(''):'<div class="muted">Keine Blocker.</div>';
+  const latest=build.latestImplementation;
+  if(!latest){ $('latestImplementation').innerHTML='<div class="muted">Noch keine abgeschlossene Umsetzung erfasst.</div>'; return; }
+  const git=latest.gitCommit?`<span>Git ${esc(latest.gitCommit.slice(0,8))}</span>`:'';
+  const live=latest.liveStatus==='live'?'<span class="live">● live</span>':'';
+  const link=latest.livePath?`<a href="${esc(latest.livePath)}">öffnen</a>`:'';
+  $('latestImplementation').innerHTML=`<div class="mini-build-row"><b>${esc(latest.title)}</b><small>${esc(latest.description||latest.detail||'')}</small><small>${fmt(latest.completedAt||latest.updatedAt)}</small><div class="release-meta">${live}${git}${link}</div></div>`;
+}
 
 function renderMetrics(){
   const s=state.status||{}, ops=s.operations||{}, connectors=s.connectors||{}, automations=s.automations||{};
@@ -55,18 +79,24 @@ function renderBacklog(){
 function renderAudit(){
   $('audit').innerHTML=state.audit.length?state.audit.slice(0,8).map(item=>`<article class="list-item"><div class="list-head"><b>${esc(item.action)}</b><span class="badge ${item.status==='completed'?'ready':''}">${esc(item.status)}</span></div><p>${esc(item.detail||item.target||'')}</p><div class="meta">${fmt(item.createdAt)} · ${esc(item.actor)}</div></article>`).join(''):empty('Noch keine Audit-Ereignisse.');
 }
-function render(){ renderMetrics(); renderAutomations(); renderAgents(); renderConnectors(); renderApprovals(); renderRuns(); renderBacklog(); renderAudit(); }
+function render(){ renderBuildProgress(); renderMetrics(); renderAutomations(); renderAgents(); renderConnectors(); renderApprovals(); renderRuns(); renderBacklog(); renderAudit(); }
 function makeCollapsible(){ document.querySelectorAll('.main>section.card,.main>section.grid>.card').forEach(card=>{ const heading=card.querySelector(':scope>h2'); if(!heading)return; const subtitle=heading.nextElementSibling?.classList?.contains('muted')?heading.nextElementSibling:null; const details=document.createElement('details'); details.className=card.className+' disclosure'; details.style.cssText=card.style.cssText; const summary=document.createElement('summary'); summary.innerHTML=`<div><span>${esc(heading.textContent)}</span>${subtitle?`<small>${esc(subtitle.textContent)}</small>`:''}</div>`; const body=document.createElement('div'); body.className='disclosure-body'; [...card.children].forEach(child=>{ if(child!==heading&&child!==subtitle)body.appendChild(child); }); details.append(summary,body); card.replaceWith(details); }); }
 async function load(){
+  if(state.loading)return;
+  state.loading=true;
   setStatus('','verbinde …');
   try{
     [state.status,state.approvals,state.runs,state.audit,state.automations,state.automationRuns,state.reports]=await Promise.all([api('/api/control/status'),api('/api/control/approvals?status=pending&limit=30'),api('/api/control/runs?limit=30'),api('/api/control/audit?limit=30'),api('/api/automations'),api('/api/automations/runs?limit=50'),api('/api/automation-reports?limit=12')]);
     render(); setStatus('on','aktuell · '+fmt(state.status.generatedAt));
   }catch(error){ setStatus('err',error.message); if(error.message.includes('401')) $('token').focus(); }
+  finally{ state.loading=false; }
 }
 $('token').value=token();
+if(window.matchMedia('(max-width:800px)').matches)$('connectionCard').removeAttribute('open');
 $('saveToken').addEventListener('click',()=>{ localStorage.setItem(TOKEN_KEY,$('token').value.trim()); load(); });
 $('refresh').addEventListener('click',load);
 $('ivaHelper').addEventListener('click',()=>location.href='/cockpit');
 makeCollapsible();
 load();
+setInterval(()=>{ if(document.visibilityState==='visible')load(); },10000);
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible')load(); });
