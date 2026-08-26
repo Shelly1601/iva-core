@@ -37,6 +37,8 @@ check('Planbar aktiv', heat.automations.some(item => item.id === 'planbar-weekly
 check('Planbar-Vervollständigung ist live schaltbar und aktiv', heat.automations.some(item => item.id === 'planbar-completion-morning' && item.toggleAvailable && item.status === 'active' && item.enabled));
 check('KfW-Morgenlauf wird ohne ausführbaren Job nicht fälschlich als aktiv gezeigt', heat.automations.some(item => item.id === 'kfw-approval-morning' && item.status === 'blocked' && !item.toggleAvailable && !item.enabled));
 check('Montage-Pflichtfeldlauf separat schaltbar', heat.automations.some(item => item.id === 'montage-required-fields-morning' && item.toggleAvailable && item.enabled));
+check('HeatHero-Rückmeldungen laufen täglich im großen CRM', heat.automations.some(item => item.id === 'heat-hero-too-often-replies' && item.status === 'active' && item.enabled));
+check('HeatHero-Rückmeldungen werden im Tagesprotokoll erwartet', heat.protocolPolicy.expectedWorkflows.some(item => item.workflowId === 'heat-hero-too-often-replies' && item.cadence === 'daily'));
 const heatWithSchedulingRequest = await addCustomerSchedulingRequest('heat-hero', {
   customerName: 'Stefanie Schneider', isoYear: 2026, week: 39,
   partnerId: 'enter', allowFreeResourceFallback: true,

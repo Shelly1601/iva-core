@@ -531,6 +531,19 @@ function normalizeProject(input = {}, fallback = {}) {
     inputRunLog.find(item => item?.id === id) || {},
     fallbackRunLog.find(item => item?.id === id) || {},
   )).sort((left, right) => String(right.executedAt).localeCompare(String(left.executedAt)));
+  const inputExpectedWorkflows = Array.isArray(input.protocolPolicy?.expectedWorkflows) ? input.protocolPolicy.expectedWorkflows : [];
+  const fallbackExpectedWorkflows = Array.isArray(fallback.protocolPolicy?.expectedWorkflows) ? fallback.protocolPolicy.expectedWorkflows : [];
+  const expectedWorkflowIds = new Set([...fallbackExpectedWorkflows, ...inputExpectedWorkflows].map(item => item?.workflowId).filter(Boolean));
+  const expectedWorkflows = [...expectedWorkflowIds].map(workflowId => {
+    const stored = inputExpectedWorkflows.find(item => item?.workflowId === workflowId) || {};
+    const seeded = fallbackExpectedWorkflows.find(item => item?.workflowId === workflowId) || {};
+    return {
+      workflowId: clean(workflowId, 140),
+      workflowName: clean(seeded.workflowName || stored.workflowName, 240),
+      cadence: (seeded.cadence || stored.cadence) === 'weekly' ? 'weekly' : 'daily',
+      weekday: Number.isInteger(Number(seeded.weekday ?? stored.weekday)) ? Number(seeded.weekday ?? stored.weekday) : null,
+    };
+  }).filter(item => item.workflowId).slice(0, 100);
   const notes = Array.isArray(input.notes) ? input.notes : (fallback.notes || []);
   const customerSchedulingRequests = Array.isArray(input.customerSchedulingRequests)
     ? input.customerSchedulingRequests
@@ -576,14 +589,7 @@ function normalizeProject(input = {}, fallback = {}) {
       dailySchedule: clean(input.protocolPolicy?.dailySchedule || fallback.protocolPolicy?.dailySchedule, 180),
       weeklySchedule: clean(input.protocolPolicy?.weeklySchedule || fallback.protocolPolicy?.weeklySchedule, 180),
       cleanupSchedule: clean(input.protocolPolicy?.cleanupSchedule || fallback.protocolPolicy?.cleanupSchedule, 180),
-      expectedWorkflows: (Array.isArray(input.protocolPolicy?.expectedWorkflows)
-        ? input.protocolPolicy.expectedWorkflows
-        : (fallback.protocolPolicy?.expectedWorkflows || [])).map(item => ({
-          workflowId: clean(item?.workflowId, 140),
-          workflowName: clean(item?.workflowName, 240),
-          cadence: item?.cadence === 'weekly' ? 'weekly' : 'daily',
-          weekday: Number.isInteger(Number(item?.weekday)) ? Number(item.weekday) : null,
-        })).filter(item => item.workflowId).slice(0, 100),
+      expectedWorkflows,
       note: clean(input.protocolPolicy?.note || fallback.protocolPolicy?.note, 1000),
     },
     existingCapabilities: (Array.isArray(input.existingCapabilities) ? input.existingCapabilities : (fallback.existingCapabilities || [])).map(item => clean(item, 3000)).filter(Boolean).slice(0, 200),
