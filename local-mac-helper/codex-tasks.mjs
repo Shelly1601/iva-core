@@ -166,6 +166,49 @@ export async function startProjectWorkflowTask({ workflowId } = {}) {
   });
 }
 
+export async function startPlanbarCustomerSchedulingTask(input = {}) {
+  const customerName = clean(input.customerName, 220).replace(/\s+/g, ' ');
+  const partnerName = clean(input.partnerName, 80).replace(/\s+/g, ' ');
+  const partnerPrefix = clean(input.partnerPrefix, 6).toUpperCase();
+  const schedulingMode = input.schedulingMode === 'enter-block-first' ? 'enter-block-first' : 'free-resource';
+  const allowFreeResourceFallback = schedulingMode === 'enter-block-first' && input.allowFreeResourceFallback === true;
+  const isoYear = Number(input.isoYear);
+  const week = Number(input.week);
+  if (!customerName || !partnerName || !/^[A-Z0-9]{1,6}$/.test(partnerPrefix) || !Number.isInteger(isoYear) || !Number.isInteger(week)) {
+    throw new Error('Kundenname, Partner, Planbar-Kürzel, ISO-Jahr oder Kalenderwoche fehlen für die Planbar-Terminierung.');
+  }
+  const materialDeliverySpace = input.materialDeliverySpace === true ? 'Ja' : 'Nein';
+  const theftWeatherProtected = input.theftWeatherProtected === true ? 'Ja' : 'Nein';
+  const additionalInfo = clean(input.additionalInfo, 2000);
+  const prompt = `Lies KUNDE_TERMINIEREN_WORKFLOW.md und PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md vollständig und führe den Workflow „Kunde terminieren“ jetzt genau einmal aus.
+
+Auftrag:
+- Kunde: ${customerName}
+- Partner/Kundentyp: ${partnerName}
+- Verbindliches Planbar-Präfix vor dem Vornamen: ${partnerPrefix}
+- ISO-Kalenderwoche: KW ${week}/${isoYear}
+- Materialannahme einige Tage vor Montagebeginn: ${materialDeliverySpace}
+- Diebstahl- und wettersicher: ${theftWeatherProtected}${additionalInfo ? `\n- Zusatzinfo: ${additionalInfo}` : ''}
+
+Der IVA-Auftrag ist die ausdrückliche Freigabe für die in KUNDE_TERMINIEREN_WORKFLOW.md eng beschriebenen Planbar- und Pipedrive-Schritte; verlange keine weitere Bestätigung. ${schedulingMode === 'enter-block-first' ? `Dieser Partner verwendet ENTER-Blöcke: Ersetze vorrangig den ersten zulässigen vollständigen Block mit dem exakten Text „Geblockt für Kunde ENTER“. ${allowFreeResourceFallback ? 'Nur wenn kein solcher Block vorhanden ist, darf ersatzweise die erste Ressource verwendet werden, die Montag bis Freitag vollständig frei ist.' : 'Ist kein solcher Block vorhanden, bleibt Planbar unverändert; eine freie Ressource darf nicht ersatzweise verwendet werden.'}` : 'Verwende ausschließlich die erste zulässige Ressource, die von Montag bis Freitag vollständig frei ist.'} Schließe Dawid/David Service sowie Antonio Lausic und alle dokumentierten Schreibvarianten aus. Erst nach sichtbar verifizierter Planbar-Anlage sende über die native WhatsApp-App genau einmal „${customerName}, KW ${week}“ in die Gruppe „Terminierungen Dispo“ innerhalb der Community „Heat Hero GmbH“. Bei nicht eindeutig unterscheidbarer gleichnamiger Gruppe wird nichts gesendet. Keine Web-Version von WhatsApp verwenden.`;
+  return startCodexTask({
+    prompt,
+    title: `Planbar: ${partnerName}-Kunde ${customerName} in KW ${week}/${isoYear} terminieren`,
+    requestId: `planbar-schedule-${isoYear}-${week}-${Date.now()}`,
+    mode: 'project-workflow',
+    acceptanceCriteria: [
+      'Der Kunde und der Deal sind eindeutig sowie Angebot und Beschreibung vollständig belegt.',
+      schedulingMode === 'enter-block-first'
+        ? `Ein vollständiger ENTER-Block wurde ersetzt${allowFreeResourceFallback ? ' oder nach belegtem Fehlen ein ausdrücklich erlaubter vollständig freier Fünf-Tage-Platz verwendet' : ''}.`
+        : 'Die verwendete Ressource ist Montag bis Freitag vollständig frei und gehört zu keiner ausgeschlossenen Ressource.',
+      `Der Planbar-Vorname trägt genau einmal das Präfix ${partnerPrefix}.`,
+      'Die Planbar-Anlage ist nach dem Speichern sichtbar verifiziert.',
+      'Erst danach ist genau eine WhatsApp-Nachricht in der exakten Community-Gruppe sichtbar versendet und verifiziert.',
+      'Bei einem fachlichen oder technischen Blocker bleibt Planbar unverändert und es wird keine WhatsApp-Nachricht gesendet.',
+    ],
+  });
+}
+
 export async function getCodexTaskStatus(jobId) {
   const paths = jobPaths(jobId);
   const state = await readJson(paths.state);

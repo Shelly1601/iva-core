@@ -61,7 +61,7 @@
 ## Mobile Übersicht freier Planbar-Plätze
 
 1. Bei aktivem Projekt-Schalter wird nach dem einmaligen Planbar-Neuladen zusätzlich eine Kapazitätsaufnahme für die kommenden zwölf Kalenderwochen erstellt.
-2. Als freier Montageplatz zählt ausschließlich ein im sichtbaren Kalender vorhandener Block mit dem exakten Text `Geblockt für Kunde ENTER`. Leere Zellen, Urlaub, Service-Termine oder sonstige Annahmen zählen nicht.
+2. Als freier Montageplatz zählt ausschließlich eine sichtbare Ressource, die in der jeweiligen Zielwoche von Montag bis Freitag vollständig frei ist. Eine auch nur teilweise Belegung sperrt die Ressource für diese Woche; einzelne freie Tage werden nicht addiert. Jede vollständig freie zulässige Ressource zählt genau einmal.
 3. Die Ressourcen `Dawid Service` und `Antonio Lausic` sowie erkennbare Schreibvarianten dieser Namen werden vollständig ausgeschlossen. Ihre Termine oder Blöcke dürfen weder eine freie Kapazität erzeugen noch die Wochenzahl beeinflussen.
 4. Für jede geprüfte Kalenderwoche wird auch der Wert `0` gespeichert. Der lokale iMac-Lauf übermittelt Zeitstempel, ISO-Jahr, KW und Anzahl über den freigegebenen Geräte-Endpunkt an die Heat-Hero-Projektakte.
 5. IVA zeigt oberhalb von `Kunde terminieren` immer vier Kalenderwochen, deren Summe, die nächste KW mit mindestens einem freien Platz und Pfeile für frühere beziehungsweise spätere Vier-Wochen-Fenster. Quelle, Aktualisierungszeit und beide ausgeschlossenen Ressourcen bleiben sichtbar.

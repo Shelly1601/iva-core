@@ -1,4 +1,10 @@
 import { spawn } from 'node:child_process';
+import {
+  countPlanbarFreeWorkweekCapacity,
+  PLANBAR_CAPACITY_RULE_VERSION,
+  PLANBAR_ENTER_BLOCK_TEXT,
+  PLANBAR_MINIMUM_BLOCK_DAYS,
+} from '../operations/customer-scheduling.js';
 
 const PLANBAR_HOST = 'heathero-partner-a.planbar365.com';
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -94,6 +100,8 @@ export async function collectPlanbarSearchIndex({ timeoutMs = 120000 } = {}) {
       addTeam(cell.getAttribute('data-resource-id'), cell.innerText);
     }
     const appointments = [];
+    const enterBlockers = [];
+    const capacityBookings = [];
     const stats = { entries: entries.length, customerEntries: 0, mappedTeams: 0 };
     for (const entry of entries) {
       const tooltip = entry?.tooltipdata || {};
@@ -101,9 +109,27 @@ export async function collectPlanbarSearchIndex({ timeoutMs = 120000 } = {}) {
       const customerName = clean([customer.firstname, customer.lastname].filter(Boolean).join(' ') || customer.name || entry.customer_name);
       const resourceId = clean(entry.resourceId);
       const team = teams.get(resourceId) || '';
-      const startDate = clean(entry.start).slice(0, 10);
-      let endDateExclusive = clean(entry.end).slice(0, 10);
+      const rawStart = clean(entry.start);
+      const rawEnd = clean(entry.end);
+      const startDate = rawStart.slice(0, 10);
+      let endDateExclusive = rawEnd.slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}[ T](?!00:00(?::00)?(?:\.0+)?(?:Z|$))/.test(rawEnd)) {
+        endDateExclusive = addDays(endDateExclusive, 1);
+      }
       if (!endDateExclusive || endDateExclusive <= startDate) endDateExclusive = addDays(startDate, 1);
+      const possibleTexts = [entry.title, entry.text, entry.description, tooltip.title, tooltip.task].map(clean);
+      const isEnterBlocker = possibleTexts.includes(${JSON.stringify(PLANBAR_ENTER_BLOCK_TEXT)});
+      if (resourceId && team && /^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+        const capacityBooking = {
+          id: clean(entry.id),
+          resourceId,
+          startDate,
+          endDateExclusive,
+          text: isEnterBlocker ? ${JSON.stringify(PLANBAR_ENTER_BLOCK_TEXT)} : 'Belegt',
+        };
+        capacityBookings.push(capacityBooking);
+        if (isEnterBlocker) enterBlockers.push(capacityBooking);
+      }
       if (!customerName || !resourceId || !team || !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) continue;
       stats.customerEntries += 1;
       stats.mappedTeams += 1;
@@ -122,6 +148,9 @@ export async function collectPlanbarSearchIndex({ timeoutMs = 120000 } = {}) {
       rangeStart,
       rangeEndExclusive,
       appointments,
+      resources: [...teams].map(([id, name]) => ({ id, name })),
+      enterBlockers,
+      capacityBookings,
       stats,
     });
   })()`, { timeoutMs });
@@ -132,4 +161,44 @@ export async function collectPlanbarSearchIndex({ timeoutMs = 120000 } = {}) {
   return result;
 }
 
-export const planbarLocalPolicy = Object.freeze({ readOnly: true, host: PLANBAR_HOST, storedFields: ['customerName', 'description', 'team', 'resourceId', 'startDate', 'endDateExclusive'] });
+function isoWeekParts(dateString) {
+  const date = new Date(`${dateString}T00:00:00Z`);
+  const thursday = new Date(date);
+  thursday.setUTCDate(date.getUTCDate() + 3 - ((date.getUTCDay() + 6) % 7));
+  const isoYear = thursday.getUTCFullYear();
+  const weekOne = new Date(Date.UTC(isoYear, 0, 4));
+  const weekOneMonday = new Date(weekOne);
+  weekOneMonday.setUTCDate(weekOne.getUTCDate() - ((weekOne.getUTCDay() + 6) % 7));
+  return { isoYear, week: Math.floor((thursday - weekOneMonday) / 604800000) + 1 };
+}
+
+export function buildPlanbarCapacitySnapshot(index, { weekCount = 12 } = {}) {
+  if (!index?.rangeStart || !Array.isArray(index.resources) || !index.resources.length) {
+    throw new Error('Die Planbar-Kapazität kann ohne vollständig zugeordnete Ressourcen nicht verifiziert werden.');
+  }
+  const weeks = [];
+  for (let offset = 0; offset < Math.max(1, Math.min(12, Number(weekCount) || 12)); offset += 1) {
+    const monday = new Date(`${index.rangeStart}T00:00:00Z`);
+    monday.setUTCDate(monday.getUTCDate() + (offset * 7));
+    const { isoYear, week } = isoWeekParts(monday.toISOString().slice(0, 10));
+    weeks.push({
+      isoYear,
+      week,
+      freeSlots: countPlanbarFreeWorkweekCapacity({
+        resources: index.resources,
+        bookings: index.capacityBookings || index.enterBlockers || [],
+        year: isoYear,
+        week,
+      }),
+    });
+  }
+  return {
+    updatedAt: index.updatedAt || new Date().toISOString(),
+    minimumBlockDays: PLANBAR_MINIMUM_BLOCK_DAYS,
+    countingRuleVersion: PLANBAR_CAPACITY_RULE_VERSION,
+    excludedResources: ['Dawid Service', 'Antonio Lausic'],
+    weeks,
+  };
+}
+
+export const planbarLocalPolicy = Object.freeze({ readOnly: true, host: PLANBAR_HOST, minimumCapacityBlockDays: PLANBAR_MINIMUM_BLOCK_DAYS, storedFields: ['customerName', 'description', 'team', 'resourceId', 'startDate', 'endDateExclusive'] });

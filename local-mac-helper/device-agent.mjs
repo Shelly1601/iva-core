@@ -15,7 +15,7 @@ const APP_ALLOWLIST = Object.freeze({
   WhatsApp: '/Applications/WhatsApp.app',
   Codex: '/Applications/Codex.app',
 });
-const UI_ACTIONS = new Set(['computer.status', 'planbar.search.refresh', 'portal.login', 'app.open']);
+const UI_ACTIONS = new Set(['computer.status', 'planbar.search.refresh', 'planbar.customer.schedule', 'portal.login', 'app.open']);
 
 function cleanServerUrl(value) {
   const url = new URL(String(value || DEFAULT_SERVER_URL));
@@ -107,16 +107,26 @@ async function executeDeviceCommand(command) {
     return { total: reviews.length, counts, latestAt: reviews[0]?.updatedAt || reviews[0]?.createdAt || null };
   }
   if (command.action === 'planbar.search.refresh') {
-    const { collectPlanbarSearchIndex } = await import('./planbar.mjs');
+    const { buildPlanbarCapacitySnapshot, collectPlanbarSearchIndex } = await import('./planbar.mjs');
     const snapshot = await collectPlanbarSearchIndex();
-    const stored = await request(`/device-agent/${IMAC_DEVICE_ID}/planbar-search-index`, { method: 'POST', body: snapshot });
+    const capacity = buildPlanbarCapacitySnapshot(snapshot);
+    const [stored, storedCapacity] = await Promise.all([
+      request(`/device-agent/${IMAC_DEVICE_ID}/planbar-search-index`, { method: 'POST', body: snapshot }),
+      request(`/device-agent/${IMAC_DEVICE_ID}/planbar-capacity`, { method: 'POST', body: capacity }),
+    ]);
     return {
       updatedAt: stored.updatedAt,
       appointmentCount: stored.appointmentCount,
       rangeStart: stored.rangeStart,
       rangeEndExclusive: stored.rangeEndExclusive,
+      capacityWeeks: storedCapacity.planbarCapacity?.weeks || capacity.weeks,
+      minimumCapacityBlockDays: capacity.minimumBlockDays,
       readOnly: true,
     };
+  }
+  if (command.action === 'planbar.customer.schedule') {
+    const { startPlanbarCustomerSchedulingTask } = await import('./codex-tasks.mjs');
+    return startPlanbarCustomerSchedulingTask(command.payload || {});
   }
   if (command.action === 'portal.credentials.status') {
     const { credentialServiceStatus } = await import('./credential-broker.mjs');
@@ -174,7 +184,7 @@ export function imacDeviceAgentPolicy() {
     deviceId: IMAC_DEVICE_ID,
     keychainService: KEYCHAIN_SERVICE,
     arbitraryShellCommands: false,
-    allowedActions: ['computer.status', 'funding.monitor.status', 'funding.monitor.run', 'funding.reviews.list', 'planbar.search.refresh', 'project.workflow.run', 'portal.credentials.status', 'portal.login', 'codex.task.start', 'codex.task.status', 'app.open'],
+    allowedActions: ['computer.status', 'funding.monitor.status', 'funding.monitor.run', 'funding.reviews.list', 'planbar.search.refresh', 'planbar.customer.schedule', 'project.workflow.run', 'portal.credentials.status', 'portal.login', 'codex.task.start', 'codex.task.status', 'app.open'],
     allowedApps: Object.keys(APP_ALLOWLIST),
   });
 }

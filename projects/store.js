@@ -1,7 +1,12 @@
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
-import { buildPlanbarSchedulingExtras, normalizePlanbarCapacitySnapshot } from '../operations/customer-scheduling.js';
+import {
+  buildPlanbarSchedulingExtras,
+  DEFAULT_CUSTOMER_SCHEDULING_PARTNERS,
+  normalizeCustomerSchedulingPartners,
+  normalizePlanbarCapacitySnapshot,
+} from '../operations/customer-scheduling.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const STORE_FILE = path.join(DATA_DIR, 'projects.json');
@@ -52,6 +57,7 @@ const HEAT_HERO_PROJECT = {
     ],
     note: 'Jede Datei zeigt Typ, Aufbewahrungsdauer und konkretes automatisches Löschdatum als Tags.',
   },
+  customerSchedulingPartners: DEFAULT_CUSTOMER_SCHEDULING_PARTNERS,
   planbarCapacity: {
     updatedAt: '2026-08-22T15:48:00.000Z',
     source: 'Planbar · sichtbare Blöcke „Geblockt für Kunde ENTER“',
@@ -386,6 +392,11 @@ function normalizeCustomerSchedulingRequest(request = {}) {
   const materialDeliverySpace = request.materialDeliverySpace === true;
   const theftWeatherProtected = request.theftWeatherProtected === true;
   const additionalInfo = clean(request.additionalInfo, 2000);
+  const partnerId = clean(request.partnerId, 80) || 'heat-hero';
+  const partnerName = clean(request.partnerName, 80) || 'Heat Hero';
+  const partnerPrefix = clean(request.partnerPrefix, 6).toUpperCase() || 'HH';
+  const schedulingMode = request.schedulingMode === 'enter-block-first' ? 'enter-block-first' : 'free-resource';
+  const allowFreeResourceFallback = schedulingMode === 'enter-block-first' && request.allowFreeResourceFallback === true;
   const planbarDescriptionExtras = buildPlanbarSchedulingExtras({ materialDeliverySpace, theftWeatherProtected, additionalInfo });
   return {
     id: clean(request.id, 100) || crypto.randomUUID(),
@@ -395,8 +406,13 @@ function normalizeCustomerSchedulingRequest(request = {}) {
     materialDeliverySpace,
     theftWeatherProtected,
     additionalInfo,
+    partnerId,
+    partnerName,
+    partnerPrefix,
+    schedulingMode,
+    allowFreeResourceFallback,
     planbarDescriptionExtras,
-    command: `Kunde terminieren: ${customerName} in KW ${week}/${isoYear}\n${planbarDescriptionExtras.join('\n')}`,
+    command: `Kunde terminieren: ${customerName} in KW ${week}/${isoYear} für ${partnerName} (${partnerPrefix})${schedulingMode === 'enter-block-first' ? `\nFreien Fünf-Tage-Platz verwenden, falls kein ENTER-Block vorhanden: ${allowFreeResourceFallback ? 'Ja' : 'Nein'}` : ''}\n${planbarDescriptionExtras.join('\n')}`,
     status: request.status === 'completed' ? 'completed' : 'requested',
     createdAt: iso(request.createdAt),
   };
@@ -512,6 +528,9 @@ function normalizeProject(input = {}, fallback = {}) {
       Array.isArray(input.planbarCapacity?.weeks) && input.planbarCapacity.weeks.length
         ? input.planbarCapacity
         : fallback.planbarCapacity,
+    ),
+    customerSchedulingPartners: normalizeCustomerSchedulingPartners(
+      input.customerSchedulingPartners ?? fallback.customerSchedulingPartners,
     ),
     protocolPolicy: {
       enabled: input.protocolPolicy?.enabled ?? fallback.protocolPolicy?.enabled ?? false,
@@ -685,6 +704,9 @@ export async function addCustomerSchedulingRequest(id, input = {}) {
   return mutate(store => {
     const project = store.projects.find(item => item.id === clean(id, 100));
     if (!project) return null;
+    const partner = normalizeCustomerSchedulingPartners(project.customerSchedulingPartners)
+      .find(item => item.id === clean(input.partnerId, 80));
+    if (!partner) throw new Error('Bitte den Planbar-Partner für diesen Kunden auswählen.');
     const request = normalizeCustomerSchedulingRequest({
       customerName,
       isoYear,
@@ -692,6 +714,11 @@ export async function addCustomerSchedulingRequest(id, input = {}) {
       materialDeliverySpace: input.materialDeliverySpace,
       theftWeatherProtected: input.theftWeatherProtected,
       additionalInfo: input.additionalInfo,
+      partnerId: partner.id,
+      partnerName: partner.name,
+      partnerPrefix: partner.prefix,
+      schedulingMode: partner.schedulingMode,
+      allowFreeResourceFallback: input.allowFreeResourceFallback,
     });
     project.customerSchedulingRequests = [request, ...(project.customerSchedulingRequests || [])].slice(0, 100);
     return publicProject(project);

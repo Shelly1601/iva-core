@@ -39,14 +39,16 @@ check('KfW-Morgenlauf wird ohne ausführbaren Job nicht fälschlich als aktiv ge
 check('Montage-Pflichtfeldlauf separat schaltbar', heat.automations.some(item => item.id === 'montage-required-fields-morning' && item.toggleAvailable && item.enabled));
 const heatWithSchedulingRequest = await addCustomerSchedulingRequest('heat-hero', {
   customerName: 'Stefanie Schneider', isoYear: 2026, week: 39,
+  partnerId: 'enter', allowFreeResourceFallback: true,
   materialDeliverySpace: true, theftWeatherProtected: false,
   additionalInfo: 'Zufahrt nur über den Hof.',
 });
 const schedulingRequest = heatWithSchedulingRequest.customerSchedulingRequests[0];
 check('Kunde-terminieren-Auftrag wird in der Projektakte vorgemerkt', schedulingRequest?.command.includes('Kunde terminieren: Stefanie Schneider in KW 39/2026'));
+check('Enter-Auftrag speichert EN und den erlaubten freien Ersatzplatz', schedulingRequest?.partnerPrefix === 'EN' && schedulingRequest?.schedulingMode === 'enter-block-first' && schedulingRequest?.allowFreeResourceFallback === true);
 check('Materialantworten werden für Planbar gespeichert', schedulingRequest?.planbarDescriptionExtras.includes('Materialannahme einige Tage vor Montagebeginn: Ja') && schedulingRequest?.planbarDescriptionExtras.includes('Diebstahl- und wettersicher: Nein'));
 check('Vorhandene Zusatzinfo wird für Planbar gespeichert', schedulingRequest?.planbarDescriptionExtras.includes('Zusatzinfo: Zufahrt nur über den Hof.'));
-const withoutAdditionalInfo = await addCustomerSchedulingRequest('heat-hero', { customerName: 'Max Mustermann', isoYear: 2026, week: 40, materialDeliverySpace: false, theftWeatherProtected: true, additionalInfo: '   ' });
+const withoutAdditionalInfo = await addCustomerSchedulingRequest('heat-hero', { customerName: 'Max Mustermann', partnerId: 'heat-hero', isoYear: 2026, week: 40, materialDeliverySpace: false, theftWeatherProtected: true, additionalInfo: '   ' });
 check('Leere Zusatzinfo wird nicht an Planbar übergeben', !withoutAdditionalInfo.customerSchedulingRequests[0]?.planbarDescriptionExtras.some(line => line.startsWith('Zusatzinfo:')));
 const invalidSchedulingWeek = await addCustomerSchedulingRequest('heat-hero', { customerName: 'Stefanie Schneider', isoYear: 2026, week: 54, materialDeliverySpace: true, theftWeatherProtected: true }).then(() => false).catch(error => /Kalenderwoche/.test(error.message));
 check('Ungültige Kalenderwoche wird abgewiesen', invalidSchedulingWeek);
@@ -65,10 +67,18 @@ const renamedPlanbar = await renameProjectAutomation('heat-hero', 'planbar-weekl
 check('Workflow-Name lässt sich frei anpassen und speichern', renamedPlanbar.automations.some(item => item.id === 'planbar-weekly-export' && item.name === 'Planbar Kunden- und Herstellerlisten'));
 const invalidWorkflowName = await renameProjectAutomation('heat-hero', 'planbar-weekly-export', ' ').then(() => false).catch(error => /mindestens zwei Zeichen/.test(error.message));
 check('Leerer Workflow-Name wird abgewiesen', invalidWorkflowName);
-await updateProject('heat-hero', { status: 'active', files: [{ storageName: 'injected' }] });
+await updateProject('heat-hero', {
+  status: 'active',
+  files: [{ storageName: 'injected' }],
+  customerSchedulingPartners: [
+    ...heat.customerSchedulingPartners,
+    { id: 'partner-x', name: 'Partner X', prefix: 'PX', schedulingMode: 'free-resource' },
+  ],
+});
 const updatedHeat = await getProject('heat-hero');
 check('Projektupdate bleibt gespeichert', updatedHeat.status === 'active');
 check('Projektupdate kann Dateien nicht einschleusen', updatedHeat.files.length === 0);
+check('Zusätzliche Planbar-Kürzel lassen sich speichern', updatedHeat.customerSchedulingPartners.some(item => item.name === 'Partner X' && item.prefix === 'PX'));
 
 const project = await createProject({ name: 'Testprojekt', category: 'Test', description: 'Projektakte testen', websiteUrl: 'beispiel.de', instagramUrl: '@beispiel.marke' });
 check('Neues Projekt erhält sichere ID', /^[a-z0-9-]+$/i.test(project.id));
@@ -120,6 +130,8 @@ check('Workflow-Namen sind bearbeitbar und speicherbar', js.includes('data-workf
 check('Jeder Workflow hat manuellen Start oder IVA-Fertigstellungsauftrag', js.includes('▶ Jetzt auslösen') && js.includes('✦ Mit IVA fertig bauen') && js.includes('/${action}') && js.includes('runOrPrepareWorkflow'));
 check('Markenprofil mit Logo, Website und Instagram ist bedienbar', html.includes('Markenprofil bearbeiten') && html.includes('projectWebsite') && html.includes('projectInstagram') && html.includes('projectLogo') && js.includes('/logo') && js.includes('projectLogo(project)'));
 check('Kunde terminieren steht oben mit Kundenname und KW-Auswahl bereit', html.includes('.workflow-launcher') && js.includes('Kunde terminieren') && js.includes('scheduleCustomerName') && js.includes('scheduleWeek') && js.includes('/customer-scheduling-requests'));
+check('Kunde terminieren startet direkt und erklärt die Fünf-Tage-Kapazität', js.includes('Jetzt terminieren') && js.includes('direkt an den Planbar-Workflow') && js.includes('vollständig freien fünf Tagen'));
+check('Kundentypen, Kürzelverwaltung und Enter-Ersatzplatz sind bedienbar', js.includes('schedulePartner') && js.includes('schedulePartnerPrefixes') && js.includes('saveCustomerSchedulingPartners') && js.includes('scheduleAllowFreeResourceFallback') && js.includes('ENTER-Block'));
 check('Kunde terminieren ist standardmäßig kompakt einklappbar', js.includes('<details class="workflow-launcher workflow-launcher-disclosure"') && html.includes('.workflow-launcher-disclosure'));
 check('Materialfragen und optionale Zusatzinfo stehen im Schnellstart bereit', js.includes('scheduleMaterialDeliverySpace') && js.includes('scheduleTheftWeatherProtected') && js.includes('scheduleAdditionalInfo'));
 

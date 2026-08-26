@@ -13,8 +13,47 @@ const ALLOWED_SOURCE_STAGES = new Set([
   'montage terminieren',
 ]);
 
+export const PLANBAR_ENTER_BLOCK_TEXT = 'Geblockt für Kunde ENTER';
+export const PLANBAR_MINIMUM_BLOCK_DAYS = 5;
+export const PLANBAR_CAPACITY_RULE_VERSION = 'free-full-workweek-v3';
+export const DEFAULT_CUSTOMER_SCHEDULING_PARTNERS = Object.freeze([
+  Object.freeze({ id: 'heat-hero', name: 'Heat Hero', prefix: 'HH', schedulingMode: 'free-resource' }),
+  Object.freeze({ id: 'enter', name: 'Enter', prefix: 'EN', schedulingMode: 'enter-block-first' }),
+  Object.freeze({ id: 'd-warmte', name: 'D Warmte', prefix: 'DW', schedulingMode: 'free-resource' }),
+]);
+
 function normalizedText(value) {
   return String(value || '').trim().toLocaleLowerCase('de-DE').replace(/\s+/g, ' ');
+}
+
+export function normalizePlanbarCustomerPrefix(value) {
+  const prefix = String(value || '').trim().toLocaleUpperCase('de-DE');
+  if (!/^[A-Z0-9]{1,6}$/.test(prefix)) throw new Error('Das Planbar-Kürzel muss aus 1 bis 6 Buchstaben oder Zahlen bestehen.');
+  return prefix;
+}
+
+export function normalizeCustomerSchedulingPartners(input) {
+  const source = Array.isArray(input) && input.length ? input : DEFAULT_CUSTOMER_SCHEDULING_PARTNERS;
+  const partners = [];
+  const usedIds = new Set();
+  const usedPrefixes = new Set();
+  for (const item of source.slice(0, 20)) {
+    const name = String(item?.name || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    if (!name) throw new Error('Jeder Planbar-Partner braucht einen Namen.');
+    const prefix = normalizePlanbarCustomerPrefix(item?.prefix);
+    const generatedId = name.toLocaleLowerCase('de-DE')
+      .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || prefix.toLowerCase();
+    let id = String(item?.id || generatedId).trim().toLocaleLowerCase('de-DE').replace(/[^a-z0-9_-]+/g, '-').slice(0, 80);
+    if (!id || usedIds.has(id)) id = `${generatedId}-${partners.length + 1}`;
+    if (usedPrefixes.has(prefix)) throw new Error(`Das Planbar-Kürzel ${prefix} ist doppelt vergeben.`);
+    usedIds.add(id);
+    usedPrefixes.add(prefix);
+    const schedulingMode = item?.schedulingMode === 'enter-block-first' ? 'enter-block-first' : 'free-resource';
+    partners.push({ id, name, prefix, schedulingMode });
+  }
+  if (!partners.length) throw new Error('Mindestens ein Planbar-Partner ist erforderlich.');
+  return partners;
 }
 
 function utcDateString(date) {
@@ -52,7 +91,9 @@ export function isExcludedPlanbarResource(name) {
 
 export function normalizePlanbarCapacitySnapshot(input = {}) {
   const byWeek = new Map();
-  for (const item of (Array.isArray(input.weeks) ? input.weeks : [])) {
+  const usesVerifiedRule = Number(input.minimumBlockDays) === PLANBAR_MINIMUM_BLOCK_DAYS
+    && input.countingRuleVersion === PLANBAR_CAPACITY_RULE_VERSION;
+  for (const item of (usesVerifiedRule && Array.isArray(input.weeks) ? input.weeks : [])) {
     const isoYear = Number(item?.isoYear);
     const week = Number(item?.week);
     const freeSlots = Number(item?.freeSlots);
@@ -65,8 +106,10 @@ export function normalizePlanbarCapacitySnapshot(input = {}) {
   const parsedUpdatedAt = new Date(input.updatedAt || Date.now());
   return {
     updatedAt: Number.isNaN(parsedUpdatedAt.getTime()) ? new Date().toISOString() : parsedUpdatedAt.toISOString(),
-    source: 'Planbar · sichtbare Blöcke „Geblockt für Kunde ENTER“',
+    source: 'Planbar · vollständig freie Ressourcen von Montag bis Freitag',
     excludedResources: ['Dawid Service', 'Antonio Lausic'],
+    minimumBlockDays: PLANBAR_MINIMUM_BLOCK_DAYS,
+    countingRuleVersion: PLANBAR_CAPACITY_RULE_VERSION,
     weeks,
   };
 }
@@ -115,6 +158,26 @@ export function buildPlanbarCustomer({ firstName, lastName, address, email, phon
   };
 }
 
+export function buildPrefixedPlanbarCustomer({ prefix, firstName, lastName, address, email, phone, phoneKind = 'Telefon', knownPrefixes = [] }) {
+  const cleanPrefix = normalizePlanbarCustomerPrefix(prefix);
+  const prefixSet = new Set([cleanPrefix, ...DEFAULT_CUSTOMER_SCHEDULING_PARTNERS.map(item => item.prefix), ...knownPrefixes.map(normalizePlanbarCustomerPrefix)]);
+  const prefixPattern = [...prefixSet].map(item => item.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const cleanFirstName = String(firstName || '').trim().replace(new RegExp(`^(?:${prefixPattern})\\s+`, 'i'), '');
+  const cleanLastName = String(lastName || '').trim();
+  if (!cleanFirstName || !cleanLastName) throw new Error('Vor- und Nachname sind Pflichtfelder.');
+  if (!String(address || '').trim() || !String(email || '').trim() || !String(phone || '').trim()) {
+    throw new Error('Adresse, E-Mail-Adresse und Telefonnummer müssen vollständig belegt sein.');
+  }
+  return {
+    firstName: `${cleanPrefix} ${cleanFirstName}`,
+    lastName: cleanLastName,
+    address: String(address).trim(),
+    email: String(email).trim(),
+    phone: String(phone).trim(),
+    phoneKind: normalizedText(phoneKind) === 'mobil' ? 'Mobil' : 'Telefon',
+  };
+}
+
 export function buildEnterPlanbarCustomer({ firstName, lastName, address, email, phone, phoneKind = 'Telefon' }) {
   const cleanFirstName = String(firstName || '').trim().replace(/^(?:EN|HH)\s+/i, '');
   const cleanLastName = String(lastName || '').trim();
@@ -139,6 +202,61 @@ function overlaps(startDate, endDateExclusive, booking) {
   return bookingStart < endDateExclusive && bookingEnd > startDate;
 }
 
+function bookingRange(booking = {}) {
+  const startDate = String(booking.startDate || booking.start || '').slice(0, 10);
+  const endDateExclusive = String(booking.endDateExclusive || booking.end || '').slice(0, 10);
+  return { startDate, endDateExclusive };
+}
+
+function isEnterBlocker(booking = {}) {
+  return String(booking.text || booking.description || booking.title || '').trim() === PLANBAR_ENTER_BLOCK_TEXT;
+}
+
+export function isFullWorkweekPlanbarEnterBlocker(booking, { year, week } = {}) {
+  const target = isoWeekRange(year, week);
+  const range = bookingRange(booking);
+  return isEnterBlocker(booking)
+    && /^\d{4}-\d{2}-\d{2}$/.test(range.startDate)
+    && /^\d{4}-\d{2}-\d{2}$/.test(range.endDateExclusive)
+    && range.startDate <= target.startDate
+    && range.endDateExclusive >= target.endDateExclusive;
+}
+
+function eligibleEnterBlockers({ resources, bookings = [], year, week }) {
+  const { startDate, endDateExclusive } = isoWeekRange(year, week);
+  const resourceById = new Map(resources.map((resource, index) => [String(resource?.id || ''), { resource, index }]));
+  return bookings
+    .filter(booking => isFullWorkweekPlanbarEnterBlocker(booking, { year, week }))
+    .map(booking => ({ booking, match: resourceById.get(String(booking?.resourceId || '')) }))
+    .filter(item => item.match?.resource?.id && !isExcludedPlanbarResource(item.match.resource.name))
+    .filter(item => !bookings.some(other => other !== item.booking
+      && String(other?.resourceId || '') === String(item.booking?.resourceId || '')
+      && !isEnterBlocker(other)
+      && overlaps(startDate, endDateExclusive, other)))
+    .sort((left, right) => left.match.index - right.match.index
+      || bookingRange(left.booking).startDate.localeCompare(bookingRange(right.booking).startDate));
+}
+
+export function countPlanbarEnterCapacity({ resources, bookings = [], year, week }) {
+  if (!Array.isArray(resources) || !resources.length) throw new Error('Keine Planbar-Ressourcen vorhanden.');
+  const candidates = eligibleEnterBlockers({ resources, bookings, year, week });
+  return new Set(candidates.map(item => String(item.booking.resourceId))).size;
+}
+
+export function countPlanbarFreeWorkweekCapacity({ resources, bookings = [], year, week }) {
+  if (!Array.isArray(resources) || !resources.length) throw new Error('Keine Planbar-Ressourcen vorhanden.');
+  const { startDate, endDateExclusive } = isoWeekRange(year, week);
+  const eligibleResourceIds = new Set();
+  for (const resource of resources) {
+    const resourceId = String(resource?.id || '');
+    if (!resourceId || isExcludedPlanbarResource(resource.name) || eligibleResourceIds.has(resourceId)) continue;
+    const occupied = bookings.some(booking => String(booking?.resourceId || '') === resourceId
+      && overlaps(startDate, endDateExclusive, booking));
+    if (!occupied) eligibleResourceIds.add(resourceId);
+  }
+  return eligibleResourceIds.size;
+}
+
 export function selectFirstFreePlanbarResource({ resources, bookings = [], startDate, endDateExclusive }) {
   if (!Array.isArray(resources) || !resources.length) throw new Error('Keine Planbar-Ressourcen vorhanden.');
   if (!startDate || !endDateExclusive || startDate >= endDateExclusive) throw new Error('Ungültiger Terminzeitraum.');
@@ -155,30 +273,42 @@ export function selectFirstFreePlanbarResource({ resources, bookings = [], start
 
 export function selectFirstPlanbarEnterBlocker({ resources, bookings = [], year, week }) {
   if (!Array.isArray(resources) || !resources.length) throw new Error('Keine Planbar-Ressourcen vorhanden.');
-  const { startDate, endDateExclusive } = isoWeekRange(year, week);
-  const resourceById = new Map(resources.map((resource, index) => [String(resource?.id || ''), { resource, index }]));
-  const isEnterBlocker = booking => String(booking?.text || booking?.description || booking?.title || '').trim() === 'Geblockt für Kunde ENTER';
+  const candidates = eligibleEnterBlockers({ resources, bookings, year, week });
 
-  const candidates = bookings
-    .filter(isEnterBlocker)
-    .filter(booking => overlaps(startDate, endDateExclusive, booking))
-    .map(booking => ({ booking, match: resourceById.get(String(booking?.resourceId || '')) }))
-    .filter(item => item.match?.resource?.id && !isExcludedPlanbarResource(item.match.resource.name))
-    .filter(item => !bookings.some(other => other !== item.booking
-      && String(other?.resourceId || '') === String(item.booking?.resourceId || '')
-      && !isEnterBlocker(other)
-      && overlaps(
-        String(item.booking.startDate || item.booking.start || ''),
-        String(item.booking.endDateExclusive || item.booking.end || item.booking.startDate || item.booking.start || ''),
-        other,
-      )))
-    .sort((left, right) => left.match.index - right.match.index
-      || String(left.booking.startDate || left.booking.start || '').localeCompare(String(right.booking.startDate || right.booking.start || '')));
-
-  if (!candidates.length) throw new Error('In der gewünschten Kalenderwoche ist kein zulässiger ENTER-Blocker vorhanden.');
+  if (!candidates.length) throw new Error('In der gewünschten Kalenderwoche ist kein zulässiger ENTER-Blocker vorhanden, der Montag bis Freitag vollständig umfasst.');
   return {
     ...candidates[0].booking,
     resource: candidates[0].match.resource,
+  };
+}
+
+export function selectPlanbarSchedulingSlot({
+  resources,
+  bookings = [],
+  year,
+  week,
+  schedulingMode = 'free-resource',
+  allowFreeResourceFallback = false,
+}) {
+  const range = isoWeekRange(year, week);
+  if (schedulingMode === 'enter-block-first') {
+    try {
+      const blocker = selectFirstPlanbarEnterBlocker({ resources, bookings, year, week });
+      return {
+        mode: 'replace-enter-block',
+        resource: blocker.resource,
+        blocker,
+        ...range,
+      };
+    } catch (error) {
+      if (!allowFreeResourceFallback) throw error;
+    }
+  }
+  return {
+    mode: 'free-resource',
+    resource: selectFirstFreePlanbarResource({ resources, bookings, ...range }),
+    blocker: null,
+    ...range,
   };
 }
 

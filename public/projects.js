@@ -52,7 +52,7 @@ function planbarCapacityOverview(project) {
   const next = allWeeks.find(item => Number(item.freeSlots) > 0);
   const range = weeks.length ? `KW ${weeks[0].week}–${weeks.at(-1).week}` : '';
   const cards = weeks.map(item => `<div class="capacity-week${item.freeSlots > 0 ? ' has-slots' : ''}"><span>KW ${esc(item.week)}</span><strong>${esc(item.freeSlots)}</strong><small>${item.freeSlots === 1 ? 'freier Platz' : 'freie Plätze'}</small></div>`).join('');
-  return `<div class="capacity-overview"><div class="capacity-head"><div><div class="eyebrow">Freie Montageplätze</div><div class="capacity-summary"><strong>${esc(total)} freie Plätze</strong> in ${esc(range)}${next ? ` · nächster freier Termin: <b>KW ${esc(next.week)}/${esc(next.isoYear)}</b>` : ''}</div></div><div class="capacity-nav"><button id="capacityPrev" type="button" aria-label="Vier Wochen zurück" ${offset === 0 ? 'disabled' : ''}>←</button><button id="capacityNext" type="button" aria-label="Vier Wochen weiter" ${offset === maxOffset ? 'disabled' : ''}>→</button></div></div><div class="capacity-grid">${cards}</div><div class="capacity-source">Stand ${esc(formatDate(snapshot.updatedAt))} · gezählt werden nur „Geblockt für Kunde ENTER“ · ohne Dawid Service und Antonio Lausic</div></div>`;
+  return `<div class="capacity-overview"><div class="capacity-head"><div><div class="eyebrow">Freie Montageplätze</div><div class="capacity-summary"><strong>${esc(total)} freie Plätze</strong> in ${esc(range)}${next ? ` · nächster freier Termin: <b>KW ${esc(next.week)}/${esc(next.isoYear)}</b>` : ''}</div></div><div class="capacity-nav"><button id="capacityPrev" type="button" aria-label="Vier Wochen zurück" ${offset === 0 ? 'disabled' : ''}>←</button><button id="capacityNext" type="button" aria-label="Vier Wochen weiter" ${offset === maxOffset ? 'disabled' : ''}>→</button></div></div><div class="capacity-grid">${cards}</div><div class="capacity-source">Stand ${esc(formatDate(snapshot.updatedAt))} · jede Ressource zählt nur bei vollständig freien fünf Tagen von Montag bis Freitag · ohne Dawid Service und Antonio Lausic</div></div>`;
 }
 
 function planbarSearchPanel() {
@@ -61,11 +61,20 @@ function planbarSearchPanel() {
 
 function customerSchedulingSection(project) {
   if (project.id !== 'heat-hero') return '';
+  const partners = (project.customerSchedulingPartners || []).length
+    ? project.customerSchedulingPartners
+    : [
+        { id: 'heat-hero', name: 'Heat Hero', prefix: 'HH', schedulingMode: 'free-resource' },
+        { id: 'enter', name: 'Enter', prefix: 'EN', schedulingMode: 'enter-block-first' },
+        { id: 'd-warmte', name: 'D Warmte', prefix: 'DW', schedulingMode: 'free-resource' },
+      ];
+  const partnerOptions = partners.map(partner => `<option value="${esc(partner.id)}" data-mode="${esc(partner.schedulingMode)}" data-prefix="${esc(partner.prefix)}">${esc(partner.name)} (${esc(partner.prefix)})</option>`).join('');
+  const partnerConfig = partners.map(partner => `${partner.name}=${partner.prefix}`).join('\n');
   const latest = (project.customerSchedulingRequests || [])[0];
   const latestSummary = latest
-    ? `Zuletzt vorgemerkt: <b>${esc(latest.customerName)}</b> · KW ${esc(latest.week)}/${esc(latest.isoYear)} · Material vorher: ${latest.materialDeliverySpace ? 'Ja' : 'Nein'} · geschützt: ${latest.theftWeatherProtected ? 'Ja' : 'Nein'}${latest.additionalInfo ? ' · Zusatzinfo vorhanden' : ''}`
+    ? `Zuletzt: <b>${esc(latest.customerName)}</b> · ${esc(latest.partnerName || 'Heat Hero')} (${esc(latest.partnerPrefix || 'HH')}) · KW ${esc(latest.week)}/${esc(latest.isoYear)} · Material vorher: ${latest.materialDeliverySpace ? 'Ja' : 'Nein'} · geschützt: ${latest.theftWeatherProtected ? 'Ja' : 'Nein'}${latest.allowFreeResourceFallback ? ' · Enter darf freien Platz nutzen' : ''}${latest.additionalInfo ? ' · Zusatzinfo vorhanden' : ''}`
     : 'Noch kein Kunde vorgemerkt.';
-  return `<details class="workflow-launcher workflow-launcher-disclosure" aria-labelledby="customerSchedulingTitle"><summary><div class="workflow-launcher-head"><div><div class="eyebrow">Operativer Workflow</div><h2 id="customerSchedulingTitle">Kunde terminieren</h2><div class="muted">${latestSummary}</div></div><span class="workflow-tag">Planbar + Pipedrive</span></div></summary><div class="workflow-launcher-body"><div class="muted scheduling-intro">Kundenname, Kalenderwoche und Materialannahme erfassen. IVA übernimmt die Angaben später in die Planbar-Beschreibung.</div>${planbarCapacityOverview(project)}${planbarSearchPanel()}<form class="schedule-form" id="customerSchedulingForm"><label><span>Kundenname</span><input id="scheduleCustomerName" name="customerName" maxlength="220" autocomplete="off" required placeholder="Vorname Nachname"></label><label><span>Kalenderwoche</span><select id="scheduleWeek" name="week" required>${schedulingWeekOptions()}</select></label><button class="btn primary" type="submit">Workflow vorbereiten</button><div class="schedule-checks"><label class="schedule-check"><input id="scheduleMaterialDeliverySpace" type="checkbox"><span class="schedule-question">Hat der Kunde Platz, Material einige Tage vor Montagebeginn anzunehmen?</span><span class="schedule-answer" data-answer-for="scheduleMaterialDeliverySpace">Nein</span></label><label class="schedule-check"><input id="scheduleTheftWeatherProtected" type="checkbox"><span class="schedule-question">Diebstahl- und wettersicher?</span><span class="schedule-answer" data-answer-for="scheduleTheftWeatherProtected">Nein</span></label></div><label class="schedule-extra"><span>Zusatzinfo · optional</span><textarea id="scheduleAdditionalInfo" maxlength="2000" placeholder="Nur ausfüllen, wenn diese Information zusätzlich in Planbar stehen soll."></textarea></label></form></div></details>`;
+  return `<details class="workflow-launcher workflow-launcher-disclosure" aria-labelledby="customerSchedulingTitle"><summary><div class="workflow-launcher-head"><div><div class="eyebrow">Operativer Workflow</div><h2 id="customerSchedulingTitle">Kunde terminieren</h2><div class="muted">${latestSummary}</div></div><span class="workflow-tag">Planbar + Pipedrive</span></div></summary><div class="workflow-launcher-body"><div class="muted scheduling-intro">Kundentyp, Kunde, Kalenderwoche und Materialannahme erfassen. IVA verwendet automatisch das gespeicherte Planbar-Kürzel, wählt den passenden Block-/Freiplatzweg und meldet den verifizierten Termin anschließend in WhatsApp.</div>${planbarCapacityOverview(project)}${planbarSearchPanel()}<form class="schedule-form" id="customerSchedulingForm"><label><span>Kundenname</span><input id="scheduleCustomerName" name="customerName" maxlength="220" autocomplete="off" required placeholder="Vorname Nachname"></label><label><span>Kundentyp / Partner</span><select id="schedulePartner" name="partnerId" required>${partnerOptions}</select></label><label><span>Kalenderwoche</span><select id="scheduleWeek" name="week" required>${schedulingWeekOptions()}</select></label><button class="btn primary" type="submit">Jetzt terminieren</button><div class="schedule-checks"><label class="schedule-check"><input id="scheduleMaterialDeliverySpace" type="checkbox"><span class="schedule-question">Hat der Kunde Platz, Material einige Tage vor Montagebeginn anzunehmen?</span><span class="schedule-answer" data-answer-for="scheduleMaterialDeliverySpace">Nein</span></label><label class="schedule-check"><input id="scheduleTheftWeatherProtected" type="checkbox"><span class="schedule-question">Diebstahl- und wettersicher?</span><span class="schedule-answer" data-answer-for="scheduleTheftWeatherProtected">Nein</span></label><label class="schedule-check" id="scheduleEnterFallbackRow" hidden><input id="scheduleAllowFreeResourceFallback" type="checkbox"><span class="schedule-question">Enter: Falls kein vollständiger ENTER-Block vorhanden ist, einen vollständig freien Montag-bis-Freitag-Platz verwenden?</span><span class="schedule-answer" data-answer-for="scheduleAllowFreeResourceFallback">Nein</span></label></div><label class="schedule-extra"><span>Zusatzinfo · optional</span><textarea id="scheduleAdditionalInfo" maxlength="2000" placeholder="Nur ausfüllen, wenn diese Information zusätzlich in Planbar stehen soll."></textarea></label></form><details class="schedule-partner-settings"><summary>Kundentypen und Planbar-Kürzel verwalten</summary><div class="muted">Eine Zeile pro Typ im Format Name=Kürzel. Enter behält dabei automatisch seinen speziellen Block-Workflow.</div><textarea id="schedulePartnerPrefixes" maxlength="2000">${esc(partnerConfig)}</textarea><button class="btn" id="saveSchedulePartners" type="button">Kürzel speichern</button></details></div></details>`;
 }
 
 function forgetProjectLogo(projectId) {
@@ -217,7 +226,21 @@ function bindProjectActions() {
       input.onchange = sync;
       sync();
     });
+    const partner = $('schedulePartner');
+    const syncPartnerMode = () => {
+      const isEnter = partner?.selectedOptions?.[0]?.dataset.mode === 'enter-block-first';
+      const row = $('scheduleEnterFallbackRow');
+      if (row) row.hidden = !isEnter;
+      if (!isEnter && $('scheduleAllowFreeResourceFallback')) {
+        $('scheduleAllowFreeResourceFallback').checked = false;
+        $('scheduleAllowFreeResourceFallback').dispatchEvent(new Event('change'));
+      }
+    };
+    if (partner) partner.onchange = syncPartnerMode;
+    syncPartnerMode();
   }
+  const savePartners = $('saveSchedulePartners');
+  if (savePartners) savePartners.onclick = saveCustomerSchedulingPartners;
   const planbarSearchForm = $('planbarSearchForm');
   if (planbarSearchForm) planbarSearchForm.onsubmit = searchPlanbar;
   const refreshPlanbarSearchButton = $('refreshPlanbarSearch');
@@ -262,21 +285,52 @@ async function requestCustomerScheduling(event) {
   if (!state.current) return;
   const customerName = $('scheduleCustomerName').value.trim();
   const [isoYear, week] = $('scheduleWeek').value.split('-').map(Number);
+  const partnerId = $('schedulePartner').value;
   const materialDeliverySpace = $('scheduleMaterialDeliverySpace').checked;
   const theftWeatherProtected = $('scheduleTheftWeatherProtected').checked;
   const additionalInfo = $('scheduleAdditionalInfo').value.trim();
+  const allowFreeResourceFallback = $('scheduleAllowFreeResourceFallback').checked;
   const submit = event.submitter;
   if (submit) submit.disabled = true;
   try {
     const project = await api(`/api/projects/${encodeURIComponent(state.current.id)}/customer-scheduling-requests`, {
       method: 'POST',
-      body: { customerName, isoYear, week, materialDeliverySpace, theftWeatherProtected, additionalInfo },
+      body: { customerName, partnerId, isoYear, week, materialDeliverySpace, theftWeatherProtected, allowFreeResourceFallback, additionalInfo },
     });
     replaceProject(project);
     render();
-    showToast(`${customerName} für KW ${week}/${isoYear} an IVA übergeben.`);
+    showToast(`${customerName} für KW ${week}/${isoYear} direkt an den Planbar-Workflow übergeben.`);
   } catch (error) { showToast(error.message, true); }
   finally { if (submit && document.body.contains(submit)) submit.disabled = false; }
+}
+
+async function saveCustomerSchedulingPartners() {
+  if (!state.current || !$('schedulePartnerPrefixes')) return;
+  const lines = $('schedulePartnerPrefixes').value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const existing = state.current.customerSchedulingPartners || [];
+  try {
+    const customerSchedulingPartners = lines.map((line, index) => {
+      const separator = line.lastIndexOf('=');
+      if (separator < 1) throw new Error(`Zeile ${index + 1}: Bitte Name=Kürzel verwenden.`);
+      const name = line.slice(0, separator).trim();
+      const prefix = line.slice(separator + 1).trim().toUpperCase();
+      if (!name || !/^[A-Z0-9]{1,6}$/.test(prefix)) throw new Error(`Zeile ${index + 1}: Kürzel muss 1 bis 6 Buchstaben oder Zahlen haben.`);
+      const previous = existing.find(item => item.name.toLocaleLowerCase('de-DE') === name.toLocaleLowerCase('de-DE') || item.prefix === prefix);
+      return {
+        id: previous?.id || name.toLocaleLowerCase('de-DE').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''),
+        name,
+        prefix,
+        schedulingMode: previous?.schedulingMode || (prefix === 'EN' ? 'enter-block-first' : 'free-resource'),
+      };
+    });
+    const project = await api(`/api/projects/${encodeURIComponent(state.current.id)}`, {
+      method: 'PATCH',
+      body: { customerSchedulingPartners },
+    });
+    replaceProject(project);
+    render();
+    showToast('Kundentypen und Planbar-Kürzel gespeichert.');
+  } catch (error) { showToast(error.message, true); }
 }
 
 function formatPlanbarDate(value) {

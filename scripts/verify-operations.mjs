@@ -45,6 +45,7 @@ const routingCases = [
   ['Prüfe mein Saxo Portfolio und die Watchlist', 'iva-investment'],
   ['Baue eine Altersvorsorgeberatung auf', 'iva-finance'],
   ['Öffne die Kundenakte in Qonekto', 'iva-customer'],
+  ['Den Kunden Stefanie Schneider in KW 39 terminieren', 'iva-customer'],
   ['Was steht heute an?', 'iva-standard'],
 ];
 for (const [text, expected] of routingCases) check(`Routing ${expected}`, routeAgent(text).agent.id === expected);

@@ -760,7 +760,7 @@ const ALL_SKILLS = {
   knowledgeLibrary: knowledgeLibrarySkill({ listKnowledgeLibrary, knowledgeLibraryStatus, assessKnowledgeSourceCandidate }),
   recruiting: recruitingSkill({ createCandidateSearchPlan, screenResumeAgainstCriteria, createInterviewGuide }),
   deviceControl: deviceControlSkill({ enqueueDeviceCommand, deviceCommandStatus }),
-  planbar:    planbarSkill({ searchPlanbarAppointments }),
+  planbar:    planbarSkill({ searchPlanbarAppointments, enqueueDeviceCommand, deviceCommandStatus, getProject }),
   investment: investmentSkill({ investment }),
   qonekto:   null, // wird pro Anfrage mit der echten sessionId erzeugt
 };
@@ -1377,7 +1377,25 @@ app.post('/api/projects/:id/notes', async (req, res) => {
 app.post('/api/projects/:id/customer-scheduling-requests', async (req, res) => {
   try {
     const project = await addCustomerSchedulingRequest(req.params.id, req.body || {});
-    res.status(project ? 201 : 404).json(project || { error: 'not found' });
+    if (!project) return res.status(404).json({ error: 'not found' });
+    const schedulingRequest = project.customerSchedulingRequests?.[0];
+    const command = await enqueueDeviceCommand({
+      action: 'planbar.customer.schedule',
+      payload: {
+        ...(req.body || {}),
+        partnerId: schedulingRequest?.partnerId,
+        partnerName: schedulingRequest?.partnerName,
+        partnerPrefix: schedulingRequest?.partnerPrefix,
+        schedulingMode: schedulingRequest?.schedulingMode,
+        allowFreeResourceFallback: schedulingRequest?.allowFreeResourceFallback,
+      },
+      requestedBy: 'heat-hero-project',
+      requestText: `${req.body?.customerName || 'Kunde'} in KW ${req.body?.week || '?'} terminieren`,
+    });
+    res.status(202).json({
+      ...project,
+      schedulingDispatch: { commandId: command.id, deviceId: command.deviceId, status: command.status },
+    });
   } catch (error) { res.status(400).json({ error: error.message }); }
 });
 app.post('/api/projects/:id/folders', async (req, res) => {

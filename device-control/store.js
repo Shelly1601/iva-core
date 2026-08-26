@@ -15,6 +15,7 @@ export const DEVICE_ACTIONS = Object.freeze({
   'funding.monitor.run': Object.freeze({ description: 'Fördermonitor einmal im gesperrten Review-Modus ausführen', mutating: false }),
   'funding.reviews.list': Object.freeze({ description: 'Lokale Förder-Prüfwarteschlange zusammenfassen', mutating: false }),
   'planbar.search.refresh': Object.freeze({ description: 'Sichtbaren Planbar-Terminindex rein lesend aktualisieren', mutating: false }),
+  'planbar.customer.schedule': Object.freeze({ description: 'Einen eindeutig belegten Kunden über den lokalen iMac-Workflow in Planbar terminieren', mutating: true }),
   'project.workflow.run': Object.freeze({ description: 'Einen freigegebenen Projekt-Workflow einmalig manuell starten', mutating: true }),
   'portal.credentials.status': Object.freeze({ description: 'Nur die Belegung von IVAs lokalem macOS-Schlüsselbund prüfen', mutating: false }),
   'portal.login': Object.freeze({ description: 'Bei einem vorab freigegebenen Portal mit lokalem Schlüsselbund anmelden', mutating: false }),
@@ -55,6 +56,38 @@ function cleanText(value, max = 240) {
 }
 
 function validatePayload(action, payload = {}) {
+  if (action === 'planbar.customer.schedule') {
+    const customerName = cleanText(payload.customerName, 220);
+    const partnerId = cleanText(payload.partnerId, 80).toLowerCase();
+    const partnerName = cleanText(payload.partnerName, 80);
+    const partnerPrefix = cleanText(payload.partnerPrefix, 6).toUpperCase();
+    const schedulingMode = payload.schedulingMode === 'enter-block-first' ? 'enter-block-first' : 'free-resource';
+    const allowFreeResourceFallback = schedulingMode === 'enter-block-first' && payload.allowFreeResourceFallback === true;
+    const isoYear = Number(payload.isoYear);
+    const week = Number(payload.week);
+    if (customerName.length < 3) throw new Error('Für die Planbar-Terminierung fehlt der vollständige Kundenname.');
+    if (!partnerId || !partnerName || !/^[A-Z0-9]{1,6}$/.test(partnerPrefix)) {
+      throw new Error('Für die Planbar-Terminierung fehlt ein gültiger Partner mit Planbar-Kürzel.');
+    }
+    if (!Number.isInteger(isoYear) || isoYear < 2000 || isoYear > 2100) throw new Error('Ungültiges ISO-Kalenderjahr.');
+    if (!Number.isInteger(week) || week < 1 || week > 53) throw new Error('Ungültige ISO-Kalenderwoche.');
+    if (typeof payload.materialDeliverySpace !== 'boolean' || typeof payload.theftWeatherProtected !== 'boolean') {
+      throw new Error('Die beiden Materialfragen müssen vor der Planbar-Terminierung eindeutig mit Ja oder Nein beantwortet sein.');
+    }
+    return {
+      customerName,
+      partnerId,
+      partnerName,
+      partnerPrefix,
+      schedulingMode,
+      allowFreeResourceFallback,
+      isoYear,
+      week,
+      materialDeliverySpace: payload.materialDeliverySpace,
+      theftWeatherProtected: payload.theftWeatherProtected,
+      additionalInfo: cleanText(payload.additionalInfo, 2000),
+    };
+  }
   if (action === 'project.workflow.run') {
     const projectId = cleanText(payload.projectId, 100);
     const workflowId = cleanText(payload.workflowId, 140);
@@ -100,12 +133,23 @@ export async function enqueueDeviceCommand({ deviceId = IVA_IMAC_DEVICE_ID, acti
   const actionName = cleanText(action, 100);
   if (device !== IVA_IMAC_DEVICE_ID) throw new Error('Unbekanntes IVA-Gerät.');
   if (!DEVICE_ACTIONS[actionName]) throw new Error('Diese iMac-Aktion ist nicht freigegeben.');
+  const normalizedPayload = validatePayload(actionName, payload);
   const now = new Date();
+  const store = await loadStore();
+  if (actionName === 'planbar.customer.schedule') {
+    const fingerprint = JSON.stringify(normalizedPayload);
+    const existing = store.commands.find(item => item.deviceId === device
+      && item.action === actionName
+      && ['queued', 'running'].includes(item.status)
+      && Date.parse(item.expiresAt) > now.getTime()
+      && JSON.stringify(item.payload) === fingerprint);
+    if (existing) return { ...existing };
+  }
   const command = {
     id: crypto.randomUUID(),
     deviceId: device,
     action: actionName,
-    payload: validatePayload(actionName, payload),
+    payload: normalizedPayload,
     status: 'queued',
     requestedBy: cleanText(requestedBy, 120) || 'iva',
     requestText: cleanText(requestText, 500),
@@ -113,7 +157,6 @@ export async function enqueueDeviceCommand({ deviceId = IVA_IMAC_DEVICE_ID, acti
     expiresAt: new Date(now.getTime() + DEFAULT_TTL_MS).toISOString(),
     attempts: 0,
   };
-  const store = await loadStore();
   store.commands.push(command);
   await saveStore(store);
   return command;
@@ -170,7 +213,7 @@ export async function listDeviceCommands({ deviceId = IVA_IMAC_DEVICE_ID, limit 
   return store.commands
     .filter(command => !deviceId || command.deviceId === deviceId)
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
-    .slice(0, Math.max(1, Math.min(200, Number(limit) || 50)))
+    .slice(0, Math.max(1, Math.min(MAX_COMMANDS, Number(limit) || 50)))
     .map(({ leaseToken, ...command }) => command);
 }
 

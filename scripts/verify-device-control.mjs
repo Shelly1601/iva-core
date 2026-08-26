@@ -44,6 +44,27 @@ try {
   const planbarCommand = await enqueueDeviceCommand({ action: 'planbar.search.refresh', requestedBy: 'test' });
   assert.equal(planbarCommand.action, 'planbar.search.refresh');
   assert.deepEqual(planbarCommand.payload, {});
+  const schedulingCommand = await enqueueDeviceCommand({
+    action: 'planbar.customer.schedule',
+    requestedBy: 'test',
+    payload: {
+      customerName: 'Stefanie Schneider', isoYear: 2026, week: 39,
+      partnerId: 'enter', partnerName: 'Enter', partnerPrefix: 'EN', schedulingMode: 'enter-block-first', allowFreeResourceFallback: true,
+      materialDeliverySpace: true, theftWeatherProtected: false, additionalInfo: 'Hofzufahrt',
+    },
+  });
+  assert.equal(schedulingCommand.action, 'planbar.customer.schedule');
+  assert.equal(schedulingCommand.payload.customerName, 'Stefanie Schneider');
+  const duplicateSchedulingCommand = await enqueueDeviceCommand({
+    action: 'planbar.customer.schedule',
+    requestedBy: 'test-duplicate',
+    payload: schedulingCommand.payload,
+  });
+  assert.equal(duplicateSchedulingCommand.id, schedulingCommand.id, 'derselbe offene Kunden-KW-Auftrag wird nicht doppelt eingereiht');
+  await assert.rejects(enqueueDeviceCommand({
+    action: 'planbar.customer.schedule',
+    payload: { customerName: 'Stefanie Schneider', partnerId: 'heat-hero', partnerName: 'Heat Hero', partnerPrefix: 'HH', isoYear: 2026, week: 39 },
+  }), /Materialfragen/);
   const projectWorkflowCommand = await enqueueDeviceCommand({
     action: 'project.workflow.run', requestedBy: 'test',
     payload: { projectId: 'heat-hero', workflowId: 'planbar-weekly-export', displayName: 'Meine Planbar-Liste' },
@@ -83,6 +104,7 @@ try {
   assert.equal(devicePolicy.allowedActions.includes('portal.login'), true);
   assert.equal(devicePolicy.allowedActions.includes('portal.credentials.status'), true);
   assert.equal(devicePolicy.allowedActions.includes('project.workflow.run'), true);
+  assert.equal(devicePolicy.allowedActions.includes('planbar.customer.schedule'), true);
 
   const { builderSkill } = await import('../skills/builder.js');
   console.log('Device-Control: Builder-Werkzeug prüfen …');
@@ -112,6 +134,27 @@ try {
   assert.equal(loginDispatch.queued, true);
   assert.equal(portalDispatch.action, 'portal.login');
   assert.deepEqual(portalDispatch.payload, { service: 'pipedrive' });
+
+  const { planbarSkill } = await import('../skills/planbar.js');
+  let planbarDispatch = null;
+  const planbarTools = planbarSkill({
+    searchPlanbarAppointments: async () => ({ matches: [] }),
+    getProject: async () => ({ customerSchedulingPartners: [{ id: 'heat-hero', name: 'Heat Hero', prefix: 'HH', schedulingMode: 'free-resource' }] }),
+    enqueueDeviceCommand: async input => {
+      planbarDispatch = input;
+      return { id: '44444444-4444-4444-8444-444444444444', deviceId: IVA_IMAC_DEVICE_ID, status: 'queued', ...input };
+    },
+    deviceCommandStatus: async id => ({ id, status: 'completed' }),
+  });
+  const scheduled = await planbarTools.scheduleCustomerInPlanbar.execute({
+    customerName: 'Stefanie Schneider', isoYear: 2026, week: 39,
+    partnerId: 'enter', partnerName: 'Enter', partnerPrefix: 'EN', schedulingMode: 'enter-block-first', allowFreeResourceFallback: true,
+    materialDeliverySpace: true, theftWeatherProtected: false,
+  });
+  assert.equal(scheduled.queued, true);
+  assert.equal(planbarDispatch.action, 'planbar.customer.schedule');
+  assert.equal(planbarDispatch.payload.week, 39);
+  assert.equal((await planbarTools.listPlanbarCustomerTypes.execute({})).customerTypes[0].prefix, 'HH');
   console.log('PASS IVA Device Control: ausgehender Gerätekanal, Lease-Schutz und enge Aktions-Positivliste.');
 } finally {
   await rm(root, { recursive: true, force: true });
