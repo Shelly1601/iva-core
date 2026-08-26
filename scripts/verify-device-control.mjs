@@ -245,6 +245,9 @@ try {
   assert.match(deviceAgentRunnerSource, /scheduleLocalRuntimeMigration/);
   assert.match(deviceAgentRunnerSource, /de\.iva\.device-agent-migrator/);
   assert.match(deviceAgentRunnerSource, /IVA_DEVICE_MIGRATOR/);
+  assert.match(deviceAgentRunnerSource, /ensureVerifiedBootstrapSnapshot/);
+  assert.match(deviceAgentRunnerSource, /c5b2a1fcfb007c74a7cb85ed6d11601218be722772186c3158a0a2bb9db04171/);
+  assert.match(deviceAgentRunnerSource, /IVA_DEVICE_RUNTIME_SOURCE/);
   assert.doesNotMatch(deviceAgentRunnerSource, /preserveTimestamps:\s*true/);
   assert.match(deviceAgentRunnerSource, /error\?\.code === 'ENOENT'/);
   const deviceAgentLaunchdSource = await readFile(new URL('../local-mac-helper/device-agent-launchd.mjs', import.meta.url), 'utf8');

@@ -26,6 +26,10 @@ const LOCAL_RELEASE_HELPER = path.join(LOCAL_RELEASE_ROOT, 'local-mac-helper');
 const LOCAL_RELEASE_FORECAST = path.join(LOCAL_RELEASE_ROOT, 'outputs', 'planbar-weekly');
 const MIGRATOR_LABEL = 'de.iva.device-agent-migrator';
 const MIGRATOR_PLIST = path.join(os.homedir(), 'Library', 'LaunchAgents', `${MIGRATOR_LABEL}.plist`);
+const BOOTSTRAP_COMMIT = '8817760c6fbb986a028ec583974513042f531c58';
+const BOOTSTRAP_SHA256 = 'c5b2a1fcfb007c74a7cb85ed6d11601218be722772186c3158a0a2bb9db04171';
+const BOOTSTRAP_ROOT = path.join(DATA_ROOT, 'bootstrap');
+const BOOTSTRAP_SOURCE = path.join(BOOTSTRAP_ROOT, `iva-core-${BOOTSTRAP_COMMIT}`);
 const ALLOWED_ACTIONS = Object.freeze([
   'agent.status',
   'app.open',
@@ -155,6 +159,39 @@ function requestIcloudMaterialization(target) {
   }
 }
 
+async function ensureVerifiedBootstrapSnapshot() {
+  const installer = path.join(BOOTSTRAP_SOURCE, 'local-mac-helper', 'install-imac-device-agent.mjs');
+  const snapshotRunner = path.join(BOOTSTRAP_SOURCE, 'local-mac-helper', 'device-agent-runner.mjs');
+  try {
+    const [installerInfo, runnerInfo] = await Promise.all([stat(installer), stat(snapshotRunner)]);
+    if (installerInfo.isFile() && runnerInfo.isFile()) return BOOTSTRAP_SOURCE;
+  } catch {
+    // Das Paket wird im nächsten Schritt vollständig und verifiziert geladen.
+  }
+  await mkdir(BOOTSTRAP_ROOT, { recursive: true, mode: 0o700 });
+  const archive = path.join(BOOTSTRAP_ROOT, `${BOOTSTRAP_COMMIT}.tar.gz`);
+  const temporary = `${archive}.${process.pid}.download`;
+  try {
+    await execFileAsync('/usr/bin/curl', [
+      '--fail', '--silent', '--show-error', '--location', '--proto', '=https', '--tlsv1.2',
+      `https://github.com/Shelly1601/iva-core/archive/${BOOTSTRAP_COMMIT}.tar.gz`,
+      '-o', temporary,
+    ], { timeout: 120_000, maxBuffer: 1024 * 1024 });
+    const { stdout } = await execFileAsync('/usr/bin/shasum', ['-a', '256', temporary], { timeout: 30_000 });
+    const actual = String(stdout || '').trim().split(/\s+/)[0];
+    if (actual !== BOOTSTRAP_SHA256) throw new Error('Das direkt geladene IVA-Paket hat die fest hinterlegte SHA-256-Prüfsumme nicht bestanden.');
+    await rename(temporary, archive);
+  } finally {
+    await unlink(temporary).catch(() => {});
+  }
+  await execFileAsync('/usr/bin/tar', ['-xzf', archive, '-C', BOOTSTRAP_ROOT], { timeout: 120_000, maxBuffer: 1024 * 1024 });
+  await Promise.all([
+    execFileAsync(process.execPath, ['--check', installer], { timeout: 10_000 }),
+    execFileAsync(process.execPath, ['--check', snapshotRunner], { timeout: 10_000 }),
+  ]);
+  return BOOTSTRAP_SOURCE;
+}
+
 async function scheduleLocalRuntimeMigration() {
   if (LOCAL_RUNTIME) return false;
   const now = Date.now();
@@ -162,11 +199,11 @@ async function scheduleLocalRuntimeMigration() {
   lastMigrationScheduleAt = now;
   const metadata = bootstrapMetadata();
   if (!metadata.hostname.includes('imac') || !metadata.iCloudAuthoritative) return false;
-  const helperSource = path.join(WORKSPACE, 'local-mac-helper');
+  const runtimeSource = await ensureVerifiedBootstrapSnapshot();
+  const helperSource = path.join(runtimeSource, 'local-mac-helper');
   const forecastSource = path.join(WORKSPACE, 'outputs', 'planbar-weekly');
-  requestIcloudMaterialization(helperSource);
   requestIcloudMaterialization(forecastSource);
-  console.error('IVA übernimmt die Agent-Dateien jetzt selbstständig in die lokale iMac-Laufzeit …');
+  console.error('IVA übernimmt das direkt geladene und SHA-256-geprüfte Paket jetzt in die lokale iMac-Laufzeit …');
   await copyRuntimeDirectory(helperSource, LOCAL_RELEASE_HELPER, 'IVA-Helfer');
   await copyRuntimeDirectory(forecastSource, LOCAL_RELEASE_FORECAST, 'Vorbereitete Forecast-Dateien');
   const installer = path.join(LOCAL_RELEASE_HELPER, 'install-imac-device-agent.mjs');
@@ -183,7 +220,7 @@ async function scheduleLocalRuntimeMigration() {
 <key>Label</key><string>${MIGRATOR_LABEL}</string>
 <key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>${xml(installer)}</string></array>
 <key>WorkingDirectory</key><string>${xml(LOCAL_RELEASE_HELPER)}</string>
-<key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string><key>IVA_DEVICE_WORKSPACE</key><string>${xml(WORKSPACE)}</string><key>IVA_DEVICE_MIGRATOR</key><string>true</string></dict>
+<key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string><key>IVA_DEVICE_WORKSPACE</key><string>${xml(WORKSPACE)}</string><key>IVA_DEVICE_RUNTIME_SOURCE</key><string>${xml(runtimeSource)}</string><key>IVA_DEVICE_MIGRATOR</key><string>true</string></dict>
 <key>RunAtLoad</key><true/><key>ProcessType</key><string>Background</string>
 <key>StandardOutPath</key><string>${xml(path.join(logs, 'device-agent-migrator.out.log'))}</string>
 <key>StandardErrorPath</key><string>${xml(path.join(logs, 'device-agent-migrator.err.log'))}</string>
