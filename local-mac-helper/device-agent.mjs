@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 const execFileAsync = promisify(execFile);
 export const IMAC_DEVICE_ID = 'imac-nadine';
 export const DEVICE_AGENT_PROTOCOL_VERSION = 2;
-export const DEVICE_AGENT_RELEASE = 'imac-local-v3';
+export const DEVICE_AGENT_RELEASE = 'imac-local-v4';
 const KEYCHAIN_SERVICE = 'de.iva.device-agent';
 const KEYCHAIN_ACCOUNT = IMAC_DEVICE_ID;
 const DEFAULT_SERVER_URL = 'https://iva-core-production.up.railway.app';
@@ -19,7 +19,7 @@ const APP_ALLOWLIST = Object.freeze({
   Codex: '/Applications/Codex.app',
 });
 const UI_ACTIONS = new Set(['computer.status', 'planbar.search.refresh', 'planbar.customer.schedule', 'project.workflow.run', 'portal.login', 'app.open']);
-const AGENT_WORKSPACE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const AGENT_WORKSPACE = path.resolve(process.env.IVA_DEVICE_WORKSPACE || path.join(path.dirname(fileURLToPath(import.meta.url)), '..'));
 const ALLOWED_ACTIONS = Object.freeze([
   'agent.status',
   'computer.status',

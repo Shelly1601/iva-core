@@ -168,16 +168,19 @@ try {
   console.log('Device-Control: LaunchAgent und Codex-Policy prüfen …');
   const plist = buildImacDeviceAgentLaunchAgent({
     nodePath: '/node',
-    runnerPath: '/Users/nadine/Library/Application Support/IVA Mac Helper/device-agent/device-agent-runner.mjs',
+    runnerPath: '/Users/nadine/Library/Application Support/IVA Mac Helper/runtime/imac-local-v4/local-mac-helper/device-agent-runner.mjs',
     workspace: '/Users/nadine/Library/Mobile Documents/com~apple~CloudDocs/IVA-Assistent/iva-core',
+    forecastRoot: '/Users/nadine/Library/Application Support/IVA Mac Helper/runtime/imac-local-v4/outputs/planbar-weekly',
   });
-  assert.match(plist, /Application Support\/IVA Mac Helper\/device-agent\/device-agent-runner\.mjs/);
+  assert.match(plist, /runtime\/imac-local-v4\/local-mac-helper\/device-agent-runner\.mjs/);
   assert.match(plist, /<key>IVA_DEVICE_WORKSPACE<\/key>/);
+  assert.match(plist, /<key>IVA_DEVICE_LOCAL_RUNTIME<\/key><string>true<\/string>/);
+  assert.match(plist, /<key>IVA_PLANBAR_OUTPUT_ROOT<\/key>/);
   assert.match(plist, /<key>KeepAlive<\/key><true\/>/);
   assert.doesNotMatch(plist, /StartInterval/);
   const connectionStatuses = [
-    { online: true, deviceId: IVA_IMAC_DEVICE_ID, hostname: 'imac-von-nadine', release: 'test-v2', lastSeenAt: '2026-08-26T10:00:05.000Z' },
-    { online: true, deviceId: IVA_IMAC_DEVICE_ID, hostname: 'imac-von-nadine', release: 'test-v2', lastSeenAt: '2026-08-26T10:00:20.000Z' },
+    { online: true, deviceId: IVA_IMAC_DEVICE_ID, hostname: 'imac-von-nadine', release: 'imac-local-v4', lastSeenAt: '2026-08-26T10:00:05.000Z' },
+    { online: true, deviceId: IVA_IMAC_DEVICE_ID, hostname: 'imac-von-nadine', release: 'imac-local-v4', lastSeenAt: '2026-08-26T10:00:20.000Z' },
   ];
   const verifiedConnection = await verifyImacDeviceAgentConnection({
     baselineLastSeenAt: '2026-08-26T10:00:00.000Z',
@@ -191,7 +194,7 @@ try {
   await assert.rejects(
     verifyImacDeviceAgentConnection({
       baselineLastSeenAt: '2026-08-26T10:00:00.000Z',
-      getStatus: async () => ({ online: true, lastSeenAt: '2026-08-26T10:00:05.000Z' }),
+      getStatus: async () => ({ online: true, release: 'imac-local-v4', lastSeenAt: '2026-08-26T10:00:05.000Z' }),
       timeoutMs: 20,
       pollMs: 1,
       minimumAdvanceMs: 10_000,
@@ -214,6 +217,9 @@ try {
   assert.match(bootstrapSource, /nodejs\.org\/dist\/\$\{node_version\}/);
   assert.match(bootstrapSource, /shasum -a 256/);
   assert.doesNotMatch(bootstrapSource, /run-imac-device-agent-once/);
+  assert.doesNotMatch(bootstrapSource, /local-mac-helper\/cli\.mjs install-imac-device-agent/);
+  assert.match(bootstrapSource, /local-mac-helper\/install-imac-device-agent\.mjs/);
+  assert.match(bootstrapSource, /IVA lädt die aktuelle iMac-Komponente aus iCloud/);
   assert.match(bootstrapSource, /Zwei fortlaufende Railway-Heartbeats wurden bestätigt/);
   const codexTaskSource = await readFile(new URL('../local-mac-helper/codex-tasks.mjs', import.meta.url), 'utf8');
   assert.match(codexTaskSource, /'exec', '--approve-for-me'/);
@@ -228,6 +234,18 @@ try {
   assert.match(deviceAgentRunnerSource, /'X-IVA-Agent-Workspace': metadata\.workspace/);
   assert.match(deviceAgentRunnerSource, /spawn\('\/usr\/bin\/caffeinate', \['-s', '-w'/);
   assert.match(deviceAgentRunnerSource, /updateLocalRunnerFromIcloud/);
+  assert.match(deviceAgentRunnerSource, /LOCAL_RUNTIME \? path\.join\(LOCAL_HELPER_DIR, 'device-agent\.mjs'\)/);
+  assert.match(deviceAgentRunnerSource, /scheduleLocalRuntimeMigration/);
+  assert.match(deviceAgentRunnerSource, /de\.iva\.device-agent-migrator/);
+  assert.match(deviceAgentRunnerSource, /IVA_DEVICE_MIGRATOR/);
+  const deviceAgentLaunchdSource = await readFile(new URL('../local-mac-helper/device-agent-launchd.mjs', import.meta.url), 'utf8');
+  assert.match(deviceAgentLaunchdSource, /previousPlist/);
+  assert.match(deviceAgentLaunchdSource, /vorheriger Agent wurde wiederhergestellt/);
+  const planbarForecastSource = await readFile(new URL('../local-mac-helper/planbar-forecast-mail.mjs', import.meta.url), 'utf8');
+  assert.match(planbarForecastSource, /IVA_PLANBAR_OUTPUT_ROOT/);
+  const dedicatedInstallerSource = await readFile(new URL('../local-mac-helper/install-imac-device-agent.mjs', import.meta.url), 'utf8');
+  assert.match(dedicatedInstallerSource, /IVA_DEVICE_MIGRATOR/);
+  assert.match(dedicatedInstallerSource, /currentPlist\.includes\(imacDeviceAgentLocalRunnerFile\(\)\)/);
   assert.match(deviceAgentRunnerSource, /deviceAgentSourceFingerprint/);
   assert.ok(
     deviceAgentRunnerSource.indexOf('await reportBootstrapHeartbeat()') < deviceAgentRunnerSource.indexOf('await loadDeviceAgent()'),

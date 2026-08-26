@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
-import { chmod, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -12,11 +12,20 @@ const execFileAsync = promisify(execFile);
 const DEVICE_ID = 'imac-nadine';
 const KEYCHAIN_SERVICE = 'de.iva.device-agent';
 const SERVER_URL = 'https://iva-core-production.up.railway.app';
-const RELEASE = 'imac-local-v3';
+const RELEASE = 'imac-local-v4';
 const MODULE_PATH = fileURLToPath(import.meta.url);
+const LOCAL_RUNTIME = process.env.IVA_DEVICE_LOCAL_RUNTIME === 'true';
+const LOCAL_HELPER_DIR = path.dirname(MODULE_PATH);
 const WORKSPACE = path.resolve(process.env.IVA_DEVICE_WORKSPACE || path.join(path.dirname(MODULE_PATH), '..'));
 const WORKSPACE_RUNNER = path.join(WORKSPACE, 'local-mac-helper', 'device-agent-runner.mjs');
 const WORKSPACE_AGENT = path.join(WORKSPACE, 'local-mac-helper', 'device-agent.mjs');
+const AGENT_MODULE_PATH = LOCAL_RUNTIME ? path.join(LOCAL_HELPER_DIR, 'device-agent.mjs') : WORKSPACE_AGENT;
+const DATA_ROOT = process.env.IVA_MAC_HELPER_DATA_DIR || path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper');
+const LOCAL_RELEASE_ROOT = path.join(DATA_ROOT, 'runtime', RELEASE);
+const LOCAL_RELEASE_HELPER = path.join(LOCAL_RELEASE_ROOT, 'local-mac-helper');
+const LOCAL_RELEASE_FORECAST = path.join(LOCAL_RELEASE_ROOT, 'outputs', 'planbar-weekly');
+const MIGRATOR_LABEL = 'de.iva.device-agent-migrator';
+const MIGRATOR_PLIST = path.join(os.homedir(), 'Library', 'LaunchAgents', `${MIGRATOR_LABEL}.plist`);
 const ALLOWED_ACTIONS = Object.freeze([
   'agent.status',
   'app.open',
@@ -34,6 +43,7 @@ const ALLOWED_ACTIONS = Object.freeze([
 
 let deviceAgentModule = null;
 let deviceAgentSourceFingerprint = '';
+let lastMigrationScheduleAt = 0;
 
 // Der iMac darf den Bildschirm weiterhin ausschalten. Nur der Systemschlaf bei
 // Netzbetrieb wird verhindert, damit der ausgehende Agent erreichbar bleibt.
@@ -88,6 +98,7 @@ async function reportBootstrapHeartbeat() {
 }
 
 async function updateLocalRunnerFromIcloud() {
+  if (LOCAL_RUNTIME) return false;
   if (path.resolve(MODULE_PATH) === path.resolve(WORKSPACE_RUNNER)) return false;
   try {
     const [installed, source] = await Promise.all([
@@ -112,9 +123,83 @@ async function updateLocalRunnerFromIcloud() {
   }
 }
 
+function xml(value) {
+  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+async function copyRuntimeDirectory(source, target, label) {
+  let lastError;
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    try {
+      await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+      await cp(source, target, { recursive: true, force: true, preserveTimestamps: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      const transient = error?.code === 'EAGAIN' || error?.errno === -11;
+      if (!transient || attempt === 6) break;
+      console.error(`${label}: iCloud-Dateien sind kurz belegt, Versuch ${attempt + 1} von 6 …`);
+      await new Promise(resolve => setTimeout(resolve, 2_000 * attempt));
+    }
+  }
+  throw new Error(`${label} konnte nicht lokal bereitgestellt werden: ${lastError?.message || lastError}`);
+}
+
+function requestIcloudMaterialization(target) {
+  try {
+    const child = spawn('/usr/bin/brctl', ['download', target], { detached: true, stdio: 'ignore' });
+    child.unref();
+  } catch {
+    // Das anschließende Kopieren löst die Materialisierung ebenfalls aus und
+    // liefert bei einem echten Fehler die genaue Ursache.
+  }
+}
+
+async function scheduleLocalRuntimeMigration() {
+  if (LOCAL_RUNTIME) return false;
+  const now = Date.now();
+  if (now - lastMigrationScheduleAt < 120_000) return false;
+  lastMigrationScheduleAt = now;
+  const metadata = bootstrapMetadata();
+  if (!metadata.hostname.includes('imac') || !metadata.iCloudAuthoritative) return false;
+  const helperSource = path.join(WORKSPACE, 'local-mac-helper');
+  const forecastSource = path.join(WORKSPACE, 'outputs', 'planbar-weekly');
+  requestIcloudMaterialization(helperSource);
+  requestIcloudMaterialization(forecastSource);
+  console.error('IVA übernimmt die Agent-Dateien jetzt selbstständig in die lokale iMac-Laufzeit …');
+  await copyRuntimeDirectory(helperSource, LOCAL_RELEASE_HELPER, 'IVA-Helfer');
+  await copyRuntimeDirectory(forecastSource, LOCAL_RELEASE_FORECAST, 'Vorbereitete Forecast-Dateien');
+  const installer = path.join(LOCAL_RELEASE_HELPER, 'install-imac-device-agent.mjs');
+  const localRunner = path.join(LOCAL_RELEASE_HELPER, 'device-agent-runner.mjs');
+  await Promise.all([chmod(installer, 0o700), chmod(localRunner, 0o700)]);
+  await execFileAsync(process.execPath, ['--check', installer], { timeout: 10_000 });
+  await execFileAsync(process.execPath, ['--check', localRunner], { timeout: 10_000 });
+  const logs = path.join(DATA_ROOT, 'logs');
+  await mkdir(logs, { recursive: true, mode: 0o700 });
+  await mkdir(path.dirname(MIGRATOR_PLIST), { recursive: true, mode: 0o700 });
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>${MIGRATOR_LABEL}</string>
+<key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>${xml(installer)}</string></array>
+<key>WorkingDirectory</key><string>${xml(LOCAL_RELEASE_HELPER)}</string>
+<key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string><key>IVA_DEVICE_WORKSPACE</key><string>${xml(WORKSPACE)}</string><key>IVA_DEVICE_MIGRATOR</key><string>true</string></dict>
+<key>RunAtLoad</key><true/><key>ProcessType</key><string>Background</string>
+<key>StandardOutPath</key><string>${xml(path.join(logs, 'device-agent-migrator.out.log'))}</string>
+<key>StandardErrorPath</key><string>${xml(path.join(logs, 'device-agent-migrator.err.log'))}</string>
+</dict></plist>`;
+  await writeFile(MIGRATOR_PLIST, plist, { mode: 0o600 });
+  await execFileAsync('/usr/bin/plutil', ['-lint', MIGRATOR_PLIST], { timeout: 10_000 });
+  const guiDomain = `gui/${process.getuid()}`;
+  await execFileAsync('/bin/launchctl', ['bootout', guiDomain, MIGRATOR_PLIST], { timeout: 10_000 }).catch(() => {});
+  await execFileAsync('/bin/launchctl', ['bootstrap', guiDomain, MIGRATOR_PLIST], { timeout: 15_000 });
+  console.error('Die lokale iMac-Übernahme wurde gestartet; der bestehende Agent bleibt bis zur geprüften Umschaltung aktiv.');
+  return true;
+}
+
 async function loadDeviceAgent() {
   try {
-    const info = await stat(WORKSPACE_AGENT);
+    const info = await stat(AGENT_MODULE_PATH);
     const fingerprint = `${info.size}:${info.mtimeMs}`;
     if (deviceAgentSourceFingerprint && fingerprint !== deviceAgentSourceFingerprint) deviceAgentModule = null;
     deviceAgentSourceFingerprint = fingerprint;
@@ -123,7 +208,7 @@ async function loadDeviceAgent() {
     // erneut versucht; die eigenständigen Heartbeats bleiben davon unberührt.
   }
   if (deviceAgentModule) return deviceAgentModule;
-  const moduleUrl = pathToFileURL(WORKSPACE_AGENT);
+  const moduleUrl = pathToFileURL(AGENT_MODULE_PATH);
   moduleUrl.searchParams.set('runner', String(Date.now()));
   deviceAgentModule = await import(moduleUrl.href);
   return deviceAgentModule;
@@ -151,6 +236,9 @@ async function runWithTimeout() {
 for (;;) {
   try {
     if (await updateLocalRunnerFromIcloud()) process.exit(75);
+    await scheduleLocalRuntimeMigration().catch(error => {
+      console.error(`Lokale iMac-Übernahme wird erneut versucht: ${error?.message || error}`);
+    });
     console.log(JSON.stringify(await runWithTimeout(), null, 2));
   } catch (error) {
     deviceAgentModule = null;

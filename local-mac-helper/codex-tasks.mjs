@@ -7,7 +7,7 @@ import { accessSync, constants as fsConstants } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const MODULE_PATH = fileURLToPath(import.meta.url);
-const REPO_ROOT = path.resolve(path.dirname(MODULE_PATH), '..');
+const REPO_ROOT = path.resolve(process.env.IVA_DEVICE_WORKSPACE || path.join(path.dirname(MODULE_PATH), '..'));
 const TASK_ROOT = process.env.IVA_CODEX_TASK_ROOT || path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper', 'codex-tasks');
 const MAX_PROMPT_LENGTH = 12_000;
 const MAX_RUNTIME_MS = 3 * 60 * 60_000;

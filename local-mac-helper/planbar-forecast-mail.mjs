@@ -8,8 +8,8 @@ export const PLANBAR_FORECAST_SENDER = 'n.sell@heat-hero.com';
 export const PLANBAR_FORECAST_RECIPIENT = 'a.keller@heat-hero.com';
 
 const MODULE_PATH = fileURLToPath(import.meta.url);
-const REPO_ROOT = path.resolve(path.dirname(MODULE_PATH), '..');
-const OUTPUT_ROOT = path.join(REPO_ROOT, 'outputs', 'planbar-weekly');
+const REPO_ROOT = path.resolve(process.env.IVA_DEVICE_WORKSPACE || path.join(path.dirname(MODULE_PATH), '..'));
+const OUTPUT_ROOT = path.resolve(process.env.IVA_PLANBAR_OUTPUT_ROOT || path.join(REPO_ROOT, 'outputs', 'planbar-weekly'));
 const SEND_LOG = path.join(OUTPUT_ROOT, 'send-log.json');
 const REQUIRED_EXCLUSIONS = Object.freeze(['David Service', 'Dawid Service', 'Antonio Lausic', 'Antonio Lausich', 'Antonio Lausitsch']);
 const EXACT_HEADERS = Object.freeze(['Kalenderwoche', 'Kunde', 'Adresse', 'Anlage']);

@@ -2,9 +2,9 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
-import { chmod, copyFile, mkdir, unlink, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { assertImacExecutionHost, fetchImacDeviceAgentStatus } from './device-agent.mjs';
+import { assertImacExecutionHost, DEVICE_AGENT_RELEASE, fetchImacDeviceAgentStatus } from './device-agent.mjs';
 
 const execFileAsync = promisify(execFile);
 export const IMAC_DEVICE_AGENT_LABEL = 'de.iva.device-agent';
@@ -22,17 +22,22 @@ export function imacDeviceAgentPlistFile() {
 }
 
 export function imacDeviceAgentLocalRunnerFile() {
-  return path.join(dataRoot(), 'device-agent', 'device-agent-runner.mjs');
+  return path.join(dataRoot(), 'runtime', DEVICE_AGENT_RELEASE, 'local-mac-helper', 'device-agent-runner.mjs');
+}
+
+function imacDeviceAgentLocalForecastRoot() {
+  return path.join(dataRoot(), 'runtime', DEVICE_AGENT_RELEASE, 'outputs', 'planbar-weekly');
 }
 
 function authoritativeWorkspace() {
-  return path.resolve(path.dirname(fileURLToPath(new URL('./device-agent-runner.mjs', import.meta.url))), '..');
+  return path.resolve(process.env.IVA_DEVICE_WORKSPACE || path.join(path.dirname(fileURLToPath(import.meta.url)), '..'));
 }
 
 export function buildImacDeviceAgentLaunchAgent({
   nodePath = process.execPath,
   runnerPath = imacDeviceAgentLocalRunnerFile(),
   workspace = authoritativeWorkspace(),
+  forecastRoot = imacDeviceAgentLocalForecastRoot(),
 } = {}) {
   const logs = path.join(dataRoot(), 'logs');
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -41,7 +46,7 @@ export function buildImacDeviceAgentLaunchAgent({
 <key>Label</key><string>${IMAC_DEVICE_AGENT_LABEL}</string>
 <key>ProgramArguments</key><array><string>${xml(nodePath)}</string><string>${xml(runnerPath)}</string></array>
 <key>WorkingDirectory</key><string>${xml(path.dirname(runnerPath))}</string>
-<key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string><key>IVA_TESSERACT_LANG</key><string>deu+eng</string><key>IVA_DEVICE_WORKSPACE</key><string>${xml(workspace)}</string></dict>
+<key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string><key>IVA_TESSERACT_LANG</key><string>deu+eng</string><key>IVA_DEVICE_WORKSPACE</key><string>${xml(workspace)}</string><key>IVA_DEVICE_LOCAL_RUNTIME</key><string>true</string><key>IVA_PLANBAR_OUTPUT_ROOT</key><string>${xml(forecastRoot)}</string></dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>10</integer><key>ProcessType</key><string>Background</string>
 <key>StandardOutPath</key><string>${xml(path.join(logs, 'device-agent.out.log'))}</string>
 <key>StandardErrorPath</key><string>${xml(path.join(logs, 'device-agent.err.log'))}</string>
@@ -58,6 +63,7 @@ export async function verifyImacDeviceAgentConnection({
   timeoutMs = 90_000,
   pollMs = 5_000,
   minimumAdvanceMs = 10_000,
+  requiredRelease = DEVICE_AGENT_RELEASE,
 } = {}) {
   const baseline = Date.parse(baselineLastSeenAt || '') || 0;
   const deadline = Date.now() + timeoutMs;
@@ -66,7 +72,7 @@ export async function verifyImacDeviceAgentConnection({
   while (Date.now() < deadline) {
     latest = await getStatus().catch(() => null);
     const seen = Date.parse(latest?.lastSeenAt || '') || 0;
-    if (latest?.online === true && seen > baseline) {
+    if (latest?.online === true && latest?.release === requiredRelease && seen > baseline) {
       if (!firstHeartbeat) firstHeartbeat = seen;
       else if (seen - firstHeartbeat >= minimumAdvanceMs) {
         return {
@@ -85,6 +91,24 @@ export async function verifyImacDeviceAgentConnection({
   throw new Error(`Der lokale iMac-Agent hat innerhalb von ${Math.ceil(timeoutMs / 1000)} Sekunden keine zwei fortlaufenden Railway-Heartbeats bestätigt.`);
 }
 
+async function copyDirectoryWithRetry(source, target, label) {
+  let lastError;
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    try {
+      await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+      await cp(source, target, { recursive: true, force: true, preserveTimestamps: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      const transient = error?.code === 'EAGAIN' || error?.errno === -11;
+      if (!transient || attempt === 6) break;
+      console.error(`${label}: iCloud-Dateien sind kurz belegt, Versuch ${attempt + 1} von 6 …`);
+      await wait(2_000 * attempt);
+    }
+  }
+  throw new Error(`${label} konnte nicht lokal bereitgestellt werden: ${lastError?.message || lastError}`);
+}
+
 export async function imacDeviceAgentLaunchdStatus() {
   const target = `gui/${process.getuid()}/${IMAC_DEVICE_AGENT_LABEL}`;
   try {
@@ -96,23 +120,48 @@ export async function imacDeviceAgentLaunchdStatus() {
 export async function installImacDeviceAgentLaunchd() {
   assertImacExecutionHost();
   const plist = imacDeviceAgentPlistFile();
-  const runnerSource = fileURLToPath(new URL('./device-agent-runner.mjs', import.meta.url));
   const runnerPath = imacDeviceAgentLocalRunnerFile();
   const workspace = authoritativeWorkspace();
+  const helperSource = path.join(workspace, 'local-mac-helper');
+  const helperTarget = path.dirname(runnerPath);
+  const forecastSource = path.join(workspace, 'outputs', 'planbar-weekly');
+  const forecastRoot = imacDeviceAgentLocalForecastRoot();
   const guiDomain = `gui/${process.getuid()}`;
   const baseline = await fetchImacDeviceAgentStatus().catch(() => null);
+  const previousPlist = await readFile(plist, 'utf8').catch(() => null);
+  let activationStarted = false;
   await mkdir(path.dirname(plist), { recursive: true, mode: 0o700 });
   await mkdir(path.join(dataRoot(), 'logs'), { recursive: true, mode: 0o700 });
-  await mkdir(path.dirname(runnerPath), { recursive: true, mode: 0o700 });
-  await copyFile(runnerSource, runnerPath);
+  console.error('IVA richtet die vollständig lokale iMac-Laufzeit ein …');
+  await copyDirectoryWithRetry(helperSource, helperTarget, 'IVA-Helfer');
+  await copyDirectoryWithRetry(forecastSource, forecastRoot, 'Vorbereitete Forecast-Dateien');
   await chmod(runnerPath, 0o700);
-  await writeFile(plist, buildImacDeviceAgentLaunchAgent({ runnerPath, workspace }), { mode: 0o600 });
-  await execFileAsync('/usr/bin/plutil', ['-lint', plist], { timeout: 10000 });
-  await execFileAsync('/bin/launchctl', ['bootout', guiDomain, plist], { timeout: 10000 }).catch(() => {});
-  await execFileAsync('/bin/launchctl', ['bootstrap', guiDomain, plist], { timeout: 15000 });
-  await execFileAsync('/bin/launchctl', ['kickstart', `${guiDomain}/${IMAC_DEVICE_AGENT_LABEL}`], { timeout: 15000 });
-  const connection = await verifyImacDeviceAgentConnection({ baselineLastSeenAt: baseline?.lastSeenAt });
-  return { installed: true, plist, runnerPath, connection, ...(await imacDeviceAgentLaunchdStatus()) };
+  try {
+    await writeFile(plist, buildImacDeviceAgentLaunchAgent({ runnerPath, workspace, forecastRoot }), { mode: 0o600 });
+    await execFileAsync('/usr/bin/plutil', ['-lint', plist], { timeout: 10000 });
+    activationStarted = true;
+    await execFileAsync('/bin/launchctl', ['bootout', guiDomain, plist], { timeout: 10000 }).catch(() => {});
+    await execFileAsync('/bin/launchctl', ['bootstrap', guiDomain, plist], { timeout: 15000 });
+    await execFileAsync('/bin/launchctl', ['kickstart', `${guiDomain}/${IMAC_DEVICE_AGENT_LABEL}`], { timeout: 15000 });
+    console.error('Lokale Laufzeit eingerichtet. Dauerverbindung wird geprüft …');
+    const connection = await verifyImacDeviceAgentConnection({
+      baselineLastSeenAt: baseline?.lastSeenAt,
+      requiredRelease: DEVICE_AGENT_RELEASE,
+    });
+    return { installed: true, plist, runnerPath, connection, ...(await imacDeviceAgentLaunchdStatus()) };
+  } catch (error) {
+    if (!activationStarted) throw error;
+    await execFileAsync('/bin/launchctl', ['bootout', guiDomain, plist], { timeout: 10000 }).catch(() => {});
+    if (previousPlist) {
+      await writeFile(plist, previousPlist, { mode: 0o600 });
+      await execFileAsync('/usr/bin/plutil', ['-lint', plist], { timeout: 10000 });
+      await execFileAsync('/bin/launchctl', ['bootstrap', guiDomain, plist], { timeout: 15000 });
+      await execFileAsync('/bin/launchctl', ['kickstart', `${guiDomain}/${IMAC_DEVICE_AGENT_LABEL}`], { timeout: 15000 }).catch(() => {});
+    } else {
+      await unlink(plist).catch(() => {});
+    }
+    throw new Error(`Neue lokale Laufzeit fehlgeschlagen; vorheriger Agent wurde wiederhergestellt: ${error?.message || error}`);
+  }
 }
 
 export async function uninstallImacDeviceAgentLaunchd() {

@@ -15,21 +15,27 @@ if [[ ! -d "$workspace" ]]; then
 fi
 
 # Holt bei Bedarf die bereits in iCloud veröffentlichte Agent-Version lokal auf
-# den iMac. Der Aufruf verändert keine Nutzerdaten und benötigt kein Passwort.
-/usr/bin/brctl download "$workspace/local-mac-helper/device-agent.mjs" >/dev/null 2>&1 || true
-/usr/bin/brctl download "$workspace/local-mac-helper/device-agent-runner.mjs" >/dev/null 2>&1 || true
-/usr/bin/brctl download "$workspace/local-mac-helper/device-agent-launchd.mjs" >/dev/null 2>&1 || true
-/usr/bin/brctl download "$workspace/local-mac-helper/planbar-forecast-mail.mjs" >/dev/null 2>&1 || true
-/usr/bin/brctl download "$workspace/outputs/planbar-weekly" >/dev/null 2>&1 || true
+# den iMac. Die Downloads laufen im Hintergrund, damit das Fenster nie wieder
+# scheinbar ohne Rückmeldung hängen bleibt.
+print "IVA lädt die aktuelle iMac-Komponente aus iCloud …"
+/usr/bin/brctl download "$workspace/local-mac-helper" >/dev/null 2>&1 &!
+/usr/bin/brctl download "$workspace/local-mac-helper/install-imac-device-agent.mjs" >/dev/null 2>&1 &!
+/usr/bin/brctl download "$workspace/local-mac-helper/device-agent.mjs" >/dev/null 2>&1 &!
+/usr/bin/brctl download "$workspace/local-mac-helper/device-agent-runner.mjs" >/dev/null 2>&1 &!
+/usr/bin/brctl download "$workspace/local-mac-helper/device-agent-launchd.mjs" >/dev/null 2>&1 &!
+/usr/bin/brctl download "$workspace/outputs/planbar-weekly" >/dev/null 2>&1 &!
 
-for _ in {1..30}; do
-  if /usr/bin/grep -q "imac-local-v3" "$workspace/local-mac-helper/device-agent.mjs" 2>/dev/null; then
+for attempt in {1..60}; do
+  if /usr/bin/grep -q "imac-local-v4" "$workspace/local-mac-helper/device-agent.mjs" 2>/dev/null; then
     break
+  fi
+  if (( attempt % 10 == 0 )); then
+    print "iCloud-Synchronisation läuft weiter …"
   fi
   /bin/sleep 1
 done
 
-if ! /usr/bin/grep -q "imac-local-v3" "$workspace/local-mac-helper/device-agent.mjs" 2>/dev/null; then
+if ! /usr/bin/grep -q "imac-local-v4" "$workspace/local-mac-helper/device-agent.mjs" 2>/dev/null; then
   print -u2 "FEHLER: Die aktuelle IVA-Agent-Version ist auf diesem iMac noch nicht aus iCloud geladen worden."
   exit 1
 fi
@@ -90,6 +96,7 @@ if [[ -z "$node_bin" ]]; then
 fi
 
 cd "$workspace"
-"$node_bin" local-mac-helper/cli.mjs install-imac-device-agent --commit
+print "Aktuelle Komponente geladen. IVA richtet jetzt die Dauerverbindung ein …"
+"$node_bin" local-mac-helper/install-imac-device-agent.mjs
 
 print "IVA ist jetzt dauerhaft mit diesem iMac und dem zentralen iCloud-Ordner verbunden. Zwei fortlaufende Railway-Heartbeats wurden bestätigt."
