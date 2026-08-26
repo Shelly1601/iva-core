@@ -14,7 +14,7 @@ if [[ ! -d "$workspace" ]]; then
   exit 1
 fi
 
-print "IVA-DIREKTSTART 8817760 – iCloud-Code wird nicht mehr als Laufzeit verwendet."
+print "IVA-DIREKTSTART 5AABF61 – zentrale Regeln, stabiler Bildschirm und Forecast-Versand werden lokal eingerichtet."
 
 # Holt bei Bedarf die bereits in iCloud veröffentlichte Agent-Version lokal auf
 # den iMac. Die Downloads laufen im Hintergrund, damit das Fenster nie wieder
@@ -97,8 +97,8 @@ if [[ -z "$node_bin" ]]; then
   fi
 fi
 
-bootstrap_commit="8817760c6fbb986a028ec583974513042f531c58"
-bootstrap_sha256="c5b2a1fcfb007c74a7cb85ed6d11601218be722772186c3158a0a2bb9db04171"
+bootstrap_commit="5aabf6129231afbe8d02391f586799b461c3c678"
+bootstrap_sha256="e136f0b6d8c88dc4d3a97605deec728dfbd3f8c97996de423998949a5d672de8"
 bootstrap_dir="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/iva-imac-bootstrap.XXXXXX")"
 cleanup_bootstrap() {
   if [[ -n "${bootstrap_dir:-}" && -d "$bootstrap_dir" ]]; then

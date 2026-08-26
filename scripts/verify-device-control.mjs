@@ -220,11 +220,11 @@ try {
   assert.doesNotMatch(bootstrapSource, /local-mac-helper\/cli\.mjs install-imac-device-agent/);
   assert.match(bootstrapSource, /local-mac-helper\/install-imac-device-agent\.mjs/);
   assert.match(bootstrapSource, /IVA lädt die aktuelle iMac-Komponente aus iCloud/);
-  assert.match(bootstrapSource, /IVA-DIREKTSTART 8817760/);
+  assert.match(bootstrapSource, /IVA-DIREKTSTART 5AABF61/);
   assert.match(bootstrapSource, /Zwei fortlaufende Railway-Heartbeats wurden bestätigt/);
   const finalBootstrapSource = await readFile(new URL('../IVA-iMac-JETZT-fertigstellen.command', import.meta.url), 'utf8');
-  assert.match(finalBootstrapSource, /8817760c6fbb986a028ec583974513042f531c58/);
-  assert.match(finalBootstrapSource, /c5b2a1fcfb007c74a7cb85ed6d11601218be722772186c3158a0a2bb9db04171/);
+  assert.match(finalBootstrapSource, /5aabf6129231afbe8d02391f586799b461c3c678/);
+  assert.match(finalBootstrapSource, /e136f0b6d8c88dc4d3a97605deec728dfbd3f8c97996de423998949a5d672de8/);
   assert.match(finalBootstrapSource, /IVA_DEVICE_RUNTIME_SOURCE="\$snapshot"/);
   assert.match(finalBootstrapSource, /4\/4 – Dauerverbindung wird umgeschaltet und doppelt geprüft/);
   const codexTaskSource = await readFile(new URL('../local-mac-helper/codex-tasks.mjs', import.meta.url), 'utf8');
@@ -250,7 +250,7 @@ try {
   assert.match(deviceAgentRunnerSource, /de\.iva\.device-agent-migrator/);
   assert.match(deviceAgentRunnerSource, /IVA_DEVICE_MIGRATOR/);
   assert.match(deviceAgentRunnerSource, /ensureVerifiedBootstrapSnapshot/);
-  assert.match(deviceAgentRunnerSource, /c5b2a1fcfb007c74a7cb85ed6d11601218be722772186c3158a0a2bb9db04171/);
+  assert.match(deviceAgentRunnerSource, /e136f0b6d8c88dc4d3a97605deec728dfbd3f8c97996de423998949a5d672de8/);
   assert.match(deviceAgentRunnerSource, /IVA_DEVICE_RUNTIME_SOURCE/);
   assert.doesNotMatch(deviceAgentRunnerSource, /preserveTimestamps:\s*true/);
   assert.match(deviceAgentRunnerSource, /error\?\.code === 'ENOENT'/);
