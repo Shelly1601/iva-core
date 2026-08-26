@@ -104,6 +104,8 @@ try {
   assert.equal(inferProjectWorkflowStatus('Status: **fachlich blockiert**.\n\nGrund: Pflichtdaten fehlen.'), 'blocked');
   assert.equal(inferProjectWorkflowStatus('Status: technisch blockiert\nKeine Schreibaktion.'), 'blocked');
   assert.equal(inferProjectWorkflowStatus('Status: erfolgreich\nKeine Blocker vorhanden.'), '');
+  const deviceAgentRunnerSource = await readFile(new URL('../local-mac-helper/device-agent-runner.mjs', import.meta.url), 'utf8');
+  assert.match(deviceAgentRunnerSource, /DEVICE_AGENT_HARD_TIMEOUT_MS = 240_000/, 'der äußere Agent darf die 180-Sekunden-Planbar-Prüfung nicht vorzeitig abbrechen');
 
   const { imacDeviceAgentPolicy } = await import('../local-mac-helper/device-agent.mjs');
   const devicePolicy = imacDeviceAgentPolicy();
