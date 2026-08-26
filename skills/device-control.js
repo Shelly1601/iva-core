@@ -1,7 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 
-export function deviceControlSkill({ enqueueDeviceCommand, deviceCommandStatus }) {
+export function deviceControlSkill({ enqueueDeviceCommand, deviceCommandStatus, listAgentRuns }) {
   return {
     sendCommandToImac: tool({
       description: 'Sendet auf Nadines ausdrücklichen Wunsch einen eng freigegebenen Befehl an ihren M1-iMac. Der iMac holt den Befehl ausgehend ab; es wird kein offener Fernzugriff eingerichtet. Unterstützt Statusprüfung, einen gesperrten Fördermonitor-Prüflauf, Review-Übersicht und das Öffnen freigegebener Apps.',
@@ -33,7 +33,15 @@ export function deviceControlSkill({ enqueueDeviceCommand, deviceCommandStatus }
           requestedBy: 'iva-imac-operation',
           requestText: title,
         });
-        return { queued: true, commandId: command.id, deviceId: command.deviceId, action: command.action, expiresAt: command.expiresAt };
+        return {
+          queued: true,
+          commandId: command.id,
+          deviceId: command.deviceId,
+          action: command.action,
+          executionVerified: false,
+          expiresAt: command.expiresAt,
+          nextStatusStep: 'Zuerst getImacCommandStatus für diese commandId aufrufen. Liefert der abgeschlossene Startbefehl eine jobId, danach getImacTaskStatus für diese jobId aufrufen. Vor task.status=completed kein Ergebnis behaupten.',
+        };
       },
     }),
     ensureImacPortalLogin: tool({
@@ -65,7 +73,29 @@ export function deviceControlSkill({ enqueueDeviceCommand, deviceCommandStatus }
       parameters: z.object({ commandId: z.string().uuid() }),
       execute: async ({ commandId }) => ({ command: await deviceCommandStatus(commandId) }),
     }),
+    getImacTaskStatus: tool({
+      description: 'Prüft den tatsächlichen Ausführungsstatus eines lokalen operativen iMac-Codex-Auftrags anhand seiner jobId. Nur status completed zusammen mit resultPreview belegt ein fertiges Ergebnis; queued oder running belegen ausschließlich, dass der Auftrag noch läuft.',
+      parameters: z.object({ jobId: z.string().uuid() }),
+      execute: async ({ jobId }) => {
+        if (typeof listAgentRuns !== 'function') return { found: false, jobId, error: 'Die iMac-Auftragsstatusquelle ist nicht verbunden.' };
+        const runs = await listAgentRuns({ limit: 500 });
+        const run = runs.find(item => item.jobId === jobId || item.externalKey === `codex-task:${jobId}`);
+        if (!run) return { found: false, jobId, status: 'pending-report', executionVerified: false };
+        const completed = run.status === 'completed';
+        return {
+          found: true,
+          jobId,
+          status: run.status,
+          phase: run.phase,
+          progress: run.progress,
+          executionVerified: completed,
+          resultPreview: completed ? run.resultPreview : '',
+          error: run.error || '',
+          updatedAt: run.updatedAt,
+        };
+      },
+    }),
   };
 }
 
-export const deviceControlSkillMeta = { id: 'deviceControl', toolNames: ['sendCommandToImac', 'runTaskOnImac', 'ensureImacPortalLogin', 'getImacCredentialStatus', 'getImacCommandStatus'] };
+export const deviceControlSkillMeta = { id: 'deviceControl', toolNames: ['sendCommandToImac', 'runTaskOnImac', 'ensureImacPortalLogin', 'getImacCredentialStatus', 'getImacCommandStatus', 'getImacTaskStatus'] };

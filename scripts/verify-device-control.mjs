@@ -349,6 +349,12 @@ try {
       return { id: '33333333-3333-4333-8333-333333333333', deviceId: IVA_IMAC_DEVICE_ID, expiresAt: new Date().toISOString(), ...input };
     },
     deviceCommandStatus: async id => ({ id, status: 'completed' }),
+    listAgentRuns: async () => [{
+      jobId: '55555555-5555-4555-8555-555555555555',
+      externalKey: 'codex-task:55555555-5555-4555-8555-555555555555',
+      status: 'completed', phase: 'completed', progress: 100,
+      resultPreview: 'Hostname: imac-von-nadine', error: '', updatedAt: new Date().toISOString(),
+    }],
   });
   const loginDispatch = await deviceTools.ensureImacPortalLogin.execute({ service: 'pipedrive' });
   assert.equal(loginDispatch.queued, true);
@@ -363,6 +369,10 @@ try {
   assert.equal(operationalDispatch.queued, true);
   assert.equal(portalDispatch.action, 'codex.task.start');
   assert.equal(portalDispatch.payload.mode, 'operational');
+  assert.equal(operationalDispatch.executionVerified, false);
+  const taskStatus = await deviceTools.getImacTaskStatus.execute({ jobId: '55555555-5555-4555-8555-555555555555' });
+  assert.equal(taskStatus.executionVerified, true);
+  assert.equal(taskStatus.resultPreview, 'Hostname: imac-von-nadine');
 
   const { planbarSkill } = await import('../skills/planbar.js');
   let planbarDispatch = null;

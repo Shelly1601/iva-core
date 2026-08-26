@@ -776,6 +776,7 @@ Tool-Nutzung:
 - Kundinnen, Kunden, Vertraege, Dokumente, Archiv, Aufgaben oder Schaeden aus blau direkt/AMEISE/Qonekto: zuerst listQonektoTools nutzen. Lesende Werkzeuge mit callQonektoReadTool sofort ausfuehren. Veraendernde Werkzeuge ausschliesslich mit prepareQonektoWrite vorbereiten, Aenderung klar wiederholen und Nadine fragen, ob sie das wirklich will. Ausgefuehrt wird serverseitig erst nach ihrer separaten, exakten Antwort "Ja, Qonekto-Aenderung ausfuehren". Niemals behaupten, eine nur vorbereitete Aenderung sei bereits erfolgt. Destruktive Werkzeuge bleiben blockiert. Niemals Qonekto-Daten raten oder durch oeffentliche Web-Recherche ersetzen.
 - Beratungsarten und vorhandene Fachmodule mit listAdviceModules ermitteln. Bei Tarif-, Altvertrags- oder Produktvergleichen zuerst searchAdviceKnowledge nutzen. Leistungsmerkmale ausschliesslich aus belegten Originalunterlagen nennen; fehlende Tarifstaende, Bedingungen oder Produktinformationsblaetter als Datenluecke markieren und niemals erfinden. DIN 77230 betrifft Privathaushalte, DIN 77235 Selbststaendige und KMU. Ohne vollstaendig hinterlegtes lizenziertes Regelwerk nur "DIN-orientierte Vorbereitung" sagen, niemals "DIN-konform".
 - Nach Toolaufruf: Ergebnis im passenden Antwort-Format (siehe oben), nicht die Rohdaten.
+- Für operative iMac-Codex-Aufträge gilt zusätzlich: getImacCommandStatus prüft zunächst den Gerätebefehl; liefert der abgeschlossene Startbefehl eine jobId, prüft getImacTaskStatus den inneren iMac-Auftrag. queued oder running bedeutet ausschließlich "läuft noch". Erst getImacTaskStatus mit status completed und resultPreview erlaubt eine konkrete Erfolgsbehauptung. Erwartete Werte niemals aus Prompt, Workspace-Kontext oder früheren Läufen als angebliches neues Testergebnis ausgeben.
 
 Direktes Lernen und Selbstverbesserung:
 
@@ -834,7 +835,7 @@ const ALL_SKILLS = {
   capabilityReview: capabilityReviewSkill({ evaluateCapability, listCapabilityReviews }),
   knowledgeLibrary: knowledgeLibrarySkill({ listKnowledgeLibrary, knowledgeLibraryStatus, assessKnowledgeSourceCandidate }),
   recruiting: recruitingSkill({ createCandidateSearchPlan, screenResumeAgainstCriteria, createInterviewGuide }),
-  deviceControl: deviceControlSkill({ enqueueDeviceCommand, deviceCommandStatus }),
+  deviceControl: deviceControlSkill({ enqueueDeviceCommand, deviceCommandStatus, listAgentRuns }),
   planbar:    planbarSkill({ searchPlanbarAppointments, enqueueDeviceCommand, deviceCommandStatus, getProject }),
   investment: investmentSkill({ investment }),
   qonekto:   null, // wird pro Anfrage mit der echten sessionId erzeugt
