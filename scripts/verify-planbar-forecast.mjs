@@ -91,6 +91,7 @@ const nativeSend = buildVerifiedSendAppleScript({
   attachments: attachmentNames.map(name => `/tmp/${name}`),
 });
 assert.match(nativeSend.script, /email address of accountCandidate as text\) is requestedSender/);
+assert.match(nativeSend.script, /email address of default account as text\) is requestedSender/);
 assert.match(nativeSend.script, /set expectedTo to \{"a\.keller@heat-hero\.com"\}/);
 assert.match(nativeSend.script, /set expectedAttachmentNames to \{"Planbar_Gesamtliste_KW36-45_2026\.xlsx", "Planbar_Midea_KW36-45_2026\.xlsx"\}/);
 assert.match(nativeSend.script, /save draftMessage[\s\S]+send draftMessage/);

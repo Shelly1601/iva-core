@@ -89,11 +89,18 @@ export function buildDraftAppleScript(input = {}) {
 function appendExactAccountLookup(lines) {
   lines.push(
     'set senderAccount to missing value',
+    'if default account is not missing value then',
+    'ignoring case',
+    'if (email address of default account as text) is requestedSender then set senderAccount to default account',
+    'end ignoring',
+    'end if',
+    'if senderAccount is missing value then',
     'repeat with accountCandidate in exchange accounts',
     'ignoring case',
     'if (email address of accountCandidate as text) is requestedSender then set senderAccount to accountCandidate',
     'end ignoring',
     'end repeat',
+    'end if',
     'if senderAccount is missing value then',
     'repeat with accountCandidate in imap accounts',
     'ignoring case',
@@ -414,7 +421,7 @@ export async function sendVerifiedOutlookXlsxMessage(input = {}) {
   let sent;
   if (diagnosis.capabilities.sharedSenderUiPrerequisitesReady) {
     sent = await sendVerifiedOutlookXlsxMessageViaUi(message);
-  } else if (diagnosis.capabilities.createAccountDraft) {
+  } else if (diagnosis.outlook.available) {
     const { script } = buildVerifiedSendAppleScript(message);
     let output = '';
     let sendAttemptError = '';
@@ -537,12 +544,12 @@ end tell`;
     },
     capabilities: {
       createLocalDraft: accessibilityEnabled,
-      createAccountDraft: installed && running && appleScript.available && appleScript.accountCount > 0,
+      createAccountDraft: installed && running && appleScript.available && (appleScript.defaultAccountAvailable || appleScript.accountCount > 0),
       chooseSharedSenderAutomatically: appleScript.defaultAccountAvailable || accessibilityEnabled,
       sharedSenderUiPrerequisitesReady: accessibilityEnabled,
       readVisibleOutlookUi: accessibilityEnabled,
       sendMail: false,
-      sendVerifiedXlsxMail: installed && running && accessibilityEnabled,
+      sendVerifiedXlsxMail: installed && running && (accessibilityEnabled || appleScript.available),
     },
   };
 }
