@@ -4,6 +4,7 @@ import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { access } from 'node:fs/promises';
 
 const execFileAsync = promisify(execFile);
 export const IMAC_DEVICE_ID = 'imac-nadine';
@@ -13,10 +14,11 @@ const KEYCHAIN_SERVICE = 'de.iva.device-agent';
 const KEYCHAIN_ACCOUNT = IMAC_DEVICE_ID;
 const DEFAULT_SERVER_URL = 'https://iva-core-production.up.railway.app';
 const APP_ALLOWLIST = Object.freeze({
-  'Microsoft Outlook': '/Applications/Microsoft Outlook.app',
-  'Google Chrome': '/Applications/Google Chrome.app',
-  WhatsApp: '/Applications/WhatsApp.app',
-  Codex: '/Applications/Codex.app',
+  'Microsoft Outlook': Object.freeze(['/Applications/Microsoft Outlook.app']),
+  'Google Chrome': Object.freeze(['/Applications/Google Chrome.app']),
+  WhatsApp: Object.freeze(['/Applications/WhatsApp.app']),
+  Codex: Object.freeze(['/Applications/ChatGPT.app', '/Applications/Codex.app']),
+  ChatGPT: Object.freeze(['/Applications/ChatGPT.app', '/Applications/Codex.app']),
 });
 const UI_ACTIONS = new Set(['computer.status', 'planbar.search.refresh', 'planbar.customer.schedule', 'project.workflow.run', 'portal.login', 'codex.task.start', 'app.open']);
 const AGENT_WORKSPACE = path.resolve(process.env.IVA_DEVICE_WORKSPACE || path.join(path.dirname(fileURLToPath(import.meta.url)), '..'));
@@ -127,13 +129,20 @@ export async function reportProjectWorkflowRun(input = {}) {
   return request(`/device-agent/${IMAC_DEVICE_ID}/project-workflow-runs`, { method: 'POST', body: input });
 }
 
-function openApplication(appName) {
-  const appPath = APP_ALLOWLIST[appName];
-  if (!appPath) throw new Error('Diese App ist auf dem iMac nicht freigegeben.');
+async function openApplication(appName) {
+  const candidates = APP_ALLOWLIST[appName];
+  if (!candidates) throw new Error('Diese App ist auf dem iMac nicht freigegeben.');
+  const appPath = await Promise.any(candidates.map(async candidate => {
+    await access(candidate);
+    return candidate;
+  })).catch(() => null);
+  if (!appPath) throw new Error(`${appName} ist auf dem iMac nicht installiert.`);
   return new Promise((resolve, reject) => {
     const child = spawn('/usr/bin/open', ['-a', appPath], { stdio: 'ignore' });
     child.on('error', reject);
-    child.on('close', code => code === 0 ? resolve({ app: appName, opened: true }) : reject(new Error(`${appName} konnte nicht geöffnet werden.`)));
+    child.on('close', code => code === 0
+      ? resolve({ app: appName, applicationPath: appPath, opened: true })
+      : reject(new Error(`${appName} konnte nicht geöffnet werden.`)));
   });
 }
 
@@ -165,7 +174,7 @@ async function executeDeviceCommand(command) {
   }
   if (command.action === 'computer.status') {
     const { diagnoseOutlook } = await import('./outlook.mjs');
-    const { diagnosePipedriveChrome } = await import('./chrome-pipedrive.mjs');
+    const { diagnosePipedriveChrome } = await import('./chrome-pipedrive-status.mjs');
     const { diagnoseWhatsAppMac } = await import('./whatsapp-mac.mjs');
     const { runMacUiBridge } = await import('./macos-ui.mjs');
     // Die UI-Pruefungen laufen absichtlich nacheinander. Outlook und WhatsApp

@@ -24,7 +24,7 @@ export const DEVICE_ACTIONS = Object.freeze({
   'portal.credentials.status': Object.freeze({ description: 'Nur die Belegung von IVAs lokalem macOS-Schlüsselbund prüfen', mutating: false, requiresAttestedAgent: true }),
   'portal.login': Object.freeze({ description: 'Bei einem vorab freigegebenen Portal mit lokalem Schlüsselbund anmelden', mutating: false, requiresAttestedAgent: true }),
   'app.open': Object.freeze({ description: 'Eine freigegebene App auf dem iMac öffnen', mutating: true, requiresAttestedAgent: true }),
-  'codex.task.start': Object.freeze({ description: 'Einen ausdrücklich beauftragten IVA-Bauauftrag im lokalen Codex starten', mutating: true, requiresAttestedAgent: true }),
+  'codex.task.start': Object.freeze({ description: 'Einen ausdrücklich beauftragten IVA-Bau- oder iMac-Operationsauftrag im lokalen Codex starten', mutating: true, requiresAttestedAgent: true }),
   'codex.task.status': Object.freeze({ description: 'Status eines lokalen Codex-Bauauftrags lesen', mutating: false, requiresAttestedAgent: true }),
 });
 
@@ -201,18 +201,19 @@ function validatePayload(action, payload = {}) {
   }
   if (action === 'app.open') {
     const app = cleanText(payload.app, 80);
-    if (!['Microsoft Outlook', 'Google Chrome', 'WhatsApp', 'Codex'].includes(app)) {
+    if (!['Microsoft Outlook', 'Google Chrome', 'WhatsApp', 'Codex', 'ChatGPT'].includes(app)) {
       throw new Error('Diese App ist für die iMac-Fernsteuerung nicht freigegeben.');
     }
     return { app };
   }
   if (action === 'codex.task.start') {
     const prompt = cleanText(payload.prompt, 12_000);
-    if (prompt.length < 10) throw new Error('Der Codex-Bauauftrag ist zu kurz.');
+    if (prompt.length < 10) throw new Error('Der Codex-Auftrag ist zu kurz.');
     return {
       prompt,
       title: cleanText(payload.title || 'IVA-Bauauftrag', 180),
       requestId: cleanText(payload.requestId, 100),
+      mode: payload.mode === 'operational' ? 'operational' : 'build',
       acceptanceCriteria: (Array.isArray(payload.acceptanceCriteria) ? payload.acceptanceCriteria : [])
         .map(value => cleanText(value, 500)).filter(Boolean).slice(0, 12),
     };

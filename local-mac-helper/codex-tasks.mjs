@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { accessSync, constants as fsConstants } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { materializeIcloudWorkspace } from './icloud-workspace.mjs';
 
 const MODULE_PATH = fileURLToPath(import.meta.url);
 const REPO_ROOT = path.resolve(process.env.IVA_DEVICE_WORKSPACE || path.join(path.dirname(MODULE_PATH), '..'));
@@ -68,14 +69,16 @@ async function reportTaskState(request, state, resultPreview = '') {
   try {
     const { reportOperationalRun, reportProjectWorkflowRun } = await import('./device-agent.mjs');
     const terminal = ['completed', 'failed', 'blocked', 'timed_out', 'incomplete'].includes(state.status);
+    const isProjectWorkflow = request.mode === 'project-workflow';
+    const isOperational = request.mode === 'operational';
     const operational = {
       externalKey: `codex-task:${request.jobId}`,
       jobId: request.jobId,
-      agentId: request.mode === 'project-workflow' ? 'iva-operations' : 'iva-builder',
+      agentId: isProjectWorkflow || isOperational ? 'iva-operations' : 'iva-builder',
       agentName: request.title,
       taskTitle: request.title,
-      routeReason: request.mode === 'project-workflow' ? 'project-workflow' : 'explicit-build-order',
-      channel: request.mode === 'project-workflow' ? 'project-workflow' : 'codex-build',
+      routeReason: isProjectWorkflow ? 'project-workflow' : isOperational ? 'explicit-imac-operation' : 'explicit-build-order',
+      channel: isProjectWorkflow ? 'project-workflow' : isOperational ? 'codex-operational' : 'codex-build',
       source: 'iMac · Codex',
       projectId: request.projectId || '',
       workflowId: request.workflowId || '',
@@ -123,6 +126,18 @@ ${request.prompt}
 
 ${request.acceptanceCriteria?.length ? `Abnahmekriterien:\n${request.acceptanceCriteria.map(item => `- ${item}`).join('\n')}` : ''}`.trim();
   }
+  if (request.mode === 'operational') {
+    return `Nadine hat diese konkrete Aktion ausdrücklich zur Ausführung auf ihrem iMac beauftragt. Führe sie jetzt genau dort aus, ohne eine weitere Planbestätigung zu verlangen.
+
+Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.md vollständig. Dies ist ein operativer iMac-Auftrag und kein IVA-Bauauftrag: Ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts, außer der Auftrag verlangt selbst ausdrücklich eine Code- oder Systemänderung. Versende keine E-Mail und führe keine andere externe Kommunikation aus, sofern sie im Auftrag nicht eindeutig freigegeben ist. Verwende bei lokalen WhatsApp-Aufträgen ausschließlich die native WhatsApp-App. Wiederhole eine Aktion niemals allein deshalb, weil der Erfolgsnachweis verzögert oder uneindeutig ist.
+
+Der autoritative Arbeitsordner liegt in iCloud. Bei „Resource deadlock avoided“, EAGAIN, EDEADLK oder kurzzeitig nicht lesbaren Dateien stößt du zuerst den lokalen iCloud-Download an und wiederholst den lesenden Zugriff; behandle das nicht vorschnell als fehlende Datei. Melde ausschließlich das tatsächlich verifizierte Ergebnis oder einen konkreten Blocker und erfinde keinen Erfolg.
+
+Operativer Auftrag:
+${request.prompt}
+
+${request.acceptanceCriteria?.length ? `Abnahmekriterien:\n${request.acceptanceCriteria.map(item => `- ${item}`).join('\n')}` : ''}`.trim();
+  }
   const progressCommand = phase => `node local-mac-helper/codex-tasks.mjs progress ${request.jobId} ${phase}`;
   return `Nadine hat diesen Auftrag ausdrücklich über ihren IVA-Chat erteilt. Setze ihn jetzt vollständig und eigenständig um, ohne eine weitere Planbestätigung von Nadine zu verlangen.
 
@@ -155,12 +170,15 @@ export function codexTaskPolicy() {
     automaticApprovalReview: true,
     maxPromptLength: MAX_PROMPT_LENGTH,
     maxRuntimeMs: MAX_RUNTIME_MS,
+    iCloudMaterialization: true,
   });
 }
 
 export async function startCodexTask({ prompt, title = '', requestId = '', acceptanceCriteria = [], mode = 'build', projectId = '', workflowId = '', workflowName = '' } = {}) {
   const cleanPrompt = clean(prompt, MAX_PROMPT_LENGTH);
-  if (cleanPrompt.length < 10) throw new Error('Der Codex-Bauauftrag ist zu kurz.');
+  if (cleanPrompt.length < 10) throw new Error('Der Codex-Auftrag ist zu kurz.');
+  const workspaceReadiness = await materializeIcloudWorkspace({ workspace: REPO_ROOT });
+  const normalizedMode = ['project-workflow', 'operational'].includes(mode) ? mode : 'build';
   const jobId = crypto.randomUUID();
   const paths = jobPaths(jobId);
   await mkdir(paths.directory, { recursive: true });
@@ -170,11 +188,16 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
     requestId: clean(requestId, 100),
     prompt: cleanPrompt,
     acceptanceCriteria: (Array.isArray(acceptanceCriteria) ? acceptanceCriteria : []).map(value => clean(value, 500)).filter(Boolean).slice(0, 12),
-    mode: mode === 'project-workflow' ? 'project-workflow' : 'build',
+    mode: normalizedMode,
     projectId: clean(projectId, 100),
     workflowId: clean(workflowId, 140),
     workflowName: clean(workflowName, 220),
     workspace: REPO_ROOT,
+    workspaceReadiness: {
+      iCloud: workspaceReadiness.iCloud,
+      materialized: workspaceReadiness.materialized,
+      checkedFiles: workspaceReadiness.probes?.length || 0,
+    },
     createdAt: new Date().toISOString(),
   };
   await writeFile(paths.request, JSON.stringify(request, null, 2));

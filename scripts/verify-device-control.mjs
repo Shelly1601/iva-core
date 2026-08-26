@@ -159,7 +159,15 @@ try {
   });
   assert.equal(codexCommand.action, 'codex.task.start');
   assert.equal(codexCommand.payload.title, 'Voice-Parität');
+  assert.equal(codexCommand.payload.mode, 'build');
   assert.deepEqual(codexCommand.payload.acceptanceCriteria, ['Tests grün']);
+  const operationalCodexCommand = await enqueueDeviceCommand({
+    action: 'codex.task.start', requestedBy: 'test-operation',
+    payload: { title: 'iMac-Dateiprüfung', prompt: 'Prüfe den gemeinsamen Arbeitsordner auf dem iMac rein lesend.', mode: 'operational' },
+  });
+  assert.equal(operationalCodexCommand.payload.mode, 'operational');
+  const chatGptCommand = await enqueueDeviceCommand({ action: 'app.open', payload: { app: 'ChatGPT' }, requestedBy: 'test' });
+  assert.deepEqual(chatGptCommand.payload, { app: 'ChatGPT' });
   await assert.rejects(enqueueDeviceCommand({ action: 'codex.task.status', payload: { jobId: '../falsch' } }), /Ungültige/);
   await assert.rejects(enqueueDeviceCommand({ action: 'shell.run', payload: { command: 'rm -rf /' } }), /nicht freigegeben/);
   await assert.rejects(enqueueDeviceCommand({ action: 'app.open', payload: { app: 'Terminal' } }), /nicht freigegeben/);
@@ -207,6 +215,28 @@ try {
   assert.equal(codexPolicy.arbitraryWorkspace, false);
   assert.equal(codexPolicy.sandbox, 'workspace-write');
   assert.match(codexPolicy.workspace, /iva-core$/);
+  assert.equal(codexPolicy.iCloudMaterialization, true);
+  const { materializeIcloudWorkspace } = await import('../local-mac-helper/icloud-workspace.mjs');
+  let downloadRequested = false;
+  let readAttempts = 0;
+  const materialized = await materializeIcloudWorkspace({
+    workspace: '/Users/nadine/Library/Mobile Documents/com~apple~CloudDocs/IVA-Assistent/iva-core',
+    exec: async (command, args) => {
+      assert.equal(command, '/usr/bin/brctl');
+      assert.equal(args[0], 'download');
+      downloadRequested = true;
+    },
+    read: async () => {
+      readAttempts += 1;
+      if (readAttempts === 1) throw Object.assign(new Error('Resource deadlock avoided'), { code: 'EDEADLK' });
+      return Buffer.from('ready');
+    },
+    waitFn: async () => {},
+  });
+  assert.equal(downloadRequested, true);
+  assert.equal(materialized.materialized, true);
+  assert.equal(materialized.probes.length, 4);
+  assert.equal(readAttempts, 5, 'ein vorübergehender iCloud-Deadlock wird wiederholt');
   const directForecast = await startProjectWorkflowTask({
     workflowId: 'planbar-weekly-export',
     findPreparedForecast: async () => ({ directory: '/prepared/forecast' }),
@@ -231,6 +261,8 @@ try {
   assert.match(codexTaskSource, /'exec', '--approve-for-me'/);
   assert.match(codexTaskSource, /withMacWakeGuard\(\(\) => runCodexTaskWithoutWakeGuard/);
   assert.match(codexTaskSource, /delete childEnv\.IVA_MAC_WAKE_GUARD_ACTIVE/);
+  assert.match(codexTaskSource, /request\.mode === 'operational'/);
+  assert.match(codexTaskSource, /materializeIcloudWorkspace/);
   assert.doesNotMatch(codexTaskSource, /'--sandbox'[^\n]+?'--approve-for-me'/, 'Codex CLI erlaubt --sandbox nicht zusammen mit --approve-for-me');
   assert.equal(inferProjectWorkflowStatus('Status: **fachlich blockiert**.\n\nGrund: Pflichtdaten fehlen.'), 'blocked');
   assert.equal(inferProjectWorkflowStatus('Status: technisch blockiert\nKeine Schreibaktion.'), 'blocked');
@@ -245,6 +277,8 @@ try {
   const deviceAgentRuntimeSource = await readFile(new URL('../local-mac-helper/device-agent.mjs', import.meta.url), 'utf8');
   assert.match(deviceAgentRuntimeSource, /runtimeMode: process\.env\.IVA_DEVICE_LOCAL_RUNTIME === 'true' \? 'local' : 'icloud'/);
   assert.match(deviceAgentRuntimeSource, /'codex\.task\.start'/);
+  assert.match(deviceAgentRuntimeSource, /ChatGPT: Object\.freeze\(\['\/Applications\/ChatGPT\.app'/);
+  assert.match(deviceAgentRuntimeSource, /chrome-pipedrive-status\.mjs/);
   assert.match(deviceAgentRunnerSource, /LOCAL_RUNTIME \? path\.join\(LOCAL_HELPER_DIR, 'device-agent\.mjs'\)/);
   assert.match(deviceAgentRunnerSource, /scheduleLocalRuntimeMigration/);
   assert.match(deviceAgentRunnerSource, /de\.iva\.device-agent-migrator/);
@@ -258,12 +292,15 @@ try {
   assert.match(deviceAgentLaunchdSource, /previousPlist/);
   assert.match(deviceAgentLaunchdSource, /vorheriger Agent wurde wiederhergestellt/);
   assert.match(deviceAgentLaunchdSource, /IVA_DEVICE_RUNTIME_SOURCE/);
+  assert.match(deviceAgentLaunchdSource, /runtime-package\.json/);
+  assert.match(deviceAgentLaunchdSource, /npm, \['install', '--omit=dev'/);
+  assert.match(deviceAgentLaunchdSource, /materializeIcloudWorkspace/);
   assert.doesNotMatch(deviceAgentLaunchdSource, /preserveTimestamps:\s*true/);
   const planbarForecastSource = await readFile(new URL('../local-mac-helper/planbar-forecast-mail.mjs', import.meta.url), 'utf8');
   assert.match(planbarForecastSource, /IVA_PLANBAR_OUTPUT_ROOT/);
   const dedicatedInstallerSource = await readFile(new URL('../local-mac-helper/install-imac-device-agent.mjs', import.meta.url), 'utf8');
-  assert.match(dedicatedInstallerSource, /IVA_DEVICE_MIGRATOR/);
-  assert.match(dedicatedInstallerSource, /currentPlist\.includes\(imacDeviceAgentLocalRunnerFile\(\)\)/);
+  assert.doesNotMatch(dedicatedInstallerSource, /IVA_DEVICE_MIGRATOR/);
+  assert.match(dedicatedInstallerSource, /installImacDeviceAgentLaunchd/);
   assert.match(deviceAgentRunnerSource, /deviceAgentSourceFingerprint/);
   assert.ok(
     deviceAgentRunnerSource.indexOf('await reportBootstrapHeartbeat()') < deviceAgentRunnerSource.indexOf('await loadDeviceAgent()'),
@@ -317,6 +354,15 @@ try {
   assert.equal(loginDispatch.queued, true);
   assert.equal(portalDispatch.action, 'portal.login');
   assert.deepEqual(portalDispatch.payload, { service: 'pipedrive' });
+  const operationalDispatch = await deviceTools.runTaskOnImac.execute({
+    title: 'iMac-Dateiprüfung',
+    request: 'Prüfe den gemeinsamen Arbeitsordner auf dem iMac rein lesend.',
+    acceptanceCriteria: ['Hostname und Arbeitsordner sind belegt.'],
+    confirmed: true,
+  });
+  assert.equal(operationalDispatch.queued, true);
+  assert.equal(portalDispatch.action, 'codex.task.start');
+  assert.equal(portalDispatch.payload.mode, 'operational');
 
   const { planbarSkill } = await import('../skills/planbar.js');
   let planbarDispatch = null;

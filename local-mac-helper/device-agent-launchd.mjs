@@ -2,9 +2,11 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
-import { chmod, cp, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { access, chmod, copyFile, cp, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { assertImacExecutionHost, DEVICE_AGENT_RELEASE, fetchImacDeviceAgentStatus } from './device-agent.mjs';
+import { materializeIcloudWorkspace } from './icloud-workspace.mjs';
 
 const execFileAsync = promisify(execFile);
 export const IMAC_DEVICE_AGENT_LABEL = 'de.iva.device-agent';
@@ -109,6 +111,53 @@ async function copyDirectoryWithRetry(source, target, label) {
   throw new Error(`${label} konnte nicht lokal bereitgestellt werden: ${lastError?.message || lastError}`);
 }
 
+async function findNpmExecutable() {
+  for (const candidate of [
+    path.join(path.dirname(process.execPath), 'npm'),
+    '/opt/homebrew/bin/npm',
+    '/usr/local/bin/npm',
+    '/usr/bin/npm',
+  ]) {
+    try {
+      await access(candidate, fsConstants.X_OK);
+      return candidate;
+    } catch {}
+  }
+  throw new Error('npm wurde neben der lokalen Node.js-Laufzeit nicht gefunden.');
+}
+
+async function localRuntimeDependenciesReady(releaseRoot) {
+  try {
+    await execFileAsync(process.execPath, [
+      '--input-type=module',
+      '--eval',
+      'await Promise.all([import("unpdf"), import("pdf-lib")])',
+    ], { cwd: releaseRoot, timeout: 30_000, maxBuffer: 512 * 1024 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function installLocalRuntimeDependencies({ runtimeSource, releaseRoot }) {
+  const packageSource = path.join(runtimeSource, 'local-mac-helper', 'runtime-package.json');
+  const packageTarget = path.join(releaseRoot, 'package.json');
+  await copyFile(packageSource, packageTarget);
+  if (await localRuntimeDependenciesReady(releaseRoot)) return { installed: false, ready: true };
+  const npm = await findNpmExecutable();
+  const env = { ...process.env, PATH: `${path.dirname(process.execPath)}:${process.env.PATH || '/usr/bin:/bin'}` };
+  await execFileAsync(npm, ['install', '--omit=dev', '--no-audit', '--no-fund', '--package-lock=false'], {
+    cwd: releaseRoot,
+    env,
+    timeout: 180_000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  if (!await localRuntimeDependenciesReady(releaseRoot)) {
+    throw new Error('Die lokalen IVA-Abhängigkeiten wurden installiert, können aber nicht geladen werden.');
+  }
+  return { installed: true, ready: true };
+}
+
 export async function imacDeviceAgentLaunchdStatus() {
   const target = `gui/${process.getuid()}/${IMAC_DEVICE_AGENT_LABEL}`;
   try {
@@ -125,6 +174,7 @@ export async function installImacDeviceAgentLaunchd() {
   const runtimeSource = path.resolve(process.env.IVA_DEVICE_RUNTIME_SOURCE || workspace);
   const helperSource = path.join(runtimeSource, 'local-mac-helper');
   const helperTarget = path.dirname(runnerPath);
+  const releaseRoot = path.dirname(helperTarget);
   const forecastSource = path.join(workspace, 'outputs', 'planbar-weekly');
   const forecastRoot = imacDeviceAgentLocalForecastRoot();
   const guiDomain = `gui/${process.getuid()}`;
@@ -133,8 +183,11 @@ export async function installImacDeviceAgentLaunchd() {
   let activationStarted = false;
   await mkdir(path.dirname(plist), { recursive: true, mode: 0o700 });
   await mkdir(path.join(dataRoot(), 'logs'), { recursive: true, mode: 0o700 });
+  await materializeIcloudWorkspace({ workspace: runtimeSource });
+  if (runtimeSource !== workspace) await materializeIcloudWorkspace({ workspace });
   console.error('IVA richtet die vollständig lokale iMac-Laufzeit ein …');
   await copyDirectoryWithRetry(helperSource, helperTarget, 'IVA-Helfer');
+  const dependencies = await installLocalRuntimeDependencies({ runtimeSource, releaseRoot });
   await copyDirectoryWithRetry(forecastSource, forecastRoot, 'Vorbereitete Forecast-Dateien');
   await chmod(runnerPath, 0o700);
   try {
@@ -149,7 +202,7 @@ export async function installImacDeviceAgentLaunchd() {
       baselineLastSeenAt: baseline?.lastSeenAt,
       requiredRelease: DEVICE_AGENT_RELEASE,
     });
-    return { installed: true, plist, runnerPath, connection, ...(await imacDeviceAgentLaunchdStatus()) };
+    return { installed: true, plist, runnerPath, dependencies, connection, ...(await imacDeviceAgentLaunchdStatus()) };
   } catch (error) {
     if (!activationStarted) throw error;
     await execFileAsync('/bin/launchctl', ['bootout', guiDomain, plist], { timeout: 10000 }).catch(() => {});
