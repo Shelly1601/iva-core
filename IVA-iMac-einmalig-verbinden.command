@@ -14,7 +14,7 @@ if [[ ! -d "$workspace" ]]; then
   exit 1
 fi
 
-print "IVA-DIREKTSTART 260C479 – einheitliche iMac-Steuerung, iCloud-Retry und lokale Laufzeit werden eingerichtet."
+print "IVA-DIREKTSTART B332BDF – Förderungslaufzeit, iCloud-Einzeldatei-Retry und lokale Dauerverbindung werden eingerichtet."
 
 # Holt bei Bedarf die bereits in iCloud veröffentlichte Agent-Version lokal auf
 # den iMac. Die Downloads laufen im Hintergrund, damit das Fenster nie wieder
@@ -26,6 +26,7 @@ print "IVA lädt die aktuelle iMac-Komponente aus iCloud …"
 /usr/bin/brctl download "$workspace/local-mac-helper/device-agent-runner.mjs" >/dev/null 2>&1 &!
 /usr/bin/brctl download "$workspace/local-mac-helper/device-agent-launchd.mjs" >/dev/null 2>&1 &!
 /usr/bin/brctl download "$workspace/outputs/planbar-weekly" >/dev/null 2>&1 &!
+/usr/bin/brctl download "$workspace/../AGENTS.md" >/dev/null 2>&1 &!
 
 for attempt in {1..60}; do
   if /usr/bin/grep -q "imac-local-v4" "$workspace/local-mac-helper/device-agent.mjs" 2>/dev/null; then
@@ -97,8 +98,8 @@ if [[ -z "$node_bin" ]]; then
   fi
 fi
 
-bootstrap_commit="260c479a96fb6179312d3dd9a04dff6fc97b3103"
-bootstrap_sha256="8a3a8b7f625c9801d65f60e47968b71c1fe0879dd66bf17f39102c5dd06fc6ba"
+bootstrap_commit="b332bdf18ad5eb25eda85f5f60326115133c1f4f"
+bootstrap_sha256="97848c3288d809cdaf2b23f9df9ccad727aa369d663ff8a7ea2ccc2290421231"
 bootstrap_dir="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/iva-imac-bootstrap.XXXXXX")"
 cleanup_bootstrap() {
   if [[ -n "${bootstrap_dir:-}" && -d "$bootstrap_dir" ]]; then

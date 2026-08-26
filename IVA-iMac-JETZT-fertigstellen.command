@@ -2,8 +2,8 @@
 set -euo pipefail
 
 workspace="$HOME/Library/Mobile Documents/com~apple~CloudDocs/IVA-Assistent/iva-core"
-commit="260c479a96fb6179312d3dd9a04dff6fc97b3103"
-archive_sha256="8a3a8b7f625c9801d65f60e47968b71c1fe0879dd66bf17f39102c5dd06fc6ba"
+commit="b332bdf18ad5eb25eda85f5f60326115133c1f4f"
+archive_sha256="97848c3288d809cdaf2b23f9df9ccad727aa369d663ff8a7ea2ccc2290421231"
 
 model="$(/usr/sbin/sysctl -n hw.model 2>/dev/null || true)"
 if [[ "$model" != iMac* ]]; then
@@ -68,6 +68,7 @@ fi
 
 print "3/4 – Die vorbereiteten Forecast-Dateien werden lokal übernommen …"
 /usr/bin/brctl download "$workspace/outputs/planbar-weekly" >/dev/null 2>&1 &!
+/usr/bin/brctl download "$workspace/../AGENTS.md" >/dev/null 2>&1 &!
 
 print "4/4 – Dauerverbindung wird umgeschaltet und doppelt geprüft …"
 IVA_DEVICE_WORKSPACE="$workspace" IVA_DEVICE_RUNTIME_SOURCE="$snapshot" \
