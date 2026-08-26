@@ -86,6 +86,125 @@ export function buildDraftAppleScript(input = {}) {
   return { script: lines.join('\n'), draft };
 }
 
+function appendExactAccountLookup(lines) {
+  lines.push(
+    'set senderAccount to missing value',
+    'repeat with accountCandidate in exchange accounts',
+    'ignoring case',
+    'if (email address of accountCandidate as text) is requestedSender then set senderAccount to accountCandidate',
+    'end ignoring',
+    'end repeat',
+    'if senderAccount is missing value then',
+    'repeat with accountCandidate in imap accounts',
+    'ignoring case',
+    'if (email address of accountCandidate as text) is requestedSender then set senderAccount to accountCandidate',
+    'end ignoring',
+    'end repeat',
+    'end if',
+    'if senderAccount is missing value then',
+    'repeat with accountCandidate in pop accounts',
+    'ignoring case',
+    'if (email address of accountCandidate as text) is requestedSender then set senderAccount to accountCandidate',
+    'end ignoring',
+    'end repeat',
+    'end if',
+    'if senderAccount is missing value then error "Das gewünschte Outlook-Absenderkonto ist über die native Schnittstelle nicht verfügbar." number 550',
+  );
+}
+
+function appendExactListVerification(lines, { actualVariable, expectedVariable, label }) {
+  lines.push(
+    `if (count of ${actualVariable}) is not (count of ${expectedVariable}) then error "Outlook-Versand abgebrochen: ${label} stimmen nicht exakt überein." number 571`,
+    `repeat with expectedItem in ${expectedVariable}`,
+    'set exactMatches to 0',
+    `repeat with actualItem in ${actualVariable}`,
+    'ignoring case',
+    'if (actualItem as text) is (expectedItem as text) then set exactMatches to exactMatches + 1',
+    'end ignoring',
+    'end repeat',
+    `if exactMatches is not 1 then error "Outlook-Versand abgebrochen: ${label} stimmen nicht exakt überein." number 572`,
+    'end repeat',
+  );
+}
+
+export function buildVerifiedSendAppleScript(input = {}) {
+  const message = normalizeDraftPayload(input);
+  if (!message.attachments.length || message.attachments.some(file => path.extname(file).toLowerCase() !== '.xlsx')) {
+    throw new Error('Outlook-Versand abgebrochen: Es sind ausschließlich eine oder mehrere XLSX-Anlagen zulässig.');
+  }
+  const expectedAttachmentNames = message.attachments.map(file => path.basename(file));
+  if (new Set(expectedAttachmentNames).size !== expectedAttachmentNames.length) {
+    throw new Error('Outlook-Versand abgebrochen: Doppelte XLSX-Anlagennamen sind nicht zulässig.');
+  }
+  const lines = [
+    'tell application id "com.microsoft.Outlook"',
+    `set requestedSender to ${appleScriptString(message.from)}`,
+    `set requestedSubject to ${appleScriptString(message.subject)}`,
+  ];
+  appendExactAccountLookup(lines);
+  lines.push(
+    'set targetDrafts to drafts of senderAccount',
+    message.html
+      ? `set draftMessage to make new outgoing message at targetDrafts with properties {subject:requestedSubject, content:${appleScriptString(message.html)}, account:senderAccount}`
+      : `set draftMessage to make new outgoing message at targetDrafts with properties {subject:requestedSubject, plain text content:${appleScriptString(message.body)}, account:senderAccount}`,
+    'try',
+  );
+  for (const address of message.to) lines.push(`make new to recipient at draftMessage with properties {email address:{address:${appleScriptString(address)}}}`);
+  for (const address of message.cc) lines.push(`make new cc recipient at draftMessage with properties {email address:{address:${appleScriptString(address)}}}`);
+  for (const address of message.bcc) lines.push(`make new bcc recipient at draftMessage with properties {email address:{address:${appleScriptString(address)}}}`);
+  for (const filePath of message.attachments) lines.push(`make new attachment at draftMessage with properties {file:(POSIX file ${appleScriptString(filePath)} as alias)}`);
+  lines.push(
+    'if (subject of draftMessage as text) is not requestedSubject then error "Outlook-Versand abgebrochen: Der Betreff stimmt nicht exakt überein." number 570',
+    'set actualTo to {}',
+    'repeat with recipientItem in (every to recipient of draftMessage)',
+    'set end of actualTo to (address of email address of recipientItem as text)',
+    'end repeat',
+    `set expectedTo to {${message.to.map(appleScriptString).join(', ')}}`,
+  );
+  appendExactListVerification(lines, { actualVariable: 'actualTo', expectedVariable: 'expectedTo', label: 'An-Empfänger' });
+  lines.push(
+    'set actualCc to {}',
+    'repeat with recipientItem in (every cc recipient of draftMessage)',
+    'set end of actualCc to (address of email address of recipientItem as text)',
+    'end repeat',
+    `set expectedCc to {${message.cc.map(appleScriptString).join(', ')}}`,
+  );
+  appendExactListVerification(lines, { actualVariable: 'actualCc', expectedVariable: 'expectedCc', label: 'Cc-Empfänger' });
+  lines.push(
+    'set actualBcc to {}',
+    'repeat with recipientItem in (every bcc recipient of draftMessage)',
+    'set end of actualBcc to (address of email address of recipientItem as text)',
+    'end repeat',
+    `set expectedBcc to {${message.bcc.map(appleScriptString).join(', ')}}`,
+  );
+  appendExactListVerification(lines, { actualVariable: 'actualBcc', expectedVariable: 'expectedBcc', label: 'Bcc-Empfänger' });
+  lines.push(
+    'set actualAttachmentNames to {}',
+    'repeat with attachmentItem in (every attachment of draftMessage)',
+    'set end of actualAttachmentNames to (name of attachmentItem as text)',
+    'end repeat',
+    `set expectedAttachmentNames to {${expectedAttachmentNames.map(appleScriptString).join(', ')}}`,
+  );
+  appendExactListVerification(lines, { actualVariable: 'actualAttachmentNames', expectedVariable: 'expectedAttachmentNames', label: 'XLSX-Anlagen' });
+  lines.push(
+    'save draftMessage',
+    'on error preflightError number preflightNumber',
+    'try',
+    'delete draftMessage',
+    'end try',
+    'error preflightError number preflightNumber',
+    'end try',
+    'try',
+    'send draftMessage',
+    'on error sendError number sendNumber',
+    'error "IVA_SEND_ATTEMPTED|" & sendError number sendNumber',
+    'end try',
+    'return "sent|" & requestedSubject',
+    'end tell',
+  );
+  return { script: lines.join('\n'), message, expectedAttachmentNames };
+}
+
 export function buildSentVerificationAppleScript({ from, subject, to = [], attachments = [], lookbackSeconds = 900 } = {}) {
   const requestedFrom = email(from, 'Absender');
   const requestedSubject = String(subject || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 240);
@@ -292,10 +411,31 @@ export async function sendVerifiedOutlookXlsxMessage(input = {}) {
   if (!diagnosis.outlook.installed || !diagnosis.outlook.running) {
     throw new Error('Microsoft Outlook ist nicht geöffnet. Es wurde nichts versendet.');
   }
-  if (!diagnosis.capabilities.sharedSenderUiPrerequisitesReady) {
-    throw new Error('Outlook-Versand abgebrochen: Die freigegebene macOS-Oberflächenprüfung ist nicht verfügbar.');
+  let sent;
+  if (diagnosis.capabilities.sharedSenderUiPrerequisitesReady) {
+    sent = await sendVerifiedOutlookXlsxMessageViaUi(message);
+  } else if (diagnosis.capabilities.createAccountDraft) {
+    const { script } = buildVerifiedSendAppleScript(message);
+    let output = '';
+    let sendAttemptError = '';
+    try {
+      output = await runAppleScript(script, { timeoutMs: 120000 });
+    } catch (error) {
+      if (!String(error?.message || error).includes('IVA_SEND_ATTEMPTED|')) throw error;
+      sendAttemptError = String(error?.message || error).slice(0, 500);
+    }
+    if (!sendAttemptError && !output.startsWith('sent|')) {
+      throw new Error('Outlook-Versand abgebrochen: Die native Schnittstelle hat den Versand nicht bestätigt.');
+    }
+    sent = {
+      sent: true,
+      channel: 'outlook-applescript-exact-account',
+      verifiedBeforeSend: true,
+      sendAttemptError,
+    };
+  } else {
+    throw new Error('Outlook-Versand abgebrochen: Weder das exakte Outlook-Konto noch die freigegebene macOS-Oberflächenprüfung ist verfügbar.');
   }
-  const sent = await sendVerifiedOutlookXlsxMessageViaUi(message);
   try {
     const sentFolder = await verifyOutlookSentMessage(message);
     return { ...sent, sentFolderVerified: true, sentFolder };

@@ -8,7 +8,7 @@ import {
   normalizePlanbarManufacturer,
 } from '../local-mac-helper/planbar-forecast.mjs';
 import { verifyOutlookXlsxComposeSnapshot } from '../local-mac-helper/macos-ui.mjs';
-import { buildSentVerificationAppleScript } from '../local-mac-helper/outlook.mjs';
+import { buildSentVerificationAppleScript, buildVerifiedSendAppleScript } from '../local-mac-helper/outlook.mjs';
 
 assert.equal(isoWeekMonday(2026, 36), '2026-08-31');
 assert.equal(isoWeekMonday(2026, 45), '2026-11-02');
@@ -83,5 +83,28 @@ const sentVerification = buildSentVerificationAppleScript({
 assert.match(sentVerification.script, /sent items of senderAccount/);
 assert.match(sentVerification.script, /was sent of candidate/);
 assert.deepEqual(sentVerification.expected.attachments, attachmentNames);
+const nativeSend = buildVerifiedSendAppleScript({
+  from: composeExpectation.from,
+  to: composeExpectation.to,
+  subject: composeExpectation.subject,
+  body: 'Hallo Angelo,\n\nanbei die Planbar-Listen.\n',
+  attachments: attachmentNames.map(name => `/tmp/${name}`),
+});
+assert.match(nativeSend.script, /email address of accountCandidate as text\) is requestedSender/);
+assert.match(nativeSend.script, /set expectedTo to \{"a\.keller@heat-hero\.com"\}/);
+assert.match(nativeSend.script, /set expectedAttachmentNames to \{"Planbar_Gesamtliste_KW36-45_2026\.xlsx", "Planbar_Midea_KW36-45_2026\.xlsx"\}/);
+assert.match(nativeSend.script, /save draftMessage[\s\S]+send draftMessage/);
+assert.match(nativeSend.script, /IVA_SEND_ATTEMPTED\|/);
+assert.equal(nativeSend.expectedAttachmentNames.length, 2);
+assert.throws(
+  () => buildVerifiedSendAppleScript({
+    from: composeExpectation.from,
+    to: composeExpectation.to,
+    subject: composeExpectation.subject,
+    body: 'Hallo Angelo',
+    attachments: ['/tmp/Planbar.pdf'],
+  }),
+  /ausschließlich eine oder mehrere XLSX-Anlagen/,
+);
 
 console.log('Planbar-Forecast: Regeln, Ausschlüsse, Wochenüberlappung, Dubletten und exakt verifizierter Outlook-Versand geprüft.');
