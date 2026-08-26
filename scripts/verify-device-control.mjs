@@ -334,12 +334,20 @@ try {
     markImprovementRequestDispatched: async (id, value) => { dispatched = { id, ...value }; },
     enqueueDeviceCommand: async input => ({ id: '22222222-2222-4222-8222-222222222222', deviceId: IVA_IMAC_DEVICE_ID, status: 'queued', ...input }),
     deviceCommandStatus: async id => ({ id, status: 'completed' }),
+    listAgentRuns: async () => [{
+      jobId: '66666666-6666-4666-8666-666666666666',
+      status: 'completed', phase: 'completed', progress: 100,
+      resultPreview: 'Live geprüft', error: '', updatedAt: new Date().toISOString(),
+    }],
   });
   const notOrdered = await tools.startIvaBuild.execute({ title: 'Test', request: 'Eine echte Funktion bauen', explicitlyOrdered: false });
   assert.equal(notOrdered.queued, false);
   const ordered = await tools.startIvaBuild.execute({ title: 'Test', request: 'Eine echte Funktion bauen', explicitlyOrdered: true, acceptanceCriteria: ['Tests grün'] });
   assert.equal(ordered.queued, true);
   assert.equal(dispatched.commandId, ordered.commandId);
+  const completedBuild = await tools.checkIvaBuildTask.execute({ jobId: '66666666-6666-4666-8666-666666666666' });
+  assert.equal(completedBuild.executionVerified, true);
+  assert.equal(completedBuild.resultPreview, 'Live geprüft');
 
   const { deviceControlSkill } = await import('../skills/device-control.js');
   let portalDispatch = null;

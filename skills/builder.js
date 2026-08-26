@@ -1,7 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 
-export function builderSkill({ captureImprovementRequest, markImprovementRequestDispatched, enqueueDeviceCommand, deviceCommandStatus }) {
+export function builderSkill({ captureImprovementRequest, markImprovementRequestDispatched, enqueueDeviceCommand, deviceCommandStatus, listAgentRuns }) {
   return {
     startIvaBuild: tool({
       description: 'Startet einen von Nadine ausdrücklich beauftragten IVA-Code- oder Systemumbau ohne weitere Planbestätigung im lokalen Codex. Verwenden, wenn sie klar sagt „mach das“, „bau das“, „setz das um“ oder gleichbedeutend. Der lokale Codex befolgt AGENTS.md und übernimmt Implementierung, Tests, Commit, Push, Railway-Deployment und Live-Prüfung. Bei einer bloßen Idee ohne Umsetzungsauftrag stattdessen nur captureImprovementRequest verwenden.',
@@ -51,13 +51,31 @@ export function builderSkill({ captureImprovementRequest, markImprovementRequest
       execute: async ({ commandId }) => ({ command: await deviceCommandStatus(commandId) }),
     }),
     checkIvaBuildTask: tool({
-      description: 'Reiht eine rein lesende lokale Statusprüfung für einen bereits gestarteten Codex-Bauauftrag ein.',
+      description: 'Prüft den tatsächlichen Status eines bereits gestarteten Codex-Bau- oder operativen iMac-Auftrags. Nur status completed mit resultPreview belegt ein fertiges Ergebnis.',
       parameters: z.object({ jobId: z.string().min(20).max(80) }),
       execute: async ({ jobId }) => {
+        if (typeof listAgentRuns === 'function') {
+          const runs = await listAgentRuns({ limit: 500 });
+          const run = runs.find(item => item.jobId === jobId || item.externalKey === `codex-task:${jobId}`);
+          if (run) {
+            const completed = run.status === 'completed';
+            return {
+              found: true,
+              jobId,
+              status: run.status,
+              phase: run.phase,
+              progress: run.progress,
+              executionVerified: completed,
+              resultPreview: completed ? run.resultPreview : '',
+              error: run.error || '',
+              updatedAt: run.updatedAt,
+            };
+          }
+        }
         const command = await enqueueDeviceCommand({
           action: 'codex.task.status', payload: { jobId }, requestedBy: 'iva-builder', requestText: 'Codex-Bauauftrag prüfen',
         });
-        return { queued: true, commandId: command.id, deviceId: command.deviceId, action: command.action };
+        return { found: false, queued: true, executionVerified: false, commandId: command.id, deviceId: command.deviceId, action: command.action };
       },
     }),
   };

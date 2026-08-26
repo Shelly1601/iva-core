@@ -830,7 +830,7 @@ const ALL_SKILLS = {
   accounting: accountingSkill({ listAccountingEntities, listAccountingDocuments, getAccountingDocument, accountingSummary }),
   energyTariffs: energyTariffsSkill({ workspaces, energyTariffStatus, prepareWorkspaceEnergyTariffRequest }),
   selfImprovement: selfImprovementSkill({ savePronunciationCorrection, saveCommunicationPreference, captureImprovementRequest, listVoiceLearning }),
-  builder: builderSkill({ captureImprovementRequest, markImprovementRequestDispatched, enqueueDeviceCommand, deviceCommandStatus }),
+  builder: builderSkill({ captureImprovementRequest, markImprovementRequestDispatched, enqueueDeviceCommand, deviceCommandStatus, listAgentRuns }),
   lumit:      lumitSkill({ lumitWorkflowConfig, listLumitApplications, createLumitServicedApplication, markLumitApplicationStep }),
   capabilityReview: capabilityReviewSkill({ evaluateCapability, listCapabilityReviews }),
   knowledgeLibrary: knowledgeLibrarySkill({ listKnowledgeLibrary, knowledgeLibraryStatus, assessKnowledgeSourceCandidate }),
