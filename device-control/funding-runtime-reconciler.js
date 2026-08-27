@@ -1,7 +1,8 @@
 import { IVA_IMAC_DEVICE_ID } from './store.js';
 
-export const FUNDING_RUNTIME_MARKER = 'funding-5am-runtime-2026-08-27-v2';
+export const FUNDING_RUNTIME_MARKER = 'funding-5am-runtime-2026-08-27-v3';
 export const FUNDING_RUNTIME_REQUIRED_ACTION = 'funding.legacy-monitor.suspend';
+export const FUNDING_RUNTIME_MAX_UPDATE_ATTEMPTS = 10;
 
 const TERMINAL_FAILURES = new Set(['failed', 'expired', 'canceled']);
 
@@ -50,7 +51,7 @@ export async function reconcileFundingImacRuntime({
     const failedUpdates = commands.filter(command => command.action === 'codex.task.start'
       && command.payload?.requestId === FUNDING_RUNTIME_MARKER
       && command.status === 'failed');
-    if (failedUpdates.length >= 3) {
+    if (failedUpdates.length >= FUNDING_RUNTIME_MAX_UPDATE_ATTEMPTS) {
       return {
         status: 'blocked_icloud_materialization',
         attempts: failedUpdates.length,

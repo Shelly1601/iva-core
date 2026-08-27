@@ -352,7 +352,7 @@ try {
   assert.equal(devicePolicy.allowedActions.includes('funding.legacy-monitor.suspend'), true);
 
   console.log('Device-Control: selbstheilenden Förderlaufzeit-Abgleich prüfen …');
-  const { FUNDING_RUNTIME_MARKER, fundingRuntimeUpdatePrompt, reconcileFundingImacRuntime, summarizeFundingRuntimeCommands } = await import('../device-control/funding-runtime-reconciler.js');
+  const { FUNDING_RUNTIME_MARKER, FUNDING_RUNTIME_MAX_UPDATE_ATTEMPTS, fundingRuntimeUpdatePrompt, reconcileFundingImacRuntime, summarizeFundingRuntimeCommands } = await import('../device-control/funding-runtime-reconciler.js');
   assert.match(fundingRuntimeUpdatePrompt(), /install-imac-device-agent --commit/);
   assert.match(fundingRuntimeUpdatePrompt(), /Starte keinen Förderlauf/);
   let queuedRuntimeCommand = null;
@@ -367,14 +367,14 @@ try {
   assert.equal(queuedRuntimeCommand.payload.mode, 'operational');
   const materializationBlocked = await reconcileFundingImacRuntime({
     getStatus: async () => ({ ...imacMetadata, attested: true, online: true, allowedActions: ['codex.task.start', 'agent.status'] }),
-    enqueue: async () => { throw new Error('nach drei identischen iCloud-Fehlern darf kein weiterer Minutenlauf starten'); },
-    listCommands: async () => [1, 2, 3].map(index => ({
+    enqueue: async () => { throw new Error('nach der begrenzten Zahl identischer iCloud-Fehler darf kein weiterer Minutenlauf starten'); },
+    listCommands: async () => Array.from({ length: FUNDING_RUNTIME_MAX_UPDATE_ATTEMPTS }, (_, index) => ({
       id: `failed-${index}`, action: 'codex.task.start', status: 'failed',
       payload: { requestId: FUNDING_RUNTIME_MARKER }, error: 'AGENTS.md EAGAIN -11',
     })),
   });
   assert.equal(materializationBlocked.status, 'blocked_icloud_materialization');
-  assert.equal(materializationBlocked.attempts, 3);
+  assert.equal(materializationBlocked.attempts, FUNDING_RUNTIME_MAX_UPDATE_ATTEMPTS);
   let queuedSuspendCommand = null;
   const suspendQueued = await reconcileFundingImacRuntime({
     getStatus: async () => ({ ...imacMetadata, attested: true, online: true }),
