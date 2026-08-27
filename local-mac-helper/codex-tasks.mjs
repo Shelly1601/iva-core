@@ -3,11 +3,12 @@ import { withImacExecutionLock } from './ui-execution-lock.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { mkdir, open, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { accessSync, constants as fsConstants } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { materializeIcloudWorkspace } from './icloud-workspace.mjs';
 import { assertImacFundingHost } from './funding-workflows.mjs';
+import { isoWeekRange, mergePlanbarSchedulingProgress, planbarSchedulingKey, planbarSchedulingSummary } from '../operations/customer-scheduling.js';
 
 const MODULE_PATH = fileURLToPath(import.meta.url);
 const REPO_ROOT = path.resolve(process.env.IVA_DEVICE_WORKSPACE || path.join(path.dirname(MODULE_PATH), '..'));
@@ -56,6 +57,7 @@ function jobPaths(jobId) {
     state: path.join(directory, 'state.json'),
     log: path.join(directory, 'codex.log'),
     lastMessage: path.join(directory, 'result.txt'),
+    planbarProgress: path.join(directory, 'planbar-progress.json'),
   };
 }
 
@@ -71,7 +73,9 @@ async function readJson(file) {
 }
 
 async function writeState(paths, value) {
-  await writeFile(paths.state, JSON.stringify(value, null, 2));
+  const temporary = `${paths.state}.${crypto.randomUUID()}.tmp`;
+  await writeFile(temporary, JSON.stringify(value, null, 2), { mode: 0o600 });
+  await rename(temporary, paths.state);
   return value;
 }
 
@@ -92,6 +96,8 @@ async function reportTaskState(request, state, resultPreview = '') {
       source: 'iMac · Codex',
       projectId: request.projectId || '',
       workflowId: request.workflowId || '',
+      schedulingKey: request.planbar ? planbarSchedulingKey(request.planbar) : '',
+      planbarProgress: state.planbarProgress || null,
       requestPreview: request.title,
       status: state.status,
       phase: state.phase,
@@ -125,7 +131,7 @@ async function reportTaskState(request, state, resultPreview = '') {
   }
 }
 
-function buildCodexPrompt(request) {
+export function buildCodexPrompt(request) {
   const runtimeInstruction = `Die verbindlichen Projektanweisungen stehen in ${path.join(REPO_ROOT, '..', 'AGENTS.md')}; lies diese Datei, auch wenn im Unterordner iva-core keine eigene AGENTS.md liegt. Bestehende lokale IVA-Helfer startest du mit absolutem Pfad aus ${path.dirname(MODULE_PATH)}. Dieser geprüfte Laufzeitstand kommt vom zentralen IVA-Core. Projektquellen und Dokumente bleiben im gesetzten iCloud-Workspace. Keine zweite lokale Kopie als laufenden Agenten starten.`;
   if (request.mode === 'project-workflow') {
     return `Nadine hat diesen Projekt-Workflow in IVA ausdrücklich über den Button „Manuell auslösen“ gestartet. Führe jetzt genau einen operativen Einmallauf aus, ohne eine weitere Planbestätigung zu verlangen.
@@ -134,6 +140,7 @@ Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.
 
 Manueller Einmallauf:
 ${request.prompt}
+${request.planbar ? planbarReceiptInstructions(request) : ''}
 
 ${request.acceptanceCriteria?.length ? `Abnahmekriterien:\n${request.acceptanceCriteria.map(item => `- ${item}`).join('\n')}` : ''}`.trim();
   }
@@ -187,7 +194,7 @@ export function codexTaskPolicy() {
   });
 }
 
-export async function startCodexTask({ prompt, title = '', requestId = '', acceptanceCriteria = [], mode = 'build', projectId = '', workflowId = '', workflowName = '' } = {}) {
+export async function startCodexTask({ prompt, title = '', requestId = '', acceptanceCriteria = [], mode = 'build', projectId = '', workflowId = '', workflowName = '', planbar = null } = {}) {
   const cleanPrompt = clean(prompt, MAX_PROMPT_LENGTH);
   if (cleanPrompt.length < 10) throw new Error('Der Codex-Auftrag ist zu kurz.');
   const workspaceReadiness = await materializeIcloudWorkspace({ workspace: REPO_ROOT });
@@ -207,6 +214,7 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
     projectId: clean(projectId, 100),
     workflowId: clean(workflowId, 140),
     workflowName: clean(workflowName, 220),
+    planbar,
     workspace: REPO_ROOT,
     workspaceReadiness: {
       iCloud: workspaceReadiness.iCloud,
@@ -309,6 +317,17 @@ export async function startProjectWorkflowTask({ workflowId, findPreparedForecas
 }
 
 export async function startPlanbarCustomerSchedulingTask(input = {}) {
+  const key = planbarSchedulingKey(input);
+  for (const entry of await readdir(TASK_ROOT, { withFileTypes: true }).catch(() => [])) {
+    if (!entry.isDirectory() || !/^[a-f0-9-]{20,80}$/i.test(entry.name)) continue;
+    const paths = jobPaths(entry.name);
+    const existingRequest = await readJson(paths.request).catch(() => null);
+    if (!existingRequest?.planbar || planbarSchedulingKey(existingRequest.planbar) !== key) continue;
+    const state = await getCodexTaskStatus(entry.name).catch(() => null);
+    if (state && (['queued', 'running'].includes(state.status) || state.planbarProgress?.reservation?.verified)) {
+      return { jobId: entry.name, status: state.status, duplicate: true, startedLocally: false, planbarProgress: state.planbarProgress, message: 'Vorhandenen Terminierungsauftrag verwenden; keine zweite Slot-Anlage.' };
+    }
+  }
   const customerName = clean(input.customerName, 220).replace(/\s+/g, ' ');
   const partnerName = clean(input.partnerName, 80).replace(/\s+/g, ' ');
   const partnerPrefix = clean(input.partnerPrefix, 6).toUpperCase();
@@ -316,13 +335,18 @@ export async function startPlanbarCustomerSchedulingTask(input = {}) {
   const allowFreeResourceFallback = schedulingMode === 'enter-block-first' && input.allowFreeResourceFallback === true;
   const isoYear = Number(input.isoYear);
   const week = Number(input.week);
+  isoWeekRange(isoYear, week);
   if (!customerName || !partnerName || !/^[A-Z0-9]{1,6}$/.test(partnerPrefix) || !Number.isInteger(isoYear) || !Number.isInteger(week)) {
     throw new Error('Kundenname, Partner, Planbar-Kürzel, ISO-Jahr oder Kalenderwoche fehlen für die Planbar-Terminierung.');
   }
   const materialDeliverySpace = input.materialDeliverySpace === true ? 'Ja' : 'Nein';
   const theftWeatherProtected = input.theftWeatherProtected === true ? 'Ja' : 'Nein';
   const additionalInfo = clean(input.additionalInfo, 2000);
-  const prompt = `Lies KUNDE_TERMINIEREN_WORKFLOW.md und PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md vollständig und führe den Workflow „Kunde terminieren“ jetzt genau einmal aus.
+  const prompt = `Führe den Workflow „Kunde terminieren“ auf diesem iMac aus. Verbindliche neue Priorität vom 27.08.2026: ZUERST Kunde und echten zulässigen Montag-bis-Freitag-Slot in Planbar sichern und rücklesen, DANACH Angebots-/TMB-Unterlagen auswerten und fehlende Angaben ergänzen. Lies KUNDE_TERMINIEREN_WORKFLOW.md; die neue Slot-zuerst-Regel ersetzt ältere widersprechende Alles-oder-nichts-/Keine-Teilanlage-Regeln. PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md ist erst für die Ergänzungsphase erforderlich.
+
+Identität, Kundentyp, Zielwoche, Dublettenprüfung und zulässige freie Kapazität bleiben harte Gates. Übernimm vorhandene belegte Kontaktdaten; optionale fehlende Felder bleiben leer. Nur tatsächlich von Planbar verlangte Mindestfelder blockieren die Anlage, niemals pauschal fehlende E-Mail/Telefon/Angebotsnummer/Beschreibung. Keine erfundenen Ersatzwerte. Quellenwidersprüche in Angebots-/TMB-Details blockieren nur die Ergänzung, bei Identität/Kunde bleiben sie blockierend.
+
+Vor jeder Anlage vorhandene Termine desselben eindeutig zugeordneten Kunden und der Zielwoche prüfen. Bei vorhandenem Termin ausschließlich diesen verwenden und rückprüfen, niemals einen zweiten Slot belegen. Nach unklarem Speicherergebnis zuerst nachlesen und niemals blind erneut speichern. Ein gesicherter Termin bleibt bei Ergänzungs-, Pipedrive- oder WhatsApp-Fehlern erhalten; nie löschen oder verschieben. Meldung dann ausdrücklich: Slot in Planbar gesichert – Angaben noch offen, mit den tatsächlichen Lücken.
 
 Auftrag:
 - Kunde: ${customerName}
@@ -336,19 +360,48 @@ Der IVA-Auftrag ist die ausdrückliche Freigabe für die in KUNDE_TERMINIEREN_WO
   return startCodexTask({
     prompt,
     title: `Planbar: ${partnerName}-Kunde ${customerName} in KW ${week}/${isoYear} terminieren`,
-    requestId: `planbar-schedule-${isoYear}-${week}-${Date.now()}`,
+    requestId: input.commandId || `planbar-schedule-${isoYear}-${week}-${Date.now()}`,
     mode: 'project-workflow',
+    projectId: 'heat-hero',
+    planbar: { customerName, partnerId: input.partnerId, partnerPrefix, isoYear, week },
     acceptanceCriteria: [
-      'Der Kunde und der Deal sind eindeutig sowie Angebot und Beschreibung vollständig belegt.',
+      'Kunde und Deal sind eindeutig; der echte Slot wurde VOR Angebots-/TMB-Auswertung verifiziert gespeichert.',
       schedulingMode === 'enter-block-first'
         ? `Ein vollständiger ENTER-Block wurde ersetzt${allowFreeResourceFallback ? ' oder nach belegtem Fehlen ein ausdrücklich erlaubter vollständig freier Fünf-Tage-Platz verwendet' : ''}.`
         : 'Die verwendete Ressource ist Montag bis Freitag vollständig frei und gehört zu keiner ausgeschlossenen Ressource.',
       `Der Planbar-Vorname trägt genau einmal das Präfix ${partnerPrefix}.`,
       'Die Planbar-Anlage ist nach dem Speichern sichtbar verifiziert.',
       'Erst danach ist genau eine WhatsApp-Nachricht in der exakten Community-Gruppe sichtbar versendet und verifiziert.',
-      'Bei einem fachlichen oder technischen Blocker bleibt Planbar unverändert und es wird keine WhatsApp-Nachricht gesendet.',
+      'Ohne Reservierungsnachweis kein Erfolg und keine WhatsApp. Nach gesicherter Reservierung bleiben Termin und Nachweis bei Folgefehlern erhalten; offene Angaben werden separat gemeldet.',
     ],
   });
+}
+
+function planbarReceiptInstructions(request) {
+  const paths = jobPaths(request.jobId);
+  return `Reservierungsnachweis (Pflicht, keine Erfolgsmeldung nur aufgrund Prozessende):
+Noch VOR dem Lesen von Angeboten/TMB nach dem erneuten Öffnen des gespeicherten Termins eine JSON-Datei ${path.join(paths.directory, 'reservation-receipt.json')} mit den tatsächlich rückgelesenen Werten schreiben und ausführen:
+node ${JSON.stringify(MODULE_PATH)} planbar-progress ${request.jobId} ${JSON.stringify(path.join(paths.directory, 'reservation-receipt.json'))}
+Schema: {"status":"reserved","reservation":{"customerId":"beobachtet","appointmentId":"beobachtet","resourceId":"beobachtet","resourceName":"beobachtet","isoYear":${request.planbar.isoYear},"week":${request.planbar.week},"startDate":"tatsächlicher Montag YYYY-MM-DD","endDateExclusive":"tatsächlicher Samstag YYYY-MM-DD","verifiedAt":"aktueller ISO-Zeitpunkt","verified":true,"identityVerified":true},"missingDetails":["Auftragsnummer","Leistungsbeschreibung"],"remainingActions":["Pipedrive-Abschluss","WhatsApp-Bestätigung"]}.
+IDs niemals erfinden. verified und identityVerified nur nach echter erneuter Sichtprüfung setzen. Fehler beim Melden beseitigen; nie eine zweite Anlage erzeugen. Der Nachweis bleibt lokal dauerhaft gespeichert und wird ins Kontrollzentrum übertragen.
+Danach Ergänzungen versuchen und denselben Befehl mit aktualisierter JSON-Datei verwenden: status details_pending, konkrete missingDetails/remainingActions. reservation kann bei Folgeupdates entfallen; der vorhandene Termin darf nicht ersetzt werden. status completed nur mit leeren missingDetails/remainingActions UND completionVerified:true nach tatsächlich geprüfter vollständiger Befüllung und Folgeaktionen. Kein erneuter Pipedrive-Phasenschritt/WhatsApp-Versand wenn bereits nachgewiesen. Bei verbleibenden Lücken den Slot als gesichert und die Lücken als offen melden.`;
+}
+
+export async function recordPlanbarTaskProgress(jobId, input, { report = reportTaskState } = {}) {
+  const paths = jobPaths(jobId);
+  const request = await readJson(paths.request);
+  if (!request.planbar) throw new Error('Kein Planbar-Terminierungsauftrag.');
+  let previous = null;
+  try { previous = await readJson(paths.planbarProgress); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const progress = mergePlanbarSchedulingProgress(previous, input);
+  if (progress.reservation.isoYear !== request.planbar.isoYear || progress.reservation.week !== request.planbar.week) throw new Error('Der Nachweis gehört nicht zur beauftragten Kalenderwoche.');
+  const temporary = `${paths.planbarProgress}.${crypto.randomUUID()}.tmp`;
+  await writeFile(temporary, JSON.stringify(progress, null, 2), { mode: 0o600 });
+  await rename(temporary, paths.planbarProgress);
+  const state = await readJson(paths.state);
+  const updated = await writeState(paths, { ...state, planbarProgress: progress, phase: progress.status === 'completed' ? 'planbar_complete' : 'planbar_reserved', detail: planbarSchedulingSummary(progress), updatedAt: progress.updatedAt });
+  await report(request, updated, planbarSchedulingSummary(progress));
+  return progress;
 }
 
 export async function getCodexTaskStatus(jobId) {
@@ -358,7 +411,8 @@ export async function getCodexTaskStatus(jobId) {
   if (['completed', 'failed', 'blocked', 'timed_out', 'incomplete'].includes(state.status)) {
     resultPreview = clean(await readFile(paths.lastMessage, 'utf8').catch(() => ''), 1800);
   }
-  return { ...state, resultPreview };
+  const planbarProgress = await readJson(paths.planbarProgress).catch(() => state.planbarProgress || null);
+  return { ...state, planbarProgress, resultPreview: planbarProgress ? `${planbarSchedulingSummary(planbarProgress)}\n${resultPreview}`.trim() : resultPreview };
 }
 
 export async function updateCodexTaskProgress(jobId, phase, detail = '') {
@@ -420,11 +474,14 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   const completedAt = new Date().toISOString();
   const current = await readJson(paths.state).catch(() => ({}));
   const resultText = await readFile(paths.lastMessage, 'utf8').catch(() => '');
-  const resultPreview = clean(resultText, 1800);
+  const planbarProgress = await readJson(paths.planbarProgress).catch(() => current.planbarProgress || null);
+  const resultPreview = clean(planbarProgress ? `${planbarSchedulingSummary(planbarProgress)}\n${resultText}` : resultText, 1800);
   const inferredWorkflowStatus = request.mode !== 'build'
     ? inferProjectWorkflowStatus(resultText)
     : '';
-  const status = timedOut
+  const status = request.planbar && planbarProgress?.status !== 'completed'
+    ? (planbarProgress?.reservation?.verified ? 'incomplete' : 'blocked')
+    : timedOut
     ? 'timed_out'
     : current.status === 'blocked' || inferredWorkflowStatus === 'blocked'
       ? 'blocked'
@@ -436,10 +493,13 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   const finalProgress = status === 'completed' ? 100 : Number(current.progress) || 0;
   const finalState = await writeState(paths, {
     ...current,
+    planbarProgress,
     jobId, title: request.title, requestId: request.requestId, status,
     phase: status === 'completed' ? 'completed' : current.phase,
     progress: finalProgress,
-    detail: status === 'incomplete'
+    detail: request.planbar && planbarProgress
+      ? planbarSchedulingSummary(planbarProgress)
+      : status === 'incomplete'
       ? (request.mode === 'build' ? 'Codex endete, bevor alle Pflichtschritte einschließlich Live-Prüfung bestätigt waren.' : 'Der operative Lauf endete ohne bestätigten Ergebnisnachweis.')
       : inferredWorkflowStatus === 'blocked' && current.status !== 'blocked'
         ? 'Der Workflow endete mit einem fachlichen oder technischen Blocker. Details stehen im Ergebnis.'
@@ -462,7 +522,14 @@ export async function runCodexTask(jobId) {
   }));
 }
 
-if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url && process.argv[2] === 'progress') {
+if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url && process.argv[2] === 'planbar-progress') {
+  try {
+    const paths = jobPaths(process.argv[3]);
+    const receipt = path.resolve(process.argv[4] || '');
+    if (path.dirname(receipt) !== paths.directory || receipt === paths.planbarProgress || receipt === paths.state || receipt === paths.request) throw new Error('Der Eingangsbeleg muss im eigenen Auftragsordner liegen.');
+    console.log(JSON.stringify(await recordPlanbarTaskProgress(process.argv[3], await readJson(receipt))));
+  } catch (error) { console.error(error.message); process.exitCode = 1; }
+} else if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url && process.argv[2] === 'progress') {
   try { await updateCodexTaskProgress(process.argv[3], process.argv[4], process.argv.slice(5).join(' ')); }
   catch (error) { console.error(error.message); process.exitCode = 1; }
 } else if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url && process.argv[2] === 'run') {

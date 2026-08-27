@@ -72,8 +72,8 @@ function customerSchedulingSection(project) {
   const partnerConfig = partners.map(partner => `${partner.name}=${partner.prefix}`).join('\n');
   const latest = (project.customerSchedulingRequests || [])[0];
   const latestSummary = latest
-    ? `Zuletzt: <b>${esc(latest.customerName)}</b> · ${esc(latest.partnerName || 'Heat Hero')} (${esc(latest.partnerPrefix || 'HH')}) · KW ${esc(latest.week)}/${esc(latest.isoYear)} · Material vorher: ${latest.materialDeliverySpace ? 'Ja' : 'Nein'} · geschützt: ${latest.theftWeatherProtected ? 'Ja' : 'Nein'}${latest.allowFreeResourceFallback ? ' · Enter darf freien Platz nutzen' : ''}${latest.additionalInfo ? ' · Zusatzinfo vorhanden' : ''}`
-    : 'Noch kein Kunde vorgemerkt.';
+    ? `Zuletzt: <b>${esc(latest.customerName)}</b> · ${esc(latest.partnerName || 'Heat Hero')} (${esc(latest.partnerPrefix || 'HH')}) · KW ${esc(latest.week)}/${esc(latest.isoYear)} · Material vorher: ${latest.materialDeliverySpace ? 'Ja' : 'Nein'} · geschützt: ${latest.theftWeatherProtected ? 'Ja' : 'Nein'}${latest.allowFreeResourceFallback ? ' · Enter darf freien Platz nutzen' : ''}${latest.additionalInfo ? ' · Zusatzinfo vorhanden' : ''}<br><span id="planbarSchedulingStatus" role="status">${esc(latest.schedulingSummary || 'Noch kein gesicherter Planbar-Slot bestätigt.')}</span>`
+    : 'Zuerst den Slot in Planbar sichern, danach fehlende Angaben ergänzen. Noch kein Kunde vorgemerkt.';
   return `<details class="workflow-launcher workflow-launcher-disclosure" aria-labelledby="customerSchedulingTitle"><summary><div class="workflow-launcher-head"><div><div class="eyebrow">Operativer Workflow</div><h2 id="customerSchedulingTitle">Kunde terminieren</h2><div class="muted">${latestSummary}</div></div><span class="workflow-tag">Planbar + Pipedrive</span></div></summary><div class="workflow-launcher-body"><div class="muted scheduling-intro">Kundentyp, Kunde, Kalenderwoche und Materialannahme erfassen. IVA verwendet automatisch das gespeicherte Planbar-Kürzel, wählt den passenden Block-/Freiplatzweg und meldet den verifizierten Termin anschließend in WhatsApp.</div>${planbarCapacityOverview(project)}${planbarSearchPanel()}<form class="schedule-form" id="customerSchedulingForm"><label><span>Kundenname</span><input id="scheduleCustomerName" name="customerName" maxlength="220" autocomplete="off" required placeholder="Vorname Nachname"></label><label><span>Kundentyp / Partner</span><select id="schedulePartner" name="partnerId" required>${partnerOptions}</select></label><label><span>Kalenderwoche</span><select id="scheduleWeek" name="week" required>${schedulingWeekOptions()}</select></label><button class="btn primary" type="submit">Jetzt terminieren</button><div class="schedule-checks"><label class="schedule-check"><input id="scheduleMaterialDeliverySpace" type="checkbox"><span class="schedule-question">Hat der Kunde Platz, Material einige Tage vor Montagebeginn anzunehmen?</span><span class="schedule-answer" data-answer-for="scheduleMaterialDeliverySpace">Nein</span></label><label class="schedule-check"><input id="scheduleTheftWeatherProtected" type="checkbox"><span class="schedule-question">Diebstahl- und wettersicher?</span><span class="schedule-answer" data-answer-for="scheduleTheftWeatherProtected">Nein</span></label><label class="schedule-check" id="scheduleEnterFallbackRow" hidden><input id="scheduleAllowFreeResourceFallback" type="checkbox"><span class="schedule-question">Enter: Falls kein vollständiger ENTER-Block vorhanden ist, einen vollständig freien Montag-bis-Freitag-Platz verwenden?</span><span class="schedule-answer" data-answer-for="scheduleAllowFreeResourceFallback">Nein</span></label></div><label class="schedule-extra"><span>Zusatzinfo · optional</span><textarea id="scheduleAdditionalInfo" maxlength="2000" placeholder="Nur ausfüllen, wenn diese Information zusätzlich in Planbar stehen soll."></textarea></label></form><details class="schedule-partner-settings"><summary>Kundentypen und Planbar-Kürzel verwalten</summary><div class="muted">Eine Zeile pro Typ im Format Name=Kürzel. Enter behält dabei automatisch seinen speziellen Block-Workflow.</div><textarea id="schedulePartnerPrefixes" maxlength="2000">${esc(partnerConfig)}</textarea><button class="btn" id="saveSchedulePartners" type="button">Kürzel speichern</button></details></div></details>`;
 }
 
@@ -378,6 +378,19 @@ async function searchPlanbar(event) {
 }
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// Refresh just the receipt text: never erase a form the user is filling out.
+setInterval(async () => {
+  if (document.hidden || state.current?.id !== 'heat-hero' || !$('planbarSchedulingStatus')) return;
+  try {
+    const latestId = state.current.customerSchedulingRequests?.[0]?.id;
+    const project = await api('/api/projects/heat-hero');
+    const latest = project.customerSchedulingRequests?.find(item => item.id === latestId);
+    if (state.current?.id === 'heat-hero' && state.current.customerSchedulingRequests?.[0]?.id === latestId && latest && $('planbarSchedulingStatus')) {
+      $('planbarSchedulingStatus').textContent = latest.schedulingSummary || 'Noch kein gesicherter Planbar-Slot bestätigt.';
+    }
+  } catch { /* Keep the last verified receipt during a temporary network error. */ }
+}, 15000);
 
 async function refreshPlanbarSearch() {
   if (state.planbarRefreshing) return;

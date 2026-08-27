@@ -43,7 +43,7 @@
     "test:projects": "node scripts/verify-projects.mjs",
     "test:project-protocols": "node scripts/verify-project-protocols.mjs",
     "test:scheduling": "node scripts/verify-scheduling.mjs",
-    "test:customer-scheduling": "node scripts/verify-customer-scheduling.mjs",
+    "test:customer-scheduling": "node scripts/verify-customer-scheduling.mjs && node scripts/verify-planbar-reservation.mjs",
     "test:planbar-search": "node scripts/verify-planbar-search.mjs",
     "test:lumit": "node scripts/verify-lumit.mjs",
     "test:capability-knowledge-recruiting": "node scripts/verify-capability-knowledge-recruiting.mjs",

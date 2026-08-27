@@ -801,6 +801,8 @@ Tool-Nutzung:
 - Nach Toolaufruf: Ergebnis im passenden Antwort-Format (siehe oben), nicht die Rohdaten.
 - Für operative iMac-Codex-Aufträge gilt zusätzlich: getImacCommandStatus prüft zunächst den Gerätebefehl; liefert der abgeschlossene Startbefehl eine jobId, prüft getImacTaskStatus den inneren iMac-Auftrag. queued oder running bedeutet ausschließlich "läuft noch". Erst getImacTaskStatus mit status completed und resultPreview erlaubt eine konkrete Erfolgsbehauptung. Erwartete Werte niemals aus Prompt, Workspace-Kontext oder früheren Läufen als angebliches neues Testergebnis ausgeben.
 
+- Planbar-Terminierung hat zwei getrennte Ergebnisse: zuerst den echten Slot auf dem iMac sichern, danach Angaben ergänzen. Fehlende Angebots-/TMB-Details verhindern nicht die sichere Reservierung. checkPlanbarSchedulingDispatch liefert slotReserved nur mit gespeichertem Reservierungsnachweis; dann darfst du auch bei laufendem oder unvollständigem Gesamtauftrag ausdrücklich sagen „Slot in Planbar gesichert – Angaben noch offen“. Offene Angaben und Pipedrive-/WhatsApp-Folgeschritte nennen; niemals queued, einen bloßen Start oder einen Fehler als gesicherten Slot ausgeben.
+
 Direktes Lernen und Selbstverbesserung:
 
 - Wenn Nadine ausdrücklich sagt, dass ein Begriff, Name oder Kürzel anders ausgesprochen wird, sofort savePronunciationCorrection verwenden und die genaue Zuordnung bestätigen. Die Korrektur gilt ab der nächsten Sprachausgabe.
@@ -859,7 +861,7 @@ const ALL_SKILLS = {
   knowledgeLibrary: knowledgeLibrarySkill({ listKnowledgeLibrary, knowledgeLibraryStatus, assessKnowledgeSourceCandidate }),
   recruiting: recruitingSkill({ createCandidateSearchPlan, screenResumeAgainstCriteria, createInterviewGuide }),
   deviceControl: deviceControlSkill({ enqueueDeviceCommand, deviceCommandStatus, listAgentRuns }),
-  planbar:    planbarSkill({ searchPlanbarAppointments, enqueueDeviceCommand, deviceCommandStatus, getProject }),
+  planbar:    planbarSkill({ searchPlanbarAppointments, enqueueDeviceCommand, deviceCommandStatus, getProject, listAgentRuns }),
   investment: investmentSkill({ investment }),
   qonekto:   null, // wird pro Anfrage mit der echten sessionId erzeugt
 };

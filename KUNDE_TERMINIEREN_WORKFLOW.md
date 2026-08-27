@@ -1,6 +1,16 @@
 # Workflow „Kunde terminieren“
 
-Stand: 26. August 2026 · Version 4
+Stand: 27. August 2026 · Version 5 · Slot zuerst
+
+## Vorrang: erst den Slot sichern
+
+Nadines ausdrückliche Priorität: Der echte Kundentermin muss zuerst in Planbar stehen und den zulässigen Montageplatz blockieren. Der zentrale iMac erledigt **zuerst die Reservierung, danach die Vervollständigung**. Diese Regel ersetzt ältere „Keine Teilanlage“- und Angebots-Vollständigkeitsgates.
+
+Vor der Reservierung nur eindeutige Identität/Partner, vorhandene belegte Kontaktdaten, Dubletten und echte Kapazität prüfen. Keine Angebots-PDFs/TMB erst herunterladen oder auswerten. Fehlende Angebotsnummer, Beschreibung, Speicher-/TMB-Daten und optionale Kontaktfelder verhindern die Reservierung nicht. Leer lassen, nichts erfinden. Nur eine mehrdeutige Identität, fehlende zulässige Kapazität oder ein tatsächlich von Planbar verlangtes technisches Mindestfeld darf die Anlage stoppen.
+
+Nach dem Speichern Kunde, Termin-ID, Ressource und Montag–Freitag-Zeitraum erneut öffnen und verifizieren. Der gestartete iMac-Auftrag enthält den verbindlichen `planbar-progress`-Befehl und das Belegschema. **Diesen Reservierungsnachweis sofort vor jeder Angebots-/TMB-Auswertung dauerhaft speichern und an IVA melden.** Erst danach Ergänzungen versuchen. Der fachliche Zwischenstatus heißt „Slot in Planbar gesichert – Angaben noch offen“; er ist kein vollständig abgeschlossener Auftrag.
+
+Bei Wiederholung zuerst den bestehenden Kundentermin derselben KW prüfen und verwenden. Ein Timeout oder ein unklarer Speicherausgang erlaubt keine blinde Neuanlage. Ein verifiziert reservierter Termin wird wegen fehlender Angaben oder Folgefehlern niemals gelöscht, verschoben oder nochmals angelegt. Die Ergänzung erfolgt ausschließlich an diesem Termin. Bei Pipedrive-/WhatsApp-Problemen bleibt der Reservierungserfolg erhalten; bereits verifizierte Folgeaktionen nicht wiederholen.
 
 ## Trigger und Ziel
 
@@ -15,7 +25,7 @@ Verbindliche Standardtypen sind `Heat Hero = HH`, `Enter = EN` und `D Warmte = D
 1. Pipedrive bleibt bis zur erfolgreich rückgeprüften Planbar-Anlage **rein lesend**. Erst der definierte Abschluss in Abschnitt 4 darf den Deal verändern.
 2. Der Deal muss entweder in **„Förderung beantragen“** oder in der live sichtbaren Stufe **„Montage einplanen“** liegen. „Montage terminieren“ ist Nadines gleichbedeutender Kurzname dafür.
 3. Identität nur bei eindeutiger Übereinstimmung von Kundenname und Deal verwenden. Vorhandene Adresse, E-Mail und Telefonnummer werden aus der belegten Kontaktperson gelesen.
-4. Auftragsnummer und Leistungsbeschreibung werden nach `PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md` ermittelt. Die Auftragsnummer stammt **immer aus dem sichtbaren Inhalt des unterschriebenen Angebots**. Deal-Titel, Pipedrive-Auftragsfeld und Dateiname sind dafür niemals maßgeblich. Original und unterschriebene Fassung werden abgeglichen; kann der Inhalt der unterschriebenen Fassung nicht sicher gelesen werden, blockiert das den Planbar-Schreibschritt.
+4. **Erst nach der verifizierten Reservierung** Auftragsnummer und Leistungsbeschreibung nach `PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md` ermitteln. Die Auftragsnummer stammt **immer aus dem sichtbaren Inhalt des unterschriebenen Angebots**. Deal-Titel, Pipedrive-Auftragsfeld und Dateiname sind dafür niemals maßgeblich. Original und unterschriebene Fassung werden abgeglichen; unlesbare oder widersprüchliche Belege blockieren nur die betreffende Ergänzung, nicht den bereits gesicherten Termin.
 5. Die Beschreibung enthält nur die tatsächlich beauftragten fett gedruckten Positionsüberschriften. Die Wärmepumpe steht zuerst als `Leistung + Hersteller`; Speicher- und TMB-Regeln gelten unverändert.
 
 ## 2. Planbar-Kunde anlegen
@@ -38,7 +48,7 @@ Verbindliche Standardtypen sind `Heat Hero = HH`, `Enter = EN` und `D Warmte = D
 4. Nur wenn Nadine beim konkreten Enter-Auftrag das Feld `Falls kein ENTER-Block vorhanden ist, freien Fünf-Tage-Platz verwenden` aktiviert hat, darf nach belegtem Fehlen eines passenden ENTER-Blocks ersatzweise die erste vollständig freie Montag-bis-Freitag-Ressource verwendet werden. Ohne Häkchen bleibt Planbar unverändert.
 5. Nie verwenden: **David/Dawid Service** und **Antonio Lausic/Lausich/Lausitsch**. Die Schreibvarianten werden absichtlich gemeinsam ausgeschlossen.
 6. Gibt es nach der partnerbezogenen Regel keinen zulässigen Platz, wird nichts angelegt und der Fall mit den belegten Kalenderdaten gemeldet.
-7. Der Termin erhält den vorhandenen oder neu angelegten Planbar-Kunden, die belegte Auftragsnummer und die nach dem Vervollständigungs-Workflow erzeugte Kurzbeschreibung.
+7. Der Termin erhält zuerst den vorhandenen oder mit belegten Mindestdaten angelegten Planbar-Kunden und die vorhandenen Materialantworten/Zusatzinfo. Auftragsnummer und Angebots-Kurzbeschreibung dürfen zunächst leer sein; keine Dummy-Auftragsnummer und keine geratenen Positionen. Nach der Reservierung nach dem Vervollständigungs-Workflow ergänzen.
 8. Unter den Angebotspositionen stehen immer die beiden Projektakten-Antworten `Materialannahme einige Tage vor Montagebeginn: Ja/Nein` und `Diebstahl- und wettersicher: Ja/Nein` als eigene Zeilen.
 9. `Zusatzinfo: …` wird nur als weitere eigene Zeile angehängt, wenn das Freitextfeld einen nicht-leeren Inhalt besitzt. Bei leerem oder nur aus Leerzeichen bestehendem Feld erscheint keine Zusatzinfo in Planbar.
 
@@ -60,8 +70,8 @@ Verbindliche Standardtypen sind `Heat Hero = HH`, `Enter = EN` und `D Warmte = D
 
 ## 6. Sicherheits- und Abschlussprüfung
 
-- Keine Teilanlage: Ohne eindeutige Identität, vollständige Kontaktdaten, widerspruchsfreie Auftragsnummer und belegte Beschreibung wird weder Kunde noch Termin gespeichert.
-- Direkt vor dem Speichern Zeitraum, Ressource, Kunde, Auftragsnummer und Beschreibung erneut prüfen.
+- Ohne eindeutige Identität, passenden Partner und zulässigen Slot keine Anlage. Fehlende ergänzende Angaben verhindern hingegen nicht die sichere Reservierung.
+- Direkt vor dem Speichern Zeitraum, Ressource, Kunde und alle tatsächlich vorhandenen Angaben erneut prüfen. Technisch nicht erforderliche Kontaktfelder dürfen leer bleiben.
 - Nach dem Speichern Planbar neu laden und Kundenstammdaten, Ressource, Montag–Freitag-Zeitraum, Auftragsnummer und Beschreibung sichtbar rückprüfen.
-- Das Ergebnis nennt knapp Kunde, KW, Ressource, Pipedrive-Zielphase sowie Planbar- und WhatsApp-Verifikationsstatus. Personenbezogene Kontaktdaten werden nicht im Bericht wiederholt.
+- Das Ergebnis nennt zuerst, ob der Slot tatsächlich gesichert wurde; danach Kunde, KW, Ressource, offene Angaben sowie getrennt die verifizierten Pipedrive-/WhatsApp-Schritte. Ein Folgefehler macht die Reservierung nicht rückgängig. Personenbezogene Kontaktdaten werden nicht im Bericht wiederholt.
 - Neue Regeln werden versioniert in diesem Dokument und in den automatisierten Prüfungen ergänzt.

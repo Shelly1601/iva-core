@@ -6,7 +6,10 @@ import {
   DEFAULT_CUSTOMER_SCHEDULING_PARTNERS,
   normalizeCustomerSchedulingPartners,
   normalizePlanbarCapacitySnapshot,
+  planbarSchedulingKey,
+  planbarSchedulingSummary,
 } from '../operations/customer-scheduling.js';
+import { listAgentRuns } from '../operations/store.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const STORE_FILE = path.join(DATA_DIR, 'projects.json');
@@ -679,12 +682,25 @@ async function mutate(fn) {
 
 export async function listProjects() {
   const store = await loadStore();
-  return store.projects.map(publicProject).sort((a, b) => a.name.localeCompare(b.name, 'de'));
+  const runs = await listAgentRuns({ limit: 500 });
+  return store.projects.map(project => withSchedulingStatus(publicProject(project), runs)).sort((a, b) => a.name.localeCompare(b.name, 'de'));
 }
 
 export async function getProject(id) {
   const project = (await loadStore()).projects.find(item => item.id === clean(id, 100));
-  return project ? publicProject(project) : null;
+  return project ? withSchedulingStatus(publicProject(project), await listAgentRuns({ limit: 500 })) : null;
+}
+
+function withSchedulingStatus(project, runs) {
+  if (project.id !== 'heat-hero') return project;
+  project.customerSchedulingRequests = (project.customerSchedulingRequests || []).map(request => {
+    const key = planbarSchedulingKey(request);
+    const matches = runs.filter(run => run.schedulingKey === key);
+    const run = matches.find(run => run.planbarProgress?.reservation?.verified) || matches[0];
+    const progress = run?.planbarProgress;
+    return { ...request, status: progress?.status || run?.status || request.status, schedulingSummary: progress ? planbarSchedulingSummary(progress) : 'Noch kein gesicherter Planbar-Slot bestätigt.', planbarProgress: progress || null };
+  });
+  return project;
 }
 
 export async function createProject(input = {}) {

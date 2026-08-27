@@ -1,3 +1,49 @@
+import { createHash } from 'node:crypto';
+
+export const PLANBAR_SCHEDULING_RULE_VERSION = 'reserve-first-v1';
+
+export function planbarSchedulingKey({ customerName, partnerId, partnerPrefix, isoYear, week }) {
+  return createHash('sha256').update(JSON.stringify([
+    normalizedText(customerName), normalizedText(partnerId || partnerPrefix), Number(isoYear), Number(week),
+  ])).digest('hex');
+}
+
+// Only observed, re-opened Planbar records may supply this receipt. An accepted
+// device command or a successful process exit is never a reservation receipt.
+export function mergePlanbarSchedulingProgress(previous = null, input = {}) {
+  if (!['reserved', 'details_pending', 'completed'].includes(input.status)) throw new Error('Ungültiger Planbar-Fachstatus.');
+  if (!previous?.reservation && input.status !== 'reserved') throw new Error('Zuerst muss der Slot verifiziert reserviert sein.');
+  const reservation = input.reservation || previous?.reservation;
+  if (!reservation || reservation.verified !== true || reservation.identityVerified !== true) throw new Error('Der Planbar-Reservierungsnachweis fehlt.');
+  const { startDate, endDateExclusive } = isoWeekRange(reservation.isoYear, reservation.week);
+  if (reservation.startDate !== startDate || reservation.endDateExclusive !== endDateExclusive) throw new Error('Der Planbar-Termin umfasst nicht die beauftragte Montag-bis-Freitag-Woche.');
+  for (const field of ['customerId', 'appointmentId', 'resourceId', 'resourceName']) {
+    if (typeof reservation[field] !== 'string' || !reservation[field].trim() || reservation[field].length > 180) throw new Error(`Planbar-Nachweis fehlt: ${field}`);
+  }
+  if (isExcludedPlanbarResource(reservation.resourceName)) throw new Error('Ausgeschlossene Planbar-Ressource.');
+  if (!Number.isFinite(Date.parse(reservation.verifiedAt)) || Date.parse(reservation.verifiedAt) > Date.now() + 60_000) throw new Error('Der Planbar-Prüfzeitpunkt fehlt oder ist ungültig.');
+  const proof = Object.fromEntries(['customerId', 'appointmentId', 'resourceId', 'resourceName', 'isoYear', 'week', 'startDate', 'endDateExclusive', 'verifiedAt', 'verified', 'identityVerified'].map(key => [key, reservation[key]]));
+  if (previous?.reservation) {
+    for (const key of ['customerId', 'appointmentId', 'resourceId', 'isoYear', 'week', 'startDate', 'endDateExclusive']) {
+      if (previous.reservation[key] !== proof[key]) throw new Error('Die gesicherte Planbar-Reservierung darf nicht ersetzt oder verschoben werden.');
+    }
+  }
+  const missingDetails = (input.missingDetails ?? previous?.missingDetails ?? ['Auftragsnummer', 'Leistungsbeschreibung'])
+    .map(value => String(value).trim().slice(0, 180)).filter(Boolean).slice(0, 20);
+  const remainingActions = (input.remainingActions ?? previous?.remainingActions ?? ['Pipedrive-Abschluss', 'WhatsApp-Bestätigung'])
+    .map(value => String(value).trim().slice(0, 180)).filter(Boolean).slice(0, 20);
+  if (input.status === 'completed' && (missingDetails.length || remainingActions.length || input.completionVerified !== true)) throw new Error('Offene Ergänzungen oder Folgeaktionen dürfen nicht als vollständig gemeldet werden.');
+  if (previous?.status === 'completed' && input.status !== 'completed') throw new Error('Ein vollständig geprüfter Auftrag darf nicht zurückgesetzt werden.');
+  return { status: input.status, reservation: proof, missingDetails, remainingActions, completionVerified: input.status === 'completed', updatedAt: new Date().toISOString(), ruleVersion: PLANBAR_SCHEDULING_RULE_VERSION };
+}
+
+export function planbarSchedulingSummary(progress) {
+  if (!progress?.reservation?.verified) return 'Noch kein gesicherter Planbar-Slot bestätigt.';
+  if (progress.status === 'completed') return 'Slot in Planbar gesichert – Angaben und Folgeaktionen vollständig geprüft.';
+  const open = [...(progress.missingDetails || []), ...(progress.remainingActions || [])];
+  return `Slot in Planbar gesichert – ${progress.missingDetails?.length ? 'Angaben noch offen' : 'Nacharbeiten offen'}${open.length ? ': ' + open.join(', ') : '.'}`;
+}
+
 const EXCLUDED_RESOURCE_KEYS = new Set([
   'david service',
   'dawid service',
@@ -78,6 +124,9 @@ export function isoWeekRange(year, week) {
   monday.setUTCDate(mondayOfWeekOne.getUTCDate() + ((numericWeek - 1) * 7));
   const saturdayExclusive = new Date(monday);
   saturdayExclusive.setUTCDate(monday.getUTCDate() + 5);
+  const thursday = new Date(monday);
+  thursday.setUTCDate(monday.getUTCDate() + 3);
+  if (thursday.getUTCFullYear() !== numericYear) throw new Error('Diese ISO-Kalenderwoche existiert in diesem Jahr nicht.');
 
   return {
     startDate: utcDateString(monday),
@@ -144,16 +193,13 @@ export function buildPlanbarCustomer({ firstName, lastName, address, email, phon
   const cleanFirstName = String(firstName || '').trim().replace(/^HH\s+/i, '');
   const cleanLastName = String(lastName || '').trim();
   if (!cleanFirstName || !cleanLastName) throw new Error('Vor- und Nachname sind Pflichtfelder.');
-  if (!String(address || '').trim() || !String(email || '').trim() || !String(phone || '').trim()) {
-    throw new Error('Adresse, E-Mail-Adresse und Telefonnummer müssen vollständig belegt sein.');
-  }
 
   return {
     firstName: `HH ${cleanFirstName}`,
     lastName: cleanLastName,
-    address: String(address).trim(),
-    email: String(email).trim(),
-    phone: String(phone).trim(),
+    address: String(address || '').trim(),
+    email: String(email || '').trim(),
+    phone: String(phone || '').trim(),
     phoneKind: normalizedText(phoneKind) === 'mobil' ? 'Mobil' : 'Telefon',
   };
 }
@@ -165,15 +211,12 @@ export function buildPrefixedPlanbarCustomer({ prefix, firstName, lastName, addr
   const cleanFirstName = String(firstName || '').trim().replace(new RegExp(`^(?:${prefixPattern})\\s+`, 'i'), '');
   const cleanLastName = String(lastName || '').trim();
   if (!cleanFirstName || !cleanLastName) throw new Error('Vor- und Nachname sind Pflichtfelder.');
-  if (!String(address || '').trim() || !String(email || '').trim() || !String(phone || '').trim()) {
-    throw new Error('Adresse, E-Mail-Adresse und Telefonnummer müssen vollständig belegt sein.');
-  }
   return {
     firstName: `${cleanPrefix} ${cleanFirstName}`,
     lastName: cleanLastName,
-    address: String(address).trim(),
-    email: String(email).trim(),
-    phone: String(phone).trim(),
+    address: String(address || '').trim(),
+    email: String(email || '').trim(),
+    phone: String(phone || '').trim(),
     phoneKind: normalizedText(phoneKind) === 'mobil' ? 'Mobil' : 'Telefon',
   };
 }
@@ -182,16 +225,13 @@ export function buildEnterPlanbarCustomer({ firstName, lastName, address, email,
   const cleanFirstName = String(firstName || '').trim().replace(/^(?:EN|HH)\s+/i, '');
   const cleanLastName = String(lastName || '').trim();
   if (!cleanFirstName || !cleanLastName) throw new Error('Vor- und Nachname sind Pflichtfelder.');
-  if (!String(address || '').trim() || !String(email || '').trim() || !String(phone || '').trim()) {
-    throw new Error('Adresse, E-Mail-Adresse und Telefonnummer müssen vollständig belegt sein.');
-  }
 
   return {
     firstName: `EN ${cleanFirstName}`,
     lastName: cleanLastName,
-    address: String(address).trim(),
-    email: String(email).trim(),
-    phone: String(phone).trim(),
+    address: String(address || '').trim(),
+    email: String(email || '').trim(),
+    phone: String(phone || '').trim(),
     phoneKind: normalizedText(phoneKind) === 'mobil' ? 'Mobil' : 'Telefon',
   };
 }

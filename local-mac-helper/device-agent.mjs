@@ -254,7 +254,7 @@ async function executeDeviceCommand(command) {
   }
   if (command.action === 'planbar.customer.schedule') {
     const { startPlanbarCustomerSchedulingTask } = await import('./codex-tasks.mjs');
-    return startPlanbarCustomerSchedulingTask(command.payload || {});
+    return startPlanbarCustomerSchedulingTask({ ...command.payload, commandId: command.id });
   }
   if (command.action === 'portal.credentials.status') {
     const { credentialServiceStatus } = await import('./credential-broker.mjs');

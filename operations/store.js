@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import crypto from 'crypto';
+import { mergePlanbarSchedulingProgress, planbarSchedulingSummary } from './customer-scheduling.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const STORE_FILE = `${DATA_DIR}/operations.json`;
@@ -146,6 +147,7 @@ export async function upsertExternalAgentRun(input = {}) {
       jobId: clean(input.jobId || item.jobId, 100),
       projectId: clean(input.projectId || item.projectId, 100),
       workflowId: clean(input.workflowId || item.workflowId, 140),
+      schedulingKey: /^[a-f0-9]{64}$/.test(input.schedulingKey || '') ? input.schedulingKey : (item.schedulingKey || ''),
       requestPreview: safePreview(input.requestPreview || input.taskTitle || item.requestPreview),
       resultPreview: safePreview(input.resultPreview || input.detail || item.resultPreview),
       error: ['failed', 'blocked', 'timed_out', 'incomplete'].includes(status)
@@ -162,6 +164,14 @@ export async function upsertExternalAgentRun(input = {}) {
       completedAt,
       updatedAt: safeTimestamp(input.updatedAt, now),
     });
+    if (input.planbarProgress) {
+      const baseline = item.planbarProgress || mergePlanbarSchedulingProgress(null, { ...input.planbarProgress, status: 'reserved' });
+      item.planbarProgress = mergePlanbarSchedulingProgress(baseline, input.planbarProgress);
+    }
+    if (item.planbarProgress?.reservation?.verified) {
+      item.resultPreview = safePreview(planbarSchedulingSummary(item.planbarProgress));
+      if (item.planbarProgress.status !== 'completed' && item.status === 'completed') item.status = 'incomplete';
+    }
     item.durationMs = completedAt
       ? Math.max(0, Date.parse(completedAt) - Date.parse(startedAt || item.createdAt))
       : null;
