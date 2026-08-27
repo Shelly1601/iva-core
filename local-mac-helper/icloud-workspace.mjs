@@ -19,11 +19,12 @@ export function isIcloudWorkspace(workspace) {
   return path.resolve(String(workspace || '')).includes(ICLOUD_MARKER);
 }
 
-async function readWithRetry(file, { attempts, read, waitFn }) {
+async function readWithRetry(file, { attempts, read, waitFn, readTimeoutMs }) {
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      const value = await read(file);
+      let timer;
+      const value = await Promise.race([read(file), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('iCloud-Dateizugriff hat das Zeitlimit erreicht')), readTimeoutMs); })]).finally(() => clearTimeout(timer));
       return { file, bytes: value.length, attempts: attempt };
     } catch (error) {
       lastError = error;
@@ -36,7 +37,8 @@ async function readWithRetry(file, { attempts, read, waitFn }) {
 
 export async function materializeIcloudWorkspace({
   workspace,
-  attempts = 8,
+  attempts = 3,
+  readTimeoutMs = 5000,
   exec = execFileAsync,
   read = readFile,
   waitFn = wait,
@@ -45,7 +47,7 @@ export async function materializeIcloudWorkspace({
   if (!isIcloudWorkspace(root)) return { workspace: root, iCloud: false, materialized: false, probes: [] };
 
   const download = await exec('/usr/bin/brctl', ['download', root], {
-    timeout: 30_000,
+    timeout: 8_000,
     maxBuffer: 256 * 1024,
   }).then(() => ({ requested: true, error: '' })).catch(error => ({
     requested: false,
@@ -64,14 +66,14 @@ export async function materializeIcloudWorkspace({
     // Fordere deshalb jede tatsächlich benötigte Datei gezielt an, bevor ein
     // EAGAIN-Placeholder fälschlich als dauerhafter Blocker gewertet wird.
     fileDownloads.push(await exec('/usr/bin/brctl', ['download', file], {
-      timeout: 30_000,
+      timeout: 8_000,
       maxBuffer: 256 * 1024,
     }).then(() => ({ file, requested: true, error: '' })).catch(error => ({
       file,
       requested: false,
       error: String(error?.message || error).slice(0, 300),
     })));
-    probes.push(await readWithRetry(file, { attempts, read, waitFn }));
+    probes.push(await readWithRetry(file, { attempts, read, waitFn, readTimeoutMs }));
   }
 
   return {

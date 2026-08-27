@@ -6,9 +6,9 @@ export function deviceControlSkill({ enqueueDeviceCommand, deviceCommandStatus, 
     sendCommandToImac: tool({
       description: 'Sendet auf Nadines ausdrücklichen Wunsch einen eng freigegebenen Befehl an ihren M1-iMac. Der iMac holt den Befehl ausgehend ab; es wird kein offener Fernzugriff eingerichtet. Unterstützt Statusprüfung, einen gesperrten Fördermonitor-Prüflauf, Review-Übersicht und das Öffnen freigegebener Apps.',
       parameters: z.object({
-        action: z.enum(['computer.status', 'funding.monitor.status', 'funding.monitor.run', 'funding.reviews.list', 'app.open']),
+        action: z.enum(['agent.status', 'computer.status', 'funding.monitor.status', 'funding.reviews.list', 'app.open']),
         app: z.enum(['Microsoft Outlook', 'Google Chrome', 'WhatsApp', 'Codex', 'ChatGPT']).optional(),
-        confirmed: z.boolean().describe('true nur wenn Nadine ausdrücklich gesagt hat, dass die Aktion auf dem iMac ausgeführt werden soll'),
+        confirmed: z.boolean().describe('true wenn Nadine die konkrete Aktion beauftragt hat; iMac ist dauerhaft der Standard, keine zweite Ortsfreigabe verlangen'),
         requestText: z.string().max(500).optional(),
       }),
       execute: async ({ action, app, confirmed, requestText }) => {
@@ -18,12 +18,12 @@ export function deviceControlSkill({ enqueueDeviceCommand, deviceCommandStatus, 
       },
     }),
     runTaskOnImac: tool({
-      description: 'Führt eine von Nadine ausdrücklich mit „oben“ oder „auf dem iMac“ beauftragte normale lokale Aktion über Codex direkt auf dem iMac aus, wenn keine engere freigegebene Geräteaktion passt. Für IVA-Code-, App- oder Systemänderungen ist startIvaBuild zu verwenden. Die Aktion erhält ausschließlich den gemeinsamen IVA-iCloud-Workspace; Erfolg wird erst nach Statusprüfung behauptet.',
+      description: 'Führt eine von Nadine beauftragte normale lokale Aktion standardmäßig auf dem iMac über Codex direkt auf dem iMac aus, wenn keine engere freigegebene Geräteaktion passt. Für IVA-Code-, App- oder Systemänderungen ist startIvaBuild zu verwenden. Die Aktion erhält ausschließlich den gemeinsamen IVA-iCloud-Workspace; Erfolg wird erst nach Statusprüfung behauptet.',
       parameters: z.object({
         title: z.string().min(3).max(180),
         request: z.string().min(10).max(12_000),
         acceptanceCriteria: z.array(z.string().min(3).max(500)).max(12).optional(),
-        confirmed: z.boolean().describe('true nur wenn Nadine die Ausführung oben beziehungsweise auf dem iMac ausdrücklich beauftragt hat'),
+        confirmed: z.boolean().describe('true wenn Nadine diesen konkreten Auftrag erteilt hat; iMac-Ausführung ist dauerhaft freigegeben'),
       }),
       execute: async ({ title, request, acceptanceCriteria = [], confirmed }) => {
         if (!confirmed) return { queued: false, error: 'Bitte die Ausführung auf dem iMac zuerst ausdrücklich bestätigen.' };

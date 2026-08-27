@@ -1,3 +1,4 @@
+import { buildCentralRuntimeBundle } from './local-mac-helper/central-runtime.mjs';
 import 'dotenv/config';
 import crypto from 'node:crypto';
 import express from 'express';
@@ -790,7 +791,7 @@ Tool-Nutzung:
 - Bevor du aus einem Reel, Profil, fremden Tool oder einer spontanen Idee eine neue IVA-Funktion oder einen neuen Agenten empfiehlst, MUSST du assessCapability aufrufen. Pruefe echten Zusatznutzen, bestehende Abdeckung, offiziellen Nachweis, Rechte, Kosten, Datenschutz und Sicherheitsfolgen. Ergebnis "integrate-existing" bedeutet: keinen neuen Agenten bauen. "needs-verification" oder "watch" bedeutet: noch nicht integrieren. Fremden Code, geschuetzte Texte oder Designs niemals kopieren; nur eigenstaendig implementierte Funktionsmuster uebernehmen.
 - Live-Daten oder Aktion nötig (Kalender, Mails, Leads, Todos, Kampagnen, Bilder, Qonekto/blau direkt): Tool sofort aufrufen. Nie "hätte ich Zugriff auf…", nie "soll ich mal nachsehen?" — machen und dann zusammenfassen.
 - Eine Anmeldeseite, eine abgelaufene Sitzung oder eine erneute Authentifizierungsaufforderung ist kein Abbruchgrund. Bei jedem von Nadine freigegebenen System selbstständig die bereits vorhandenen Zugangsdaten und, falls erforderlich, den eingerichteten Authenticator aus dem sicheren lokalen beziehungsweise verbundenen Kontext verwenden, anmelden und die Aufgabe fortsetzen. Nadine nicht erneut nach bekannten Zugangsdaten oder einer normalen Anmeldung fragen. Passwörter und Einmalcodes niemals anzeigen, kopieren, in Prompts oder Dateien speichern oder protokollieren. Erst ein tatsächlich erschienener CAPTCHA, eine technisch erzwungene externe Bestätigung, eine Kontosperre oder nach einem konkreten Anmeldeversuch ausdrücklich abgelehnte beziehungsweise im sicheren Kontext technisch nicht verfügbare Zugangsdaten sind ein echter Blocker; diesen präzise benennen.
-- Das Wort "oben" bedeutet bei Nadine immer den iMac. Wenn eine normale freigegebene Aktion "oben" oder "auf dem iMac" passieren soll, darf sie niemals auf dem MacBook ausgeführt werden. Für eine direkt unterstützte Geräteaktion sendCommandToImac verwenden. Passt keine engere Geräteaktion, aber Nadine hat eine gewöhnliche lokale iMac-Aktion ausdrücklich beauftragt, runTaskOnImac verwenden. Für Panasonic, Bosch, Pipedrive, Airtable oder Planbar bei Bedarf ensureImacPortalLogin verwenden: normale Wiederanmeldungen sind von Nadine dauerhaft freigegeben und brauchen keine neue Rückfrage; Zugangsdaten bleiben im lokalen macOS-Schlüsselbund, Panasonic-2FA wird ohne Zwischenablage direkt aus dem fest freigegebenen Ente-Auth-Eintrag eingesetzt. Erst CAPTCHA, Kontosperre, externe Bestätigung, ausdrücklich abgelehnte oder lokal nicht vorhandene Zugangsdaten sind ein echter Login-Blocker. Für ausdrücklich beauftragte IVA-Code-, App- oder Systemänderungen stattdessen startIvaBuild verwenden; dieses Werkzeug übergibt den vollständigen Auftrag kontrolliert an Codex. Niemals so tun, als sei ein nur eingereihter Befehl bereits ausgeführt; anschließend den passenden Befehls- beziehungsweise Codex-Auftragsstatus prüfen. Keine Zugangsdaten und keine beliebigen Dateipfade an den Gerätekanal übergeben.
+- Alle beauftragten Rechneraktionen laufen standardmäßig auf dem iMac über denselben zentralen IVA-Gerätekanal, unabhängig von Handy, Telegram, Sprache oder MacBook als Eingang. Das MacBook bleibt Nadines Arbeitsgerät. Eine erneute Bestätigung des Ausführungsortes ist nicht nötig. Der konkrete Auftrag autorisiert seine üblichen Zwischenschritte; fremde Daten ändern, Geld ausgeben oder extern kommunizieren nur im ausdrücklich beauftragten Rahmen. Das Wort "oben" bedeutet bei Nadine immer den iMac. Wenn eine normale freigegebene Aktion "oben" oder "auf dem iMac" passieren soll, darf sie niemals auf dem MacBook ausgeführt werden. Für eine direkt unterstützte Geräteaktion sendCommandToImac verwenden. Passt keine engere Geräteaktion, aber Nadine hat eine gewöhnliche lokale iMac-Aktion ausdrücklich beauftragt, runTaskOnImac verwenden. Für Panasonic, Bosch, Pipedrive, Airtable oder Planbar bei Bedarf ensureImacPortalLogin verwenden: normale Wiederanmeldungen sind von Nadine dauerhaft freigegeben und brauchen keine neue Rückfrage; Zugangsdaten bleiben im lokalen macOS-Schlüsselbund, Panasonic-2FA wird ohne Zwischenablage direkt aus dem fest freigegebenen Ente-Auth-Eintrag eingesetzt. Erst CAPTCHA, Kontosperre, externe Bestätigung, ausdrücklich abgelehnte oder lokal nicht vorhandene Zugangsdaten sind ein echter Login-Blocker. Für ausdrücklich beauftragte IVA-Code-, App- oder Systemänderungen stattdessen startIvaBuild verwenden; dieses Werkzeug übergibt den vollständigen Auftrag kontrolliert an Codex. Niemals so tun, als sei ein nur eingereihter Befehl bereits ausgeführt; anschließend den passenden Befehls- beziehungsweise Codex-Auftragsstatus prüfen. Keine Zugangsdaten und keine beliebigen Dateipfade an den Gerätekanal übergeben.
 - CRM-Namen aus Sprache oder freier Texteingabe können falsch geschrieben beziehungsweise transkribiert sein. Vor jeder CRM-Auskunft oder -Aktion zu einer namentlich genannten Person findHeatHeroLeads mit der gelieferten Schreibweise aufrufen. Das Werkzeug durchsucht Schreibvarianten. Bei matchStatus "unique" ausschließlich den gespeicherten CRM-Namen und die gespeicherte ID verwenden. Bei "ambiguous" mit höchstens drei Kandidaten nachfragen, welcher gemeint ist. Bei "not-found" genau eine Frage stellen: wie der Nachname geschrieben wird. Niemals einen ähnlich klingenden Namen stillschweigend auswählen. Bei anderen CRM-Projekten ohne eigenen Resolver gilt mindestens dieselbe Rückfragepflicht, bis der gespeicherte Vollname eindeutig ist.
 - Wenn Nadine verlangt, eine Kundenakte aus dem CRM anzulegen oder CRM-Daten in die Kundenakte zu ziehen, ausschließlich importCrmCustomerFile aufrufen. Dieses Werkzeug erstellt eine aktive Kundenakte, übernimmt vorhandene Kontaktdaten und CRM-Notizen und verhindert Dubletten. Dafür niemals mehrfach createWorkspace aufrufen. Eine Qonekto-/Blau-direkt-Übertragung erfolgt dadurch ausdrücklich noch nicht.
 - Mehrere Quellen relevant (z. B. Kalender + Mails + Leads): parallel abrufen.
@@ -1128,8 +1129,10 @@ function authorizedImacAgent(req) {
 function imacAgentMetadataFromRequest(req) {
   return {
     hostname: String(req.headers['x-iva-agent-host'] || ''),
+    uiBusy: req.headers['x-iva-agent-ui-busy'] === 'true',
     protocolVersion: Number(req.headers['x-iva-agent-protocol'] || 0),
     release: String(req.headers['x-iva-agent-release'] || ''),
+    runtimeRevision: String(req.headers['x-iva-agent-revision'] || ''),
     workspace: String(req.headers['x-iva-agent-workspace'] || ''),
     iCloudAuthoritative: String(req.headers['x-iva-agent-icloud'] || '').toLowerCase() === 'true',
   };
@@ -1151,6 +1154,14 @@ app.post('/device-agent/:deviceId/heartbeat', async (req, res) => {
     }
     res.json(await recordDeviceAgentHeartbeat({ deviceId: req.params.deviceId, ...bodyMetadata }));
   } catch (error) { res.status(403).json({ error: error.message }); }
+});
+let centralRuntimeBundle;
+app.get('/device-agent/:deviceId/runtime', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
+  try {
+    centralRuntimeBundle ||= buildCentralRuntimeBundle(new URL('.', import.meta.url).pathname).catch(error => { centralRuntimeBundle = null; throw error; });
+    res.set('Cache-Control', 'no-store').json(await centralRuntimeBundle);
+  } catch (error) { res.status(503).json({ error: 'IVA-Laufzeitpaket konnte nicht erstellt werden.' }); }
 });
 app.get('/device-agent/:deviceId/status', async (req, res) => {
   if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);

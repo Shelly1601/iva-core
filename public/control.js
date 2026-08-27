@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id);
 const TOKEN_KEY = 'iva_token';
-const state = { status:null, approvals:[], runs:[], audit:[], automations:[], projectWorkflows:[], reports:[], loading:false };
+const state = { status:null, approvals:[], runs:[], audit:[], automations:[], projectWorkflows:[], reports:[], deviceAgent:null, loading:false };
 function token(){ return localStorage.getItem(TOKEN_KEY) || ''; }
 function esc(value){ return String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char])); }
 function fmt(value){ if(!value)return '–'; try{return new Date(value).toLocaleString('de-DE',{dateStyle:'short',timeStyle:'short'});}catch{return value;} }
@@ -100,14 +100,20 @@ function renderBacklog(){
 function renderAudit(){
   $('audit').innerHTML=state.audit.length?state.audit.slice(0,8).map(item=>`<article class="list-item"><div class="list-head"><b>${esc(item.action)}</b><span class="badge ${item.status==='completed'?'ready':''}">${esc(item.status)}</span></div><p>${esc(item.detail||item.target||'')}</p><div class="meta">${fmt(item.createdAt)} · ${esc(item.actor)}</div></article>`).join(''):empty('Noch keine Audit-Ereignisse.');
 }
-function render(){ renderBuildProgress(); renderMetrics(); renderAutomations(); renderAgents(); renderConnectors(); renderApprovals(); renderRuns(); renderBacklog(); renderAudit(); }
+function renderImacStatus(){
+  const agent=state.deviceAgent||{};
+  const label=!agent.online?'iMac nicht verbunden':agent.uiBusy?'iMac arbeitet – weitere Aufträge warten':agent.dispatchReady?'iMac bereit':'iMac verbunden – Befehlsabholung wird geprüft';
+  const el=$('imacStatus');
+  if(el)el.innerHTML=`<b>${esc(label)}</b><div class="meta">Handy · MacBook · Telegram → IVA-Core → iMac · ${esc(agent.release||'Version unbekannt')}${agent.runtimeRevision?' · '+esc(agent.runtimeRevision.slice(0,12)):''}</div><div class="meta">${esc(agent.detail||'')} · Letzter Abruf: ${fmt(agent.lastPolledAt)}</div>`;
+}
+function render(){ renderImacStatus(); renderBuildProgress(); renderMetrics(); renderAutomations(); renderAgents(); renderConnectors(); renderApprovals(); renderRuns(); renderBacklog(); renderAudit(); }
 function makeCollapsible(){ document.querySelectorAll('.main>section.card,.main>section.grid>.card').forEach(card=>{ const heading=card.querySelector(':scope>h2'); if(!heading)return; const subtitle=heading.nextElementSibling?.classList?.contains('muted')?heading.nextElementSibling:null; const details=document.createElement('details'); details.className=card.className+' disclosure'; details.style.cssText=card.style.cssText; const summary=document.createElement('summary'); summary.innerHTML=`<div><span>${esc(heading.textContent)}</span>${subtitle?`<small>${esc(subtitle.textContent)}</small>`:''}</div>`; const body=document.createElement('div'); body.className='disclosure-body'; [...card.children].forEach(child=>{ if(child!==heading&&child!==subtitle)body.appendChild(child); }); details.append(summary,body); card.replaceWith(details); }); }
 async function load(){
   if(state.loading)return;
   state.loading=true;
   setStatus('','verbinde …');
   try{
-    [state.status,state.approvals,state.audit,state.automations,state.reports]=await Promise.all([api('/api/control/status'),api('/api/control/approvals?status=pending&limit=30'),api('/api/control/audit?limit=30'),api('/api/automations'),api('/api/automation-reports?limit=12')]);
+    [state.status,state.approvals,state.audit,state.automations,state.reports,state.deviceAgent]=await Promise.all([api('/api/control/status'),api('/api/control/approvals?status=pending&limit=30'),api('/api/control/audit?limit=30'),api('/api/automations'),api('/api/automation-reports?limit=12'),api('/api/device-agent/status')]);
     state.runs=state.status.activity||[];
     state.projectWorkflows=state.status.projectWorkflows||[];
     render(); setStatus('on','aktuell · '+fmt(state.status.generatedAt));

@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import { withImacExecutionLock, imacUiIsBusy } from './ui-execution-lock.mjs';
+import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
@@ -9,7 +11,8 @@ import { access } from 'node:fs/promises';
 const execFileAsync = promisify(execFile);
 export const IMAC_DEVICE_ID = 'imac-nadine';
 export const DEVICE_AGENT_PROTOCOL_VERSION = 2;
-export const DEVICE_AGENT_RELEASE = 'imac-local-v4';
+export const DEVICE_AGENT_RELEASE = 'imac-central-v5';
+const RUNTIME_REVISION = (() => { try { return JSON.parse(readFileSync(new URL('../release.json', import.meta.url), 'utf8')).revision || ''; } catch { return ''; } })();
 const KEYCHAIN_SERVICE = 'de.iva.device-agent';
 const KEYCHAIN_ACCOUNT = IMAC_DEVICE_ID;
 const DEFAULT_SERVER_URL = 'https://iva-core-production.up.railway.app';
@@ -63,6 +66,8 @@ export function imacDeviceAgentMetadata() {
     hostname: normalizedHost(os.hostname()),
     protocolVersion: DEVICE_AGENT_PROTOCOL_VERSION,
     release: DEVICE_AGENT_RELEASE,
+    runtimeRevision: RUNTIME_REVISION,
+    uiBusy: imacUiIsBusy(),
     workspace: AGENT_WORKSPACE,
     iCloudAuthoritative: isAuthoritativeIcloudWorkspace(),
     allowedActions: [...ALLOWED_ACTIONS],
@@ -97,8 +102,10 @@ async function request(pathname, { method = 'GET', body } = {}) {
     headers: {
       Authorization: `Bearer ${token}`,
       'X-IVA-Agent-Host': agent.hostname,
+      'X-IVA-Agent-Ui-Busy': agent.uiBusy ? 'true' : 'false',
       'X-IVA-Agent-Protocol': String(agent.protocolVersion),
       'X-IVA-Agent-Release': agent.release,
+      'X-IVA-Agent-Revision': agent.runtimeRevision,
       'X-IVA-Agent-Workspace': agent.workspace,
       'X-IVA-Agent-ICloud': agent.iCloudAuthoritative ? 'true' : 'false',
       ...(body ? { 'Content-Type': 'application/json' } : {}),
@@ -116,6 +123,10 @@ async function request(pathname, { method = 'GET', body } = {}) {
 export async function reportImacDeviceAgentHeartbeat() {
   const metadata = imacDeviceAgentMetadata();
   return request(`/device-agent/${IMAC_DEVICE_ID}/heartbeat`, { method: 'POST', body: metadata });
+}
+
+export async function fetchCentralRuntimeBundle() {
+  return request(`/device-agent/${IMAC_DEVICE_ID}/runtime`);
 }
 
 export async function fetchImacDeviceAgentStatus() {
@@ -186,7 +197,7 @@ async function executeDeviceCommand(command) {
     // greifen beide auf macOS Accessibility/Apple Events zu und koennen sich
     // bei parallelen Probes gegenseitig einen falschen Negativstatus liefern.
     const outlook = await diagnoseOutlook();
-    const bridge = await runMacUiBridge(['accessibility-status', '--prompt'], { timeoutMs: 15000 }).catch(() => ({ trusted: false }));
+    const bridge = await runMacUiBridge(['accessibility-status'], { timeoutMs: 15000 }).catch(() => ({ trusted: false }));
     const pipedrive = await diagnosePipedriveChrome();
     const whatsapp = await diagnoseWhatsAppMac();
     return {
@@ -255,7 +266,7 @@ async function executeDeviceCommand(command) {
   }
   if (command.action === 'codex.task.start') {
     const { startCodexTask } = await import('./codex-tasks.mjs');
-    return startCodexTask(command.payload || {});
+    return startCodexTask({ ...command.payload, requestId: command.id });
   }
   if (command.action === 'codex.task.status') {
     const { getCodexTaskStatus } = await import('./codex-tasks.mjs');
@@ -288,7 +299,7 @@ export async function runImacDeviceAgentOnce() {
   try {
     if (UI_ACTIONS.has(command.action)) {
       const { withMacWakeGuard } = await import('./mac-wake-guard.mjs');
-      result = await withMacWakeGuard(() => executeDeviceCommand(command), { maxSeconds: command.action === 'planbar.search.refresh' ? 180 : 120 });
+      result = await withImacExecutionLock(() => withMacWakeGuard(() => executeDeviceCommand(command), { maxSeconds: command.action === 'planbar.search.refresh' ? 180 : 120 }), { timeoutMs: 20_000 });
     } else {
       result = await executeDeviceCommand(command);
     }
@@ -312,6 +323,8 @@ export function imacDeviceAgentPolicy() {
     executionHostAllowed: isAllowedImacExecutionHost(),
     protocolVersion: DEVICE_AGENT_PROTOCOL_VERSION,
     release: DEVICE_AGENT_RELEASE,
+    runtimeRevision: RUNTIME_REVISION,
+    uiBusy: imacUiIsBusy(),
     workspace: AGENT_WORKSPACE,
     iCloudAuthoritative: isAuthoritativeIcloudWorkspace(),
     expectedHostname: String(process.env.IVA_IMAC_HOSTNAME || '').trim() || 'Hostname enthält „iMac“',

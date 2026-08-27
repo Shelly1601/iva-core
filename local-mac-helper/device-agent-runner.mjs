@@ -1,4 +1,6 @@
 import os from 'node:os';
+import { imacUiIsBusy } from './ui-execution-lock.mjs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { chmod, cp, mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
@@ -12,7 +14,7 @@ const execFileAsync = promisify(execFile);
 const DEVICE_ID = 'imac-nadine';
 const KEYCHAIN_SERVICE = 'de.iva.device-agent';
 const SERVER_URL = 'https://iva-core-production.up.railway.app';
-const RELEASE = 'imac-local-v4';
+const RELEASE = 'imac-central-v5';
 const MODULE_PATH = fileURLToPath(import.meta.url);
 const LOCAL_RUNTIME = process.env.IVA_DEVICE_LOCAL_RUNTIME === 'true';
 const LOCAL_HELPER_DIR = path.dirname(MODULE_PATH);
@@ -62,8 +64,10 @@ function hostname() {
 function bootstrapMetadata() {
   return {
     hostname: hostname(),
+    uiBusy: imacUiIsBusy(),
     protocolVersion: 2,
     release: RELEASE,
+    runtimeRevision: (() => { try { return JSON.parse(readFileSync(path.join(LOCAL_HELPER_DIR, '..', 'release.json'), 'utf8')).revision || ''; } catch { return ''; } })(),
     workspace: WORKSPACE,
     iCloudAuthoritative: WORKSPACE.includes('/Library/Mobile Documents/com~apple~CloudDocs/IVA-Assistent/iva-core'),
     allowedActions: [...ALLOWED_ACTIONS],
@@ -271,8 +275,26 @@ async function runWithTimeout() {
   }
 }
 
+let lastCentralUpdateAt = 0;
+async function updateFromCentralRuntime() {
+  if (!LOCAL_RUNTIME || Date.now() - lastCentralUpdateAt < 60_000) return false;
+  // Only the central launchd installation follows the atomic current symlink.
+  // A legacy fixed-path installation must first use install-central-runtime.mjs.
+  if (!LOCAL_HELPER_DIR.includes(`${path.sep}central${path.sep}releases${path.sep}`)) return false;
+  lastCentralUpdateAt = Date.now();
+  const { fetchCentralRuntimeBundle, imacDeviceAgentMetadata } = await loadDeviceAgent();
+  const bundle = await fetchCentralRuntimeBundle();
+  if (bundle.revision === imacDeviceAgentMetadata().runtimeRevision) return false;
+  const { prepareCentralRuntime, activateCentralRuntime } = await import('./central-runtime.mjs');
+  const target = await prepareCentralRuntime(bundle, { dependencyRoot: path.dirname(LOCAL_HELPER_DIR) });
+  await activateCentralRuntime(target);
+  return true;
+}
+
 for (;;) {
   try {
+    await reportBootstrapHeartbeat();
+    if (await updateFromCentralRuntime().catch(error => { console.error(`Zentrale Aktualisierung wird erneut versucht: ${error.message}`); return false; })) process.exit(75);
     if (await updateLocalRunnerFromIcloud()) process.exit(75);
     await scheduleLocalRuntimeMigration().catch(error => {
       console.error(`Lokale iMac-Übernahme wird erneut versucht: ${error?.message || error}`);

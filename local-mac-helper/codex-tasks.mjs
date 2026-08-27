@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { withImacExecutionLock } from './ui-execution-lock.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -36,6 +37,14 @@ function safeJobId(value) {
   const jobId = clean(value, 80);
   if (!/^[a-f0-9-]{20,80}$/i.test(jobId)) throw new Error('Ungültige Codex-Auftrags-ID.');
   return jobId;
+}
+
+export function codexJobIdForRequest(requestId) {
+  if (!requestId) return crypto.randomUUID();
+  const bytes = crypto.createHash('sha256').update(String(requestId)).digest().subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  return bytes.toString('hex').replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5');
 }
 
 function jobPaths(jobId) {
@@ -117,10 +126,11 @@ async function reportTaskState(request, state, resultPreview = '') {
 }
 
 function buildCodexPrompt(request) {
+  const runtimeInstruction = `Bestehende lokale IVA-Helfer startest du mit absolutem Pfad aus ${path.dirname(MODULE_PATH)}. Dieser geprüfte Laufzeitstand kommt vom zentralen IVA-Core. Projektquellen und Dokumente bleiben im gesetzten iCloud-Workspace. Keine zweite lokale Kopie als laufenden Agenten starten.`;
   if (request.mode === 'project-workflow') {
     return `Nadine hat diesen Projekt-Workflow in IVA ausdrücklich über den Button „Manuell auslösen“ gestartet. Führe jetzt genau einen operativen Einmallauf aus, ohne eine weitere Planbestätigung zu verlangen.
 
-Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.md vollständig. Dies ist kein Bauauftrag: ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts. Führe nur den unten genannten Workflow mit seinen dokumentierten Quellen, Sicherheitsregeln, Verifikationen, Zeitlimits, Protokollen und Rückfallwegen aus. Normale erneute Anmeldungen erledigst du mit den vorhandenen sicheren Zugangsdaten selbstständig. Bei CAPTCHA, Kontosperre, technisch erzwungener externer Bestätigung oder einem fachlichen Sicherheits-Gate stoppst du mit dem konkreten Blocker. Erfinde keinen Erfolg.
+Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.md vollständig. ${runtimeInstruction} Dies ist kein Bauauftrag: ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts. Führe nur den unten genannten Workflow mit seinen dokumentierten Quellen, Sicherheitsregeln, Verifikationen, Zeitlimits, Protokollen und Rückfallwegen aus. Normale erneute Anmeldungen erledigst du mit den vorhandenen sicheren Zugangsdaten selbstständig. Bei CAPTCHA, Kontosperre, technisch erzwungener externer Bestätigung oder einem fachlichen Sicherheits-Gate stoppst du mit dem konkreten Blocker. Erfinde keinen Erfolg.
 
 Manueller Einmallauf:
 ${request.prompt}
@@ -130,9 +140,11 @@ ${request.acceptanceCriteria?.length ? `Abnahmekriterien:\n${request.acceptanceC
   if (request.mode === 'operational') {
     return `Nadine hat diese konkrete Aktion ausdrücklich zur Ausführung auf ihrem iMac beauftragt. Führe sie jetzt genau dort aus, ohne eine weitere Planbestätigung zu verlangen.
 
-Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.md vollständig. Dies ist ein operativer iMac-Auftrag und kein IVA-Bauauftrag: Ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts, außer der Auftrag verlangt selbst ausdrücklich eine Code- oder Systemänderung. Versende keine E-Mail und führe keine andere externe Kommunikation aus, sofern sie im Auftrag nicht eindeutig freigegeben ist. Verwende bei lokalen WhatsApp-Aufträgen ausschließlich die native WhatsApp-App. Wiederhole eine Aktion niemals allein deshalb, weil der Erfolgsnachweis verzögert oder uneindeutig ist.
+Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.md vollständig. ${runtimeInstruction} Dies ist ein operativer iMac-Auftrag und kein IVA-Bauauftrag: Ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts, außer der Auftrag verlangt selbst ausdrücklich eine Code- oder Systemänderung. Versende keine E-Mail und führe keine andere externe Kommunikation aus, sofern sie im Auftrag nicht eindeutig freigegeben ist. Verwende bei lokalen WhatsApp-Aufträgen ausschließlich die native WhatsApp-App. Wiederhole eine Aktion niemals allein deshalb, weil der Erfolgsnachweis verzögert oder uneindeutig ist.
 
 Der autoritative Arbeitsordner liegt in iCloud. Bei „Resource deadlock avoided“, EAGAIN, EDEADLK oder kurzzeitig nicht lesbaren Dateien stößt du zuerst den lokalen iCloud-Download an und wiederholst den lesenden Zugriff; behandle das nicht vorschnell als fehlende Datei. Melde ausschließlich das tatsächlich verifizierte Ergebnis oder einen konkreten Blocker und erfinde keinen Erfolg.
+
+Beende den Ergebnisbericht mit einer eigenen Zeile „Status: erfolgreich“ nur nach tatsächlicher Prüfung des Ergebnisses, sonst „Status: blockiert“ und dem konkreten Grund.
 
 Operativer Auftrag:
 ${request.prompt}
@@ -180,8 +192,10 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
   if (cleanPrompt.length < 10) throw new Error('Der Codex-Auftrag ist zu kurz.');
   const workspaceReadiness = await materializeIcloudWorkspace({ workspace: REPO_ROOT });
   const normalizedMode = ['project-workflow', 'operational'].includes(mode) ? mode : 'build';
-  const jobId = crypto.randomUUID();
+  const jobId = codexJobIdForRequest(requestId);
   const paths = jobPaths(jobId);
+  const existing = await readJson(paths.state).catch(() => null);
+  if (existing) return { jobId, status: existing.status, title: existing.title, workspace: 'iva-core', startedLocally: true, duplicate: true };
   await mkdir(paths.directory, { recursive: true });
   const request = {
     jobId,
@@ -387,6 +401,7 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   const command = codexBinary();
   const args = [
     'exec', '--approve-for-me', '--add-dir', paths.directory,
+    '--add-dir', path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper'),
     '-C', REPO_ROOT, '--output-last-message', paths.lastMessage,
     buildCodexPrompt(request),
   ];
@@ -404,9 +419,10 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   await logHandle.close();
   const completedAt = new Date().toISOString();
   const current = await readJson(paths.state).catch(() => ({}));
-  const resultPreview = clean(await readFile(paths.lastMessage, 'utf8').catch(() => ''), 1800);
-  const inferredWorkflowStatus = request.mode === 'project-workflow'
-    ? inferProjectWorkflowStatus(resultPreview)
+  const resultText = await readFile(paths.lastMessage, 'utf8').catch(() => '');
+  const resultPreview = clean(resultText, 1800);
+  const inferredWorkflowStatus = request.mode !== 'build'
+    ? inferProjectWorkflowStatus(resultText)
     : '';
   const status = timedOut
     ? 'timed_out'
@@ -414,7 +430,7 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
       ? 'blocked'
       : exitCode !== 0
         ? 'failed'
-        : request.mode === 'build' && current.phase !== 'completed'
+        : (request.mode === 'build' && current.phase !== 'completed') || (request.mode === 'operational' && !/(?:^|\n)\s*Status\s*:\s*(?:\*\*)?erfolgreich\b/i.test(resultText))
           ? 'incomplete'
           : 'completed';
   const finalProgress = status === 'completed' ? 100 : Number(current.progress) || 0;
@@ -424,7 +440,7 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
     phase: status === 'completed' ? 'completed' : current.phase,
     progress: finalProgress,
     detail: status === 'incomplete'
-      ? 'Codex endete, bevor alle Pflichtschritte einschließlich Live-Prüfung bestätigt waren.'
+      ? (request.mode === 'build' ? 'Codex endete, bevor alle Pflichtschritte einschließlich Live-Prüfung bestätigt waren.' : 'Der operative Lauf endete ohne bestätigten Ergebnisnachweis.')
       : inferredWorkflowStatus === 'blocked' && current.status !== 'blocked'
         ? 'Der Workflow endete mit einem fachlichen oder technischen Blocker. Details stehen im Ergebnis.'
         : current.detail,
@@ -440,10 +456,10 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
 
 export async function runCodexTask(jobId) {
   const { withMacWakeGuard } = await import('./mac-wake-guard.mjs');
-  return withMacWakeGuard(() => runCodexTaskWithoutWakeGuard(jobId), {
+  return withImacExecutionLock(() => withMacWakeGuard(() => runCodexTaskWithoutWakeGuard(jobId), {
     maxSeconds: Math.ceil(MAX_RUNTIME_MS / 1000) + 60,
     sleepDisplays: true,
-  });
+  }));
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url && process.argv[2] === 'progress') {

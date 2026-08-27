@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 
 const root = await mkdtemp(path.join(os.tmpdir(), 'iva-device-control-'));
 process.env.DATA_DIR = root;
@@ -194,19 +194,19 @@ try {
   console.log('Device-Control: LaunchAgent und Codex-Policy prüfen …');
   const plist = buildImacDeviceAgentLaunchAgent({
     nodePath: '/node',
-    runnerPath: '/Users/nadine/Library/Application Support/IVA Mac Helper/runtime/imac-local-v4/local-mac-helper/device-agent-runner.mjs',
+    runnerPath: '/Users/nadine/Library/Application Support/IVA Mac Helper/runtime/imac-central-v5/local-mac-helper/device-agent-runner.mjs',
     workspace: '/Users/nadine/Library/Mobile Documents/com~apple~CloudDocs/IVA-Assistent/iva-core',
-    forecastRoot: '/Users/nadine/Library/Application Support/IVA Mac Helper/runtime/imac-local-v4/outputs/planbar-weekly',
+    forecastRoot: '/Users/nadine/Library/Application Support/IVA Mac Helper/runtime/imac-central-v5/outputs/planbar-weekly',
   });
-  assert.match(plist, /runtime\/imac-local-v4\/local-mac-helper\/device-agent-runner\.mjs/);
+  assert.match(plist, /runtime\/imac-central-v5\/local-mac-helper\/device-agent-runner\.mjs/);
   assert.match(plist, /<key>IVA_DEVICE_WORKSPACE<\/key>/);
   assert.match(plist, /<key>IVA_DEVICE_LOCAL_RUNTIME<\/key><string>true<\/string>/);
   assert.match(plist, /<key>IVA_PLANBAR_OUTPUT_ROOT<\/key>/);
   assert.match(plist, /<key>KeepAlive<\/key><true\/>/);
   assert.doesNotMatch(plist, /StartInterval/);
   const connectionStatuses = [
-    { online: true, deviceId: IVA_IMAC_DEVICE_ID, hostname: 'imac-von-nadine', release: 'imac-local-v4', lastSeenAt: '2026-08-26T10:00:05.000Z' },
-    { online: true, deviceId: IVA_IMAC_DEVICE_ID, hostname: 'imac-von-nadine', release: 'imac-local-v4', lastSeenAt: '2026-08-26T10:00:20.000Z' },
+    { online: true, deviceId: IVA_IMAC_DEVICE_ID, hostname: 'imac-von-nadine', release: 'imac-central-v5', lastSeenAt: '2026-08-26T10:00:05.000Z' },
+    { online: true, deviceId: IVA_IMAC_DEVICE_ID, hostname: 'imac-von-nadine', release: 'imac-central-v5', lastSeenAt: '2026-08-26T10:00:20.000Z' },
   ];
   const verifiedConnection = await verifyImacDeviceAgentConnection({
     baselineLastSeenAt: '2026-08-26T10:00:00.000Z',
@@ -220,7 +220,7 @@ try {
   await assert.rejects(
     verifyImacDeviceAgentConnection({
       baselineLastSeenAt: '2026-08-26T10:00:00.000Z',
-      getStatus: async () => ({ online: true, release: 'imac-local-v4', lastSeenAt: '2026-08-26T10:00:05.000Z' }),
+      getStatus: async () => ({ online: true, release: 'imac-central-v5', lastSeenAt: '2026-08-26T10:00:05.000Z' }),
       timeoutMs: 20,
       pollMs: 1,
       minimumAdvanceMs: 10_000,
@@ -228,11 +228,15 @@ try {
     /keine zwei fortlaufenden Railway-Heartbeats/,
     'ein einzelner oder stehengebliebener Heartbeat darf die Installation nicht grün melden',
   );
-  const { codexTaskPolicy, inferProjectWorkflowStatus, startProjectWorkflowTask } = await import('../local-mac-helper/codex-tasks.mjs');
+  const { codexJobIdForRequest, codexTaskPolicy, inferProjectWorkflowStatus, startProjectWorkflowTask } = await import('../local-mac-helper/codex-tasks.mjs');
+  const stableJobId = codexJobIdForRequest('same-command');
+  assert.equal(codexJobIdForRequest('same-command'), stableJobId);
+  assert.match(stableJobId, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
+  assert.notEqual(codexJobIdForRequest('other-command'), stableJobId);
   const codexPolicy = codexTaskPolicy();
   assert.equal(codexPolicy.arbitraryWorkspace, false);
   assert.equal(codexPolicy.sandbox, 'workspace-write');
-  assert.match(codexPolicy.workspace, /iva-core$/);
+  assert.equal(path.isAbsolute(codexPolicy.workspace), true);
   assert.equal(codexPolicy.iCloudMaterialization, true);
   const { materializeIcloudWorkspace } = await import('../local-mac-helper/icloud-workspace.mjs');
   let downloadRequested = false;
@@ -350,6 +354,57 @@ try {
   assert.equal(devicePolicy.allowedActions.includes('project.workflow.run'), true);
   assert.equal(devicePolicy.allowedActions.includes('planbar.customer.schedule'), true);
   assert.equal(devicePolicy.allowedActions.includes('funding.legacy-monitor.suspend'), true);
+
+  console.log('Device-Control: gleichzeitige Zugriffe und ehrliche Bereitschaft prüfen …');
+  const beforeConcurrent = (await listDeviceCommands({ limit: 500 })).length;
+  await Promise.all(Array.from({ length: 30 }, (_, i) => Promise.all([
+    enqueueDeviceCommand({ action: 'agent.status', requestText: `concurrent-${i}` }),
+    recordDeviceAgentHeartbeat({ ...imacMetadata }),
+  ])));
+  assert.equal((await listDeviceCommands({ limit: 500 })).length, beforeConcurrent + 30, 'kein Befehl darf durch einen Heartbeat überschrieben werden');
+  const simultaneousClaims = await Promise.all(Array.from({ length: 8 }, () => claimNextDeviceCommand(IVA_IMAC_DEVICE_ID, imacMetadata)));
+  assert.equal(new Set(simultaneousClaims.map(item => item.id)).size, 8, 'jede Lease gehört zu genau einem Abruf');
+  assert.equal((await deviceAgentStatus()).dispatchReady, true);
+  const diskStore = JSON.parse(await readFile(path.join(root, 'device-commands.json'), 'utf8'));
+  diskStore.agents[IVA_IMAC_DEVICE_ID].lastPolledAt = '2020-01-01T00:00:00Z';
+  await writeFile(path.join(root, 'device-commands.json'), JSON.stringify(diskStore));
+  await recordDeviceAgentHeartbeat({ ...imacMetadata });
+  assert.equal((await deviceAgentStatus()).dispatchReady, false, 'Heartbeat allein belegt keine Befehlsabholung');
+  const mutation = await enqueueDeviceCommand({ action: 'app.open', payload: { app: 'WhatsApp' } });
+  const retryStore = JSON.parse(await readFile(path.join(root, 'device-commands.json'), 'utf8'));
+  const pendingMutation = retryStore.commands.find(item => item.id === mutation.id);
+  Object.assign(pendingMutation, { status: 'running', leaseExpiresAt: '2020-01-01T00:00:00Z', attempts: 1 });
+  await writeFile(path.join(root, 'device-commands.json'), JSON.stringify(retryStore));
+  await claimNextDeviceCommand(IVA_IMAC_DEVICE_ID, imacMetadata);
+  assert.equal((await deviceCommandStatus(mutation.id)).status, 'failed');
+  assert.match((await deviceCommandStatus(mutation.id)).error, /Keine automatische Wiederholung/);
+
+  console.log('Device-Control: zentrales Laufzeitpaket und UI-Serialisierung prüfen …');
+  const { buildCentralRuntimeBundle, validateCentralRuntimeBundle, prepareCentralRuntime, activateCentralRuntime } = await import('../local-mac-helper/central-runtime.mjs');
+  const bundle = await buildCentralRuntimeBundle(path.resolve(new URL('..', import.meta.url).pathname));
+  validateCentralRuntimeBundle(bundle);
+  assert.ok(bundle.files.some(file => file.path === 'operations/customer-scheduling.js'));
+  assert.ok(bundle.files.every(file => !/\.env|outputs\//.test(file.path)));
+  const corrupt = structuredClone(bundle);
+  corrupt.files[0].content = Buffer.from('corrupt').toString('base64');
+  assert.throws(() => validateCentralRuntimeBundle(corrupt), /Inhaltsprüfung/);
+  const escaped = structuredClone(bundle);
+  escaped.files[0].path = '../escape.mjs';
+  assert.throws(() => validateCentralRuntimeBundle(escaped), /Laufzeitpfad/);
+  const runtimeRoot = path.join(root, 'runtime-test');
+  const target = await prepareCentralRuntime(bundle, { root: runtimeRoot, exec: async () => ({ stdout: '' }) });
+  await activateCentralRuntime(target, { root: runtimeRoot });
+  assert.equal(JSON.parse(await readFile(path.join(runtimeRoot, 'current/release.json'), 'utf8')).revision, bundle.revision);
+  await assert.rejects(prepareCentralRuntime(corrupt, { root: runtimeRoot, exec: async () => ({}) }), /Inhaltsprüfung/);
+  assert.equal(JSON.parse(await readFile(path.join(runtimeRoot, 'current/release.json'), 'utf8')).revision, bundle.revision, 'fehlerhaftes Update lässt den aktiven Stand stehen');
+  const { withImacExecutionLock } = await import('../local-mac-helper/ui-execution-lock.mjs');
+  let active = 0, maximum = 0;
+  await Promise.all(Array.from({ length: 4 }, () => withImacExecutionLock(async () => {
+    maximum = Math.max(maximum, ++active);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    active--;
+  }, { root: path.join(root, 'ui-lock'), pollMs: 2 })));
+  assert.equal(maximum, 1, 'zwei Aufträge dürfen den Bildschirm nicht gleichzeitig bedienen');
 
   console.log('Device-Control: selbstheilenden Förderlaufzeit-Abgleich prüfen …');
   const { FUNDING_RUNTIME_MARKER, FUNDING_RUNTIME_MAX_UPDATE_ATTEMPTS, fundingRuntimeUpdatePrompt, reconcileFundingImacRuntime, summarizeFundingRuntimeCommands } = await import('../device-control/funding-runtime-reconciler.js');

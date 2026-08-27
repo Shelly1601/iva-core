@@ -210,3 +210,35 @@ node local-mac-helper/cli.mjs provision-imac-device-token --commit
 node local-mac-helper/cli.mjs install-imac-device-agent --commit
 node local-mac-helper/cli.mjs imac-device-agent-status
 ```
+
+
+## Zentraler iMac-Kanal (27.08.2026)
+
+Alle Rechneraufträge aus Handy, MacBook, Telegram und IVA laufen standardmäßig
+über `POST /api/devices/imac-nadine/commands`. Eine Ortsbestätigung ist nicht
+noch einmal nötig; der konkrete Auftrag und fachliche Schreibfreigaben bleiben
+maßgeblich. Kein lokaler UI-Fallback auf das MacBook.
+
+Die Laufzeit `imac-central-v5` bezieht alle 60 Sekunden ausschließlich das
+über Gerätetoken geschützte Paket von `/device-agent/imac-nadine/runtime`.
+Dateipositivliste, Einzel- und Gesamthashes, Syntax- und Importprüfung laufen
+vor dem atomaren Wechsel. Alte Releases bleiben für aktive Läufe erhalten.
+Das Paket enthält auch `operations/customer-scheduling.js`. iCloud ist die
+Projekt-/Dokumentquelle, nicht mehr der Importpfad des laufenden Geräteagenten.
+Einmaliger Wechsel einer bestehenden Installation:
+`node local-mac-helper/install-central-runtime.mjs` (auf dem iMac).
+Die vorherige LaunchAgent-Konfiguration wird gesichert und bei fehlgeschlagener
+Verbindungsprüfung wiederhergestellt. Kein Secret wird übertragen außer dem
+Gerätetoken im HTTPS-Authorization-Header zum bestehenden IVA-Core.
+
+Die Queue serialisiert vollständige Schreibtransaktionen. Schreibende Befehle
+mit abgelaufener Lease werden nicht blind wiederholt. Codex-Starts verwenden
+die commandId als Deduplizierungsschlüssel. UI-Aufträge teilen einen Prozesslock;
+bereits belegte Oberflächen lassen weitere Befehle in der zentralen Queue.
+`online` belegt die Verbindung, `dispatchReady` eine frische Befehlsabholung,
+`runtimeRevision` den geladenen Stand. Erst ein verifizierter Ergebnisbericht
+belegt die Ausführung.
+
+Codex behält `--approve-for-me` und die Workspace-Sandbox. Der eng begrenzte
+IVA-Helfer-Zustandsordner ist zusätzlich schreibbar; Keychain-, macOS- und
+verwaltete Freigabegrenzen bleiben bestehen. Keine pauschale Sandbox-Abschaltung.

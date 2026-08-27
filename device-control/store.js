@@ -10,6 +10,14 @@ const DEFERRED_IMAC_COMMAND_TTL_MS = 24 * 60 * 60_000;
 const LEASE_MS = 5 * 60_000;
 const AGENT_ONLINE_MS = 60_000;
 
+// Serialize the complete read/modify/write transaction, not just rename.
+let storeTransaction = Promise.resolve();
+function transaction(work) {
+  const next = storeTransaction.then(work);
+  storeTransaction = next.catch(() => {});
+  return next;
+}
+
 export const IVA_IMAC_DEVICE_ID = 'imac-nadine';
 export const DEVICE_AGENT_PROTOCOL_VERSION = 2;
 export const DEVICE_ACTIONS = Object.freeze({
@@ -77,8 +85,10 @@ function isIcloudIvaWorkspace(value) {
 function normalizedAgentMetadata(input = {}) {
   return {
     hostname: normalizedHostname(input.hostname),
+    uiBusy: input.uiBusy === true,
     protocolVersion: Number(input.protocolVersion || 0),
     release: cleanText(input.release, 120),
+    runtimeRevision: /^[a-f0-9]{64}$/.test(input.runtimeRevision || '') ? input.runtimeRevision : '',
     workspace: cleanText(input.workspace, 1000),
     iCloudAuthoritative: input.iCloudAuthoritative === true,
     allowedActions: [...new Set((Array.isArray(input.allowedActions) ? input.allowedActions : [])
@@ -115,25 +125,28 @@ function assertClaimingAgent(store, deviceId, input = {}) {
 }
 
 export async function recordDeviceAgentHeartbeat({ deviceId = IVA_IMAC_DEVICE_ID, ...input } = {}) {
-  if (cleanText(deviceId, 80) !== IVA_IMAC_DEVICE_ID) throw new Error('Unbekanntes IVA-Gerät.');
-  const metadata = normalizedAgentMetadata(input);
-  assertAttestedImacMetadata(metadata);
-  const store = await loadStore();
-  const previous = store.agents?.[deviceId];
-  if (previous?.attested && previous.hostname !== metadata.hostname) {
-    throw new Error(`Geräte-Attestierung abgelehnt: Der Gerätekanal ist bereits an ${previous.hostname} gebunden.`);
-  }
-  const now = new Date().toISOString();
-  store.agents = store.agents || {};
-  store.agents[deviceId] = {
-    deviceId,
-    ...metadata,
-    attested: true,
-    firstAttestedAt: previous?.firstAttestedAt || now,
-    lastSeenAt: now,
-  };
-  await saveStore(store);
-  return { ...store.agents[deviceId], online: true };
+  return transaction(async () => {
+    if (cleanText(deviceId, 80) !== IVA_IMAC_DEVICE_ID) throw new Error('Unbekanntes IVA-Gerät.');
+    const metadata = normalizedAgentMetadata(input);
+    assertAttestedImacMetadata(metadata);
+    const store = await loadStore();
+    const previous = store.agents?.[deviceId];
+    if (previous?.attested && previous.hostname !== metadata.hostname) {
+      throw new Error(`Geräte-Attestierung abgelehnt: Der Gerätekanal ist bereits an ${previous.hostname} gebunden.`);
+    }
+    const now = new Date().toISOString();
+    store.agents = store.agents || {};
+    store.agents[deviceId] = {
+      deviceId,
+      ...metadata,
+      attested: true,
+      firstAttestedAt: previous?.firstAttestedAt || now,
+      lastPolledAt: previous?.lastPolledAt || null,
+      lastSeenAt: now,
+    };
+    await saveStore(store);
+    return { ...store.agents[deviceId], online: true };
+  });
 }
 
 export async function deviceAgentStatus(deviceId = IVA_IMAC_DEVICE_ID) {
@@ -149,11 +162,13 @@ export async function deviceAgentStatus(deviceId = IVA_IMAC_DEVICE_ID) {
     };
   }
   const online = Date.now() - Date.parse(agent.lastSeenAt || 0) <= AGENT_ONLINE_MS;
+  const dispatchReady = online && Date.now() - Date.parse(agent.lastPolledAt || 0) <= AGENT_ONLINE_MS;
   return {
     ...agent,
     online,
+    dispatchReady,
     requiredProtocolVersion: DEVICE_AGENT_PROTOCOL_VERSION,
-    detail: online ? 'Attestierter iMac-Agent ist online.' : 'Der attestierte iMac-Agent hat sich zuletzt nicht innerhalb von 60 Sekunden gemeldet.',
+    detail: online ? (dispatchReady ? 'iMac verbunden; Befehlsabholung bestätigt.' : 'iMac verbunden; Befehlsabholung noch nicht bestätigt.') : 'Der attestierte iMac-Agent hat sich zuletzt nicht innerhalb von 60 Sekunden gemeldet.',
   };
 }
 
@@ -232,117 +247,135 @@ function validatePayload(action, payload = {}) {
 }
 
 export async function enqueueDeviceCommand({ deviceId = IVA_IMAC_DEVICE_ID, action, payload = {}, requestedBy = 'iva', requestText = '' } = {}) {
-  const device = cleanText(deviceId, 80);
-  const actionName = cleanText(action, 100);
-  if (device !== IVA_IMAC_DEVICE_ID) throw new Error('Unbekanntes IVA-Gerät.');
-  if (!DEVICE_ACTIONS[actionName]) throw new Error('Diese iMac-Aktion ist nicht freigegeben.');
-  const normalizedPayload = validatePayload(actionName, payload);
-  const now = new Date();
-  const store = await loadStore();
-  if (actionName === 'codex.task.start' && normalizedPayload.requestId) {
-    const existing = store.commands.find(item => item.deviceId === device
-      && item.action === actionName
-      && ['queued', 'running'].includes(item.status)
-      && Date.parse(item.expiresAt) > now.getTime()
-      && item.payload?.requestId === normalizedPayload.requestId);
-    if (existing) return { ...existing };
-  }
-  if (actionName === 'planbar.customer.schedule' || actionName === 'project.workflow.run') {
-    const fingerprint = JSON.stringify(normalizedPayload);
-    const existing = store.commands.find(item => item.deviceId === device
-      && item.action === actionName
-      && ['queued', 'running'].includes(item.status)
-      && Date.parse(item.expiresAt) > now.getTime()
-      && JSON.stringify(item.payload) === fingerprint);
-    if (existing) return { ...existing };
-  }
-  const command = {
-    id: crypto.randomUUID(),
-    deviceId: device,
-    action: actionName,
-    payload: normalizedPayload,
-    status: 'queued',
-    requestedBy: cleanText(requestedBy, 120) || 'iva',
-    requestText: cleanText(requestText, 500),
-    createdAt: now.toISOString(),
-    expiresAt: new Date(now.getTime() + (DEVICE_ACTIONS[actionName].requiresAttestedAgent ? DEFERRED_IMAC_COMMAND_TTL_MS : DEFAULT_TTL_MS)).toISOString(),
-    attempts: 0,
-  };
-  store.commands.push(command);
-  await saveStore(store);
-  return command;
+  return transaction(async () => {
+    const device = cleanText(deviceId, 80);
+    const actionName = cleanText(action, 100);
+    if (device !== IVA_IMAC_DEVICE_ID) throw new Error('Unbekanntes IVA-Gerät.');
+    if (!DEVICE_ACTIONS[actionName]) throw new Error('Diese iMac-Aktion ist nicht freigegeben.');
+    const normalizedPayload = validatePayload(actionName, payload);
+    const now = new Date();
+    const store = await loadStore();
+    if (actionName === 'codex.task.start' && normalizedPayload.requestId) {
+      const existing = store.commands.find(item => item.deviceId === device
+        && item.action === actionName
+        && ['queued', 'running'].includes(item.status)
+        && Date.parse(item.expiresAt) > now.getTime()
+        && item.payload?.requestId === normalizedPayload.requestId);
+      if (existing) return { ...existing };
+    }
+    if (actionName === 'planbar.customer.schedule' || actionName === 'project.workflow.run') {
+      const fingerprint = JSON.stringify(normalizedPayload);
+      const existing = store.commands.find(item => item.deviceId === device
+        && item.action === actionName
+        && ['queued', 'running'].includes(item.status)
+        && Date.parse(item.expiresAt) > now.getTime()
+        && JSON.stringify(item.payload) === fingerprint);
+      if (existing) return { ...existing };
+    }
+    const command = {
+      id: crypto.randomUUID(),
+      deviceId: device,
+      action: actionName,
+      payload: normalizedPayload,
+      status: 'queued',
+      requestedBy: cleanText(requestedBy, 120) || 'iva',
+      requestText: cleanText(requestText, 500),
+      createdAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + (DEVICE_ACTIONS[actionName].requiresAttestedAgent ? DEFERRED_IMAC_COMMAND_TTL_MS : DEFAULT_TTL_MS)).toISOString(),
+      attempts: 0,
+    };
+    store.commands.push(command);
+    await saveStore(store);
+    return command;
+  });
 }
 
 export async function claimNextDeviceCommand(deviceId = IVA_IMAC_DEVICE_ID, agentMetadata = {}) {
-  const store = await loadStore();
-  const claimingAgent = assertClaimingAgent(store, deviceId, agentMetadata);
-  const now = Date.now();
-  let changed = false;
-  for (const command of store.commands) {
-    if (command.status === 'queued' && Date.parse(command.expiresAt) <= now) {
-      command.status = 'expired';
-      command.completedAt = new Date().toISOString();
+  return transaction(async () => {
+    const store = await loadStore();
+    const claimingAgent = assertClaimingAgent(store, deviceId, agentMetadata);
+    const now = Date.now();
+    let changed = false;
+    if (claimingAgent) {
+      store.agents[deviceId].lastPolledAt = new Date(now).toISOString();
       changed = true;
     }
-    if (command.status === 'running' && Date.parse(command.leaseExpiresAt || 0) <= now) {
-      command.status = command.attempts >= 3 ? 'failed' : 'queued';
-      delete command.leaseToken;
-      delete command.leaseExpiresAt;
-      changed = true;
+    for (const command of store.commands) {
+      if (command.status === 'queued' && Date.parse(command.expiresAt) <= now) {
+        command.status = 'expired';
+        command.completedAt = new Date().toISOString();
+        changed = true;
+      }
+      if (command.status === 'running' && Date.parse(command.leaseExpiresAt || 0) <= now) {
+        const uncertainMutation = DEVICE_ACTIONS[command.action]?.mutating === true;
+        command.status = uncertainMutation || command.attempts >= 3 ? 'failed' : 'queued';
+        if (uncertainMutation) {
+          command.error = 'Ausführung nach Verbindungsabbruch unklar. Keine automatische Wiederholung einer schreibenden Aktion; Ergebnis zuerst prüfen.';
+          command.completedAt = new Date(now).toISOString();
+        }
+        delete command.leaseToken;
+        delete command.leaseExpiresAt;
+        changed = true;
+      }
     }
-  }
-  const command = store.commands.find(item => item.deviceId === deviceId
-    && item.status === 'queued'
-    && (!DEVICE_ACTIONS[item.action]?.requiresAttestedAgent
-      || (claimingAgent && claimingAgent.allowedActions.includes(item.action))));
-  if (!command) {
-    if (changed) await saveStore(store);
-    return null;
-  }
-  command.status = 'running';
-  command.startedAt = new Date().toISOString();
-  command.attempts = Number(command.attempts || 0) + 1;
-  command.leaseToken = crypto.randomBytes(24).toString('hex');
-  command.leaseExpiresAt = new Date(Date.now() + LEASE_MS).toISOString();
-  if (claimingAgent) command.claimedBy = claimingAgent;
-  await saveStore(store);
-  return { ...command };
+    const command = store.commands.find(item => item.deviceId === deviceId
+      && item.status === 'queued'
+      && (!claimingAgent?.uiBusy || ['agent.status', 'codex.task.status', 'funding.monitor.status', 'funding.reviews.list', 'portal.credentials.status'].includes(item.action))
+      && (!DEVICE_ACTIONS[item.action]?.requiresAttestedAgent
+        || (claimingAgent && claimingAgent.allowedActions.includes(item.action))));
+    if (!command) {
+      if (changed) await saveStore(store);
+      return null;
+    }
+    command.status = 'running';
+    command.startedAt = new Date().toISOString();
+    command.attempts = Number(command.attempts || 0) + 1;
+    command.leaseToken = crypto.randomBytes(24).toString('hex');
+    command.leaseExpiresAt = new Date(Date.now() + LEASE_MS).toISOString();
+    if (claimingAgent) command.claimedBy = claimingAgent;
+    await saveStore(store);
+    return { ...command };
+  });
 }
 
 export async function completeDeviceCommand({ deviceId, commandId, leaseToken, ok, result = null, error = '', agentMetadata = {} } = {}) {
-  const store = await loadStore();
-  const command = store.commands.find(item => item.id === String(commandId) && item.deviceId === String(deviceId));
-  if (!command || command.status !== 'running') throw new Error('Aktiver iMac-Befehl wurde nicht gefunden.');
-  if (!leaseToken || leaseToken !== command.leaseToken) throw new Error('iMac-Befehlslease ist ungültig.');
-  if (command.claimedBy) {
-    const completingAgent = assertClaimingAgent(store, deviceId, agentMetadata);
-    if (!completingAgent || completingAgent.hostname !== command.claimedBy.hostname) {
-      throw new Error('Geräte-Attestierung abgelehnt: Der Befehl darf nur vom attestierten iMac abgeschlossen werden.');
+  return transaction(async () => {
+    const store = await loadStore();
+    const command = store.commands.find(item => item.id === String(commandId) && item.deviceId === String(deviceId));
+    if (!command || command.status !== 'running') throw new Error('Aktiver iMac-Befehl wurde nicht gefunden.');
+    if (!leaseToken || leaseToken !== command.leaseToken) throw new Error('iMac-Befehlslease ist ungültig.');
+    if (command.claimedBy) {
+      const completingAgent = assertClaimingAgent(store, deviceId, agentMetadata);
+      if (!completingAgent || completingAgent.hostname !== command.claimedBy.hostname) {
+        throw new Error('Geräte-Attestierung abgelehnt: Der Befehl darf nur vom attestierten iMac abgeschlossen werden.');
+      }
     }
-  }
-  command.status = ok === true ? 'completed' : 'failed';
-  command.completedAt = new Date().toISOString();
-  command.result = ok === true ? result : null;
-  command.error = ok === true ? null : cleanText(error, 1000);
-  delete command.leaseToken;
-  delete command.leaseExpiresAt;
-  await saveStore(store);
-  return { ...command };
+    command.status = ok === true ? 'completed' : 'failed';
+    command.completedAt = new Date().toISOString();
+    command.result = ok === true ? result : null;
+    command.error = ok === true ? null : cleanText(error, 1000);
+    delete command.leaseToken;
+    delete command.leaseExpiresAt;
+    await saveStore(store);
+    return { ...command };
+  });
 }
 
 export async function cancelDeviceCommand({ deviceId = IVA_IMAC_DEVICE_ID, commandId, reason = '' } = {}) {
-  const store = await loadStore();
-  const command = store.commands.find(item => item.id === String(commandId) && item.deviceId === String(deviceId));
-  if (!command) throw new Error('iMac-Befehl wurde nicht gefunden.');
-  if (command.status !== 'queued') {
-    throw new Error(`Nur ein wartender iMac-Befehl kann abgebrochen werden (Status: ${command.status}).`);
-  }
-  command.status = 'canceled';
-  command.completedAt = new Date().toISOString();
-  command.cancelReason = cleanText(reason, 500) || 'Vom Auftraggeber vor Ausführung abgebrochen.';
-  await saveStore(store);
-  const { leaseToken, ...safe } = command;
-  return safe;
+  return transaction(async () => {
+    const store = await loadStore();
+    const command = store.commands.find(item => item.id === String(commandId) && item.deviceId === String(deviceId));
+    if (!command) throw new Error('iMac-Befehl wurde nicht gefunden.');
+    if (command.status !== 'queued') {
+      throw new Error(`Nur ein wartender iMac-Befehl kann abgebrochen werden (Status: ${command.status}).`);
+    }
+    command.status = 'canceled';
+    command.completedAt = new Date().toISOString();
+    command.cancelReason = cleanText(reason, 500) || 'Vom Auftraggeber vor Ausführung abgebrochen.';
+    await saveStore(store);
+    const { leaseToken, ...safe } = command;
+    return safe;
+  });
 }
 
 export async function listDeviceCommands({ deviceId = IVA_IMAC_DEVICE_ID, limit = 50 } = {}) {
