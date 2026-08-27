@@ -1,8 +1,9 @@
 import { IVA_IMAC_DEVICE_ID } from './store.js';
 
-export const FUNDING_RUNTIME_MARKER = 'funding-5am-runtime-2026-08-27-v3';
+export const FUNDING_RUNTIME_MARKER = 'funding-5am-runtime-2026-08-27-v4';
 export const FUNDING_RUNTIME_REQUIRED_ACTION = 'funding.legacy-monitor.suspend';
 export const FUNDING_RUNTIME_MAX_UPDATE_ATTEMPTS = 10;
+export const FUNDING_DAILY_SEQUENCE_WORKFLOW = 'funding-daily-sequence';
 
 const TERMINAL_FAILURES = new Set(['failed', 'expired', 'canceled']);
 
@@ -23,8 +24,8 @@ export function fundingRuntimeUpdatePrompt() {
 Arbeitsordner: /Users/nadine/Library/Mobile Documents/com~apple~CloudDocs/IVA-Assistent/iva-core
 
 1. Prüfe, dass der Hostname ein iMac ist und dass genau dieser iCloud-Arbeitsordner aktiv ist.
-2. Prüfe mit node --check die Dateien local-mac-helper/device-agent.mjs, local-mac-helper/device-agent-runner.mjs, local-mac-helper/device-agent-launchd.mjs und local-mac-helper/codex-tasks.mjs.
-3. Führe genau einmal aus: node local-mac-helper/cli.mjs install-imac-device-agent --commit
+2. Führe genau einmal das bereits veröffentlichte, SHA-256-geprüfte Direktpaket aus: zsh IVA-iMac-JETZT-fertigstellen.command
+3. Warte den vollständigen Abschluss dieses Befehls ab. Er lädt die fest gepinnte Laufzeit direkt aus GitHub und verwendet iCloud nicht als Laufzeitquelle.
 4. Verifiziere das ausgegebene Installationsergebnis: zwei fortlaufende Railway-Heartbeats, Laufzeitmodus local und die Aktionsliste enthält funding.legacy-monitor.suspend.
 
 Dies ist nur eine lokale Laufzeitaktualisierung. Ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts. Starte keinen Förderlauf. Öffne oder verändere weder Pipedrive noch Outlook, WhatsApp oder Google Sheets. Versende nichts. Melde nur das verifizierte Ergebnis oder den konkreten technischen Fehler.`;
@@ -82,11 +83,41 @@ export async function reconcileFundingImacRuntime({
   const suspension = commands.find(command => command.action === FUNDING_RUNTIME_REQUIRED_ACTION
     && String(command.requestText || '').includes(FUNDING_RUNTIME_MARKER));
   if (successfulSuspension(suspension)) {
+    const berlinDay = value => new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date(value));
+    const today = berlinDay(Date.now());
+    const fundingCatchup = commands.find(command => command.action === 'project.workflow.run'
+      && command.payload?.workflowId === FUNDING_DAILY_SEQUENCE_WORKFLOW
+      && berlinDay(command.createdAt) === today);
+    if (!fundingCatchup) {
+      const catchup = await enqueue({
+        deviceId: IVA_IMAC_DEVICE_ID,
+        action: 'project.workflow.run',
+        payload: {
+          projectId: 'heat-hero',
+          workflowId: FUNDING_DAILY_SEQUENCE_WORKFLOW,
+          displayName: 'Förderung – Tageslauf 1 → 2 → 3',
+        },
+        requestedBy: 'funding-runtime-catchup',
+        requestText: `[${FUNDING_RUNTIME_MARKER}] Ausgefallenen 05:00-Förderlauf heute genau einmal auf dem iMac nachholen`,
+      });
+      return {
+        status: 'ready_funding_catchup_queued',
+        runtimeCurrent: true,
+        legacyMonitorSuspended: true,
+        commandId: suspension.id,
+        fundingCatchupCommandId: catchup.id,
+        result: suspension.result,
+      };
+    }
     return {
       status: 'ready',
       runtimeCurrent: true,
       legacyMonitorSuspended: true,
       commandId: suspension.id,
+      fundingCatchupCommandId: fundingCatchup.id,
+      fundingCatchupStatus: fundingCatchup.status,
       result: suspension.result,
     };
   }
@@ -108,7 +139,10 @@ export async function reconcileFundingImacRuntime({
 export function summarizeFundingRuntimeCommands(commands = []) {
   const relevant = (Array.isArray(commands) ? commands : [])
     .filter(command => command.action === FUNDING_RUNTIME_REQUIRED_ACTION
-      || (command.action === 'codex.task.start' && command.payload?.requestId === FUNDING_RUNTIME_MARKER));
+      || (command.action === 'codex.task.start' && command.payload?.requestId === FUNDING_RUNTIME_MARKER)
+      || (command.action === 'project.workflow.run'
+        && command.payload?.workflowId === FUNDING_DAILY_SEQUENCE_WORKFLOW
+        && String(command.requestText || '').includes(FUNDING_RUNTIME_MARKER)));
   const summarize = command => command ? {
     id: command.id,
     action: command.action,
@@ -127,5 +161,7 @@ export function summarizeFundingRuntimeCommands(commands = []) {
     runtimeUpdate: summarize(relevant.find(command => command.action === 'codex.task.start')),
     legacyMonitorSuspension: summarize(relevant.find(command => command.action === FUNDING_RUNTIME_REQUIRED_ACTION
       && String(command.requestText || '').includes(FUNDING_RUNTIME_MARKER))),
+    fundingCatchup: summarize(relevant.find(command => command.action === 'project.workflow.run'
+      && command.payload?.workflowId === FUNDING_DAILY_SEQUENCE_WORKFLOW)),
   };
 }

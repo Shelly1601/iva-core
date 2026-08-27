@@ -353,7 +353,7 @@ try {
 
   console.log('Device-Control: selbstheilenden Förderlaufzeit-Abgleich prüfen …');
   const { FUNDING_RUNTIME_MARKER, FUNDING_RUNTIME_MAX_UPDATE_ATTEMPTS, fundingRuntimeUpdatePrompt, reconcileFundingImacRuntime, summarizeFundingRuntimeCommands } = await import('../device-control/funding-runtime-reconciler.js');
-  assert.match(fundingRuntimeUpdatePrompt(), /install-imac-device-agent --commit/);
+  assert.match(fundingRuntimeUpdatePrompt(), /IVA-iMac-JETZT-fertigstellen\.command/);
   assert.match(fundingRuntimeUpdatePrompt(), /Starte keinen Förderlauf/);
   let queuedRuntimeCommand = null;
   const updateQueued = await reconcileFundingImacRuntime({
@@ -383,24 +383,44 @@ try {
   });
   assert.equal(suspendQueued.status, 'legacy_monitor_suspend_queued');
   assert.equal(queuedSuspendCommand.action, 'funding.legacy-monitor.suspend');
-  const runtimeReady = await reconcileFundingImacRuntime({
+  let queuedFundingCatchup = null;
+  const runtimeCatchupQueued = await reconcileFundingImacRuntime({
     getStatus: async () => ({ ...imacMetadata, attested: true, online: true }),
-    enqueue: async () => { throw new Error('bei verifiziertem Abschluss darf nichts neu eingereiht werden'); },
+    enqueue: async input => { queuedFundingCatchup = { id: 'funding-catchup', ...input }; return queuedFundingCatchup; },
     listCommands: async () => [{
       id: 'legacy-suspend', action: 'funding.legacy-monitor.suspend', status: 'completed',
       requestText: `[${FUNDING_RUNTIME_MARKER}] geprüft`,
       result: { suspended: true, loaded: false, plistRetained: true },
     }],
   });
+  assert.equal(runtimeCatchupQueued.status, 'ready_funding_catchup_queued');
+  assert.equal(queuedFundingCatchup.action, 'project.workflow.run');
+  assert.equal(queuedFundingCatchup.payload.workflowId, 'funding-daily-sequence');
+  const runtimeReady = await reconcileFundingImacRuntime({
+    getStatus: async () => ({ ...imacMetadata, attested: true, online: true }),
+    enqueue: async () => { throw new Error('bei vorhandenem Tageslauf darf nichts doppelt eingereiht werden'); },
+    listCommands: async () => [{
+      id: 'legacy-suspend', action: 'funding.legacy-monitor.suspend', status: 'completed',
+      requestText: `[${FUNDING_RUNTIME_MARKER}] geprüft`,
+      result: { suspended: true, loaded: false, plistRetained: true },
+    }, {
+      id: 'funding-catchup', action: 'project.workflow.run', status: 'running',
+      createdAt: new Date().toISOString(), requestText: `[${FUNDING_RUNTIME_MARKER}] nachholen`,
+      payload: { projectId: 'heat-hero', workflowId: 'funding-daily-sequence' },
+    }],
+  });
   assert.equal(runtimeReady.status, 'ready');
   assert.equal(runtimeReady.legacyMonitorSuspended, true);
+  assert.equal(runtimeReady.fundingCatchupCommandId, 'funding-catchup');
   const diagnostic = summarizeFundingRuntimeCommands([
     { id: 'runtime-update', action: 'codex.task.start', status: 'completed', payload: { requestId: FUNDING_RUNTIME_MARKER }, result: { jobId: 'job-1' } },
     { id: 'legacy-suspend', action: 'funding.legacy-monitor.suspend', status: 'completed', requestText: `[${FUNDING_RUNTIME_MARKER}] geprüft`, result: { suspended: true, loaded: false, plistRetained: true } },
+    { id: 'funding-catchup', action: 'project.workflow.run', status: 'running', requestText: `[${FUNDING_RUNTIME_MARKER}] nachholen`, payload: { workflowId: 'funding-daily-sequence' } },
   ]);
   assert.equal(diagnostic.runtimeUpdate.jobId, 'job-1');
   assert.equal(diagnostic.legacyMonitorSuspension.suspended, true);
   assert.equal(diagnostic.legacyMonitorSuspension.loaded, false);
+  assert.equal(diagnostic.fundingCatchup.status, 'running');
 
   const { builderSkill } = await import('../skills/builder.js');
   console.log('Device-Control: Builder-Werkzeug prüfen …');
