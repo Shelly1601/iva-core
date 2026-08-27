@@ -199,6 +199,7 @@ function validatePayload(action, payload = {}) {
       schedulingMode,
       allowFreeResourceFallback,
       isoYear,
+      requestId: cleanText(payload.requestId, 100),
       week,
       materialDeliverySpace: payload.materialDeliverySpace,
       theftWeatherProtected: payload.theftWeatherProtected,
@@ -264,12 +265,17 @@ export async function enqueueDeviceCommand({ deviceId = IVA_IMAC_DEVICE_ID, acti
       if (existing) return { ...existing };
     }
     if (actionName === 'planbar.customer.schedule' || actionName === 'project.workflow.run') {
-      const fingerprint = JSON.stringify(normalizedPayload);
+      // Eine Outbox-Wiederholung nach einem Serverabbruch muss auch einen schon
+      // abgeschlossenen Auftrag wiederfinden, nicht erneut ausführen.
+      const sameRequest = normalizedPayload.requestId && store.commands.find(item => item.deviceId === device
+        && item.action === actionName && item.payload?.requestId === normalizedPayload.requestId);
+      if (sameRequest) return { ...sameRequest };
+      const fingerprint = JSON.stringify({ ...normalizedPayload, requestId: undefined });
       const existing = store.commands.find(item => item.deviceId === device
         && item.action === actionName
         && ['queued', 'running'].includes(item.status)
         && Date.parse(item.expiresAt) > now.getTime()
-        && JSON.stringify(item.payload) === fingerprint);
+        && JSON.stringify({ ...item.payload, requestId: undefined }) === fingerprint);
       if (existing) return { ...existing };
     }
     const command = {
@@ -320,6 +326,7 @@ export async function claimNextDeviceCommand(deviceId = IVA_IMAC_DEVICE_ID, agen
     }
     const command = store.commands.find(item => item.deviceId === deviceId
       && item.status === 'queued'
+      && (!item.retryAt || Date.parse(item.retryAt) <= now)
       && (!claimingAgent?.uiBusy || ['agent.status', 'codex.task.status', 'funding.monitor.status', 'funding.reviews.list', 'portal.credentials.status'].includes(item.action))
       && (!DEVICE_ACTIONS[item.action]?.requiresAttestedAgent
         || (claimingAgent && claimingAgent.allowedActions.includes(item.action))));
@@ -338,7 +345,7 @@ export async function claimNextDeviceCommand(deviceId = IVA_IMAC_DEVICE_ID, agen
   });
 }
 
-export async function completeDeviceCommand({ deviceId, commandId, leaseToken, ok, result = null, error = '', agentMetadata = {} } = {}) {
+export async function completeDeviceCommand({ deviceId, commandId, leaseToken, ok, result = null, error = '', failureStage = '', agentMetadata = {} } = {}) {
   return transaction(async () => {
     const store = await loadStore();
     const command = store.commands.find(item => item.id === String(commandId) && item.deviceId === String(deviceId));
@@ -354,6 +361,17 @@ export async function completeDeviceCommand({ deviceId, commandId, leaseToken, o
     command.completedAt = new Date().toISOString();
     command.result = ok === true ? result : null;
     command.error = ok === true ? null : cleanText(error, 1000);
+    // Ausschließlich attestierte Vorstartfehler: niemals unklare Schreibaktionen,
+    // Lease-Verluste oder fachlich blockierte Workflows automatisch wiederholen.
+    if (ok !== true && command.action === 'planbar.customer.schedule' && command.claimedBy
+      && failureStage === 'before_launch' && command.attempts < 3 && Date.parse(command.expiresAt) > Date.now() + 60_000) {
+      command.status = 'queued';
+      command.retryAt = new Date(Date.now() + command.attempts * 15_000).toISOString();
+      command.failureStage = 'before_launch';
+      delete command.completedAt;
+    } else {
+      delete command.retryAt;
+    }
     delete command.leaseToken;
     delete command.leaseExpiresAt;
     await saveStore(store);

@@ -23,7 +23,9 @@ const APP_ALLOWLIST = Object.freeze({
   Codex: Object.freeze(['/Applications/ChatGPT.app', '/Applications/Codex.app']),
   ChatGPT: Object.freeze(['/Applications/ChatGPT.app', '/Applications/Codex.app']),
 });
-const UI_ACTIONS = new Set(['computer.status', 'planbar.search.refresh', 'planbar.customer.schedule', 'project.workflow.run', 'portal.login', 'codex.task.start', 'app.open']);
+// Reine Task-Starts bedienen keine UI. Der gestartete Worker hält selbst die
+// UI-Sperre und den Wachschutz; Display-/Lockfehler dürfen die Übergabe nicht verdecken.
+const UI_ACTIONS = new Set(['computer.status', 'planbar.search.refresh', 'project.workflow.run', 'portal.login', 'app.open']);
 const AGENT_WORKSPACE = path.resolve(process.env.IVA_DEVICE_WORKSPACE || path.join(path.dirname(fileURLToPath(import.meta.url)), '..'));
 const ALLOWED_ACTIONS = Object.freeze([
   'agent.status',
@@ -290,12 +292,17 @@ export async function runImacDeviceAgentOnce() {
     // Heartbeat-Endpunkt den bisherigen Agentenabruf nicht unterbrechen.
     if (!/HTTP 404\b/.test(String(error?.message || error))) throw error;
   });
+  // Verlorene Statusmeldungen nachliefern, tote Worker sichtbar machen. Kein
+  // Wiederholen einer Terminbuchung; der lokale Reservierungsbeleg bleibt führend.
+  const { syncSchedulingTaskStates } = await import('./codex-tasks.mjs');
+  await syncSchedulingTaskStates().catch(error => console.error(`Terminierungsstatus: ${error.message}`));
   const payload = await request(`/device-agent/${IMAC_DEVICE_ID}/commands/next`);
   const command = payload?.command;
   if (!command) return { status: 'no_command', deviceId: IMAC_DEVICE_ID };
   let ok = false;
   let result = null;
   let error = '';
+  let failureStage = '';
   try {
     if (UI_ACTIONS.has(command.action)) {
       const { withMacWakeGuard } = await import('./mac-wake-guard.mjs');
@@ -306,10 +313,11 @@ export async function runImacDeviceAgentOnce() {
     ok = true;
   } catch (caught) {
     error = String(caught?.message || caught).slice(0, 1000);
+    failureStage = caught?.code === 'IVA_TASK_NOT_LAUNCHED' ? 'before_launch' : '';
   }
   await request(`/device-agent/${IMAC_DEVICE_ID}/commands/${encodeURIComponent(command.id)}/complete`, {
     method: 'POST',
-    body: { leaseToken: command.leaseToken, ok, result, error },
+    body: { leaseToken: command.leaseToken, ok, result, error, failureStage },
   });
   return { status: ok ? 'completed' : 'failed', deviceId: IMAC_DEVICE_ID, commandId: command.id, action: command.action, error: ok ? null : error };
 }

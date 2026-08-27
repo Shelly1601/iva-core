@@ -59,6 +59,10 @@ function planbarSearchPanel() {
   return `<section class="planbar-search" aria-labelledby="planbarSearchTitle"><div class="planbar-search-head"><div><div class="eyebrow">Schnell finden · rein lesend</div><h3 id="planbarSearchTitle">Planbar-Suche</h3><div class="muted">Kundenname, Hersteller oder Stichwort eingeben – IVA zeigt KW, sichtbaren Zeitraum und aktuelles Team.</div></div><button class="btn" id="refreshPlanbarSearch" type="button">↻ Planbar aktualisieren</button></div><form class="planbar-search-form" id="planbarSearchForm"><label><span>Name, Hersteller oder Stichwort</span><input id="planbarSearchQuery" maxlength="220" autocomplete="off" required placeholder="z. B. Schneider oder Cuderos"></label><label><span>Zeitraum</span><select id="planbarSearchWeeks"><option value="0">gesamter Datenstand</option><option value="3">nächste 3 Wochen</option><option value="6">nächste 6 Wochen</option><option value="12">nächste 12 Wochen</option></select></label><div class="planbar-search-actions"><button class="btn primary" type="submit">Suchen</button></div></form><div class="planbar-search-results" id="planbarSearchResults"><div class="planbar-search-empty">Suchbegriff eingeben oder den Planbar-Stand aktualisieren.</div></div><div class="planbar-search-meta" id="planbarSearchMeta"></div></section>`;
 }
 
+function schedulingHistory(project) {
+  return `<h3>Terminierungsaufträge · Live-Status</h3>${(project.customerSchedulingRequests || []).slice(0, 10).map(request => `<p><b>${esc(request.customerName)} · KW ${esc(request.week)}/${esc(request.isoYear)}</b><br><span role="status">${esc(request.schedulingSummary || 'Status wird geprüft …')}</span></p>`).join('')}`;
+}
+
 function customerSchedulingSection(project) {
   if (project.id !== 'heat-hero') return '';
   const partners = (project.customerSchedulingPartners || []).length
@@ -277,6 +281,7 @@ function render() {
   const objective = project.objective || project.description;
   $('content').innerHTML = `${customerSchedulingSection(project)}${brandSection(project)}${notesSection(project)}${objective ? `<section class="hero"><div class="eyebrow">Zielbild</div><h2>${esc(objective)}</h2></section>` : ''}${archiveSection(project)}${operationalSections(project)}`;
   collapseProjectSections();
+  if ($('customerSchedulingForm')) $('customerSchedulingForm').insertAdjacentHTML('afterend', `<section id="schedulingHistory" class="capacity-overview">${schedulingHistory(project)}</section>`);
   bindProjectActions();
 }
 
@@ -299,7 +304,9 @@ async function requestCustomerScheduling(event) {
     });
     replaceProject(project);
     render();
-    showToast(`${customerName} für KW ${week}/${isoYear} direkt an den Planbar-Workflow übergeben.`);
+    showToast(project.schedulingDispatch?.status === 'retrying'
+      ? `${customerName}: Die automatische Übergabe wird erneut versucht.`
+      : `${customerName} für KW ${week}/${isoYear} direkt an den Planbar-Workflow übergeben.`);
   } catch (error) { showToast(error.message, true); }
   finally { if (submit && document.body.contains(submit)) submit.disabled = false; }
 }
@@ -388,6 +395,14 @@ setInterval(async () => {
     const latest = project.customerSchedulingRequests?.find(item => item.id === latestId);
     if (state.current?.id === 'heat-hero' && state.current.customerSchedulingRequests?.[0]?.id === latestId && latest && $('planbarSchedulingStatus')) {
       $('planbarSchedulingStatus').textContent = latest.schedulingSummary || 'Noch kein gesicherter Planbar-Slot bestätigt.';
+      for (const request of project.customerSchedulingRequests || []) {
+        const previous = state.current.customerSchedulingRequests?.find(item => item.id === request.id);
+        if (previous && previous.status !== request.status && ['failed', 'blocked', 'expired', 'incomplete', 'completed', 'details_pending', 'reserved'].includes(request.status)) {
+          showToast(`${request.customerName}: ${request.schedulingSummary}`, ['failed', 'blocked', 'expired'].includes(request.status));
+        }
+      }
+      state.current.customerSchedulingRequests = project.customerSchedulingRequests;
+      if ($('schedulingHistory')) $('schedulingHistory').innerHTML = schedulingHistory(project);
     }
   } catch { /* Keep the last verified receipt during a temporary network error. */ }
 }, 15000);

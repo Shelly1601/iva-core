@@ -538,9 +538,10 @@ try {
   const planbarTools = planbarSkill({
     searchPlanbarAppointments: async () => ({ matches: [] }),
     getProject: async () => ({ customerSchedulingPartners: [{ id: 'heat-hero', name: 'Heat Hero', prefix: 'HH', schedulingMode: 'free-resource' }] }),
-    enqueueDeviceCommand: async input => {
-      planbarDispatch = input;
-      return { id: '44444444-4444-4444-8444-444444444444', deviceId: IVA_IMAC_DEVICE_ID, status: 'queued', ...input };
+    addCustomerSchedulingRequest: async (id, input) => {
+      assert.equal(id, 'heat-hero');
+      planbarDispatch = { action: 'planbar.customer.schedule', payload: input };
+      return { schedulingDispatch: { commandId: '44444444-4444-4444-8444-444444444444', deviceId: IVA_IMAC_DEVICE_ID, status: 'queued' }, customerSchedulingRequests: [{ schedulingSummary: 'Automatisch übergeben; kein Slot bestätigt.' }] };
     },
     deviceCommandStatus: async id => ({ id, status: 'completed' }),
   });

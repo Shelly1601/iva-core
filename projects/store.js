@@ -6,10 +6,10 @@ import {
   DEFAULT_CUSTOMER_SCHEDULING_PARTNERS,
   normalizeCustomerSchedulingPartners,
   normalizePlanbarCapacitySnapshot,
-  planbarSchedulingKey,
-  planbarSchedulingSummary,
 } from '../operations/customer-scheduling.js';
 import { listAgentRuns } from '../operations/store.js';
+import { enqueueDeviceCommand, listDeviceCommands } from '../device-control/store.js';
+import { schedulingRequestStatus } from '../operations/scheduling-dispatch.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const STORE_FILE = path.join(DATA_DIR, 'projects.json');
@@ -458,6 +458,9 @@ function normalizeCustomerSchedulingRequest(request = {}) {
     planbarDescriptionExtras,
     command: `Kunde terminieren: ${customerName} in KW ${week}/${isoYear} für ${partnerName} (${partnerPrefix})${schedulingMode === 'enter-block-first' ? `\nFreien Fünf-Tage-Platz verwenden, falls kein ENTER-Block vorhanden: ${allowFreeResourceFallback ? 'Ja' : 'Nein'}` : ''}\n${planbarDescriptionExtras.join('\n')}`,
     status: request.status === 'completed' ? 'completed' : 'requested',
+    commandId: clean(request.commandId, 100),
+    dispatchPending: request.dispatchPending === true,
+    dispatchError: clean(request.dispatchError, 1000),
     createdAt: iso(request.createdAt),
   };
 }
@@ -616,7 +619,7 @@ function normalizeProject(input = {}, fallback = {}) {
       .map(normalizeCustomerSchedulingRequest)
       .filter(request => request.customerName)
       .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
-      .slice(0, 100),
+      .filter((request, index) => index < 100 || request.dispatchPending),
     folders: folders.map(normalizeFolder),
     files: files.map(normalizeFile).filter(file => file.storageName),
   };
@@ -683,23 +686,18 @@ async function mutate(fn) {
 export async function listProjects() {
   const store = await loadStore();
   const runs = await listAgentRuns({ limit: 500 });
-  return store.projects.map(project => withSchedulingStatus(publicProject(project), runs)).sort((a, b) => a.name.localeCompare(b.name, 'de'));
+  const commands = await listDeviceCommands({ limit: 500 });
+  return store.projects.map(project => withSchedulingStatus(publicProject(project), runs, commands)).sort((a, b) => a.name.localeCompare(b.name, 'de'));
 }
 
 export async function getProject(id) {
   const project = (await loadStore()).projects.find(item => item.id === clean(id, 100));
-  return project ? withSchedulingStatus(publicProject(project), await listAgentRuns({ limit: 500 })) : null;
+  return project ? withSchedulingStatus(publicProject(project), await listAgentRuns({ limit: 500 }), await listDeviceCommands({ limit: 500 })) : null;
 }
 
-function withSchedulingStatus(project, runs) {
+function withSchedulingStatus(project, runs, commands) {
   if (project.id !== 'heat-hero') return project;
-  project.customerSchedulingRequests = (project.customerSchedulingRequests || []).map(request => {
-    const key = planbarSchedulingKey(request);
-    const matches = runs.filter(run => run.schedulingKey === key);
-    const run = matches.find(run => run.planbarProgress?.reservation?.verified) || matches[0];
-    const progress = run?.planbarProgress;
-    return { ...request, status: progress?.status || run?.status || request.status, schedulingSummary: progress ? planbarSchedulingSummary(progress) : 'Noch kein gesicherter Planbar-Slot bestätigt.', planbarProgress: progress || null };
-  });
+  project.customerSchedulingRequests = (project.customerSchedulingRequests || []).map(request => schedulingRequestStatus(request, runs, commands));
   return project;
 }
 
@@ -764,7 +762,7 @@ export async function addProjectNote(id, text, source = 'manual') {
   });
 }
 
-export async function addCustomerSchedulingRequest(id, input = {}) {
+export async function addCustomerSchedulingRequest(id, input = {}, { enqueue = enqueueDeviceCommand } = {}) {
   const customerName = clean(input.customerName, 220);
   const isoYear = Number(input.isoYear);
   const week = Number(input.week);
@@ -774,13 +772,14 @@ export async function addCustomerSchedulingRequest(id, input = {}) {
   if (typeof input.materialDeliverySpace !== 'boolean' || typeof input.theftWeatherProtected !== 'boolean') {
     throw new Error('Bitte beide Materialfragen mit Ja oder Nein beantworten.');
   }
-  return mutate(store => {
+  const created = await mutate(async store => {
     const project = store.projects.find(item => item.id === clean(id, 100));
     if (!project) return null;
     const partner = normalizeCustomerSchedulingPartners(project.customerSchedulingPartners)
       .find(item => item.id === clean(input.partnerId, 80));
     if (!partner) throw new Error('Bitte den Planbar-Partner für diesen Kunden auswählen.');
     const request = normalizeCustomerSchedulingRequest({
+      dispatchPending: true,
       customerName,
       isoYear,
       week,
@@ -793,8 +792,39 @@ export async function addCustomerSchedulingRequest(id, input = {}) {
       schedulingMode: partner.schedulingMode,
       allowFreeResourceFallback: input.allowFreeResourceFallback,
     });
-    project.customerSchedulingRequests = [request, ...(project.customerSchedulingRequests || [])].slice(0, 100);
-    return publicProject(project);
+    project.customerSchedulingRequests = [request, ...(project.customerSchedulingRequests || [])].filter((item, index) => index < 100 || item.dispatchPending);
+    // Persistente Outbox VOR der Übergabe: Ein Serverabbruch verliert keine Eingabe.
+    await saveStore(store);
+    const command = await dispatchSchedulingRequest(request, enqueue);
+    return { ...withSchedulingStatus(publicProject(project), [], command ? [command] : []),
+      schedulingDispatch: { commandId: command?.id || '', deviceId: 'imac-nadine', status: command?.status || 'retrying' } };
+  });
+  return created ? { ...await getProject(id), schedulingDispatch: created.schedulingDispatch } : null;
+}
+
+async function dispatchSchedulingRequest(request, enqueue) {
+  try {
+    const command = await enqueue({ action: 'planbar.customer.schedule', payload: { ...request, requestId: request.id },
+      requestedBy: 'heat-hero-project', requestText: `${request.customerName} in KW ${request.week}/${request.isoYear} terminieren` });
+    request.commandId = command.id;
+    request.dispatchPending = false;
+    request.dispatchError = '';
+    return command;
+  } catch (error) {
+    request.dispatchError = clean(error.message, 1000);
+    return null;
+  }
+}
+
+export async function dispatchPendingCustomerSchedulingRequests({ enqueue = enqueueDeviceCommand } = {}) {
+  // Alte Einträge ohne Outbox-Flag nicht nachträglich buchen.
+  const pending = (await loadStore()).projects.find(item => item.id === 'heat-hero')?.customerSchedulingRequests?.some(item => item.dispatchPending);
+  if (!pending) return;
+  await mutate(async store => {
+    const project = store.projects.find(item => item.id === 'heat-hero');
+    for (const request of project?.customerSchedulingRequests || []) {
+      if (request.dispatchPending) await dispatchSchedulingRequest(request, enqueue);
+    }
   });
 }
 

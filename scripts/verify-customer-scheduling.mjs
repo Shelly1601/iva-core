@@ -257,7 +257,7 @@ assert.throws(() => buildPipedriveCompletion({
 
 const workflow = await readFile(new URL('../KUNDE_TERMINIEREN_WORKFLOW.md', import.meta.url), 'utf8');
 assert.match(workflow, /native WhatsApp-App/);
-assert.match(workflow, /Gruppe `Terminierungen Dispo` innerhalb der Community `Heat Hero GmbH`/);
+assert.match(workflow, /Gruppe `Terminierung Dispo` innerhalb der Community `Heat Hero GmbH`/);
 assert.match(workflow, /Vorname Nachname, KW <Kalenderwoche>/);
 assert.match(workflow, /vollständig frei/);
 assert.match(workflow, /`Heat Hero = HH`, `Enter = EN` und `D Warmte = DW`/);

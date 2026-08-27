@@ -6,7 +6,7 @@ import { mkdir, readFile, readdir, rmdir, stat, unlink, writeFile } from 'node:f
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-const WAKE_ROOT = path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper', 'wake-guards');
+const WAKE_ROOT = process.env.IVA_MAC_WAKE_ROOT || path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper', 'wake-guards');
 const RELEASE_LOCK = path.join(WAKE_ROOT, '.release-lock');
 
 function processIsAlive(pid) {
@@ -86,6 +86,7 @@ export async function withMacWakeGuard(task, {
   spawnProcess = spawn,
   exec = execFileAsync,
   sleepDisplays = true,
+  onCleanupWarning = message => console.warn(message),
 } = {}) {
   if (typeof task !== 'function') throw new Error('Mac-Wachschutz benötigt einen lokalen Arbeitslauf.');
   if (process.env.IVA_MAC_WAKE_GUARD_ACTIVE === '1') return task();
@@ -106,9 +107,13 @@ export async function withMacWakeGuard(task, {
   } finally {
     if (previousGuard === undefined) delete process.env.IVA_MAC_WAKE_GUARD_ACTIVE;
     else process.env.IVA_MAC_WAKE_GUARD_ACTIVE = previousGuard;
-    await stopProcess(wakeLock);
+    // Aufräumen darf weder ein Geschäftsergebnis noch den ursprünglichen Fehler
+    // ersetzen. Insbesondere ist ein pmset-Fehler kein Grund für eine Neuanlage.
+    await stopProcess(wakeLock).catch(error => {
+      try { onCleanupWarning(`IVA-Wachschutz: ${error.message}`); } catch {}
+    });
     await releaseWakeLease(leaseFile, { sleepDisplays, exec })
-      .catch(error => { throw new Error(`Display konnte nach dem IVA-Lauf nicht sauber freigegeben werden: ${error.message}`); });
+      .catch(error => { try { onCleanupWarning(`Display konnte nach dem IVA-Lauf nicht sauber freigegeben werden: ${error.message}`); } catch {} });
   }
 }
 

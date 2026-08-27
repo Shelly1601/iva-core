@@ -1,7 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 
-export function planbarSkill({ searchPlanbarAppointments, enqueueDeviceCommand, deviceCommandStatus, getProject, listAgentRuns }) {
+export function planbarSkill({ searchPlanbarAppointments, addCustomerSchedulingRequest, deviceCommandStatus, getProject, listAgentRuns }) {
   return {
     searchPlanbar: tool({
       description: 'Sucht im zuletzt verifizierten Planbar-Stand nach Kundenname, Hersteller oder einem Stichwort aus der Auftragsbeschreibung. Liefert Kalenderwoche, Zeitraum und aktuelles Team. Für Formulierungen wie „in den nächsten drei Wochen“ weeks=3 verwenden. Die Suche verändert Planbar nicht.',
@@ -35,18 +35,16 @@ export function planbarSkill({ searchPlanbarAppointments, enqueueDeviceCommand, 
         additionalInfo: z.string().max(2000).optional(),
       }),
       execute: async input => {
-        const command = await enqueueDeviceCommand({
-          action: 'planbar.customer.schedule',
-          payload: input,
-          requestedBy: 'iva-planbar',
-          requestText: `${input.customerName} in KW ${input.week}/${input.isoYear} terminieren`,
-        });
+        const project = await addCustomerSchedulingRequest('heat-hero', input);
+        const dispatch = project?.schedulingDispatch;
+        if (!dispatch) throw new Error('Der Terminierungsauftrag konnte nicht übernommen werden.');
         return {
-          queued: true,
-          commandId: command.id,
-          deviceId: command.deviceId,
-          status: command.status,
-          message: 'Der vollständige Planbar-Terminierungsworkflow wurde direkt an Nadines iMac übergeben.',
+          queued: dispatch.status === 'queued',
+          commandId: dispatch.commandId,
+          deviceId: dispatch.deviceId,
+          status: dispatch.status,
+          executionVerified: false,
+          message: project.customerSchedulingRequests[0].schedulingSummary,
         };
       },
     }),

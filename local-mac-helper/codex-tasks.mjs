@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { mkdir, open, readFile, readdir, rename, writeFile } from 'node:fs/promises';
-import { accessSync, constants as fsConstants } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { accessSync, constants as fsConstants, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { materializeIcloudWorkspace } from './icloud-workspace.mjs';
 import { assertImacFundingHost } from './funding-workflows.mjs';
 import { isoWeekRange, mergePlanbarSchedulingProgress, planbarSchedulingKey, planbarSchedulingSummary } from '../operations/customer-scheduling.js';
@@ -58,6 +58,7 @@ function jobPaths(jobId) {
     log: path.join(directory, 'codex.log'),
     lastMessage: path.join(directory, 'result.txt'),
     planbarProgress: path.join(directory, 'planbar-progress.json'),
+    executionClaim: path.join(directory, 'execution-claim.json'),
   };
 }
 
@@ -123,11 +124,13 @@ async function reportTaskState(request, state, resultPreview = '') {
         metrics: { jobId: request.jobId, phase: state.phase, progress: state.progress },
       });
     }
+    return true;
   } catch (error) {
     // Der lokale Zustand bleibt die Quelle für spätere Statusabfragen. Ein
     // vorübergehend nicht erreichbarer Server darf den eigentlichen Lauf nie
     // abbrechen oder fälschlich als fehlgeschlagen markieren.
     console.error(`Kontrollzentrum-Meldung fehlgeschlagen: ${clean(error.message, 300)}`);
+    return false;
   }
 }
 
@@ -194,15 +197,21 @@ export function codexTaskPolicy() {
   });
 }
 
-export async function startCodexTask({ prompt, title = '', requestId = '', acceptanceCriteria = [], mode = 'build', projectId = '', workflowId = '', workflowName = '', planbar = null } = {}) {
+export async function startCodexTask({ prompt, title = '', requestId = '', acceptanceCriteria = [], mode = 'build', projectId = '', workflowId = '', workflowName = '', planbar = null } = {}, { materialize = materializeIcloudWorkspace, spawnProcess = spawn, report = reportTaskState } = {}) {
   const cleanPrompt = clean(prompt, MAX_PROMPT_LENGTH);
   if (cleanPrompt.length < 10) throw new Error('Der Codex-Auftrag ist zu kurz.');
-  const workspaceReadiness = await materializeIcloudWorkspace({ workspace: REPO_ROOT });
   const normalizedMode = ['project-workflow', 'operational'].includes(mode) ? mode : 'build';
   const jobId = codexJobIdForRequest(requestId);
   const paths = jobPaths(jobId);
-  const existing = await readJson(paths.state).catch(() => null);
-  if (existing) return { jobId, status: existing.status, title: existing.title, workspace: 'iva-core', startedLocally: true, duplicate: true };
+  try {
+  const existing = await readJson(paths.state).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
+  if (existing && existing.status !== 'queued') return { jobId, status: existing.status, title: existing.title, workspace: 'iva-core', startedLocally: true, duplicate: true };
+  if (existing && (await readJson(paths.request)).launchProtocol !== 2) return { jobId, status: existing.status, title: existing.title, workspace: 'iva-core', startedLocally: false, duplicate: true };
+  // Operative Helfer kommen aus der geprüften zentralen Laufzeit. Veraltete
+  // iCloud-package.json/.git-Dateien sind keine Voraussetzung für deren Start.
+  // Der Worker liest weiterhin die verbindlichen AGENTS-/Workflow-Dokumente.
+  const workspaceReadiness = normalizedMode === 'build'
+    ? await materialize({ workspace: REPO_ROOT }) : { iCloud: true, materialized: false, probes: [] };
   await mkdir(paths.directory, { recursive: true });
   const request = {
     jobId,
@@ -215,6 +224,7 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
     workflowId: clean(workflowId, 140),
     workflowName: clean(workflowName, 220),
     planbar,
+    launchProtocol: 2,
     workspace: REPO_ROOT,
     workspaceReadiness: {
       iCloud: workspaceReadiness.iCloud,
@@ -223,14 +233,23 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
     },
     createdAt: new Date().toISOString(),
   };
-  await writeFile(paths.request, JSON.stringify(request, null, 2));
+  if (!existing) {
+  await writeFile(paths.request, JSON.stringify(request, null, 2), { mode: 0o600 });
   const initialState = await writeState(paths, { jobId, title: request.title, requestId: request.requestId, mode: request.mode, projectId: request.projectId, workflowId: request.workflowId, status: 'queued', phase: request.mode === 'build' ? 'planning' : 'queued', progress: request.mode === 'build' ? 5 : 0, detail: 'Auftrag wartet auf den lokalen Codex-Start.', createdAt: request.createdAt, updatedAt: request.createdAt, workspace: REPO_ROOT });
-  await reportTaskState(request, initialState);
+  await report(request, initialState);
+  }
   const childEnv = { ...process.env };
   delete childEnv.IVA_MAC_WAKE_GUARD_ACTIVE;
-  const child = spawn(process.execPath, [MODULE_PATH, 'run', jobId], { detached: true, stdio: 'ignore', env: childEnv });
+  const beforeLaunch = await readJson(paths.state);
+  await writeState(paths, { ...beforeLaunch, launchAttempts: Number(beforeLaunch.launchAttempts || 0) + 1, lastLaunchAt: new Date().toISOString() });
+  const child = spawnProcess(process.execPath, [MODULE_PATH, 'run', jobId], { detached: true, stdio: 'ignore', env: childEnv });
+  // spawn() allein bestätigt keinen gestarteten Prozess (z.B. EAGAIN).
+  await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
   child.unref();
   return { jobId, status: 'queued', title: request.title, workspace: 'iva-core', startedLocally: true };
+  } catch (cause) {
+    throw Object.assign(new Error(`Workflow vor dem Start nicht übergeben: ${cause.message}`, { cause }), { code: 'IVA_TASK_NOT_LAUNCHED' });
+  }
 }
 
 const PROJECT_WORKFLOW_TASKS = Object.freeze({
@@ -324,6 +343,7 @@ export async function startPlanbarCustomerSchedulingTask(input = {}) {
     const existingRequest = await readJson(paths.request).catch(() => null);
     if (!existingRequest?.planbar || planbarSchedulingKey(existingRequest.planbar) !== key) continue;
     const state = await getCodexTaskStatus(entry.name).catch(() => null);
+    if (state?.status === 'queued' && existingRequest.launchProtocol === 2) return startCodexTask(existingRequest);
     if (state && (['queued', 'running'].includes(state.status) || state.planbarProgress?.reservation?.verified)) {
       return { jobId: entry.name, status: state.status, duplicate: true, startedLocally: false, planbarProgress: state.planbarProgress, message: 'Vorhandenen Terminierungsauftrag verwenden; keine zweite Slot-Anlage.' };
     }
@@ -356,7 +376,7 @@ Auftrag:
 - Materialannahme einige Tage vor Montagebeginn: ${materialDeliverySpace}
 - Diebstahl- und wettersicher: ${theftWeatherProtected}${additionalInfo ? `\n- Zusatzinfo: ${additionalInfo}` : ''}
 
-Der IVA-Auftrag ist die ausdrückliche Freigabe für die in KUNDE_TERMINIEREN_WORKFLOW.md eng beschriebenen Planbar- und Pipedrive-Schritte; verlange keine weitere Bestätigung. ${schedulingMode === 'enter-block-first' ? `Dieser Partner verwendet ENTER-Blöcke: Ersetze vorrangig den ersten zulässigen vollständigen Block mit dem exakten Text „Geblockt für Kunde ENTER“. ${allowFreeResourceFallback ? 'Nur wenn kein solcher Block vorhanden ist, darf ersatzweise die erste Ressource verwendet werden, die Montag bis Freitag vollständig frei ist.' : 'Ist kein solcher Block vorhanden, bleibt Planbar unverändert; eine freie Ressource darf nicht ersatzweise verwendet werden.'}` : 'Verwende ausschließlich die erste zulässige Ressource, die von Montag bis Freitag vollständig frei ist.'} Schließe Dawid/David Service sowie Antonio Lausic und alle dokumentierten Schreibvarianten aus. Erst nach sichtbar verifizierter Planbar-Anlage sende über die native WhatsApp-App genau einmal „${customerName}, KW ${week}“ in die Gruppe „Terminierungen Dispo“ innerhalb der Community „Heat Hero GmbH“. Bei nicht eindeutig unterscheidbarer gleichnamiger Gruppe wird nichts gesendet. Keine Web-Version von WhatsApp verwenden.`;
+Der IVA-Auftrag ist die ausdrückliche Freigabe für die in KUNDE_TERMINIEREN_WORKFLOW.md eng beschriebenen Planbar- und Pipedrive-Schritte; verlange keine weitere Bestätigung. ${schedulingMode === 'enter-block-first' ? `Dieser Partner verwendet ENTER-Blöcke: Ersetze vorrangig den ersten zulässigen vollständigen Block mit dem exakten Text „Geblockt für Kunde ENTER“. ${allowFreeResourceFallback ? 'Nur wenn kein solcher Block vorhanden ist, darf ersatzweise die erste Ressource verwendet werden, die Montag bis Freitag vollständig frei ist.' : 'Ist kein solcher Block vorhanden, bleibt Planbar unverändert; eine freie Ressource darf nicht ersatzweise verwendet werden.'}` : 'Verwende ausschließlich die erste zulässige Ressource, die von Montag bis Freitag vollständig frei ist.'} Schließe Dawid/David Service sowie Antonio Lausic und alle dokumentierten Schreibvarianten aus. Erst nach sichtbar verifizierter Planbar-Anlage sende über die native WhatsApp-App genau einmal „${customerName}, KW ${week}“ in die Gruppe „Terminierung Dispo“ innerhalb der Community „Heat Hero GmbH“ (Nadines Klarstellung vom 27.08.2026 ersetzt die ältere Plural-Schreibweise). Bei nicht eindeutig unterscheidbarer gleichnamiger Gruppe wird nichts gesendet. Keine Web-Version von WhatsApp verwenden.`;
   return startCodexTask({
     prompt,
     title: `Planbar: ${partnerName}-Kunde ${customerName} in KW ${week}/${isoYear} terminieren`,
@@ -449,7 +469,7 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   const paths = jobPaths(jobId);
   const request = await readJson(paths.request);
   const startedAt = new Date().toISOString();
-  const runningState = await writeState(paths, { jobId, title: request.title, requestId: request.requestId, mode: request.mode, projectId: request.projectId, workflowId: request.workflowId, status: 'running', phase: request.mode === 'build' ? 'planning' : 'running', progress: request.mode === 'build' ? 10 : 5, detail: request.mode === 'build' ? 'Planung wurde begonnen.' : 'Workflow wurde gestartet.', createdAt: request.createdAt, startedAt, updatedAt: startedAt, workspace: REPO_ROOT });
+  const runningState = await writeState(paths, { jobId, workerPid: process.pid, title: request.title, requestId: request.requestId, mode: request.mode, projectId: request.projectId, workflowId: request.workflowId, status: 'running', phase: request.mode === 'build' ? 'planning' : 'running', progress: request.mode === 'build' ? 10 : 5, detail: request.mode === 'build' ? 'Planung wurde begonnen.' : 'Workflow wurde gestartet.', createdAt: request.createdAt, startedAt, updatedAt: startedAt, workspace: REPO_ROOT });
   await reportTaskState(request, runningState);
   const logHandle = await open(paths.log, 'a');
   const command = codexBinary();
@@ -515,6 +535,9 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
 }
 
 export async function runCodexTask(jobId) {
+  // Permanenter, atomarer Ausführungsnachweis: doppelte Startzustellung darf
+  // denselben Workflow nie zweimal ausführen, auch nicht nach einem Absturz.
+  if (!await claimCodexTaskExecution(jobId)) return { jobId, duplicate: true };
   const { withMacWakeGuard } = await import('./mac-wake-guard.mjs');
   return withImacExecutionLock(() => withMacWakeGuard(() => runCodexTaskWithoutWakeGuard(jobId), {
     maxSeconds: Math.ceil(MAX_RUNTIME_MS / 1000) + 60,
@@ -522,22 +545,88 @@ export async function runCodexTask(jobId) {
   }));
 }
 
-if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url && process.argv[2] === 'planbar-progress') {
+export async function claimCodexTaskExecution(jobId, { report = reportTaskState } = {}) {
+  const paths = jobPaths(jobId);
+  const state = await readJson(paths.state);
+  if (state.status !== 'queued') return false;
+  let claim;
+  try { claim = await open(paths.executionClaim, 'wx', 0o600); }
+  catch (error) { if (error.code === 'EEXIST') return false; throw error; }
+  try { await claim.writeFile(JSON.stringify({ jobId, pid: process.pid, claimedAt: new Date().toISOString() })); }
+  finally { await claim.close(); }
+  const request = await readJson(paths.request);
+  const waiting = await writeState(paths, { ...state, status: 'running', phase: 'waiting_for_imac', workerPid: process.pid,
+    detail: 'Workflow gestartet; wartet auf den freien iMac.', updatedAt: new Date().toISOString() });
+  await report(request, waiting);
+  return true;
+}
+
+const reportedSchedulingStates = new Map();
+let lastSchedulingSync = 0;
+export async function syncSchedulingTaskStates({ now = Date.now(), report = reportTaskState, launch = startCodexTask, processAlive = pid => {
+  try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; }
+} } = {}) {
+  if (now - lastSchedulingSync < 60_000) return;
+  lastSchedulingSync = now;
+  let reports = 0;
+  for (const entry of await readdir(TASK_ROOT, { withFileTypes: true }).catch(() => [])) {
+    if (!entry.isDirectory() || !/^[a-f0-9-]{20,80}$/i.test(entry.name)) continue;
+    const paths = jobPaths(entry.name);
+    const request = await readJson(paths.request).catch(() => null);
+    if (!request?.planbar || now - Date.parse(request.createdAt) > 7 * 86400_000) continue;
+    let state = await getCodexTaskStatus(entry.name).catch(() => null);
+    if (!state) continue;
+    if (request.launchProtocol === 2 && state.status === 'queued' && now - Date.parse(state.lastLaunchAt || state.createdAt) > 60_000) {
+      const claim = await readJson(paths.executionClaim).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
+      if (!claim && Number(state.launchAttempts || 0) < 3) {
+        // Ein gestorbener Startprozess hat noch keinerlei Ausführungsfreigabe.
+        // Derselbe jobId + atomarer Claim halten diese Wiederholung schreibsicher.
+        await launch(request).catch(() => {});
+        state = await getCodexTaskStatus(entry.name);
+      } else if (!claim || !processAlive(claim.pid)) {
+        state = await writeState(paths, { ...state, status: 'failed', error: claim
+          ? 'Startprozess unterbrochen; Ausführung unklar. Keine automatische Wiederholung.'
+          : 'Workflow konnte nach drei Startversuchen nicht gestartet werden.',
+          updatedAt: new Date(now).toISOString(), completedAt: new Date(now).toISOString() });
+      }
+    }
+    if (state.status === 'running' && state.workerPid && !processAlive(state.workerPid)) {
+      state = await writeState(paths, { ...state, status: state.planbarProgress?.reservation?.verified ? 'incomplete' : 'failed',
+        error: 'Der Workflow-Prozess wurde unterbrochen. Keine automatische Wiederholung möglicher Schreibaktionen.',
+        detail: 'Lauf unterbrochen; vorhandener Slot-Nachweis bleibt erhalten.', completedAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() });
+    }
+    const signature = JSON.stringify([state.status, state.updatedAt, state.planbarProgress]);
+    if (reportedSchedulingStates.get(entry.name) === signature) continue;
+    if (await report(request, state, state.resultPreview)) reportedSchedulingStates.set(entry.name, signature);
+    if (++reports >= 3) break; // Ein nicht erreichbarer Server blockiert den Befehlsabruf nicht unbegrenzt.
+  }
+}
+
+export function isCodexTasksEntrypoint(entry = process.argv[1]) {
+  try { return Boolean(entry) && realpathSync(entry) === realpathSync(MODULE_PATH); } catch { return false; }
+}
+
+if (isCodexTasksEntrypoint() && process.argv[2] === 'planbar-progress') {
   try {
     const paths = jobPaths(process.argv[3]);
     const receipt = path.resolve(process.argv[4] || '');
     if (path.dirname(receipt) !== paths.directory || receipt === paths.planbarProgress || receipt === paths.state || receipt === paths.request) throw new Error('Der Eingangsbeleg muss im eigenen Auftragsordner liegen.');
     console.log(JSON.stringify(await recordPlanbarTaskProgress(process.argv[3], await readJson(receipt))));
   } catch (error) { console.error(error.message); process.exitCode = 1; }
-} else if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url && process.argv[2] === 'progress') {
+} else if (isCodexTasksEntrypoint() && process.argv[2] === 'progress') {
   try { await updateCodexTaskProgress(process.argv[3], process.argv[4], process.argv.slice(5).join(' ')); }
   catch (error) { console.error(error.message); process.exitCode = 1; }
-} else if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url && process.argv[2] === 'run') {
+} else if (isCodexTasksEntrypoint() && process.argv[2] === 'run') {
   try { await runCodexTask(process.argv[3]); }
   catch (error) {
     const paths = jobPaths(process.argv[3]);
     await writeFile(paths.lastMessage, `Codex-Auftrag fehlgeschlagen: ${error.message}`).catch(() => {});
-    await writeState(paths, { jobId: process.argv[3], status: 'failed', completedAt: new Date().toISOString(), error: clean(error.message, 1000) }).catch(() => {});
+    const previous = await readJson(paths.state).catch(() => ({}));
+    const planbarProgress = await readJson(paths.planbarProgress).catch(() => previous.planbarProgress || null);
+    const failed = await writeState(paths, { ...previous, jobId: process.argv[3], status: planbarProgress?.reservation?.verified ? 'incomplete' : 'failed', planbarProgress,
+      detail: clean(error.message, 1000), updatedAt: new Date().toISOString(), completedAt: new Date().toISOString(), error: clean(error.message, 1000) }).catch(() => null);
+    const request = await readJson(paths.request).catch(() => null);
+    if (request && failed) await reportTaskState(request, failed);
     process.exitCode = 1;
   }
 }

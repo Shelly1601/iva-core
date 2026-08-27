@@ -1,6 +1,12 @@
 # Workflow „Kunde terminieren“
 
-Stand: 27. August 2026 · Version 5 · Slot zuerst
+Stand: 27. August 2026 · Version 6 · Direktstart und Slot zuerst
+
+## Jede vollständige Eingabe startet automatisch
+
+Chat und Projektformular verwenden denselben dauerhaften Übergabeweg an `imac-nadine`. Die Eingabe ist der konkrete Ausführungsauftrag, keine bloße Notiz/Vormerkung. Es gibt keine zweite Bestätigung. Bei ausgelastetem oder nicht verbundenem iMac wartet der Auftrag automatisch auf die Ausführung (Geräteauftrag maximal 24 Stunden); ein Ablauf oder Fehler wird nicht als erfolgreicher Start angezeigt.
+
+Vorübergehende Übergabefehler werden automatisch wiederholt. Vorstartfehler des iMac-Starters werden höchstens dreimal versucht. Ein atomarer Ausführungsnachweis verhindert doppelte Workerlaufe; nach möglichem Beginn von Schreibaktionen niemals blind erneut ausführen. Alte fehlgeschlagene Aufträge werden durch die Softwareänderung nicht pauschal nachgebucht. Reservierungsnachweise bleiben bei Folgefehlern erhalten, unterbrochene Worker und verlorene Statusmeldungen werden im regelmäßigen Geräteabruf abgeglichen.
 
 ## Vorrang: erst den Slot sichern
 
@@ -64,7 +70,7 @@ Verbindliche Standardtypen sind `Heat Hero = HH`, `Enter = EN` und `D Warmte = D
 ## 5. WhatsApp-Bestätigung
 
 1. Unmittelbar nach der sichtbar verifizierten Planbar-Anlage wird über die native WhatsApp-App auf Nadines iMac genau eine Nachricht im Format `Vorname Nachname, KW <Kalenderwoche>` gesendet, zum Beispiel `Stefanie Schneider, KW 39`.
-2. Ziel ist ausschließlich die Gruppe `Terminierungen Dispo` innerhalb der Community `Heat Hero GmbH`. Da eine zweite gleichnamige Gruppe existiert, muss die Community-Zuordnung vor dem Senden sichtbar eindeutig sein.
+2. Ziel ist ausschließlich die Gruppe `Terminierung Dispo` innerhalb der Community `Heat Hero GmbH` (Nadines Klarstellung vom 27.08.2026). Da eine zweite gleichnamige Gruppe existiert, muss die Community-Zuordnung vor dem Senden sichtbar eindeutig sein.
 3. WhatsApp Web und `web.whatsapp.com` sind ausgeschlossen. Ist Community oder Gruppe nicht eindeutig unterscheidbar, wird nichts gesendet und der konkrete Blocker gemeldet.
 4. Bei fehlgeschlagener oder nicht vollständig rückgeprüfter Planbar-Anlage wird keine Nachricht gesendet. Ein lokaler idempotenter Abschlussnachweis verhindert eine zweite Nachricht für denselben Kunden-KW-Auftrag.
 

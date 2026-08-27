@@ -125,6 +125,16 @@ export async function upsertExternalAgentRun(input = {}) {
   return mutate(store => {
     const now = new Date().toISOString();
     const existing = store.runs.find(run => run.externalKey === externalKey);
+    if (existing?.schedulingKey && Date.parse(input.updatedAt) < Date.parse(existing.updatedAt)) {
+      // Der Geräteabgleich darf einen neueren Abschluss nicht mit einem alten
+      // Zwischenstand überschreiben. Einen verspäteten ERSTEN Slotbeleg behalten.
+      if (!existing.planbarProgress?.reservation?.verified && input.planbarProgress?.reservation?.verified) {
+        const reserved = mergePlanbarSchedulingProgress(null, { ...input.planbarProgress, status: 'reserved' });
+        existing.planbarProgress = mergePlanbarSchedulingProgress(reserved, input.planbarProgress);
+        existing.resultPreview = safePreview(planbarSchedulingSummary(existing.planbarProgress));
+      }
+      return structuredClone(existing);
+    }
     const item = existing || {
       id: crypto.randomUUID(),
       externalKey,

@@ -79,6 +79,7 @@ import {
 } from './scheduling/store.js';
 import {
   addCustomerSchedulingRequest,
+  dispatchPendingCustomerSchedulingRequests,
   addProjectNote,
   createProject,
   createProjectFolder,
@@ -861,7 +862,7 @@ const ALL_SKILLS = {
   knowledgeLibrary: knowledgeLibrarySkill({ listKnowledgeLibrary, knowledgeLibraryStatus, assessKnowledgeSourceCandidate }),
   recruiting: recruitingSkill({ createCandidateSearchPlan, screenResumeAgainstCriteria, createInterviewGuide }),
   deviceControl: deviceControlSkill({ enqueueDeviceCommand, deviceCommandStatus, listAgentRuns }),
-  planbar:    planbarSkill({ searchPlanbarAppointments, enqueueDeviceCommand, deviceCommandStatus, getProject, listAgentRuns }),
+  planbar:    planbarSkill({ searchPlanbarAppointments, addCustomerSchedulingRequest, deviceCommandStatus, getProject, listAgentRuns }),
   investment: investmentSkill({ investment }),
   qonekto:   null, // wird pro Anfrage mit der echten sessionId erzeugt
 };
@@ -1200,6 +1201,7 @@ app.post('/device-agent/:deviceId/commands/:commandId/complete', async (req, res
       ok: req.body?.ok === true,
       result: req.body?.result || null,
       error: req.body?.error || '',
+      failureStage: req.body?.failureStage || '',
       agentMetadata: imacAgentMetadataFromRequest(req),
     }));
   } catch (error) { res.status(409).json({ error: error.message }); }
@@ -1592,24 +1594,7 @@ app.post('/api/projects/:id/customer-scheduling-requests', async (req, res) => {
   try {
     const project = await addCustomerSchedulingRequest(req.params.id, req.body || {});
     if (!project) return res.status(404).json({ error: 'not found' });
-    const schedulingRequest = project.customerSchedulingRequests?.[0];
-    const command = await enqueueDeviceCommand({
-      action: 'planbar.customer.schedule',
-      payload: {
-        ...(req.body || {}),
-        partnerId: schedulingRequest?.partnerId,
-        partnerName: schedulingRequest?.partnerName,
-        partnerPrefix: schedulingRequest?.partnerPrefix,
-        schedulingMode: schedulingRequest?.schedulingMode,
-        allowFreeResourceFallback: schedulingRequest?.allowFreeResourceFallback,
-      },
-      requestedBy: 'heat-hero-project',
-      requestText: `${req.body?.customerName || 'Kunde'} in KW ${req.body?.week || '?'} terminieren`,
-    });
-    res.status(202).json({
-      ...project,
-      schedulingDispatch: { commandId: command.id, deviceId: command.deviceId, status: command.status },
-    });
+    res.status(202).json(project);
   } catch (error) { res.status(400).json({ error: error.message }); }
 });
 app.post('/api/projects/:id/folders', async (req, res) => {
@@ -2961,6 +2946,10 @@ app.get('/health/voice', async (_req, res) => res.json(await voiceLabSummary()))
 app.get('/', (_req, res) => res.send('IVA laeuft.'));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => { console.log('IVA-Core auf Port ' + PORT); setupTelegramWebhook(); setBotCommands(); });
+const reconcileSchedulingDispatch = () => dispatchPendingCustomerSchedulingRequests().catch(error => console.error('Terminierungsübergabe:', error.message));
+void reconcileSchedulingDispatch();
+const schedulingDispatchInterval = setInterval(reconcileSchedulingDispatch, 15_000);
+schedulingDispatchInterval.unref();
 
 let lastFundingRuntimeReconcileStatus = '';
 async function runFundingRuntimeReconcile() {
