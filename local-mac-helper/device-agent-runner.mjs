@@ -278,6 +278,7 @@ async function runWithTimeout() {
 let lastCentralUpdateAt = 0;
 async function updateFromCentralRuntime() {
   if (!LOCAL_RUNTIME || Date.now() - lastCentralUpdateAt < 60_000) return false;
+  if (imacUiIsBusy()) return false; // Finish the current UI task before switching releases.
   // Only the central launchd installation follows the atomic current symlink.
   // A legacy fixed-path installation must first use install-central-runtime.mjs.
   if (!LOCAL_HELPER_DIR.includes(`${path.sep}central${path.sep}releases${path.sep}`)) return false;

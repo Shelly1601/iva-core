@@ -126,7 +126,7 @@ async function reportTaskState(request, state, resultPreview = '') {
 }
 
 function buildCodexPrompt(request) {
-  const runtimeInstruction = `Bestehende lokale IVA-Helfer startest du mit absolutem Pfad aus ${path.dirname(MODULE_PATH)}. Dieser geprüfte Laufzeitstand kommt vom zentralen IVA-Core. Projektquellen und Dokumente bleiben im gesetzten iCloud-Workspace. Keine zweite lokale Kopie als laufenden Agenten starten.`;
+  const runtimeInstruction = `Die verbindlichen Projektanweisungen stehen in ${path.join(REPO_ROOT, '..', 'AGENTS.md')}; lies diese Datei, auch wenn im Unterordner iva-core keine eigene AGENTS.md liegt. Bestehende lokale IVA-Helfer startest du mit absolutem Pfad aus ${path.dirname(MODULE_PATH)}. Dieser geprüfte Laufzeitstand kommt vom zentralen IVA-Core. Projektquellen und Dokumente bleiben im gesetzten iCloud-Workspace. Keine zweite lokale Kopie als laufenden Agenten starten.`;
   if (request.mode === 'project-workflow') {
     return `Nadine hat diesen Projekt-Workflow in IVA ausdrücklich über den Button „Manuell auslösen“ gestartet. Führe jetzt genau einen operativen Einmallauf aus, ohne eine weitere Planbestätigung zu verlangen.
 
@@ -151,10 +151,10 @@ ${request.prompt}
 
 ${request.acceptanceCriteria?.length ? `Abnahmekriterien:\n${request.acceptanceCriteria.map(item => `- ${item}`).join('\n')}` : ''}`.trim();
   }
-  const progressCommand = phase => `node local-mac-helper/codex-tasks.mjs progress ${request.jobId} ${phase}`;
+  const progressCommand = phase => `node ${JSON.stringify(MODULE_PATH)} progress ${request.jobId} ${phase}`;
   return `Nadine hat diesen Auftrag ausdrücklich über ihren IVA-Chat erteilt. Setze ihn jetzt vollständig und eigenständig um, ohne eine weitere Planbestätigung von Nadine zu verlangen.
 
-Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace. Lies und befolge AGENTS.md vollständig. Bewahre fremde und nicht zum Auftrag gehörende Änderungen. Fertig bedeutet gemäß Projektregel: implementieren, angemessen testen, Fehler beheben, nur die eigenen Änderungen committen, pushen, Railway deployen und die öffentliche Live-URL prüfen. Falls ein echter externer Blocker besteht, dokumentiere ihn konkret im Endergebnis; erfinde keinen Erfolg.
+Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace. Lies und befolge AGENTS.md vollständig. ${runtimeInstruction} Bewahre fremde und nicht zum Auftrag gehörende Änderungen. Fertig bedeutet gemäß Projektregel: implementieren, angemessen testen, Fehler beheben, nur die eigenen Änderungen committen, pushen, Railway deployen und die öffentliche Live-URL prüfen. Falls ein echter externer Blocker besteht, dokumentiere ihn konkret im Endergebnis; erfinde keinen Erfolg.
 
 Melde Nadine im IVA-Kontrollzentrum ausschließlich tatsächlich begonnene Meilensteine. Führe dafür jeweils beim Start des Schritts genau den passenden lokalen Befehl aus:
 - Planung: ${progressCommand('planning')}
@@ -165,7 +165,7 @@ Melde Nadine im IVA-Kontrollzentrum ausschließlich tatsächlich begonnene Meile
 - Railway-Deploy: ${progressCommand('deploying')}
 - öffentliche Live-Prüfung: ${progressCommand('live_verification')}
 - erst nach erfolgreicher Live-Prüfung: ${progressCommand('completed')}
-Bei einem echten Blocker: node local-mac-helper/codex-tasks.mjs progress ${request.jobId} blocked "kurzer konkreter Grund". Überspringe keine Anzeige vorab und melde niemals einen noch nicht begonnenen Schritt.
+Bei einem echten Blocker: ${progressCommand('blocked')} "kurzer konkreter Grund". Überspringe keine Anzeige vorab und melde niemals einen noch nicht begonnenen Schritt.
 
 Auftrag:
 ${request.prompt}
@@ -443,7 +443,7 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
       ? (request.mode === 'build' ? 'Codex endete, bevor alle Pflichtschritte einschließlich Live-Prüfung bestätigt waren.' : 'Der operative Lauf endete ohne bestätigten Ergebnisnachweis.')
       : inferredWorkflowStatus === 'blocked' && current.status !== 'blocked'
         ? 'Der Workflow endete mit einem fachlichen oder technischen Blocker. Details stehen im Ergebnis.'
-        : current.detail,
+        : status === 'completed' ? 'Auftrag abgeschlossen; Ergebnisprüfung liegt vor.' : current.detail,
     error: inferredWorkflowStatus === 'blocked' && current.status !== 'blocked'
       ? 'Der Workflow endete mit einem fachlichen oder technischen Blocker.'
       : current.error,
