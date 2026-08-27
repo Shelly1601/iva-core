@@ -1,6 +1,6 @@
 import { IVA_IMAC_DEVICE_ID } from './store.js';
 
-export const FUNDING_RUNTIME_MARKER = 'funding-5am-runtime-2026-08-27-v1';
+export const FUNDING_RUNTIME_MARKER = 'funding-5am-runtime-2026-08-27-v2';
 export const FUNDING_RUNTIME_REQUIRED_ACTION = 'funding.legacy-monitor.suspend';
 
 const TERMINAL_FAILURES = new Set(['failed', 'expired', 'canceled']);
