@@ -11,7 +11,7 @@ import { access } from 'node:fs/promises';
 const execFileAsync = promisify(execFile);
 export const IMAC_DEVICE_ID = 'imac-nadine';
 export const DEVICE_AGENT_PROTOCOL_VERSION = 2;
-export const DEVICE_AGENT_RELEASE = 'imac-central-v6';
+export const DEVICE_AGENT_RELEASE = 'imac-central-v7';
 const RUNTIME_REVISION = (() => { try { return JSON.parse(readFileSync(new URL('../release.json', import.meta.url), 'utf8')).revision || ''; } catch { return ''; } })();
 const KEYCHAIN_SERVICE = 'de.iva.device-agent';
 const KEYCHAIN_ACCOUNT = IMAC_DEVICE_ID;
@@ -120,6 +120,12 @@ async function request(pathname, { method = 'GET', body } = {}) {
   try { payload = text ? JSON.parse(text) : null; } catch {}
   if (!response.ok) throw new Error(`IVA-Gerätekanal HTTP ${response.status}: ${String(payload?.error || text || response.statusText).slice(0, 400)}`);
   return payload;
+}
+
+// Called by the fixed, read-only browser capacity worker only after its
+// deterministic DOM validation. Credentials never enter the worker prompt.
+export async function publishPlanbarCapacitySnapshot(snapshot) {
+  return request(`/device-agent/${IMAC_DEVICE_ID}/planbar-capacity`, { method: 'POST', body: snapshot });
 }
 
 export async function reportImacDeviceAgentHeartbeat() {

@@ -50,7 +50,7 @@ export function mergePlanbarSchedulingProgress(previous = null, input = {}) {
   if (input.status === 'completed' && (missingDetails.length || remainingActions.length || input.completionVerified !== true)) throw new Error('Offene Ergänzungen oder Folgeaktionen dürfen nicht als vollständig gemeldet werden.');
   if (previous?.status === 'completed' && input.status !== 'completed') throw new Error('Ein vollständig geprüfter Auftrag darf nicht zurückgesetzt werden.');
   return { status: input.status, reservation: proof, missingDetails, remainingActions,
-    ...(sourceCheck ? { sourceCheck: Object.fromEntries(['dealId', 'partnerId', 'stage', 'identityVerified', 'objectLocationMatched', 'verifiedAt'].map(key => [key, sourceCheck[key]])) } : {}),
+    ...(sourceCheck ? { sourceCheck: Object.fromEntries(['dealId', 'partnerId', 'stage', 'identityVerified', 'objectLocationMatched', 'planbarRefreshedAt', 'verifiedAt'].map(key => [key, sourceCheck[key]])) } : {}),
     ...(confirmationMail ? { confirmationMail: Object.fromEntries(['messageId', 'from', 'recipientHash', 'sentAt', 'verified'].map(key => [key, confirmationMail[key]])) } : {}),
     completionVerified: input.status === 'completed', updatedAt: new Date().toISOString(), ruleVersion: PLANBAR_SCHEDULING_RULE_VERSION };
 }

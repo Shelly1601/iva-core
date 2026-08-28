@@ -2,8 +2,10 @@ import crypto from 'node:crypto';
 import { isoWeekRange } from '../operations/customer-scheduling.js';
 import { addCustomerSchedulingRequest, getProject } from '../projects/store.js';
 import { deviceAgentStatus, enqueueDeviceCommand, listDeviceCommands } from '../device-control/store.js';
+import { listAgentRuns } from '../operations/store.js';
+import { buildPlanbarCapacityReadTask, PLANBAR_CAPACITY_TASK_TITLE } from '../local-mac-helper/planbar-browser-capacity.mjs';
 
-export const PUBLIC_SCHEDULING_RELEASE = 'imac-central-v6';
+export const PUBLIC_SCHEDULING_RELEASE = 'imac-central-v7';
 export const PUBLIC_SCHEDULING_PATH = '/heat-hero/termin';
 export const PUBLIC_SCHEDULING_API = '/heat-hero-termin-api';
 const MAX_AGE = 5 * 60_000;
@@ -47,7 +49,7 @@ export function validatePublicSchedulingInput(input = {}, now = Date.now()) {
 // claim that the anonymous visitor has been identified as the CRM customer.
 export function createPublicScheduling({
   project = () => getProject('heat-hero'), addRequest = addCustomerSchedulingRequest,
-  agentStatus = deviceAgentStatus, enqueue = enqueueDeviceCommand, commands = listDeviceCommands,
+  agentStatus = deviceAgentStatus, enqueue = enqueueDeviceCommand, commands = listDeviceCommands, runs = listAgentRuns,
   now = () => Date.now(), secret = crypto.randomBytes(32),
 } = {}) {
   const limits = new Map();
@@ -105,7 +107,7 @@ export function createPublicScheduling({
       && Date.parse(snapshot.pageRefreshedAt) >= token.iat - 30_000
       && Date.parse(snapshot.updatedAt) >= Date.parse(snapshot.pageRefreshedAt);
     if (fresh) return { status: 'ready', weeks, updatedAt: snapshot.updatedAt };
-    const refreshes = (await commands({ limit: 500 })).filter(item => item.action === 'planbar.search.refresh');
+    const refreshes = await refreshStates();
     const active = refreshes.find(item => ['queued', 'running'].includes(item.status) && Date.parse(item.expiresAt) > now());
     if (active) return { status: 'refreshing', phase: active.status === 'queued' ? 'queued' : 'checking', weeks: [], updatedAt: null };
     const failed = refreshes.find(item => ['failed', 'expired', 'canceled'].includes(item.status)
@@ -114,17 +116,30 @@ export function createPublicScheduling({
       message: 'Die aktuellen Montagewochen konnten noch nicht geprüft werden. Bitte starten Sie die Verfügbarkeitsprüfung erneut.' };
     return { status: 'refreshing', phase: 'checking', weeks: [], updatedAt: null };
   }
+  async function refreshStates() {
+    const [items, jobRuns] = await Promise.all([commands({ limit: 500 }), runs({ limit: 500 })]);
+    return items.filter(item => item.action === 'planbar.search.refresh'
+      || (item.action === 'codex.task.start' && item.requestedBy === 'heat-hero-public-availability'
+        && item.payload?.title === PLANBAR_CAPACITY_TASK_TITLE)).map(item => {
+      if (item.action !== 'codex.task.start' || item.status !== 'completed') return item;
+      const run = jobRuns.find(run => run.jobId === item.result?.jobId);
+      // Handoff is not completion. A missing run after handoff remains pending
+      // only until the original command expiry, never forever.
+      const status = !run || ['queued', 'starting'].includes(run.status) ? 'queued'
+        : run.status === 'running' ? 'running' : 'failed';
+      return { ...item, status };
+    });
+  }
   async function refresh(formToken) {
     verifyToken(formToken);
     return transaction(async () => {
       await readyAgent();
-      const existing = (await commands({ limit: 500 })).find(item => item.action === 'planbar.search.refresh'
-        && ['queued', 'running'].includes(item.status) && Date.parse(item.expiresAt) > now());
+      const existing = (await refreshStates()).find(item => ['queued', 'running'].includes(item.status) && Date.parse(item.expiresAt) > now());
       if (!existing) {
         const state = await availability(formToken);
         if (state.status === 'ready') return state;
         rateLimit('refresh:global', 8, 60_000);
-        await enqueue({ action: 'planbar.search.refresh', requestedBy: 'heat-hero-public-availability', requestText: 'Montagewochen für den Heat-Hero-Terminlink aktuell prüfen' });
+        await enqueue({ action: 'codex.task.start', payload: buildPlanbarCapacityReadTask(), requestedBy: 'heat-hero-public-availability', requestText: 'Montagewochen für den Heat-Hero-Terminlink aktuell prüfen' });
       }
       return { status: 'refreshing', phase: existing?.status === 'running' ? 'checking' : 'queued', weeks: [], updatedAt: null };
     });
