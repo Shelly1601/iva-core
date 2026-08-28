@@ -104,7 +104,15 @@ export function createPublicScheduling({
       && now() - Date.parse(snapshot.pageRefreshedAt) <= MAX_AGE
       && Date.parse(snapshot.pageRefreshedAt) >= token.iat - 30_000
       && Date.parse(snapshot.updatedAt) >= Date.parse(snapshot.pageRefreshedAt);
-    return { status: fresh ? 'ready' : 'refreshing', weeks, updatedAt: fresh ? snapshot.updatedAt : null };
+    if (fresh) return { status: 'ready', weeks, updatedAt: snapshot.updatedAt };
+    const refreshes = (await commands({ limit: 500 })).filter(item => item.action === 'planbar.search.refresh');
+    const active = refreshes.find(item => ['queued', 'running'].includes(item.status) && Date.parse(item.expiresAt) > now());
+    if (active) return { status: 'refreshing', phase: active.status === 'queued' ? 'queued' : 'checking', weeks: [], updatedAt: null };
+    const failed = refreshes.find(item => ['failed', 'expired', 'canceled'].includes(item.status)
+      && Date.parse(item.createdAt) >= token.iat - 30_000);
+    if (failed) return { status: 'unavailable', weeks: [], updatedAt: null,
+      message: 'Die aktuellen Montagewochen konnten noch nicht geprüft werden. Bitte starten Sie die Verfügbarkeitsprüfung erneut.' };
+    return { status: 'refreshing', phase: 'checking', weeks: [], updatedAt: null };
   }
   async function refresh(formToken) {
     verifyToken(formToken);
@@ -118,7 +126,7 @@ export function createPublicScheduling({
         rateLimit('refresh:global', 8, 60_000);
         await enqueue({ action: 'planbar.search.refresh', requestedBy: 'heat-hero-public-availability', requestText: 'Montagewochen für den Heat-Hero-Terminlink aktuell prüfen' });
       }
-      return { status: 'refreshing', weeks: [], updatedAt: null };
+      return { status: 'refreshing', phase: existing?.status === 'running' ? 'checking' : 'queued', weeks: [], updatedAt: null };
     });
   }
   async function submit(input, formToken, client = 'unknown') {

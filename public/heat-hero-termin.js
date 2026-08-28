@@ -40,7 +40,11 @@
         if (ownCycle !== cycle) return;
         try {
           if (result.status === 'ready') { displayWeeks(result); $('refreshWeeks').disabled = false; return; }
-          if (Date.now() - started > 120_000) throw new Error('Die Prüfung dauert gerade länger. Bitte versuchen Sie es in Kürze erneut. Es wurde noch keine Anfrage abgeschickt.');
+          if (result.status === 'unavailable') throw new Error(result.message || 'Die aktuellen Montagewochen konnten noch nicht geprüft werden. Bitte starten Sie die Prüfung erneut.');
+          $('availabilityStatus').textContent = result.phase === 'queued'
+            ? 'Die aktuelle Planung wird noch abgeschlossen. Ihre Prüfung wartet sicher und startet automatisch. Bitte lassen Sie die Seite geöffnet.'
+            : 'Die Plantafel wird aktualisiert und freie Wochen werden geprüft …';
+          if (Date.now() - started > 15 * 60_000) throw new Error('Die Prüfung dauert gerade länger. Bitte versuchen Sie es in Kürze erneut. Es wurde noch keine Anfrage abgeschickt.');
           result = await request('/availability');
           timer = setTimeout(poll, 3000);
         } catch (error) { showError(error.message); $('refreshWeeks').disabled = false; $('availabilityStatus').textContent = 'Verfügbarkeit noch nicht bestätigt.'; }
