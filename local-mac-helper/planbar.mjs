@@ -59,9 +59,18 @@ export async function diagnosePlanbarDom() {
 // then wait for a NEW document and actual resource configuration, not a timer.
 export async function refreshPlanbarPage({ execute = executePlanbarJavaScript, login,
   timeoutMs = 60_000, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
-  const ensureLogin = login || (await import('./portal-auth.mjs')).ensurePortalLogin;
-  await ensureLogin('planbar');
-  const oldOrigin = Number(await execute('String(performance.timeOrigin)'));
+  let oldOrigin;
+  try {
+    // A signed-in plantafel needs no activation of Chrome or login dialog.
+    // Activating an already open background app can itself time out on macOS.
+    oldOrigin = Number(await execute('String(performance.timeOrigin)', { timeoutMs: 20_000 }));
+  } catch (error) {
+    if (!/nicht auf der Plantafel geöffnet/.test(error.message)) throw error;
+    const ensureLogin = login || (await import('./portal-auth.mjs')).ensurePortalLogin;
+    await ensureLogin('planbar');
+    oldOrigin = Number(await execute('String(performance.timeOrigin)', { timeoutMs: 20_000 }));
+  }
+  if (!Number.isFinite(oldOrigin) || oldOrigin <= 0) throw new Error('Planbar-Dokument konnte vor dem Aktualisieren nicht verifiziert werden.');
   await execute('location.reload(); "RELOADING"');
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
