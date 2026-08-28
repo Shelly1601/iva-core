@@ -102,6 +102,16 @@ const fakeSpawn = fail => () => {
 };
 const dependencies = { materialize: async () => { throw new Error('Operativer Start darf keine iCloud-Codeprobe verlangen'); }, spawnProcess: fakeSpawn(false), report: async () => true };
 const taskInput = { prompt: 'Fixture ausschließlich Test', title: 'Fixture', requestId: 'fixture-stable-launch', mode: 'project-workflow', planbar: input };
+for (const mode of ['operational', 'project-workflow', 'build']) {
+  const args = tasks.buildCodexCliArguments({ ...taskInput, jobId: '00000000-0000-4000-8000-000000000001', mode, acceptanceCriteria: [] });
+  assert.equal(args[0], 'exec');
+  assert.ok(args.includes('--approve-for-me'));
+  assert.equal(args.includes('code_mode_host'), mode !== 'build');
+  if (mode !== 'build') assert.equal(args[args.indexOf('--enable') + 1], 'code_mode_host');
+  assert.equal(args.filter(arg => arg === '--add-dir').length, 2);
+  assert.equal(args[args.indexOf('-C') + 1], process.env.IVA_DEVICE_WORKSPACE);
+  assert.ok(!args.some(arg => /--disable|--dangerously-|--ignore-rules|--ignore-user-config|--yolo|danger-full-access/.test(arg)));
+}
 await assert.rejects(tasks.startCodexTask(taskInput, { ...dependencies, spawnProcess: fakeSpawn(true) }), error => error.code === 'IVA_TASK_NOT_LAUNCHED');
 const launched = await tasks.startCodexTask(taskInput, dependencies);
 assert.equal(launched.jobId, tasks.codexJobIdForRequest(taskInput.requestId));

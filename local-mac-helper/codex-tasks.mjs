@@ -496,6 +496,23 @@ export function inferProjectWorkflowStatus(lastMessage = '') {
     : '';
 }
 
+export function buildCodexCliArguments(request) {
+  const paths = jobPaths(request.jobId);
+  return [
+    'exec', '--approve-for-me',
+    // The launchd runner does not inherit the desktop app's feature state.
+    // Operational workflows need code mode for Browser and connector tools,
+    // so make the required host explicit instead of accepting a disabled
+    // per-user/default setting and failing only after the task has started.
+    ...(['operational', 'project-workflow'].includes(request.mode)
+      ? ['--enable', 'code_mode_host'] : []),
+    '--add-dir', paths.directory,
+    '--add-dir', path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper'),
+    '-C', REPO_ROOT, '--output-last-message', paths.lastMessage,
+    buildCodexPrompt(request),
+  ];
+}
+
 async function runCodexTaskWithoutWakeGuard(jobId) {
   const paths = jobPaths(jobId);
   const request = await readJson(paths.request);
@@ -515,13 +532,12 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   }
   const logHandle = await open(paths.log, 'a');
   const command = codexBinary();
-  const args = [
-    'exec', '--approve-for-me', '--add-dir', paths.directory,
-    '--add-dir', path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper'),
-    '-C', REPO_ROOT, '--output-last-message', paths.lastMessage,
-    buildCodexPrompt(request),
-  ];
-  const child = spawn(command, args, { cwd: REPO_ROOT, stdio: ['ignore', logHandle.fd, logHandle.fd] });
+  const args = buildCodexCliArguments(request);
+  const childEnv = {
+    ...process.env,
+    PATH: [path.dirname(command), process.env.PATH || ''].filter(Boolean).join(path.delimiter),
+  };
+  const child = spawn(command, args, { cwd: REPO_ROOT, stdio: ['ignore', logHandle.fd, logHandle.fd], env: childEnv });
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; child.kill('SIGTERM'); }, MAX_RUNTIME_MS);
   const exitCode = await new Promise((resolve, reject) => {
