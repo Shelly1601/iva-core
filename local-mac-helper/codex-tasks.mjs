@@ -496,23 +496,6 @@ export function inferProjectWorkflowStatus(lastMessage = '') {
     : '';
 }
 
-export function buildCodexCliArguments(request) {
-  const paths = jobPaths(request.jobId);
-  return [
-    'exec', '--approve-for-me',
-    // Operative Starts scheiterten am 28.08.2026 wiederholt bereits beim
-    // Handshake des separaten code-mode hosts. Den alternativen, CLI-eigenen
-    // Werkzeugpfad nur für diese Prozesse verwenden. Sandbox, Auto-Review,
-    // Regeln, Modell und globale Konfiguration bleiben unverändert.
-    ...(['operational', 'project-workflow'].includes(request.mode)
-      ? ['--disable', 'code_mode_host'] : []),
-    '--add-dir', paths.directory,
-    '--add-dir', path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper'),
-    '-C', REPO_ROOT, '--output-last-message', paths.lastMessage,
-    buildCodexPrompt(request),
-  ];
-}
-
 async function runCodexTaskWithoutWakeGuard(jobId) {
   const paths = jobPaths(jobId);
   const request = await readJson(paths.request);
@@ -532,7 +515,12 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   }
   const logHandle = await open(paths.log, 'a');
   const command = codexBinary();
-  const args = buildCodexCliArguments(request);
+  const args = [
+    'exec', '--approve-for-me', '--add-dir', paths.directory,
+    '--add-dir', path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper'),
+    '-C', REPO_ROOT, '--output-last-message', paths.lastMessage,
+    buildCodexPrompt(request),
+  ];
   const child = spawn(command, args, { cwd: REPO_ROOT, stdio: ['ignore', logHandle.fd, logHandle.fd] });
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; child.kill('SIGTERM'); }, MAX_RUNTIME_MS);
