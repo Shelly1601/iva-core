@@ -191,6 +191,9 @@ function validatePayload(action, payload = {}) {
     if (typeof payload.materialDeliverySpace !== 'boolean' || typeof payload.theftWeatherProtected !== 'boolean') {
       throw new Error('Die beiden Materialfragen müssen vor der Planbar-Terminierung eindeutig mit Ja oder Nein beantwortet sein.');
     }
+    const publicRequest = payload.source === 'public-heat-hero';
+    if (publicRequest && (partnerId !== 'heat-hero' || partnerPrefix !== 'HH' || schedulingMode !== 'free-resource'
+      || !cleanText(payload.objectLocation, 180))) throw new Error('Öffentliche Anfragen sind ausschließlich für Heat Hero zulässig.');
     return {
       customerName,
       partnerId,
@@ -204,6 +207,8 @@ function validatePayload(action, payload = {}) {
       materialDeliverySpace: payload.materialDeliverySpace,
       theftWeatherProtected: payload.theftWeatherProtected,
       additionalInfo: cleanText(payload.additionalInfo, 2000),
+      ...(publicRequest ? { source: 'public-heat-hero', firstName: cleanText(payload.firstName, 100),
+        lastName: cleanText(payload.lastName, 100), objectLocation: cleanText(payload.objectLocation, 180) } : {}),
     };
   }
   if (action === 'project.workflow.run') {

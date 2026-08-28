@@ -55,6 +55,25 @@ export async function diagnosePlanbarDom() {
   }))()`));
 }
 
+// Called only inside the central agent's UI lock and wake guard. Reload first,
+// then wait for a NEW document and actual resource configuration, not a timer.
+export async function refreshPlanbarPage({ execute = executePlanbarJavaScript, login,
+  timeoutMs = 60_000, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
+  const ensureLogin = login || (await import('./portal-auth.mjs')).ensurePortalLogin;
+  await ensureLogin('planbar');
+  const oldOrigin = Number(await execute('String(performance.timeOrigin)'));
+  await execute('location.reload(); "RELOADING"');
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await wait(500);
+    try {
+      const state = JSON.parse(await execute(`JSON.stringify({origin:performance.timeOrigin,ready:document.readyState==='complete'&&!!document.querySelector('[data-planboard-config]')&&!!document.querySelector('.fc-datagrid-body [data-resource-id]')})`));
+      if (state.ready && state.origin !== oldOrigin) return { refreshedAt: new Date().toISOString(), verified: true };
+    } catch { /* A document is unavailable briefly during navigation. */ }
+  }
+  throw new Error('Planbar wurde neu geladen, die aktuelle Plantafel ist aber noch nicht prüfbar. Keine Terminfreigabe.');
+}
+
 export async function collectPlanbarSearchIndex({ timeoutMs = 120000 } = {}) {
   const raw = await executePlanbarJavaScript(String.raw`(() => {
     const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
@@ -194,6 +213,7 @@ export function buildPlanbarCapacitySnapshot(index, { weekCount = 12 } = {}) {
   }
   return {
     updatedAt: index.updatedAt || new Date().toISOString(),
+    pageRefreshedAt: index.pageRefreshedAt || null,
     minimumBlockDays: PLANBAR_MINIMUM_BLOCK_DAYS,
     countingRuleVersion: PLANBAR_CAPACITY_RULE_VERSION,
     excludedResources: ['Dawid Service', 'Antonio Lausic'],

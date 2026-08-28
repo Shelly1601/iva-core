@@ -270,6 +270,7 @@ import {
 } from './device-control/store.js';
 import { reconcileFundingImacRuntime, summarizeFundingRuntimeCommands } from './device-control/funding-runtime-reconciler.js';
 import { createInvestmentModule } from './investment/index.js';
+import { createPublicScheduling } from './heat-hero/public-scheduling.js';
 
 const app = express();
 app.use(express.json({
@@ -277,6 +278,7 @@ app.use(express.json({
     if (req.originalUrl?.startsWith('/webhooks/whatsapp')) req.rawBody = Buffer.from(buffer);
   },
 }));
+createPublicScheduling().registerRoutes(app);
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const MEM_FILE = DATA_DIR + '/memory.json';
@@ -2918,6 +2920,13 @@ app.get('/pv-calculator', (_req, res) => res.sendFile(path.join(__dirnameIva, 'p
 app.get('/pv-schnellrechner', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'pv-calculator.html')));
 app.get('/customers', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'customers.html')));
 app.get('/scheduling', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'scheduling.html')));
+for (const url of ['/heat-hero/termin', '/heat-hero/termin/anfrage-erhalten']) {
+  app.get(url, (req, res) => {
+    res.set({ 'Cache-Control': 'no-store, max-age=0', 'X-Robots-Tag': 'noindex, nofollow',
+      'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'" });
+    res.sendFile(path.join(__dirnameIva, 'public', req.path.endsWith('/anfrage-erhalten') ? 'heat-hero-termin-danke.html' : 'heat-hero-termin.html'));
+  });
+}
 app.get('/book/:slug', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'booking.html')));
 app.get('/advice', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'advice.html')));
 app.get('/whatsapp', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'whatsapp.html')));

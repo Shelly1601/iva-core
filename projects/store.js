@@ -450,6 +450,13 @@ function normalizeCustomerSchedulingRequest(request = {}) {
     materialDeliverySpace,
     theftWeatherProtected,
     additionalInfo,
+    ...(request.source === 'public-heat-hero' ? {
+      source: 'public-heat-hero',
+      firstName: clean(request.firstName, 100),
+      lastName: clean(request.lastName, 100),
+      objectLocation: clean(request.objectLocation, 180),
+      publicPayloadHash: clean(request.publicPayloadHash, 64),
+    } : {}),
     partnerId,
     partnerName,
     partnerPrefix,
@@ -619,7 +626,7 @@ function normalizeProject(input = {}, fallback = {}) {
       .map(normalizeCustomerSchedulingRequest)
       .filter(request => request.customerName)
       .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
-      .filter((request, index) => index < 100 || request.dispatchPending),
+      .filter((request, index) => index < 100 || request.dispatchPending || request.source === 'public-heat-hero'),
     folders: folders.map(normalizeFolder),
     files: files.map(normalizeFile).filter(file => file.storageName),
   };
@@ -762,7 +769,7 @@ export async function addProjectNote(id, text, source = 'manual') {
   });
 }
 
-export async function addCustomerSchedulingRequest(id, input = {}, { enqueue = enqueueDeviceCommand } = {}) {
+export async function addCustomerSchedulingRequest(id, input = {}, { enqueue = enqueueDeviceCommand, publicRequest = null } = {}) {
   const customerName = clean(input.customerName, 220);
   const isoYear = Number(input.isoYear);
   const week = Number(input.week);
@@ -775,6 +782,13 @@ export async function addCustomerSchedulingRequest(id, input = {}, { enqueue = e
   const created = await mutate(async store => {
     const project = store.projects.find(item => item.id === clean(id, 100));
     if (!project) return null;
+    if (publicRequest && (id !== 'heat-hero' || input.partnerId !== 'heat-hero'
+      || !/^public-[a-f0-9-]{36}$/.test(publicRequest.id) || !/^[a-f0-9]{64}$/.test(publicRequest.payloadHash)
+      || !clean(input.objectLocation, 180))) throw new Error('Ungültige öffentliche Heat-Hero-Anfrage.');
+    if (publicRequest && (project.customerSchedulingRequests || []).some(item =>
+      item.id === publicRequest.id || item.publicPayloadHash === publicRequest.payloadHash)) {
+      return { schedulingDispatch: { status: 'already_received' } };
+    }
     const partner = normalizeCustomerSchedulingPartners(project.customerSchedulingPartners)
       .find(item => item.id === clean(input.partnerId, 80));
     if (!partner) throw new Error('Bitte den Planbar-Partner für diesen Kunden auswählen.');
@@ -791,8 +805,10 @@ export async function addCustomerSchedulingRequest(id, input = {}, { enqueue = e
       partnerPrefix: partner.prefix,
       schedulingMode: partner.schedulingMode,
       allowFreeResourceFallback: input.allowFreeResourceFallback,
+      ...(publicRequest ? { id: publicRequest.id, source: 'public-heat-hero', firstName: input.firstName,
+        lastName: input.lastName, objectLocation: input.objectLocation, publicPayloadHash: publicRequest.payloadHash } : {}),
     });
-    project.customerSchedulingRequests = [request, ...(project.customerSchedulingRequests || [])].filter((item, index) => index < 100 || item.dispatchPending);
+    project.customerSchedulingRequests = [request, ...(project.customerSchedulingRequests || [])].filter((item, index) => index < 100 || item.dispatchPending || item.source === 'public-heat-hero');
     // Persistente Outbox VOR der Übergabe: Ein Serverabbruch verliert keine Eingabe.
     await saveStore(store);
     const command = await dispatchSchedulingRequest(request, enqueue);

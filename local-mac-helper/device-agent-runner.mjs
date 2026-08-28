@@ -14,7 +14,7 @@ const execFileAsync = promisify(execFile);
 const DEVICE_ID = 'imac-nadine';
 const KEYCHAIN_SERVICE = 'de.iva.device-agent';
 const SERVER_URL = 'https://iva-core-production.up.railway.app';
-const RELEASE = 'imac-central-v5';
+const RELEASE = 'imac-central-v6';
 const MODULE_PATH = fileURLToPath(import.meta.url);
 const LOCAL_RUNTIME = process.env.IVA_DEVICE_LOCAL_RUNTIME === 'true';
 const LOCAL_HELPER_DIR = path.dirname(MODULE_PATH);

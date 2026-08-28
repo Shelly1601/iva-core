@@ -2,9 +2,10 @@ import { createHash } from 'node:crypto';
 
 export const PLANBAR_SCHEDULING_RULE_VERSION = 'reserve-first-v1';
 
-export function planbarSchedulingKey({ customerName, partnerId, partnerPrefix, isoYear, week }) {
+export function planbarSchedulingKey({ customerName, partnerId, partnerPrefix, isoYear, week, source, objectLocation }) {
   return createHash('sha256').update(JSON.stringify([
     normalizedText(customerName), normalizedText(partnerId || partnerPrefix), Number(isoYear), Number(week),
+    ...(source === 'public-heat-hero' ? ['public-heat-hero', normalizedText(objectLocation)] : []),
   ])).digest('hex');
 }
 
@@ -32,9 +33,26 @@ export function mergePlanbarSchedulingProgress(previous = null, input = {}) {
     .map(value => String(value).trim().slice(0, 180)).filter(Boolean).slice(0, 20);
   const remainingActions = (input.remainingActions ?? previous?.remainingActions ?? ['Pipedrive-Abschluss', 'WhatsApp-Bestätigung'])
     .map(value => String(value).trim().slice(0, 180)).filter(Boolean).slice(0, 20);
+  const sourceCheck = input.sourceCheck || previous?.sourceCheck || null;
+  if (sourceCheck) {
+    assertSchedulableSourceStage(sourceCheck.stage);
+    if (sourceCheck.partnerId !== 'heat-hero' || !/^[0-9]+$/.test(sourceCheck.dealId || '')
+      || sourceCheck.identityVerified !== true || sourceCheck.objectLocationMatched !== true
+      || !Number.isFinite(Date.parse(sourceCheck.verifiedAt)) || Date.parse(sourceCheck.verifiedAt) > Date.now() + 60_000) throw new Error('Der belegte Heat-Hero-Kundenabgleich fehlt.');
+  }
+  const confirmationMail = input.confirmationMail || previous?.confirmationMail || null;
+  if (previous?.sourceCheck && sourceCheck.dealId !== previous.sourceCheck.dealId) throw new Error('Der verifizierte Kundenauftrag darf nicht ersetzt werden.');
+  if (previous?.confirmationMail && ['messageId', 'recipientHash', 'from', 'sentAt'].some(key => confirmationMail[key] !== previous.confirmationMail[key])) throw new Error('Der verifizierte Mailnachweis darf nicht ersetzt werden.');
+  if (confirmationMail && (confirmationMail.verified !== true || typeof confirmationMail.messageId !== 'string' || !confirmationMail.messageId || confirmationMail.messageId.length > 300
+    || confirmationMail.from !== 'n.sell@heat-hero.com' || !/^[a-f0-9]{64}$/.test(confirmationMail.recipientHash || '')
+    || !Number.isFinite(Date.parse(confirmationMail.sentAt)) || Date.parse(confirmationMail.sentAt) > Date.now() + 60_000
+    || Date.parse(confirmationMail.sentAt) < Date.parse(reservation.verifiedAt))) throw new Error('Der geprüfte Bestätigungs-Mailnachweis fehlt.');
   if (input.status === 'completed' && (missingDetails.length || remainingActions.length || input.completionVerified !== true)) throw new Error('Offene Ergänzungen oder Folgeaktionen dürfen nicht als vollständig gemeldet werden.');
   if (previous?.status === 'completed' && input.status !== 'completed') throw new Error('Ein vollständig geprüfter Auftrag darf nicht zurückgesetzt werden.');
-  return { status: input.status, reservation: proof, missingDetails, remainingActions, completionVerified: input.status === 'completed', updatedAt: new Date().toISOString(), ruleVersion: PLANBAR_SCHEDULING_RULE_VERSION };
+  return { status: input.status, reservation: proof, missingDetails, remainingActions,
+    ...(sourceCheck ? { sourceCheck: Object.fromEntries(['dealId', 'partnerId', 'stage', 'identityVerified', 'objectLocationMatched', 'verifiedAt'].map(key => [key, sourceCheck[key]])) } : {}),
+    ...(confirmationMail ? { confirmationMail: Object.fromEntries(['messageId', 'from', 'recipientHash', 'sentAt', 'verified'].map(key => [key, confirmationMail[key]])) } : {}),
+    completionVerified: input.status === 'completed', updatedAt: new Date().toISOString(), ruleVersion: PLANBAR_SCHEDULING_RULE_VERSION };
 }
 
 export function planbarSchedulingSummary(progress) {
@@ -55,6 +73,8 @@ const EXCLUDED_RESOURCE_KEYS = new Set([
 const ALLOWED_SOURCE_STAGES = new Set([
   'förderung beantragen',
   'foerderung beantragen',
+  'förderung beantragt',
+  'foerderung beantragt',
   'montage einplanen',
   'montage terminieren',
 ]);
@@ -155,6 +175,7 @@ export function normalizePlanbarCapacitySnapshot(input = {}) {
   const parsedUpdatedAt = new Date(input.updatedAt || Date.now());
   return {
     updatedAt: Number.isNaN(parsedUpdatedAt.getTime()) ? new Date().toISOString() : parsedUpdatedAt.toISOString(),
+    pageRefreshedAt: Number.isFinite(Date.parse(input.pageRefreshedAt)) ? new Date(input.pageRefreshedAt).toISOString() : null,
     source: 'Planbar · vollständig freie Ressourcen von Montag bis Freitag',
     excludedResources: ['Dawid Service', 'Antonio Lausic'],
     minimumBlockDays: PLANBAR_MINIMUM_BLOCK_DAYS,

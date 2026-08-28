@@ -282,6 +282,14 @@ function render() {
   $('content').innerHTML = `${customerSchedulingSection(project)}${brandSection(project)}${notesSection(project)}${objective ? `<section class="hero"><div class="eyebrow">Zielbild</div><h2>${esc(objective)}</h2></section>` : ''}${archiveSection(project)}${operationalSections(project)}`;
   collapseProjectSections();
   if ($('customerSchedulingForm')) $('customerSchedulingForm').insertAdjacentHTML('afterend', `<section id="schedulingHistory" class="capacity-overview">${schedulingHistory(project)}</section>`);
+  if ($('customerSchedulingForm')) {
+    $('customerSchedulingForm').insertAdjacentHTML('beforebegin', '<div class="capacity-overview"><b>Terminlink für Heat-Hero-Kunden und Vertriebspartner</b><p class="muted">Ein gemeinsamer Link, bei jeder neuen Anfrage eine leere Maske. Kein Zugang zu IVA oder anderen Kundenakten.</p><button class="btn" id="copyPublicSchedulingLink" type="button">Terminlink kopieren</button> <a class="btn" href="/heat-hero/termin" target="_blank" rel="noopener">Terminseite öffnen</a></div>');
+    $('copyPublicSchedulingLink').onclick = async () => {
+      const url = new URL('/heat-hero/termin', location.origin).href;
+      try { await navigator.clipboard.writeText(url); showToast('Terminlink kopiert – bereit zum Einfügen in Ihre E-Mail.'); }
+      catch { showToast(`Terminlink: ${url}`); }
+    };
+  }
   bindProjectActions();
 }
 

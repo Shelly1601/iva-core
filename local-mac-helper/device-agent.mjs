@@ -11,7 +11,7 @@ import { access } from 'node:fs/promises';
 const execFileAsync = promisify(execFile);
 export const IMAC_DEVICE_ID = 'imac-nadine';
 export const DEVICE_AGENT_PROTOCOL_VERSION = 2;
-export const DEVICE_AGENT_RELEASE = 'imac-central-v5';
+export const DEVICE_AGENT_RELEASE = 'imac-central-v6';
 const RUNTIME_REVISION = (() => { try { return JSON.parse(readFileSync(new URL('../release.json', import.meta.url), 'utf8')).revision || ''; } catch { return ''; } })();
 const KEYCHAIN_SERVICE = 'de.iva.device-agent';
 const KEYCHAIN_ACCOUNT = IMAC_DEVICE_ID;
@@ -237,8 +237,9 @@ async function executeDeviceCommand(command) {
     return { total: reviews.length, counts, latestAt: reviews[0]?.updatedAt || reviews[0]?.createdAt || null };
   }
   if (command.action === 'planbar.search.refresh') {
-    const { buildPlanbarCapacitySnapshot, collectPlanbarSearchIndex } = await import('./planbar.mjs');
-    const snapshot = await collectPlanbarSearchIndex();
+    const { buildPlanbarCapacitySnapshot, collectPlanbarSearchIndex, refreshPlanbarPage } = await import('./planbar.mjs');
+    const page = await refreshPlanbarPage();
+    const snapshot = { ...await collectPlanbarSearchIndex(), pageRefreshedAt: page.refreshedAt };
     const capacity = buildPlanbarCapacitySnapshot(snapshot);
     const [stored, storedCapacity] = await Promise.all([
       request(`/device-agent/${IMAC_DEVICE_ID}/planbar-search-index`, { method: 'POST', body: snapshot }),

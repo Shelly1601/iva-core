@@ -191,6 +191,7 @@ try {
   await assert.rejects(enqueueDeviceCommand({ action: 'app.open', payload: { app: 'Terminal' } }), /nicht freigegeben/);
 
   const { buildImacDeviceAgentLaunchAgent, verifyImacDeviceAgentConnection } = await import('../local-mac-helper/device-agent-launchd.mjs');
+  const { DEVICE_AGENT_RELEASE } = await import('../local-mac-helper/device-agent.mjs');
   console.log('Device-Control: LaunchAgent und Codex-Policy prüfen …');
   const plist = buildImacDeviceAgentLaunchAgent({
     nodePath: '/node',
@@ -205,8 +206,8 @@ try {
   assert.match(plist, /<key>KeepAlive<\/key><true\/>/);
   assert.doesNotMatch(plist, /StartInterval/);
   const connectionStatuses = [
-    { online: true, deviceId: IVA_IMAC_DEVICE_ID, hostname: 'imac-von-nadine', release: 'imac-central-v5', lastSeenAt: '2026-08-26T10:00:05.000Z' },
-    { online: true, deviceId: IVA_IMAC_DEVICE_ID, hostname: 'imac-von-nadine', release: 'imac-central-v5', lastSeenAt: '2026-08-26T10:00:20.000Z' },
+    { online: true, deviceId: IVA_IMAC_DEVICE_ID, hostname: 'imac-von-nadine', release: DEVICE_AGENT_RELEASE, lastSeenAt: '2026-08-26T10:00:05.000Z' },
+    { online: true, deviceId: IVA_IMAC_DEVICE_ID, hostname: 'imac-von-nadine', release: DEVICE_AGENT_RELEASE, lastSeenAt: '2026-08-26T10:00:20.000Z' },
   ];
   const verifiedConnection = await verifyImacDeviceAgentConnection({
     baselineLastSeenAt: '2026-08-26T10:00:00.000Z',
@@ -220,7 +221,7 @@ try {
   await assert.rejects(
     verifyImacDeviceAgentConnection({
       baselineLastSeenAt: '2026-08-26T10:00:00.000Z',
-      getStatus: async () => ({ online: true, release: 'imac-central-v5', lastSeenAt: '2026-08-26T10:00:05.000Z' }),
+      getStatus: async () => ({ online: true, release: DEVICE_AGENT_RELEASE, lastSeenAt: '2026-08-26T10:00:05.000Z' }),
       timeoutMs: 20,
       pollMs: 1,
       minimumAdvanceMs: 10_000,
