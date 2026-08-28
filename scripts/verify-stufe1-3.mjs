@@ -108,6 +108,9 @@ eq('  LUMIT routet zu Kunden/Backoffice', routeAgent('LUMIT als servicierter Ant
 truthy('  Kunden-Agent besitzt LUMIT-Skill', getAgent('iva-customer').allowedSkills.includes('lumit'));
 eq('  Planbar-Anfrage routet zu Kunden/Backoffice', routeAgent('Suche Schneider in Planbar').agent.id, 'iva-customer');
 truthy('  Kunden-Agent besitzt Planbar-Skill', getAgent('iva-customer').allowedSkills.includes('planbar'));
+truthy('  Kunden-Agent besitzt den iMac-Gerätekanal', getAgent('iva-customer').allowedSkills.includes('deviceControl'));
+eq('  Planbar-Gesamtworkflow bleibt beim Kunden-Agent', routeAgent('Führe den Workflow Planbar ENTER aus Airtable auf dem iMac aus').agent.id, 'iva-customer');
+eq('  Planbar-Workflow-Reparatur routet zum Builder', routeAgent('Fixe den IVA Planbar-Workflow').agent.id, 'iva-builder');
 eq('  Saxo-Anfrage routet zum Investment-Agent', routeAgent('Bitte mein Saxo Portfolio und die Positionsrisiken pruefen').agent.id, 'iva-investment');
 truthy('  Investment-Agent besitzt Investment-Skill', getAgent('iva-investment').allowedSkills.includes('investment'));
 eq('  Recruiting-Anfrage routet zum Recruiting-Agent', routeAgent('Bitte Lebenslauf fuer das Vorstellungsgespraech pruefen').agent.id, 'iva-recruiting');
