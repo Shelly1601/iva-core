@@ -106,7 +106,8 @@ export function createPublicScheduling({
       && now() - Date.parse(snapshot.pageRefreshedAt) <= MAX_AGE
       && Date.parse(snapshot.pageRefreshedAt) >= token.iat - 30_000
       && Date.parse(snapshot.updatedAt) >= Date.parse(snapshot.pageRefreshedAt);
-    if (fresh) return { status: 'ready', weeks, updatedAt: snapshot.updatedAt };
+    if (fresh) return { status: 'ready', weeks, updatedAt: snapshot.updatedAt,
+      expiresAt: new Date(Date.parse(snapshot.pageRefreshedAt) + MAX_AGE).toISOString() };
     const refreshes = await refreshStates();
     const active = refreshes.find(item => ['queued', 'running'].includes(item.status) && Date.parse(item.expiresAt) > now());
     if (active) return { status: 'refreshing', phase: active.status === 'queued' ? 'queued' : 'checking', weeks: [], updatedAt: null };
@@ -114,6 +115,17 @@ export function createPublicScheduling({
       && Date.parse(item.createdAt) >= token.iat - 30_000);
     if (failed) return { status: 'unavailable', weeks: [], updatedAt: null,
       message: 'Die aktuellen Montagewochen konnten noch nicht geprüft werden. Bitte starten Sie die Verfügbarkeitsprüfung erneut.' };
+    // A visitor may join after an in-flight reader already reloaded Planbar.
+    // Its valid result belongs to earlier visitors, not to this new session.
+    // Start a fresh read automatically instead of presenting that as a failure.
+    const recentSnapshot = Date.parse(snapshot?.updatedAt) >= Date.parse(snapshot?.pageRefreshedAt)
+      && Date.parse(snapshot?.updatedAt) <= now() && Date.parse(snapshot?.pageRefreshedAt) <= now()
+      && now() - Date.parse(snapshot?.pageRefreshedAt) <= MAX_AGE;
+    if (recentSnapshot) return { status: 'refresh_required', weeks: [], updatedAt: null };
+    if (refreshes.some(item => item.status === 'completed' && Date.parse(item.createdAt) >= token.iat - 30_000)) {
+      return { status: 'unavailable', weeks: [], updatedAt: null,
+        message: 'Die aktuellen Montagewochen konnten noch nicht geprüft werden. Bitte starten Sie die Verfügbarkeitsprüfung erneut.' };
+    }
     return { status: 'refreshing', phase: 'checking', weeks: [], updatedAt: null };
   }
   async function refreshStates() {
@@ -126,7 +138,7 @@ export function createPublicScheduling({
       // Handoff is not completion. A missing run after handoff remains pending
       // only until the original command expiry, never forever.
       const status = !run || ['queued', 'starting'].includes(run.status) ? 'queued'
-        : run.status === 'running' ? 'running' : 'failed';
+        : run.status === 'running' ? 'running' : run.status === 'completed' ? 'completed' : 'failed';
       return { ...item, status };
     });
   }

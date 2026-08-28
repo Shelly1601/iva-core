@@ -3,7 +3,7 @@
   const $ = id => document.getElementById(id);
   const api = '/heat-hero-termin-api';
   const form = $('requestForm');
-  let formToken = '', timer = null, cycle = 0, submitting = false, loadedAt = 0;
+  let formToken = '', timer = null, cycle = 0, submitting = false, loadedAt = 0, availableUntil = 0;
   function showError(message = '') { $('error').textContent = message; $('error').hidden = !message; }
   async function request(path, method = 'GET', body) {
     const response = await fetch(`${api}${path}`, { method, cache: 'no-store', credentials: 'omit',
@@ -23,6 +23,7 @@
     $('week').disabled = !data.weeks.length;
     $('submit').disabled = !data.weeks.length;
     loadedAt = Date.now();
+    availableUntil = Date.parse(data.expiresAt) || loadedAt + 4 * 60_000;
     $('availabilityStatus').textContent = data.weeks.length
       ? `Zuletzt geprüft: ${new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' }).format(new Date(data.updatedAt))} Uhr. Vor der Einplanung wird erneut geprüft.`
       : 'Im aktuell geprüften Zeitraum sind keine freien Montagewochen verfügbar. Bitte versuchen Sie es später erneut.';
@@ -41,6 +42,7 @@
         try {
           if (result.status === 'ready') { displayWeeks(result); $('refreshWeeks').disabled = false; return; }
           if (result.status === 'unavailable') throw new Error(result.message || 'Die aktuellen Montagewochen konnten noch nicht geprüft werden. Bitte starten Sie die Prüfung erneut.');
+          if (result.status === 'refresh_required') result = await request('/availability', 'POST');
           $('availabilityStatus').textContent = result.phase === 'queued'
             ? 'Die aktuelle Planung wird noch abgeschlossen. Ihre Prüfung wartet sicher und startet automatisch. Bitte lassen Sie die Seite geöffnet.'
             : 'Die Plantafel wird aktualisiert und freie Wochen werden geprüft …';
@@ -56,7 +58,7 @@
   form.addEventListener('submit', async event => {
     event.preventDefault();
     if (submitting || !form.reportValidity()) return;
-    if (!loadedAt || Date.now() - loadedAt > 4 * 60_000) {
+    if (!loadedAt || Date.now() >= availableUntil - 10_000) {
       await refresh(); showError('Bitte die neu geprüfte Kalenderwoche noch einmal auswählen.'); return;
     }
     submitting = true; $('submit').disabled = true; showError();
