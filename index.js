@@ -274,6 +274,7 @@ import {
   listAutomationRuns,
   listAutomations,
   setAutomationEnabled,
+  skipAutomationSlot,
 } from './automations/store.js';
 import { createAutomationOrchestrator } from './automations/orchestrator.js';
 import { createPlanbarForecastAutomationHandler, createProjectWorkflowAutomationHandler } from './automations/imac-workflow.js';
@@ -1655,6 +1656,13 @@ app.patch('/api/automations/:id', async (req, res) => {
     res.json(updated);
   }
   catch (error) { res.status(404).json({ error: error.message }); }
+});
+app.post('/api/automations/:id/skip-slot', async (req, res) => {
+  try {
+    if (req.params.id !== 'planbar-weekly-export') return res.status(403).json({ error: 'Dieser Sicherheitsabschluss ist nur für den Planbar-Forecast freigegeben.' });
+    const reason = String(req.body?.reason || 'Nadine hat bestätigt, dass der Forecast bereits versandt wurde; kein erneuter Versand.').slice(0, 1000);
+    res.json(await skipAutomationSlot(req.params.id, req.body?.slotKey, reason));
+  } catch (error) { res.status(400).json({ error: error.message }); }
 });
 app.get('/api/automations/runs', async (req, res) => res.json(await listAutomationRuns({ automationId: String(req.query?.automationId || ''), status: String(req.query?.status || ''), limit: req.query?.limit, since: String(req.query?.since || '') })));
 app.get('/api/automation-reports', async (req, res) => res.json(await listAutomationReports({ type: String(req.query?.type || ''), limit: req.query?.limit })));
@@ -3098,10 +3106,17 @@ async function triggerProjectWorkflowManually(projectId, workflowId) {
     };
   }
   if (project.id === 'heat-hero' && IMAC_MANUAL_PROJECT_WORKFLOWS.has(workflow.id)) {
+    const requestedAt = Date.now();
     const command = await enqueueDeviceCommand({
       deviceId: IVA_IMAC_DEVICE_ID,
       action: 'project.workflow.run',
-      payload: { projectId: project.id, workflowId: workflow.id, displayName: workflow.name },
+      payload: {
+        projectId: project.id,
+        workflowId: workflow.id,
+        displayName: workflow.name,
+        requestId: `${workflow.id}:manual:${requestedAt}`,
+        runMode: 'manual',
+      },
       requestedBy: 'projects-manual-trigger',
       requestText: `Projekt-Workflow manuell auslösen: ${workflow.name}`,
     });

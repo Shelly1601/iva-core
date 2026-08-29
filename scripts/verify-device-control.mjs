@@ -157,7 +157,7 @@ try {
     action: 'project.workflow.run', requestedBy: 'test',
     payload: { projectId: 'heat-hero', workflowId: 'planbar-weekly-export', displayName: 'Meine Planbar-Liste' },
   });
-  assert.deepEqual(projectWorkflowCommand.payload, { projectId: 'heat-hero', workflowId: 'planbar-weekly-export', displayName: 'Meine Planbar-Liste' });
+  assert.deepEqual(projectWorkflowCommand.payload, { projectId: 'heat-hero', workflowId: 'planbar-weekly-export', displayName: 'Meine Planbar-Liste', runMode: 'manual' });
   const fundingSequenceCommand = await enqueueDeviceCommand({
     action: 'project.workflow.run', requestedBy: 'test-funding-scheduler',
     payload: { projectId: 'heat-hero', workflowId: 'funding-daily-sequence', displayName: 'Förderung – Tageslauf 1 → 2 → 3' },
@@ -275,10 +275,18 @@ try {
   assert.equal(readAttempts, 5, 'ein vorübergehender iCloud-Deadlock wird wiederholt');
   const directForecast = await startProjectWorkflowTask({
     workflowId: 'planbar-weekly-export',
+    runMode: 'automatic',
+    automationSlotKey: 'planbar-weekly-export:weekly:2026-W35',
     findPreparedForecast: async () => ({ directory: '/prepared/forecast' }),
-    sendPreparedForecast: async directory => ({ sent: true, sentFolderVerified: true, directory }),
+    sendPreparedForecast: async (directory, context) => ({ sent: true, sentFolderVerified: true, directory, ...context }),
   });
-  assert.deepEqual(directForecast, { sent: true, sentFolderVerified: true, directory: '/prepared/forecast' });
+  assert.deepEqual(directForecast, {
+    sent: true,
+    sentFolderVerified: true,
+    directory: '/prepared/forecast',
+    runMode: 'automatic',
+    automationSlotKey: 'planbar-weekly-export:weekly:2026-W35',
+  });
   const bootstrapSource = await readFile(new URL('../IVA-iMac-einmalig-verbinden.command', import.meta.url), 'utf8');
   assert.match(bootstrapSource, /nodejs\.org\/dist\/\$\{node_version\}/);
   assert.match(bootstrapSource, /shasum -a 256/);

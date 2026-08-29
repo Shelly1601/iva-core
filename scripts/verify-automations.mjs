@@ -30,7 +30,7 @@ const fundingSequence = initial.find(item => item.id === 'funding-daily-sequence
 check('Förder-Tageslauf ist täglich um 05:00 Uhr aktiv', fundingSequence?.enabled === true && fundingSequence.cron === '0 5 * * *');
 check('Förder-Tageslauf benennt die feste Reihenfolge', /1 → 2 → 3/.test(fundingSequence?.name || ''));
 const planbarForecast = initial.find(item => item.id === 'planbar-weekly-export');
-check('Planbar-Forecast ist zentral freitags um 19:00 Uhr aktiv', planbarForecast?.enabled === true && planbarForecast.cron === '0 19 * * 5');
+check('Planbar-Forecast ist zentral freitags um 18:00 Uhr aktiv', planbarForecast?.enabled === true && planbarForecast.cron === '0 18 * * 5');
 check('Alle angesetzten täglichen iMac-Projektworkflows sind zentral terminiert', [
   ['funding-daily-sequence', '0 5 * * *'],
   ['montage-required-fields-morning', '0 7 * * *'],
@@ -47,6 +47,15 @@ const fixedNow = new Date('2026-08-17T07:30:00+02:00');
 const first = await runner.runAutomation('daily-briefing', { now: fixedNow, slotKey: 'test:daily:2026-08-17' });
 const duplicate = await runner.runAutomation('daily-briefing', { now: fixedNow, slotKey: 'test:daily:2026-08-17' });
 check('Ein Slot wird nur einmal ausgeführt', first.run?.status === 'completed' && duplicate.reason === 'duplicate' && handlerCalls === 1);
+
+const skippedSlotKey = 'planbar-weekly-export:weekly:2026-W35';
+const skipped = await store.skipAutomationSlot('planbar-weekly-export', skippedSlotKey, 'Forecast wurde bereits manuell versandt; kein Doppelversand.');
+let skippedHandlerCalls = 0;
+const skippedRunner = createAutomationOrchestrator({
+  'planbar-weekly-export': async () => { skippedHandlerCalls += 1; return { summary: 'darf nicht laufen' }; },
+});
+const skippedResult = await skippedRunner.runAutomation('planbar-weekly-export', { now: fixedNow, slotKey: skippedSlotKey });
+check('Ein ausdrücklich als bereits versandt bestätigter Forecast-Slot wird nicht erneut ausgeführt', skipped.status === 'skipped' && skippedResult.reason === 'duplicate' && skippedHandlerCalls === 0);
 
 let failedCalls = 0;
 const failing = createAutomationOrchestrator({

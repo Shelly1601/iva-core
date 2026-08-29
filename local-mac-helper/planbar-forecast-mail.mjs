@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { access, mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { sendVerifiedOutlookXlsxMessage, verifyOutlookSentMessage } from './outlook.mjs';
+import { isOutlookSentMessageNotFound, sendVerifiedOutlookXlsxMessage, verifyOutlookSentMessage } from './outlook.mjs';
 
 export const PLANBAR_FORECAST_SENDER = 'n.sell@heat-hero.com';
 export const PLANBAR_FORECAST_RECIPIENT = 'a.keller@heat-hero.com';
@@ -167,10 +167,43 @@ async function saveSendLog(log) {
   }
 }
 
-export async function sendPlanbarForecastRun(runDirectory, { commit = false, send = sendVerifiedOutlookXlsxMessage } = {}) {
-  const run = await validatePlanbarForecastRun(runDirectory);
-  const log = await loadSendLog();
-  const duplicate = log.entries.find(item => item.subject === run.subject && ['sent_verified', 'submitted_unverified'].includes(item.status));
+function deliveryMatches(item, run) {
+  return item.subject === run.subject
+    && item.sender === run.sender
+    && item.recipient === run.recipient
+    && sameStrings(item.attachments || [], run.attachmentNames);
+}
+
+function newDeliveryEntry(run, context, status, now) {
+  const timestamp = now().toISOString();
+  return {
+    id: crypto.randomUUID(), createdAt: timestamp, sentAt: timestamp,
+    period: run.period, sender: run.sender, recipient: run.recipient,
+    subject: run.subject, attachments: run.attachmentNames,
+    runMode: context.runMode, automationSlotKey: context.automationSlotKey,
+    status, sentFolderVerified: status === 'sent_verified', sentFolderVerificationError: '',
+  };
+}
+
+export async function deliverValidatedPlanbarForecast(run, {
+  send = sendVerifiedOutlookXlsxMessage,
+  verify = verifyOutlookSentMessage,
+  loadLog = loadSendLog,
+  saveLog = saveSendLog,
+  runMode = 'manual',
+  automationSlotKey = '',
+  now = () => new Date(),
+} = {}) {
+  const context = {
+    runMode: runMode === 'automatic' ? 'automatic' : 'manual',
+    automationSlotKey: runMode === 'automatic' ? String(automationSlotKey || '').slice(0, 180) : '',
+  };
+  if (context.runMode === 'automatic' && !context.automationSlotKey) {
+    throw new Error('Forecast-Abbruch: Dem automatischen Lauf fehlt der eindeutige Wochen-Slot.');
+  }
+  const log = await loadLog();
+  const duplicate = log.entries.find(item => deliveryMatches(item, run)
+    && ['sent_verified', 'submitted_unverified', 'submission_started', 'submission_uncertain'].includes(item.status));
   const body = `Hallo Angelo,\n\nanbei die Planbar-Listen für ${run.period}.\n\nViele Grüße\nNadine`;
   const preview = {
     period: run.period,
@@ -181,8 +214,9 @@ export async function sendPlanbarForecastRun(runDirectory, { commit = false, sen
     attachments: run.attachmentNames,
     excludedResourceLeaks: run.manifest.verification.excludedResourceLeaks,
     sent: false,
+    runMode: context.runMode,
+    automationSlotKey: context.automationSlotKey,
   };
-  if (!commit) return { ...preview, preview: true };
   if (duplicate?.status === 'sent_verified') {
     return {
       ...preview,
@@ -193,21 +227,22 @@ export async function sendPlanbarForecastRun(runDirectory, { commit = false, sen
       sendLogEntry: duplicate,
     };
   }
-  if (duplicate?.status === 'submitted_unverified') {
+  if (duplicate) {
     try {
-      const sentFolder = await verifyOutlookSentMessage({
+      const sentFolder = await verify({
         from: run.sender,
         to: [run.recipient],
         subject: run.subject,
         body,
         attachments: run.attachments,
+        lookbackSeconds: 8 * 24 * 60 * 60,
       });
       duplicate.status = 'sent_verified';
       duplicate.sentFolderVerified = true;
       duplicate.sentFolderVerificationError = '';
-      duplicate.verifiedAt = new Date().toISOString();
+      duplicate.verifiedAt = now().toISOString();
       duplicate.sentFolder = sentFolder;
-      await saveSendLog(log);
+      await saveLog(log);
       return {
         ...preview,
         preview: false,
@@ -219,35 +254,97 @@ export async function sendPlanbarForecastRun(runDirectory, { commit = false, sen
       };
     } catch (error) {
       duplicate.sentFolderVerificationError = String(error?.message || error).slice(0, 500);
-      duplicate.lastVerificationAttemptAt = new Date().toISOString();
-      await saveSendLog(log);
-      throw new Error(`Forecast-Abbruch: Outlook-Versand wurde bereits bestätigt; der Gesendet-Nachweis ist noch nicht sichtbar. Es wurde nicht erneut gesendet. ${duplicate.sentFolderVerificationError}`);
+      duplicate.lastVerificationAttemptAt = now().toISOString();
+      await saveLog(log);
+      throw new Error(`Forecast-Abbruch: Für diesen Forecast existiert bereits ein Versandversuch; der Gesendet-Nachweis ist noch nicht sichtbar. Es wurde nicht erneut gesendet. ${duplicate.sentFolderVerificationError}`);
     }
   }
-  const result = await send({
+
+  const message = {
     from: run.sender,
     to: [run.recipient],
     subject: run.subject,
     body,
     attachments: run.attachments,
-  });
-  if (result?.sent !== true) throw new Error('Forecast-Abbruch: Outlook hat den Versand nicht bestätigt.');
-  const entry = {
-    id: crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
-    sentAt: new Date().toISOString(),
-    period: run.period,
-    sender: run.sender,
-    recipient: run.recipient,
-    subject: run.subject,
-    attachments: run.attachmentNames,
-    status: result.sentFolderVerified === true ? 'sent_verified' : 'submitted_unverified',
-    sentFolderVerified: result.sentFolderVerified === true,
-    sentFolderVerificationError: result.sentFolderVerificationError || '',
   };
+  try {
+    const sentFolder = await verify({ ...message, lookbackSeconds: 8 * 24 * 60 * 60, pollAttempts: 1 });
+    const recovered = newDeliveryEntry(run, context, 'sent_verified', now);
+    recovered.recoveredFromSentFolder = true;
+    recovered.sentFolder = sentFolder;
+    log.entries.push(recovered);
+    await saveLog(log);
+    return {
+      ...preview, preview: false, sent: true, sentFolderVerified: true,
+      duplicateVerified: true, recoveredFromSentFolder: true, sendLogEntry: recovered,
+      outlook: { sent: true, sentFolderVerified: true, sentFolder, reverifiedWithoutResend: true },
+    };
+  } catch (error) {
+    if (!isOutlookSentMessageNotFound(error)) {
+      throw new Error(`Forecast-Abbruch: Der Gesendet-Ordner konnte vor dem Versand nicht sicher geprüft werden. Es wurde nichts gesendet. ${String(error?.message || error).slice(0, 500)}`);
+    }
+  }
+
+  // Vor dem UI-Aufruf persistieren: Stirbt der Prozess während des Klicks,
+  // darf der nächste Lauf nur nachprüfen und niemals blind erneut senden.
+  const entry = newDeliveryEntry(run, context, 'submission_started', now);
   log.entries.push(entry);
-  await saveSendLog(log);
+  await saveLog(log);
+  let result;
+  try {
+    result = await send(message);
+    if (result?.sent !== true) throw new Error('Outlook hat den Versand nicht bestätigt.');
+    entry.status = result.sentFolderVerified === true ? 'sent_verified' : 'submitted_unverified';
+    entry.sentFolderVerified = result.sentFolderVerified === true;
+    entry.sentFolderVerificationError = result.sentFolderVerificationError || '';
+    if (result.sentFolder) entry.sentFolder = result.sentFolder;
+    await saveLog(log);
+  } catch (sendError) {
+    entry.status = 'submission_uncertain';
+    entry.sentFolderVerificationError = String(sendError?.message || sendError).slice(0, 500);
+    await saveLog(log);
+    try {
+      const sentFolder = await verify({ ...message, lookbackSeconds: 8 * 24 * 60 * 60 });
+      entry.status = 'sent_verified';
+      entry.sentFolderVerified = true;
+      entry.sentFolderVerificationError = '';
+      entry.sentFolder = sentFolder;
+      entry.verifiedAt = now().toISOString();
+      await saveLog(log);
+      return {
+        ...preview, preview: false, sent: true, sentFolderVerified: true,
+        recoveredAfterUncertainSubmission: true, sendLogEntry: entry,
+        outlook: { sent: true, sentFolderVerified: true, sentFolder, recoveredAfterUncertainSubmission: true },
+      };
+    } catch (verificationError) {
+      entry.lastVerificationAttemptAt = now().toISOString();
+      entry.sentFolderVerificationError = String(verificationError?.message || verificationError).slice(0, 500);
+      await saveLog(log);
+      throw new Error(`Forecast-Abbruch: Der Versandstatus ist technisch unklar. Es wird ausdrücklich nicht erneut gesendet; ausschließlich der Gesendet-Ordner darf nachgeprüft werden. ${entry.sentFolderVerificationError}`);
+    }
+  }
   return { ...preview, preview: false, sent: true, sentFolderVerified: entry.sentFolderVerified, sendLogEntry: entry, outlook: result };
+}
+
+export async function sendPlanbarForecastRun(runDirectory, {
+  commit = false,
+  send = sendVerifiedOutlookXlsxMessage,
+  verify = verifyOutlookSentMessage,
+  runMode = 'manual',
+  automationSlotKey = '',
+} = {}) {
+  const run = await validatePlanbarForecastRun(runDirectory);
+  if (!commit) {
+    return {
+      period: run.period, sender: run.sender, recipient: run.recipient, subject: run.subject,
+      attachmentCount: run.attachments.length, attachments: run.attachmentNames,
+      excludedResourceLeaks: run.manifest.verification.excludedResourceLeaks,
+      sent: false, preview: true,
+      runMode: runMode === 'automatic' ? 'automatic' : 'manual',
+      automationSlotKey: runMode === 'automatic' ? String(automationSlotKey || '') : '',
+    };
+  }
+  return deliverValidatedPlanbarForecast(run, { send, verify, runMode, automationSlotKey });
 }
 
 export async function latestVerifiedPlanbarForecastDelivery({ after = '' } = {}) {
@@ -270,7 +367,11 @@ export async function latestVerifiedPlanbarForecastDelivery({ after = '' } = {})
 if (process.argv[1] && path.resolve(process.argv[1]) === MODULE_PATH) {
   const directory = process.argv.slice(2).find(value => value && !value.startsWith('--'));
   const commit = process.argv.includes('--commit');
-  const result = await sendPlanbarForecastRun(directory, { commit });
+  const runModeIndex = process.argv.indexOf('--run-mode');
+  const automationSlotIndex = process.argv.indexOf('--automation-slot');
+  const runMode = runModeIndex >= 0 ? process.argv[runModeIndex + 1] : 'manual';
+  const automationSlotKey = automationSlotIndex >= 0 ? process.argv[automationSlotIndex + 1] : '';
+  const result = await sendPlanbarForecastRun(directory, { commit, runMode, automationSlotKey });
   console.log(JSON.stringify(result, null, 2));
   if (commit && result.sentFolderVerified !== true) process.exitCode = 2;
 }

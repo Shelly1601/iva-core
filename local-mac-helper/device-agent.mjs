@@ -332,7 +332,12 @@ async function executeDeviceCommand(command) {
   }
   if (command.action === 'project.workflow.run') {
     const { startProjectWorkflowTask } = await import('./codex-tasks.mjs');
-    return startProjectWorkflowTask({ workflowId: command.payload?.workflowId, requestId: command.payload?.requestId || command.id });
+    return startProjectWorkflowTask({
+      workflowId: command.payload?.workflowId,
+      requestId: command.payload?.requestId || command.id,
+      runMode: command.payload?.runMode,
+      automationSlotKey: command.payload?.automationSlotKey,
+    });
   }
   if (command.action === 'app.open') return openApplication(command.payload?.app);
   throw new Error('Der iMac hat diesen Befehl nicht in seiner lokalen Positivliste.');

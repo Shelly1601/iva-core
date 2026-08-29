@@ -43,6 +43,8 @@ export function createPlanbarForecastAutomationHandler({
           workflowId: 'planbar-weekly-export',
           displayName: 'Planbar-Forecast als Excel-Listen',
           requestId: `${slotKey}:attempt:${attempt}`,
+          runMode: 'automatic',
+          automationSlotKey: slotKey,
         },
         requestedBy: 'automation-planbar-weekly-export',
         requestText: `Planbar-Freitagsforecast zuverlässig ausführen (${slotKey})`,

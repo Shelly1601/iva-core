@@ -390,7 +390,14 @@ const PROJECT_WORKFLOW_TASKS = Object.freeze({
   }),
 });
 
-export async function startProjectWorkflowTask({ workflowId, requestId = '', findPreparedForecast, sendPreparedForecast } = {}) {
+export async function startProjectWorkflowTask({
+  workflowId,
+  requestId = '',
+  runMode = 'manual',
+  automationSlotKey = '',
+  findPreparedForecast,
+  sendPreparedForecast,
+} = {}) {
   const normalizedWorkflowId = clean(workflowId, 140);
   const definition = PROJECT_WORKFLOW_TASKS[normalizedWorkflowId];
   if (!definition) throw new Error('Dieser Projekt-Workflow ist für den operativen Codex-Start nicht freigegeben.');
@@ -415,15 +422,32 @@ export async function startProjectWorkflowTask({ workflowId, requestId = '', fin
     }
   }
   if (normalizedWorkflowId === 'planbar-weekly-export') {
+    const normalizedRunMode = runMode === 'automatic' ? 'automatic' : 'manual';
+    const normalizedAutomationSlotKey = normalizedRunMode === 'automatic' ? clean(automationSlotKey, 180) : '';
+    if (normalizedRunMode === 'automatic' && !normalizedAutomationSlotKey) {
+      throw new Error('Dem automatischen Planbar-Forecast fehlt der eindeutige Wochen-Slot.');
+    }
     const mail = typeof findPreparedForecast === 'function' && typeof sendPreparedForecast === 'function'
       ? null
       : await import('./planbar-forecast-mail.mjs');
     const findPrepared = typeof findPreparedForecast === 'function' ? findPreparedForecast : mail.findRecentValidatedPlanbarForecastRun;
     const sendPrepared = typeof sendPreparedForecast === 'function'
       ? sendPreparedForecast
-      : directory => mail.sendPlanbarForecastRun(directory, { commit: true });
+      : (directory, context) => mail.sendPlanbarForecastRun(directory, { commit: true, ...context });
     const prepared = await findPrepared();
-    if (prepared) return sendPrepared(prepared.directory);
+    if (prepared) return sendPrepared(prepared.directory, { runMode: normalizedRunMode, automationSlotKey: normalizedAutomationSlotKey });
+    const senderFlags = normalizedRunMode === 'automatic'
+      ? `--run-mode automatic --automation-slot ${JSON.stringify(normalizedAutomationSlotKey)}`
+      : '--run-mode manual';
+    return startCodexTask({
+      ...definition,
+      prompt: `${definition.prompt}\n\nAuslöseart dieses Auftrags: ${normalizedRunMode}. Beim verbindlichen Sender müssen zusätzlich exakt diese Parameter verwendet werden: ${senderFlags}.`,
+      mode: 'project-workflow',
+      projectId: 'heat-hero',
+      workflowId: normalizedWorkflowId,
+      workflowName: definition.title,
+      requestId: requestId || `project-workflow-${normalizedWorkflowId}-${Date.now()}`,
+    });
   }
   return startCodexTask({
     ...definition,

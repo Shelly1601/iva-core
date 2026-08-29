@@ -4,7 +4,9 @@ Stand: 29.08.2026
 
 ## Zeitplan und Empfänger
 
-- Lauf: freitags um 19:00 Uhr, Zeitzone `Europe/Berlin`.
+- Automatischer Lauf: genau einmal pro Wochen-Slot, freitags um 18:00 Uhr, Zeitzone `Europe/Berlin`.
+- Ausdrücklich beauftragte manuelle Läufe werden als `manual` getrennt protokolliert und verändern weder den Freitags-Slot noch dessen Historie.
+- Der Versand-Duplikatschutz gilt unabhängig vom Auslöser: derselbe Empfänger, Betreff/Forecast-Zeitraum und dieselben Anlagen dürfen niemals blind ein zweites Mal versendet werden.
 - Zeitraum: Die unmittelbar folgende Kalenderwoche wird vollständig ausgelassen. Der Forecast umfasst zehn vollständige Kalenderwochen ab dem übernächsten Montag.
 - Verbindliches Beispiel für den Freitagslauf am 21.08.2026: KW 35 auslassen und KW 36–45 exportieren.
 - Absender: `n.sell@heat-hero.com`.
@@ -55,8 +57,10 @@ Die Zeilen sind nach Kalenderwoche und Kunde sortiert. Kopfzeile und Filter blei
 Der Versand erfolgt ausschließlich mit dem deterministischen iMac-Sender:
 
 ```bash
-node local-mac-helper/planbar-forecast-mail.mjs "/absoluter/iCloud-Laufordner" --commit
+node local-mac-helper/planbar-forecast-mail.mjs "/absoluter/iCloud-Laufordner" --commit --run-mode manual
 ```
+
+Der zentrale Freitagslauf ergänzt stattdessen `--run-mode automatic --automation-slot "<stabile Wochen-Slot-ID>"`. Manuelle Aufträge dürfen niemals eine Automatik-Slot-ID erhalten.
 
 Der Sender übernimmt nur die exakten vollständigen XLSX-Pfade aus dem Manifest. Finder-, Spotlight- oder Outlook-Dateisuche ist für Anlagen verboten. Vor dem Senden werden Absender, Empfänger, Betreff und die vollständige sichtbare Anhangsliste erneut verglichen; jede zusätzliche oder fehlende Datei und jede PDF führen zum Abbruch. Nach geschlossenem Verfassen-Fenster wird die Nachricht über Outlooks natives `Gesendet`-Postfach anhand Betreff, Empfänger und exakter Anlagenliste geprüft. Wurde das Senden bereits bestätigt, darf ein noch ausstehender Gesendet-Nachweis niemals einen erneuten Versand auslösen.
 

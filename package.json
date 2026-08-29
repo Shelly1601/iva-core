@@ -43,6 +43,7 @@
     "test:control-activity": "node scripts/verify-control-activity.mjs",
     "test:automations": "node scripts/verify-automations.mjs",
     "test:planbar-forecast-automation": "node scripts/verify-planbar-forecast-automation.mjs",
+    "test:planbar-forecast-delivery": "node scripts/verify-planbar-forecast-delivery.mjs",
     "test:projects": "node scripts/verify-projects.mjs",
     "test:project-protocols": "node scripts/verify-project-protocols.mjs",
     "test:scheduling": "node scripts/verify-scheduling.mjs",

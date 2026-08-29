@@ -25,6 +25,16 @@ function harness({ projectEnabled = true, online = true, commands = {} } = {}) {
 }
 
 {
+  const { handler, queued, commands } = harness();
+  const result = await handler({ slotKey: 'planbar-weekly-export:weekly:2026-W35', attempt: 1 });
+  assert.equal(result.status, 'waiting');
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].payload.runMode, 'automatic');
+  assert.equal(queued[0].payload.automationSlotKey, 'planbar-weekly-export:weekly:2026-W35');
+  assert.equal(commands[queued[0].id].status, 'queued');
+}
+
+{
   const { handler } = harness({ projectEnabled: false });
   const result = await handler({ slotKey: 'forecast:weekly:2026-W35', attempt: 1 });
   assert.equal(result.status, 'blocked');
@@ -86,3 +96,5 @@ console.log('PASS Planbar-Forecast-Automation verfolgt iMac und Outlook bis zum 
 }
 
 console.log('PASS Wiederkehrende iMac-Projektworkflows bleiben bis zum lokalen Endstatus offen.');
+
+await import('./verify-planbar-forecast-delivery.mjs');

@@ -11,7 +11,7 @@ export const AUTOMATION_DEFINITIONS = Object.freeze([
   { id: 'report-email-daily', name: 'Täglicher Workflow-Report: E-Mail mit Telegram-Ersatz', category: 'Reporting', schedule: 'Täglich · 06:45 Uhr', cron: '45 6 * * *', cadence: 'daily', hour: 6, minute: 45, defaultEnabled: true, maxSlotAttempts: 3, timeoutMs: 30_000, description: 'Sendet den Vortagsreport bevorzugt per E-Mail an Nadines HeatHero-Postfach; bei nicht möglicher E-Mail-Zustellung folgt genau ein Telegram-Ersatzreport.' },
   { id: 'report-email-weekly', name: 'Wöchentlicher Workflow-Report: E-Mail mit Telegram-Ersatz', category: 'Reporting', schedule: 'Montag · 06:50 Uhr', cron: '50 6 * * 1', cadence: 'weekly', weekday: 1, hour: 6, minute: 50, defaultEnabled: true, maxSlotAttempts: 3, timeoutMs: 30_000, description: 'Sendet den Wochenreport bevorzugt per E-Mail; bei nicht möglicher E-Mail-Zustellung folgt genau ein Telegram-Ersatzreport.' },
   { id: 'funding-daily-sequence', name: 'Förderung – Tageslauf 1 → 2 → 3 auf dem iMac', category: 'Heat Hero', schedule: 'Täglich · 05:00 Uhr', cron: '0 5 * * *', cadence: 'daily', hour: 5, minute: 0, defaultEnabled: true, maxSlotAttempts: 6, timeoutMs: 120_000, description: 'Führt den geordneten iMac-Auftrag für Vollständigkeit, Förderhöhe und KfW-Zusagen aus und bleibt bis zum echten lokalen Endstatus offen. Verpasste Slots werden nachgeholt.' },
-  { id: 'planbar-weekly-export', name: 'Planbar-Forecast als Excel-Listen', category: 'Heat Hero', schedule: 'Freitag · 19:00 Uhr', cron: '0 19 * * 5', cadence: 'weekly', weekday: 5, hour: 19, minute: 0, defaultEnabled: true, maxSlotAttempts: 6, timeoutMs: 120_000, description: 'Erstellt den rollierenden Zehn-Wochen-Forecast auf dem iMac und gilt erst nach verifiziertem Outlook-Versand als erfolgreich. Verpasste Slots werden nachgeholt.' },
+  { id: 'planbar-weekly-export', name: 'Planbar-Forecast als Excel-Listen', category: 'Heat Hero', schedule: 'Freitag · 18:00 Uhr', cron: '0 18 * * 5', cadence: 'weekly', weekday: 5, hour: 18, minute: 0, defaultEnabled: true, maxSlotAttempts: 6, timeoutMs: 120_000, description: 'Erstellt den rollierenden Zehn-Wochen-Forecast auf dem iMac und gilt erst nach verifiziertem Outlook-Versand als erfolgreich. Pro Freitags-Slot gibt es höchstens einen automatischen Versand; manuelle Läufe werden getrennt protokolliert.' },
   { id: 'montage-required-fields-morning', name: 'Montage-Pflichtfelder morgens prüfen', category: 'Heat Hero', schedule: 'Täglich · 07:00 Uhr', cron: '0 7 * * *', cadence: 'daily', hour: 7, minute: 0, defaultEnabled: true, maxSlotAttempts: 6, timeoutMs: 120_000, description: 'Prüft offene Montage-Deals auf dem iMac und bleibt bis zum echten lokalen Endstatus offen. Verpasste Slots werden nachgeholt.' },
   { id: 'planbar-completion-morning', name: 'Planbar Vervollständigung', category: 'Heat Hero', schedule: 'Täglich · 08:00 Uhr', cron: '0 8 * * *', cadence: 'daily', hour: 8, minute: 0, defaultEnabled: true, maxSlotAttempts: 6, timeoutMs: 120_000, description: 'Vervollständigt bestehende Planbar-Termine auf dem iMac und bleibt bis zum echten lokalen Endstatus offen. Verpasste Slots werden nachgeholt.' },
   { id: 'daily-briefing', name: 'IVA Morning-Briefing', category: 'Kommunikation', schedule: 'Täglich · 07:00 Uhr', cron: '0 7 * * *', cadence: 'daily', hour: 7, minute: 0, defaultEnabled: true, maxSlotAttempts: 2, timeoutMs: 120_000, description: 'Termine, Todos und CRM-Handlungsbedarf als täglicher Telegram-Überblick.' },
@@ -163,6 +163,28 @@ export async function finishAutomationRun(runId, input = {}) {
     run.updatedAt = completedAt;
     run.completedAt = run.status === 'waiting' ? '' : completedAt;
     run.durationMs = run.status === 'waiting' ? null : Math.max(0, Date.parse(completedAt) - Date.parse(run.startedAt));
+    return clone(run);
+  });
+}
+
+export async function skipAutomationSlot(automationId, slotKey, reason = '') {
+  const definition = automationDefinition(automationId);
+  const normalizedSlotKey = clean(slotKey, 160);
+  if (!definition || !normalizedSlotKey) throw new Error('Automation oder Slot fehlt.');
+  return mutate(store => {
+    const existing = store.runs.find(item => item.automationId === definition.id
+      && item.slotKey === normalizedSlotKey && ['completed', 'skipped'].includes(item.status));
+    if (existing) return clone(existing);
+    const now = new Date().toISOString();
+    const run = {
+      id: crypto.randomUUID(), automationId: definition.id, automationName: definition.name,
+      slotKey: normalizedSlotKey, trigger: 'manual-safety-skip', attempt: 0,
+      status: 'skipped',
+      summary: clean(reason || 'Slot wurde ausdrücklich ohne erneuten Versand abgeschlossen.', 4000),
+      error: '', result: { userConfirmedAlreadyDelivered: true },
+      startedAt: now, updatedAt: now, completedAt: now, durationMs: 0,
+    };
+    store.runs.push(run);
     return clone(run);
   });
 }

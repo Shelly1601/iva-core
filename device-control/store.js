@@ -221,6 +221,10 @@ function validatePayload(action, payload = {}) {
       workflowId,
       displayName: cleanText(payload.displayName, 220) || workflowId,
       ...(cleanText(payload.requestId, 160) ? { requestId: cleanText(payload.requestId, 160) } : {}),
+      runMode: payload.runMode === 'automatic' ? 'automatic' : 'manual',
+      ...(payload.runMode === 'automatic' && cleanText(payload.automationSlotKey, 180)
+        ? { automationSlotKey: cleanText(payload.automationSlotKey, 180) }
+        : {}),
     };
   }
   if (action === 'portal.credentials.status' || action === 'portal.login') {

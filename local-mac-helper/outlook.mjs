@@ -289,12 +289,13 @@ export function buildVerifiedSendAppleScript(input = {}) {
   return { script: lines.join('\n'), message, expectedAttachmentNames };
 }
 
-export function buildSentVerificationAppleScript({ from, subject, to = [], attachments = [], lookbackSeconds = 900 } = {}) {
+export function buildSentVerificationAppleScript({ from, subject, to = [], attachments = [], lookbackSeconds = 900, pollAttempts = 20 } = {}) {
   const requestedFrom = email(from, 'Absender');
   const requestedSubject = String(subject || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 240);
   const requestedTo = recipients(to, 'An');
   const expectedAttachments = [...new Set((Array.isArray(attachments) ? attachments : []).map(value => path.basename(String(value))))].sort();
-  const seconds = Math.max(60, Math.min(3600, Number(lookbackSeconds) || 900));
+  const seconds = Math.max(60, Math.min(8 * 24 * 60 * 60, Number(lookbackSeconds) || 900));
+  const attempts = Math.max(1, Math.min(20, Number(pollAttempts) || 20));
   if (!requestedSubject || !requestedTo.length || !expectedAttachments.length) throw new Error('Die Gesendet-Prüfung benötigt Absender, Betreff, Empfänger und Anlagen.');
   const lines = [
     'tell application id "com.microsoft.Outlook"',
@@ -305,7 +306,7 @@ export function buildSentVerificationAppleScript({ from, subject, to = [], attac
   appendExactAccountLookup(lines);
   lines.push(
     'set recentMatches to {}',
-    'repeat 20 times',
+    `repeat ${attempts} times`,
     'set recentMatches to {}',
     'if senderAccount is missing value then',
     'set candidateMessages to (every outgoing message whose subject is requestedSubject)',
@@ -354,6 +355,11 @@ export async function verifyOutlookSentMessage(input = {}) {
     throw new Error('Gesendet-Prüfung: Die Anlagen stimmen nicht exakt mit dem versendeten Manifest überein.');
   }
   return { verified: true, folder: 'Gesendet', subject, sender: expected.from, recipients: actualRecipients, attachments: actualAttachments };
+}
+
+export function isOutlookSentMessageNotFound(error) {
+  const message = String(error?.message || error || '');
+  return /(?:\(-?562\)|number\s+562|nicht eindeutig im Gesendet-Ordner gefunden)/i.test(message);
 }
 
 function normalizeDeleteEntries(entries = []) {
