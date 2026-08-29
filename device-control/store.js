@@ -337,7 +337,11 @@ export async function claimNextDeviceCommand(deviceId = IVA_IMAC_DEVICE_ID, agen
     const command = store.commands.find(item => item.deviceId === deviceId
       && item.status === 'queued'
       && (!item.retryAt || Date.parse(item.retryAt) <= now)
-      && (!claimingAgent?.uiBusy || ['agent.status', 'codex.task.status', 'funding.monitor.status', 'funding.reviews.list', 'portal.credentials.status'].includes(item.action))
+      // The Planbar search refresh reads the live tooltip endpoint for an
+      // explicit range without steering or reloading the shared UI. It is safe
+      // to claim while another workflow owns the UI lock; scheduling and every
+      // other UI-writing action remain blocked here.
+      && (!claimingAgent?.uiBusy || ['agent.status', 'codex.task.status', 'funding.monitor.status', 'funding.reviews.list', 'portal.credentials.status', 'planbar.search.refresh'].includes(item.action))
       && (!DEVICE_ACTIONS[item.action]?.requiresAttestedAgent
         || (claimingAgent && claimingAgent.allowedActions.includes(item.action))));
     if (!command) {
