@@ -188,6 +188,7 @@ import {
   probeGoogleGmail,
 } from './integrations/google-gmail.js';
 import {
+  PIPEDRIVE_EDITABLE_DEAL_FIELDS,
   authorizePipedriveWebhook,
   completePipedriveOAuth,
   createPipedriveAuthUrl,
@@ -1427,6 +1428,12 @@ app.get('/health/pipedrive', async (_req, res) => {
     authorized: status.authorized,
     readReady: status.readReady,
     writeEnabled: status.writeEnabled,
+    capabilities: {
+      notes: true,
+      dealFields: Object.keys(PIPEDRIVE_EDITABLE_DEAL_FIELDS),
+      stages: true,
+      delete: false,
+    },
     companyDomain: status.companyDomain || null,
     lastCheckedAt: status.lastProbe?.checkedAt || null,
   });
