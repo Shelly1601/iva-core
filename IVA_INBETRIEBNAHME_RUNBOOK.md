@@ -99,6 +99,25 @@ Projekt-IDs kommen aus „Mein CRM“/Supabase und müssen jeweils zur richtigen
 
 Test: pro Projekt genau einen bekannten Lead lesen und Projektname, Status und Wiedervorlage vergleichen. Keine Kundendaten im Chat wiedergeben.
 
+### Pipedrive fuer IVA-Workflows
+
+Fuer das bestehende HeatHero-Firmenkonto wird kein zweites CRM aufgebaut. IVA
+liest Deals, Kontakte, Notizen, Dateien und Aktivitaeten bei Bedarf direkt aus
+Pipedrive. Der einmalige schlanke Zugang besteht aus:
+
+- `PIPEDRIVE_API_TOKEN`: in Pipedrive unter den persoenlichen API-Einstellungen anzeigen und unmittelbar als Railway-Secret speichern; niemals in Chat, Datei oder Zwischenablageprotokoll dokumentieren
+- `PIPEDRIVE_ALLOWED_COMPANY_DOMAIN=simplegategmbh.pipedrive.com`
+- `PIPEDRIVE_WRITE_ENABLED=false` fuer die erste Inbetriebnahme
+
+Pruefung nach dem Deploy:
+
+1. `/health/pipedrive` meldet `readReady: true`.
+2. `/api/pipedrive/probe` erkennt drei Pipelines und 15 Phasen ohne Drift.
+3. Ein bekannter Deal wird inklusive Notizen, Dateien und Aktivitaeten gelesen.
+4. Erst nach diesem Vergleich `PIPEDRIVE_WRITE_ENABLED=true` setzen und eine einzelne Testnotiz mit exakter Ruecklesepruefung anlegen.
+
+Datei- oder Datensatzloeschungen sind unabhaengig von der Variable im IVA-Code gesperrt. Fuer spaetere weitere Pipedrive-Konten kann stattdessen die bereits vorbereitete private OAuth-App verwendet werden.
+
 ### Qonekto
 
 - `QONEKTO_MCP_TOKEN`: in Qonekto als dedizierten Produktionszugang `IVA – Qonekto – Produktion` erzeugen

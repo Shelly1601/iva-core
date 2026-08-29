@@ -57,6 +57,27 @@ _Stand: 4. August 2026. Diese Datei ist die verbindliche Resteliste für IVAs ex
 | ➖ | `CRM_QONEKTO_DEFAULT_SALUTATION_ID` | Nur falls die Anrede-ID im CRM fehlt. |
 | ➖ | `CRM_QONEKTO_DEFAULT_BROKER_ID` | Nur falls Qonekto keinen Standardvermittler setzt. |
 
+### Pipedrive als direkte IVA-Arbeitsquelle
+
+Pipedrive bleibt das fuehrende System fuer HeatHero-Deals, Phasen, Notizen und
+Dateien. IVA legt keine zweite Kundenkopie an, sondern liest den benoetigten
+Deal live. Der bereits vorhandene iMac-/Chrome-Weg bleibt nur als Fallback.
+
+| Status | Railway-Variable | Zweck / naechster Schritt |
+|---|---|---|
+| 🟡 | `PIPEDRIVE_API_TOKEN` | Schlanker Zugang fuer das bestehende Firmenkonto; ausschliesslich direkt in Railway speichern. |
+| ✅ | `PIPEDRIVE_ALLOWED_COMPANY_DOMAIN` | Exakt `simplegategmbh.pipedrive.com`; verhindert die Verbindung mit einem falschen Pipedrive-Unternehmen. |
+| ⬜ | `PIPEDRIVE_WRITE_ENABLED` | Zunaechst `false`; erst nach einem Live-Lesetest und einem einzelnen bestaetigten Schreibtest auf `true`. |
+| ➖ | `PIPEDRIVE_WEBHOOK_USERNAME`, `PIPEDRIVE_WEBHOOK_PASSWORD` | Optional fuer Webhooks v2 an `/webhooks/pipedrive`; IVA speichert nur Ereignis-Metadaten. |
+| ➖ | `PIPEDRIVE_CLIENT_ID`, `PIPEDRIVE_CLIENT_SECRET`, `PIPEDRIVE_REDIRECT_URI`, `PIPEDRIVE_TOKEN_KEY` | Spaeterer OAuth-Weg fuer weitere Konten; fuer das aktuelle Einzelkonto nicht noetig. |
+
+Live-Abnahme in dieser Reihenfolge:
+
+1. `GET /health/pipedrive` muss `readReady: true` liefern.
+2. `POST /api/pipedrive/probe` muss drei Pipelines, 15 Phasen und keinen Layout-Drift bestaetigen.
+3. Einen bekannten Deal ueber `/api/pipedrive/deals/:id` lesen und Deal, Person, Notizen, Dateien und Aktivitaeten gegen Pipedrive vergleichen.
+4. Erst danach genau eine IVA-Testnotiz mit Ruecklesepruefung anlegen. Loeschen bleibt im Code immer gesperrt.
+
 Noch zu prüfen:
 
 - Einen benannten Testkunden aus Qonekto rein lesend abrufen.

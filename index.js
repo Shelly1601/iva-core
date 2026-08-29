@@ -21,6 +21,7 @@ import { memorySkill } from './skills/memory.js';
 import { calendarSkill } from './skills/calendar.js';
 import { mailsSkill } from './skills/mails.js';
 import { crmSkill } from './skills/crm.js';
+import { pipedriveSkill } from './skills/pipedrive.js';
 import { marketingSkill } from './skills/marketing.js';
 import { researchSkill } from './skills/research.js';
 import { workspacesSkill } from './skills/workspaces.js';
@@ -185,6 +186,21 @@ import {
   listGoogleGmailMessages,
   probeGoogleGmail,
 } from './integrations/google-gmail.js';
+import {
+  authorizePipedriveWebhook,
+  completePipedriveOAuth,
+  createPipedriveAuthUrl,
+  createPipedriveDealNote,
+  getPipedriveDealBundle,
+  getPipedriveStructure,
+  listPipedriveDeals,
+  pipedriveStatus,
+  pipedriveWebhookStatus,
+  probePipedrive,
+  recordPipedriveWebhook,
+  searchPipedriveDeals,
+  updatePipedriveDealStage,
+} from './integrations/pipedrive.js';
 import { classifyTooOftenReplyWithAi } from './heat-hero/too-often-classifier.js';
 import {
   TOO_OFTEN_LABEL_NAME,
@@ -797,6 +813,7 @@ Tool-Nutzung:
 - Alle beauftragten Rechneraktionen laufen standardmäßig auf dem iMac über denselben zentralen IVA-Gerätekanal, unabhängig von Handy, Telegram, Sprache oder MacBook als Eingang. Das MacBook bleibt Nadines Arbeitsgerät. Eine erneute Bestätigung des Ausführungsortes ist nicht nötig. Der konkrete Auftrag autorisiert seine üblichen Zwischenschritte; fremde Daten ändern, Geld ausgeben oder extern kommunizieren nur im ausdrücklich beauftragten Rahmen. Das Wort "oben" bedeutet bei Nadine immer den iMac. Wenn eine normale freigegebene Aktion "oben" oder "auf dem iMac" passieren soll, darf sie niemals auf dem MacBook ausgeführt werden. Für eine direkt unterstützte Geräteaktion sendCommandToImac verwenden. Passt keine engere Geräteaktion, aber Nadine hat eine gewöhnliche lokale iMac-Aktion ausdrücklich beauftragt, runTaskOnImac verwenden. Für Panasonic, Bosch, Pipedrive, Airtable oder Planbar bei Bedarf ensureImacPortalLogin verwenden: normale Wiederanmeldungen sind von Nadine dauerhaft freigegeben und brauchen keine neue Rückfrage; Zugangsdaten bleiben im lokalen macOS-Schlüsselbund, Panasonic-2FA wird ohne Zwischenablage direkt aus dem fest freigegebenen Ente-Auth-Eintrag eingesetzt. Erst CAPTCHA, Kontosperre, externe Bestätigung, ausdrücklich abgelehnte oder lokal nicht vorhandene Zugangsdaten sind ein echter Login-Blocker. Für ausdrücklich beauftragte IVA-Code-, App- oder Systemänderungen stattdessen startIvaBuild verwenden; dieses Werkzeug übergibt den vollständigen Auftrag kontrolliert an Codex. Niemals so tun, als sei ein nur eingereihter Befehl bereits ausgeführt; anschließend den passenden Befehls- beziehungsweise Codex-Auftragsstatus prüfen. Keine Zugangsdaten und keine beliebigen Dateipfade an den Gerätekanal übergeben.
 - CRM-Namen aus Sprache oder freier Texteingabe können falsch geschrieben beziehungsweise transkribiert sein. Vor jeder CRM-Auskunft oder -Aktion zu einer namentlich genannten Person findHeatHeroLeads mit der gelieferten Schreibweise aufrufen. Das Werkzeug durchsucht Schreibvarianten. Bei matchStatus "unique" ausschließlich den gespeicherten CRM-Namen und die gespeicherte ID verwenden. Bei "ambiguous" mit höchstens drei Kandidaten nachfragen, welcher gemeint ist. Bei "not-found" genau eine Frage stellen: wie der Nachname geschrieben wird. Niemals einen ähnlich klingenden Namen stillschweigend auswählen. Bei anderen CRM-Projekten ohne eigenen Resolver gilt mindestens dieselbe Rückfragepflicht, bis der gespeicherte Vollname eindeutig ist.
 - Wenn Nadine verlangt, eine Kundenakte aus dem CRM anzulegen oder CRM-Daten in die Kundenakte zu ziehen, ausschließlich importCrmCustomerFile aufrufen. Dieses Werkzeug erstellt eine aktive Kundenakte, übernimmt vorhandene Kontaktdaten und CRM-Notizen und verhindert Dubletten. Dafür niemals mehrfach createWorkspace aufrufen. Eine Qonekto-/Blau-direkt-Übertragung erfolgt dadurch ausdrücklich noch nicht.
+- Pipedrive ist fuer Auftrags- und Montageprozesse eine eigene fuehrende Live-Datenquelle. Bei Pipedrive-Anfragen zuerst searchPipedriveDeals beziehungsweise listPipedriveDeals nutzen und einen eindeutigen Deal danach mit getPipedriveDeal vollstaendig lesen. Pipedrive-Daten nicht aus altem Gedächtnis oder Browser-Screenshots ableiten. Notizen und Phasen nur bei einem konkreten aktuellen Auftrag mit addPipedriveDealNote beziehungsweise movePipedriveDealStage schreiben; vor und nach der Aktion pruefen. Pipedrive-Löschungen sind verboten.
 - Mehrere Quellen relevant (z. B. Kalender + Mails + Leads): parallel abrufen.
 - Fach-/Recherche-Anfragen: askArchitect mit der präzisen Frage. Der Router entscheidet zwischen knowledge (zeitloses Fachwissen zu Finanz/Versicherung/Vorsorge/Rente) und web-research (aktuelle öffentliche Fakten wie Gesetze, Grenzwerte, Beitragssätze, Freibeträge, Fördersätze, Produktdatenblätter, Versicherungsbedingungen, Preise, Nachrichten, Öffnungszeiten). Für JEDE aktuelle Zahl / jeden aktuellen Grenzwert PFLICHT diesen Router nutzen statt aus dem Kopf zu antworten. Für eigene Systeme (Kalender/Mails/CRM/Leads/Kampagnen/Todos/Bilder) stattdessen direkt das passende Tool.
 - Kundinnen, Kunden, Vertraege, Dokumente, Archiv, Aufgaben oder Schaeden aus blau direkt/AMEISE/Qonekto: zuerst listQonektoTools nutzen. Lesende Werkzeuge mit callQonektoReadTool sofort ausfuehren. Veraendernde Werkzeuge ausschliesslich mit prepareQonektoWrite vorbereiten, Aenderung klar wiederholen und Nadine fragen, ob sie das wirklich will. Ausgefuehrt wird serverseitig erst nach ihrer separaten, exakten Antwort "Ja, Qonekto-Aenderung ausfuehren". Niemals behaupten, eine nur vorbereitete Aenderung sei bereits erfolgt. Destruktive Werkzeuge bleiben blockiert. Niemals Qonekto-Daten raten oder durch oeffentliche Web-Recherche ersetzen.
@@ -850,6 +867,14 @@ const ALL_SKILLS = {
   calendar:  calendarSkill({ getEventsRaw, getCalendlyEvents, fmtEvents, listAppointmentTypes, createAppointmentType }),
   mails:     mailsSkill({ loadMailAccounts, fetchInbox, fetchAllMailSources }),
   crm:       crmSkill({ fetchAllLeads, searchHeatHeroLeads, updateHeatHeroLeadStatus, importCrmCustomerFile }),
+  pipedrive: pipedriveSkill({
+    status: pipedriveStatus,
+    searchDeals: searchPipedriveDeals,
+    listDeals: listPipedriveDeals,
+    getDealBundle: getPipedriveDealBundle,
+    createDealNote: createPipedriveDealNote,
+    updateDealStage: updatePipedriveDealStage,
+  }),
   marketing: marketingSkill({ campaigns, brands, analyzeReferences, generateImage, generateContent }),
   research:  researchSkill({ askArchitect }),
   workspaces: workspacesSkill({ workspaces }),
@@ -1349,6 +1374,47 @@ app.get('/health/google-gmail', async (_req, res) => {
   });
 });
 
+// Pipedrive bleibt das fuehrende Arbeitssystem. IVA speichert nur den
+// serverseitigen API-/OAuth-Zugang und liest die benoetigten Deals/Falldaten bei
+// Bedarf live. Die vorhandene iMac-/Chrome-Automation bleibt als begrenzter
+// Fallback bestehen, bis alle produktiven Workflows gegen die offizielle API
+// verifiziert sind.
+app.get('/oauth/pipedrive/start', async (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.redirect(await createPipedriveAuthUrl()); }
+  catch (error) {
+    console.error('Pipedrive OAuth-Start:', error.message);
+    res.status(503).type('text/plain').send('Die Pipedrive-Verbindung ist noch nicht vollstaendig konfiguriert.');
+  }
+});
+app.get('/oauth/pipedrive/callback', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (req.query?.error) return res.status(400).type('text/plain').send('Die Pipedrive-Freigabe wurde nicht erteilt.');
+  try {
+    const result = await completePipedriveOAuth({ code: String(req.query?.code || ''), state: String(req.query?.state || '') });
+    res.type('html').send(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>IVA Pipedrive verbunden</title><style>body{font:16px system-ui;max-width:720px;margin:64px auto;padding:0 24px;color:#172033}h1{color:#137333}.box{padding:20px;border:1px solid #d7dee8;border-radius:12px;background:#f8fafc}li{margin:10px 0}</style></head><body><h1>IVA ist mit Pipedrive verbunden</h1><div class="box"><p>Der dauerhafte Zugriff wurde verschluesselt gespeichert. Pipedrive bleibt die fuehrende Datenquelle.</p><ul><li>Pipelines erkannt: <strong>${Number(result.probe?.pipelines || 0)}</strong></li><li>Phasen erkannt: <strong>${Number(result.probe?.stages || 0)}</strong></li><li>Deal-Felder erkannt: <strong>${Number(result.probe?.dealFields || 0)}</strong></li><li>Live-Aufbau stimmt: <strong>${result.probe?.layoutMatches ? 'Ja' : 'Pruefung erforderlich'}</strong></li></ul></div><p>Dieses Fenster kann jetzt geschlossen werden.</p></body></html>`);
+  } catch (error) {
+    console.error('Pipedrive OAuth-Callback:', error.message);
+    res.status(400).type('text/plain').send('Die Pipedrive-Verbindung konnte nicht abgeschlossen werden. Bitte den Vorgang erneut starten.');
+  }
+});
+app.get('/health/pipedrive', async (_req, res) => {
+  const status = await pipedriveStatus();
+  res.set('Cache-Control', 'no-store').status(status.readReady ? 200 : 503).json({
+    configured: status.configured,
+    authorized: status.authorized,
+    readReady: status.readReady,
+    writeEnabled: status.writeEnabled,
+    companyDomain: status.companyDomain || null,
+    lastCheckedAt: status.lastProbe?.checkedAt || null,
+  });
+});
+app.post('/webhooks/pipedrive', (req, res) => {
+  if (!authorizePipedriveWebhook(req.headers.authorization)) return res.sendStatus(401);
+  res.sendStatus(202);
+  void recordPipedriveWebhook(req.body || {}).catch(error => console.error('Pipedrive-Webhook:', error.message));
+});
+
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type', 'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS' };
 app.use('/api', (req, res, next) => {
   res.set(CORS);
@@ -1760,6 +1826,65 @@ app.get('/api/google-gmail/messages', async (req, res) => {
 app.post('/api/google-gmail/probe', async (_req, res) => {
   try { res.json(await probeGoogleGmail()); }
   catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.get('/api/pipedrive/status', async (req, res) => {
+  try {
+    const [status, webhook] = await Promise.all([
+      pipedriveStatus({ probe: req.query?.probe === '1' }),
+      pipedriveWebhookStatus(),
+    ]);
+    res.json({ ...status, webhook });
+  } catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.post('/api/pipedrive/probe', async (_req, res) => {
+  try { res.json(await probePipedrive()); }
+  catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.get('/api/pipedrive/structure', async (_req, res) => {
+  try { res.json(await getPipedriveStructure()); }
+  catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.get('/api/pipedrive/deals/search', async (req, res) => {
+  try {
+    res.json(await searchPipedriveDeals(String(req.query?.q || ''), {
+      exactMatch: req.query?.exact === '1',
+      limit: req.query?.limit,
+    }));
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.get('/api/pipedrive/deals', async (req, res) => {
+  try {
+    res.json(await listPipedriveDeals({
+      pipelineId: req.query?.pipelineId,
+      stageId: req.query?.stageId,
+      status: req.query?.status,
+      limit: req.query?.limit,
+      cursor: req.query?.cursor,
+    }));
+  } catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.get('/api/pipedrive/deals/:id', async (req, res) => {
+  try { res.json(await getPipedriveDealBundle(req.params.id)); }
+  catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.post('/api/pipedrive/deals/:id/notes', async (req, res) => {
+  try {
+    res.status(201).json(await createPipedriveDealNote({
+      dealId: req.params.id,
+      text: req.body?.text,
+      confirmation: req.body?.confirmation,
+    }));
+  } catch (error) { res.status(error.message.includes('freigeschaltet') ? 409 : 400).json({ error: error.message }); }
+});
+app.patch('/api/pipedrive/deals/:id/stage', async (req, res) => {
+  try {
+    res.json(await updatePipedriveDealStage({
+      dealId: req.params.id,
+      expectedStageId: req.body?.expectedStageId,
+      targetStageId: req.body?.targetStageId,
+      confirmation: req.body?.confirmation,
+    }));
+  } catch (error) { res.status(error.message.includes('freigeschaltet') ? 409 : 400).json({ error: error.message }); }
 });
 app.get('/api/mails/klassifiziert', async (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query?.limit) || 15, 1), 50);
