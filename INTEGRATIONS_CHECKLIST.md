@@ -11,6 +11,17 @@ _Stand: 4. August 2026. Diese Datei ist die verbindliche Resteliste für IVAs ex
 - `✅` = laut Projektstand bereits im Einsatz, `🟡` = vorhanden, aber live prüfen/abschließen, `⬜` = noch einrichten, `➖` = optional.
 - Die Statusangaben ersetzen keinen Blick in Railway: IVA kann die dort gespeicherten Secret-Werte absichtlich nicht auslesen.
 
+## Gemeinsamer Schnittstellenzugriff
+
+Alle aktiven IVA-Agenten und alle IVA-Workflows erhalten denselben zentralen
+Schnittstellenkatalog. Die Fachrolle entscheidet damit nicht mehr, ob etwa
+Pipedrive, Airtable, Planbar, CRM, Kalender, Mails oder Qonekto verfuegbar ist.
+Die Schutzlogik bleibt in der jeweiligen Schnittstelle: gemeinsame
+Verfuegbarkeit umgeht keine Schreibbestaetigung, keinen Aktivierungsschalter,
+keine Versand- oder Budgetfreigabe und kein Loeschverbot. Der geschuetzte
+Statusendpunkt `/api/interfaces/access` weist Agenten-, Workflow- und
+Werkzeugzugriff aus.
+
 ## 1. IVA-Gehirn, Sprache und Kosten
 
 | Status | Railway-Variable | Zweck / nächster Schritt |
@@ -77,7 +88,7 @@ Live-Abnahme in dieser Reihenfolge:
 2. `POST /api/pipedrive/probe` muss drei Pipelines, 15 Phasen und keinen Layout-Drift bestaetigen.
 3. Einen bekannten Deal ueber `/api/pipedrive/deals/:id` lesen und Deal, Person, Notizen, Dateien und Aktivitaeten gegen Pipedrive vergleichen.
 4. Nach bewusstem Aktivieren des Schreibschutzschalters koennen IVA-Workflows Notizen anlegen, freigegebene Deal-Felder aktualisieren und Deals zwischen den bekannten Phasen verschieben. Jede Feld- oder Phasenaenderung prueft den zuvor gelesenen Ist-Wert und liest das Ergebnis nach dem Speichern erneut; Loeschungen bleiben gesperrt.
-4. Erst danach genau eine IVA-Testnotiz mit Ruecklesepruefung anlegen. Loeschen bleibt im Code immer gesperrt.
+5. Erst danach genau eine IVA-Testnotiz mit Ruecklesepruefung anlegen. Loeschen bleibt im Code immer gesperrt.
 
 ### Airtable als direkte Workflowquelle
 

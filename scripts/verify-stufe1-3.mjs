@@ -18,7 +18,7 @@ const TEST_DATA_DIR = await fs.mkdtemp(path.join(os.tmpdir(), 'iva-router-test-'
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const { chooseModel, listTasks, listModels, inspectRouting, recordUsage, currentSpendEUR } = await import('../core/router.js');
-const { AGENTS, getAgent, listAgents, routeAgent } = await import('../agents/registry.js');
+const { AGENTS, SHARED_INTERFACE_SKILLS, WORKFLOW_INTERFACE_SKILLS, getAgent, getInterfaceAccessPolicy, listAgents, routeAgent } = await import('../agents/registry.js');
 const { memorySkill } = await import('../skills/memory.js');
 const { calendarSkill } = await import('../skills/calendar.js');
 const { mailsSkill } = await import('../skills/mails.js');
@@ -103,6 +103,9 @@ eq('  iva-recruiting enabled', AGENTS['iva-recruiting'].enabled, true);
 eq('  iva-builder enabled', getAgent('iva-builder').id, 'iva-builder');
 eq('  getAgent(unbekannt) -> iva-standard', getAgent('does-not-exist').id, 'iva-standard');
 eq('  iva-standard allowedSkills', getAgent('iva-standard').allowedSkills, ['memory', 'calendar', 'mails', 'crm', 'pipedrive', 'airtable', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'builder', 'qonekto', 'lumit', 'capabilityReview', 'knowledgeLibrary', 'recruiting', 'deviceControl', 'planbar', 'investment']);
+truthy('  Alle aktiven Agenten besitzen alle gemeinsamen Schnittstellen', Object.values(AGENTS).filter(agent => agent.enabled).every(agent => SHARED_INTERFACE_SKILLS.every(skill => agent.allowedSkills.includes(skill))));
+eq('  Workflows besitzen dieselben gemeinsamen Schnittstellen', WORKFLOW_INTERFACE_SKILLS, SHARED_INTERFACE_SKILLS);
+eq('  Schnittstellenrichtlinie ist zentral geteilt', getInterfaceAccessPolicy().mode, 'shared-interfaces');
 eq('  IVA-Codeauftrag routet zum Builder', routeAgent('Implementiere in IVA eine neue Chat-Funktion').agent.id, 'iva-builder');
 eq('  LUMIT routet zu Kunden/Backoffice', routeAgent('LUMIT als servicierter Antrag anlegen').agent.id, 'iva-customer');
 truthy('  Kunden-Agent besitzt LUMIT-Skill', getAgent('iva-customer').allowedSkills.includes('lumit'));

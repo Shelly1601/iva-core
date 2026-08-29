@@ -5,6 +5,19 @@
 
 const STANDARD_SKILLS = ['memory', 'calendar', 'mails', 'crm', 'pipedrive', 'airtable', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'builder', 'qonekto', 'lumit', 'capabilityReview', 'knowledgeLibrary', 'recruiting', 'deviceControl', 'planbar', 'investment'];
 
+// Schnittstellen sind IVA-weit geteilt. Fachagenten bleiben unterschiedliche
+// Rollen, duerfen aber bei gemischten Auftraegen auf dieselben Live-Systeme
+// zugreifen. Die Werkzeuge selbst behalten ihre Schreib-, Versand-, Budget-,
+// Freigabe- und Loeschschutzregeln.
+export const SHARED_INTERFACE_SKILLS = Object.freeze([
+  'memory', 'calendar', 'mails', 'crm', 'pipedrive', 'airtable', 'marketing',
+  'research', 'workspaces', 'advice', 'opportunities', 'accounting',
+  'energyTariffs', 'qonekto', 'lumit', 'knowledgeLibrary', 'recruiting',
+  'deviceControl', 'planbar', 'investment',
+]);
+
+export const WORKFLOW_INTERFACE_SKILLS = SHARED_INTERFACE_SKILLS;
+
 export const AGENTS = {
   'iva-standard': {
     id: 'iva-standard', name: 'IVA · Zentrale', shortName: 'IVA', enabled: true,
@@ -82,6 +95,20 @@ export const AGENTS = {
   },
 };
 
+for (const agent of Object.values(AGENTS)) {
+  agent.allowedSkills = Object.freeze([...new Set([...agent.allowedSkills, ...SHARED_INTERFACE_SKILLS])]);
+}
+
+export function getInterfaceAccessPolicy() {
+  return {
+    mode: 'shared-interfaces',
+    agentIds: Object.values(AGENTS).filter(agent => agent.enabled).map(agent => agent.id),
+    agentSkillIds: [...SHARED_INTERFACE_SKILLS],
+    workflowSkillIds: [...WORKFLOW_INTERFACE_SKILLS],
+    safeguards: ['tool-confirmations', 'write-switches', 'no-delete-guards', 'budget-and-send-gates'],
+  };
+}
+
 const ROUTES = [
   { agentId: 'iva-builder', reason: 'IVA-Bauauftrag erkannt', pattern: /\b(?:bau(?:e|en)?|implementier(?:e|en)?|programmier(?:e|en)?|entwickl(?:e|en)?|fix(?:e|en)?|reparier(?:e|en)?|beheb(?:e|en)?|setz(?:e|t)?\s+.{0,35}\s+um|codeänderung|codeaenderung|systemänderung|systemaenderung)\b.{0,100}\b(?:iva|eva|funktion|workflow|automation|cockpit|chat|app|code|server|frontend|backend|agent|planbar)\b/i },
   { agentId: 'iva-investment', reason: 'Investment/Portfolio erkannt', pattern: /\b(investment(?:agent)?|saxo|portfolio|depotbestand|watchlist|orderentwurf|wertpapier|aktie(?:n)?|etf(?:s)?|anleihe(?:n)?|position(?:srisiko)?|margin)\b/i },
@@ -119,6 +146,6 @@ export function listAgents() {
   return Object.values(AGENTS).map(agent => ({
     id: agent.id, name: agent.name, shortName: agent.shortName, description: agent.description,
     enabled: agent.enabled, allowedSkills: agent.allowedSkills, modelProfile: agent.modelProfile,
-    safetyDefault: agent.safetyDefault, color: agent.color,
+    safetyDefault: agent.safetyDefault, color: agent.color, sharedInterfaceAccess: true,
   }));
 }

@@ -40,7 +40,7 @@ import { deviceControlSkill } from './skills/device-control.js';
 import { builderSkill } from './skills/builder.js';
 import { planbarSkill } from './skills/planbar.js';
 import { investmentSkill } from './skills/investment.js';
-import { listAgents, routeAgent } from './agents/registry.js';
+import { WORKFLOW_INTERFACE_SKILLS, getInterfaceAccessPolicy, listAgents, routeAgent } from './agents/registry.js';
 import { marketAnalysis } from './marketing/market.js';
 import { fetchMetaAdsInsights, marketingConnectorStatus } from './marketing/connectors.js';
 import { listResearchRuns, listResearchedCompanies, runMarketIntelligence } from './marketing/intelligence.js';
@@ -829,6 +829,7 @@ Tool-Nutzung:
 - Wenn Nadine verlangt, eine Kundenakte aus dem CRM anzulegen oder CRM-Daten in die Kundenakte zu ziehen, ausschließlich importCrmCustomerFile aufrufen. Dieses Werkzeug erstellt eine aktive Kundenakte, übernimmt vorhandene Kontaktdaten und CRM-Notizen und verhindert Dubletten. Dafür niemals mehrfach createWorkspace aufrufen. Eine Qonekto-/Blau-direkt-Übertragung erfolgt dadurch ausdrücklich noch nicht.
 - Pipedrive ist fuer Auftrags- und Montageprozesse eine eigene fuehrende Live-Datenquelle. Bei Pipedrive-Anfragen zuerst searchPipedriveDeals beziehungsweise listPipedriveDeals nutzen und einen eindeutigen Deal danach mit getPipedriveDeal vollstaendig lesen. Pipedrive-Daten nicht aus altem Gedächtnis oder Browser-Screenshots ableiten. Notizen, Deal-Felder und Phasen nur bei einem konkreten aktuellen Auftrag mit addPipedriveDealNote, updatePipedriveDealField beziehungsweise movePipedriveDealStage schreiben; vor und nach der Aktion pruefen. Pipedrive-Löschungen sind verboten.
 - Airtable ist fuer den Heat-Hero-/ENTER-Workflow eine eigene fuehrende Live-Datenquelle. Nutze listAirtableInstallationQueue, searchAirtableWorkflowRecords und getAirtableWorkflowRecord statt alte Screenshots oder gespeicherte Kundenkopien. Diese IVA-Schnittstelle ist strikt lesend: Niemals Airtable-Datensaetze, Felder, Stages oder Anhaenge veraendern oder loeschen.
+- Alle aktiven Fachagenten und IVA-Workflows haben grundsaetzlich Zugriff auf dieselben registrierten Schnittstellen. Nutze deshalb auch im aktiven Fachagenten die sachlich benoetigte Live-Quelle, statt wegen der Rollenbezeichnung auf veraltete Kopien auszuweichen. Die gemeinsame Verfuegbarkeit hebt keine Bestaetigung, keinen Schreibschalter, keine Versand- oder Budgetfreigabe und kein Loeschverbot auf.
 - Mehrere Quellen relevant (z. B. Kalender + Mails + Leads): parallel abrufen.
 - Fach-/Recherche-Anfragen: askArchitect mit der präzisen Frage. Der Router entscheidet zwischen knowledge (zeitloses Fachwissen zu Finanz/Versicherung/Vorsorge/Rente) und web-research (aktuelle öffentliche Fakten wie Gesetze, Grenzwerte, Beitragssätze, Freibeträge, Fördersätze, Produktdatenblätter, Versicherungsbedingungen, Preise, Nachrichten, Öffnungszeiten). Für JEDE aktuelle Zahl / jeden aktuellen Grenzwert PFLICHT diesen Router nutzen statt aus dem Kopf zu antworten. Für eigene Systeme (Kalender/Mails/CRM/Leads/Kampagnen/Todos/Bilder) stattdessen direkt das passende Tool.
 - Kundinnen, Kunden, Vertraege, Dokumente, Archiv, Aufgaben oder Schaeden aus blau direkt/AMEISE/Qonekto: zuerst listQonektoTools nutzen. Lesende Werkzeuge mit callQonektoReadTool sofort ausfuehren. Veraendernde Werkzeuge ausschliesslich mit prepareQonektoWrite vorbereiten, Aenderung klar wiederholen und Nadine fragen, ob sie das wirklich will. Ausgefuehrt wird serverseitig erst nach ihrer separaten, exakten Antwort "Ja, Qonekto-Aenderung ausfuehren". Niemals behaupten, eine nur vorbereitete Aenderung sei bereits erfolgt. Destruktive Werkzeuge bleiben blockiert. Niemals Qonekto-Daten raten oder durch oeffentliche Web-Recherche ersetzen.
@@ -919,16 +920,24 @@ const ALL_SKILLS = {
 
 // Baut die Tool-Map fuer einen konkreten Agenten aus dessen allowedSkills.
 // Fuer iva-standard = alle Skills -> identisches Tool-Set wie zuvor.
-function assembleTools(agent, { sessionId = 'default' } = {}) {
+function assembleSkillTools(skillIds, { sessionId = 'default' } = {}) {
   const out = {};
-  for (const skillId of agent.allowedSkills) {
+  for (const skillId of skillIds) {
     const s = skillId === 'qonekto'
       ? qonektoSkill({ sessionId, qonektoStatus, listQonektoTools, callQonektoReadTool, prepareQonektoWriteAction: prepareTrackedQonektoWrite })
       : ALL_SKILLS[skillId];
-    if (!s) { console.warn(`[REGISTRY] Skill "${skillId}" fuer Agent "${agent.id}" nicht gefunden.`); continue; }
+    if (!s) { console.warn(`[REGISTRY] Skill "${skillId}" nicht gefunden.`); continue; }
     Object.assign(out, s);
   }
   return out;
+}
+
+function assembleTools(agent, { sessionId = 'default' } = {}) {
+  return assembleSkillTools(agent.allowedSkills, { sessionId });
+}
+
+function assembleWorkflowTools({ sessionId = 'workflow' } = {}) {
+  return assembleSkillTools(WORKFLOW_INTERFACE_SKILLS, { sessionId });
 }
 
 function qonektoApprovalKey(sessionId) { return `qonekto:${String(sessionId || 'default').slice(0, 180)}`; }
@@ -1456,6 +1465,18 @@ app.get('/health/airtable', async (_req, res) => {
     lastCheckedAt: status.lastProbe?.checkedAt || null,
   });
 });
+app.get('/health/interfaces', (_req, res) => {
+  const policy = getInterfaceAccessPolicy();
+  const allAgentsReady = listAgents().filter(agent => agent.enabled).every(agent => agent.sharedInterfaceAccess === true);
+  res.set('Cache-Control', 'no-store').status(allAgentsReady ? 200 : 503).json({
+    mode: policy.mode,
+    activeAgents: policy.agentIds.length,
+    allAgentsReady,
+    sharedInterfaces: policy.agentSkillIds.length,
+    workflowsReady: policy.workflowSkillIds.length === policy.agentSkillIds.length,
+    safeguards: policy.safeguards,
+  });
+});
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type', 'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS' };
 app.use('/api', (req, res, next) => {
@@ -1580,6 +1601,7 @@ async function controlSnapshot() {
   return {
     generatedAt: new Date().toISOString(),
     agents,
+    interfaceAccess: getInterfaceAccessPolicy(),
     operations: ops,
     automations: automationsResult,
     connectors: {
@@ -1604,6 +1626,15 @@ async function controlSnapshot() {
     buildBacklog: improvementRequests.filter(item => !['done', 'rejected'].includes(item.status)).slice(-30).reverse(),
   };
 }
+
+app.get('/api/interfaces/access', (_req, res) => {
+  const workflowTools = assembleWorkflowTools({ sessionId: 'interface-access-status' });
+  res.json({
+    ...getInterfaceAccessPolicy(),
+    agents: listAgents().map(agent => ({ id: agent.id, sharedInterfaceAccess: agent.sharedInterfaceAccess })),
+    workflowToolNames: Object.keys(workflowTools).sort(),
+  });
+});
 
 app.get('/api/control/status', async (_req, res) => {
   try { res.json(await controlSnapshot()); }

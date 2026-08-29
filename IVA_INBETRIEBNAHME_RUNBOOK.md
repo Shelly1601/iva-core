@@ -101,6 +101,12 @@ Test: pro Projekt genau einen bekannten Lead lesen und Projektname, Status und W
 
 ### Pipedrive fuer IVA-Workflows
 
+Alle aktiven Fachagenten und alle IVA-Workflows erhalten den gleichen zentralen
+Schnittstellenkatalog. `/api/interfaces/access` muss fuer jeden Agenten
+`sharedInterfaceAccess: true` und fuer Workflows denselben Katalog melden.
+Schreib-, Versand-, Budget-, Freigabe- und Loeschschutz bleibt weiterhin im
+jeweiligen Werkzeug erzwungen.
+
 Fuer das bestehende HeatHero-Firmenkonto wird kein zweites CRM aufgebaut. IVA
 liest Deals, Kontakte, Notizen, Dateien und Aktivitaeten bei Bedarf direkt aus
 Pipedrive. Der einmalige schlanke Zugang besteht aus:

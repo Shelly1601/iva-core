@@ -8,7 +8,7 @@ const {
   beginAgentRun, finishAgentRun, listAgentRuns, createApproval, resolveApprovalByExternalKey,
   listApprovals, recordAudit, listAudit, operationsSummary,
 } = await import('../operations/store.js');
-const { AGENTS, getAgent, listAgents, routeAgent } = await import('../agents/registry.js');
+const { AGENTS, SHARED_INTERFACE_SKILLS, WORKFLOW_INTERFACE_SKILLS, getAgent, listAgents, routeAgent } = await import('../agents/registry.js');
 const { accountingSkill } = await import('../skills/accounting.js');
 
 let failures = 0;
@@ -52,8 +52,9 @@ for (const [text, expected] of routingCases) check(`Routing ${expected}`, routeA
 check('Explizite aktive Rolle wird respektiert', routeAgent('gemischtes Thema', 'iva-energy').agent.id === 'iva-energy');
 check('Builder ist für ausdrückliche IVA-Bauaufträge aktiv', getAgent('iva-builder').id === 'iva-builder');
 check('Elf Rollen sind aktiv', listAgents().filter(agent => agent.enabled).length === 11);
-check('Builder besitzt nur kontrollierte Übergabe-Werkzeuge', AGENTS['iva-builder'].enabled && AGENTS['iva-builder'].allowedSkills.includes('builder') && !AGENTS['iva-builder'].allowedSkills.includes('qonekto'));
-check('Marketing hat kein Qonekto-Schreibwerkzeug', !AGENTS['iva-marketing'].allowedSkills.includes('qonekto'));
+check('Alle Agenten teilen alle Schnittstellen', Object.values(AGENTS).filter(agent => agent.enabled).every(agent => SHARED_INTERFACE_SKILLS.every(skill => agent.allowedSkills.includes(skill))));
+check('Alle Workflows teilen denselben Schnittstellenkatalog', WORKFLOW_INTERFACE_SKILLS.length === SHARED_INTERFACE_SKILLS.length && WORKFLOW_INTERFACE_SKILLS.every(skill => SHARED_INTERFACE_SKILLS.includes(skill)));
+check('Builder behaelt den kontrollierten Baukanal zusaetzlich', AGENTS['iva-builder'].enabled && AGENTS['iva-builder'].allowedSkills.includes('builder'));
 
 const tools = accountingSkill({
   accountingSummary: async () => ({ open: 2 }), listAccountingEntities: async () => [],
