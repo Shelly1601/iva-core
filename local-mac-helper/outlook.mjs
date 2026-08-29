@@ -505,6 +505,7 @@ export async function createOutlookForwardDraft(input = {}) {
 
 export async function sendVerifiedOutlookXlsxMessage(input = {}) {
   const message = normalizeDraftPayload(input);
+  const sentVerificationLookbackSeconds = Math.max(60, Math.min(3600, Number(input.sentVerificationLookbackSeconds) || 900));
   if (!message.attachments.length || message.attachments.some(file => path.extname(file).toLowerCase() !== '.xlsx')) {
     throw new Error('Outlook-Versand abgebrochen: Es sind ausschließlich eine oder mehrere XLSX-Anlagen zulässig.');
   }
@@ -539,7 +540,7 @@ export async function sendVerifiedOutlookXlsxMessage(input = {}) {
     throw new Error('Outlook-Versand abgebrochen: Weder das exakte Outlook-Konto noch die freigegebene macOS-Oberflächenprüfung ist verfügbar.');
   }
   try {
-    const sentFolder = await verifyOutlookSentMessage(message);
+    const sentFolder = await verifyOutlookSentMessage({ ...message, lookbackSeconds: sentVerificationLookbackSeconds });
     return { ...sent, sentFolderVerified: true, sentFolder };
   } catch (error) {
     return {

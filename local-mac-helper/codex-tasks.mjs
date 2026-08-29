@@ -424,8 +424,12 @@ export async function startProjectWorkflowTask({
   if (normalizedWorkflowId === 'planbar-weekly-export') {
     const normalizedRunMode = runMode === 'automatic' ? 'automatic' : 'manual';
     const normalizedAutomationSlotKey = normalizedRunMode === 'automatic' ? clean(automationSlotKey, 180) : '';
+    const normalizedRequestId = clean(requestId, 160);
     if (normalizedRunMode === 'automatic' && !normalizedAutomationSlotKey) {
       throw new Error('Dem automatischen Planbar-Forecast fehlt der eindeutige Wochen-Slot.');
+    }
+    if (normalizedRunMode === 'manual' && !normalizedRequestId) {
+      throw new Error('Dem manuellen Planbar-Forecast fehlt die eindeutige Auftrags-ID.');
     }
     const mail = typeof findPreparedForecast === 'function' && typeof sendPreparedForecast === 'function'
       ? null
@@ -435,10 +439,15 @@ export async function startProjectWorkflowTask({
       ? sendPreparedForecast
       : (directory, context) => mail.sendPlanbarForecastRun(directory, { commit: true, ...context });
     const prepared = await findPrepared();
-    if (prepared) return sendPrepared(prepared.directory, { runMode: normalizedRunMode, automationSlotKey: normalizedAutomationSlotKey });
+    const deliveryContext = {
+      runMode: normalizedRunMode,
+      automationSlotKey: normalizedAutomationSlotKey,
+      ...(normalizedRunMode === 'manual' ? { deliveryRunKey: normalizedRequestId } : {}),
+    };
+    if (prepared) return sendPrepared(prepared.directory, deliveryContext);
     const senderFlags = normalizedRunMode === 'automatic'
       ? `--run-mode automatic --automation-slot ${JSON.stringify(normalizedAutomationSlotKey)}`
-      : '--run-mode manual';
+      : `--run-mode manual --delivery-run ${JSON.stringify(normalizedRequestId)}`;
     return startCodexTask({
       ...definition,
       prompt: `${definition.prompt}\n\nAuslöseart dieses Auftrags: ${normalizedRunMode}. Beim verbindlichen Sender müssen zusätzlich exakt diese Parameter verwendet werden: ${senderFlags}.`,

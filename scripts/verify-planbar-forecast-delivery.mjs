@@ -19,68 +19,77 @@ function memoryLog(entries = []) {
 {
   const store = memoryLog();
   let sends = 0;
-  const result = await deliverValidatedPlanbarForecast(run, {
-    ...store,
-    runMode: 'automatic',
-    automationSlotKey: 'planbar-weekly-export:weekly:2026-W35',
-    send: async () => { sends += 1; throw new Error('darf nicht senden'); },
-    verify: async () => ({ verified: true, folder: 'Gesendet' }),
+  const sent = async () => {
+    sends += 1;
+    return { sent: true, sentFolderVerified: true, sentFolder: { folder: 'Gesendet' } };
+  };
+
+  const manualTuesday = await deliverValidatedPlanbarForecast(run, {
+    ...store, runMode: 'manual', deliveryRunKey: 'manual-request-tuesday', send: sent,
   });
-  assert.equal(sends, 0, 'ein bereits in Gesendet gefundener Forecast wird niemals erneut verschickt');
-  assert.equal(result.recoveredFromSentFolder, true);
-  assert.equal(store.log.entries[0].runMode, 'automatic');
-  assert.equal(store.log.entries[0].automationSlotKey, 'planbar-weekly-export:weekly:2026-W35');
+  const automaticFriday = await deliverValidatedPlanbarForecast(run, {
+    ...store, runMode: 'automatic', automationSlotKey: 'planbar-weekly-export:weekly:2026-W35', send: sent,
+  });
+  const manualWednesday = await deliverValidatedPlanbarForecast(run, {
+    ...store, runMode: 'manual', deliveryRunKey: 'manual-request-wednesday', send: sent,
+  });
+
+  assert.equal(sends, 3, 'zwei ausdrückliche manuelle Aufträge und der Freitagslauf dürfen trotz identischem Inhalt jeweils senden');
+  assert.equal(manualTuesday.deliveryRunKey, 'manual:manual-request-tuesday');
+  assert.equal(automaticFriday.deliveryRunKey, 'automatic:planbar-weekly-export:weekly:2026-W35');
+  assert.equal(manualWednesday.deliveryRunKey, 'manual:manual-request-wednesday');
+  assert.deepEqual(store.log.entries.map(item => item.runMode), ['manual', 'automatic', 'manual']);
+
+  const automaticRetry = await deliverValidatedPlanbarForecast(run, {
+    ...store, runMode: 'automatic', automationSlotKey: 'planbar-weekly-export:weekly:2026-W35',
+    send: async () => { sends += 1; throw new Error('darf nicht erneut senden'); },
+  });
+  const manualRetry = await deliverValidatedPlanbarForecast(run, {
+    ...store, runMode: 'manual', deliveryRunKey: 'manual-request-tuesday',
+    send: async () => { sends += 1; throw new Error('darf nicht erneut senden'); },
+  });
+  assert.equal(sends, 3, 'nur Wiederholungen derselben stabilen Auftrags-ID werden dedupliziert');
+  assert.equal(automaticRetry.duplicateVerified, true);
+  assert.equal(manualRetry.duplicateVerified, true);
 }
 
 {
   const store = memoryLog();
   let sends = 0;
   let verifications = 0;
-  const verify = async () => {
-    verifications += 1;
-    if (verifications === 1) throw new Error('Gesendet-Prüfung: Die Nachricht wurde nicht eindeutig im Gesendet-Ordner gefunden. (562)');
-    return { verified: true, folder: 'Gesendet' };
-  };
   const result = await deliverValidatedPlanbarForecast(run, {
     ...store,
     runMode: 'manual',
+    deliveryRunKey: 'manual-timeout-request',
     send: async () => { sends += 1; throw new Error('macOS-Oberflächenautomation hat nach 15000 ms abgebrochen.'); },
-    verify,
+    verify: async input => {
+      verifications += 1;
+      assert.equal(input.lookbackSeconds, 120);
+      return { verified: true, folder: 'Gesendet' };
+    },
   });
   assert.equal(sends, 1);
+  assert.equal(verifications, 1);
   assert.equal(result.recoveredAfterUncertainSubmission, true);
   assert.equal(store.log.entries[0].status, 'sent_verified');
 
-  const automatic = await deliverValidatedPlanbarForecast(run, {
+  const retry = await deliverValidatedPlanbarForecast(run, {
     ...store,
-    runMode: 'automatic',
-    automationSlotKey: 'planbar-weekly-export:weekly:2026-W35',
+    runMode: 'manual',
+    deliveryRunKey: 'manual-timeout-request',
     send: async () => { sends += 1; throw new Error('darf nicht erneut senden'); },
-    verify,
   });
-  assert.equal(sends, 1, 'manueller und automatischer Lauf bleiben getrennt, der identische tatsächliche Versand bleibt dedupliziert');
-  assert.equal(automatic.duplicateVerified, true);
-  assert.equal(store.log.entries[0].runMode, 'manual', 'der manuelle Lauf wird nicht nachträglich zum Automatiklauf umetikettiert');
-}
-
-{
-  const store = memoryLog();
-  let sends = 0;
-  await assert.rejects(
-    deliverValidatedPlanbarForecast(run, {
-      ...store,
-      runMode: 'manual',
-      send: async () => { sends += 1; },
-      verify: async () => { throw new Error('Outlook-Automation hat das Zeitlimit überschritten.'); },
-    }),
-    /Gesendet-Ordner konnte vor dem Versand nicht sicher geprüft/,
-  );
-  assert.equal(sends, 0, 'bei einer technisch fehlgeschlagenen Vorprüfung wird nicht gesendet');
+  assert.equal(sends, 1);
+  assert.equal(retry.duplicateVerified, true);
 }
 
 await assert.rejects(
   deliverValidatedPlanbarForecast(run, { ...memoryLog(), runMode: 'automatic' }),
   /Wochen-Slot/,
 );
+await assert.rejects(
+  deliverValidatedPlanbarForecast(run, { ...memoryLog(), runMode: 'manual' }),
+  /Auftrags-ID/,
+);
 
-console.log('PASS Planbar-Forecast trennt manuelle und automatische Läufe und verhindert Doppelversand.');
+console.log('PASS Planbar-Forecast zählt Automatik-Slots und ausdrückliche manuelle Aufträge getrennt.');

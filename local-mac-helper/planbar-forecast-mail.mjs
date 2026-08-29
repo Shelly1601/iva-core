@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { access, mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { isOutlookSentMessageNotFound, sendVerifiedOutlookXlsxMessage, verifyOutlookSentMessage } from './outlook.mjs';
+import { sendVerifiedOutlookXlsxMessage, verifyOutlookSentMessage } from './outlook.mjs';
 
 export const PLANBAR_FORECAST_SENDER = 'n.sell@heat-hero.com';
 export const PLANBAR_FORECAST_RECIPIENT = 'a.keller@heat-hero.com';
@@ -167,13 +167,6 @@ async function saveSendLog(log) {
   }
 }
 
-function deliveryMatches(item, run) {
-  return item.subject === run.subject
-    && item.sender === run.sender
-    && item.recipient === run.recipient
-    && sameStrings(item.attachments || [], run.attachmentNames);
-}
-
 function newDeliveryEntry(run, context, status, now) {
   const timestamp = now().toISOString();
   return {
@@ -181,6 +174,7 @@ function newDeliveryEntry(run, context, status, now) {
     period: run.period, sender: run.sender, recipient: run.recipient,
     subject: run.subject, attachments: run.attachmentNames,
     runMode: context.runMode, automationSlotKey: context.automationSlotKey,
+    deliveryRunKey: context.deliveryRunKey,
     status, sentFolderVerified: status === 'sent_verified', sentFolderVerificationError: '',
   };
 }
@@ -192,17 +186,25 @@ export async function deliverValidatedPlanbarForecast(run, {
   saveLog = saveSendLog,
   runMode = 'manual',
   automationSlotKey = '',
+  deliveryRunKey = '',
   now = () => new Date(),
 } = {}) {
+  const normalizedMode = runMode === 'automatic' ? 'automatic' : 'manual';
+  const normalizedSlotKey = normalizedMode === 'automatic' ? String(automationSlotKey || '').slice(0, 180) : '';
+  const normalizedManualKey = normalizedMode === 'manual' ? String(deliveryRunKey || '').slice(0, 180) : '';
   const context = {
-    runMode: runMode === 'automatic' ? 'automatic' : 'manual',
-    automationSlotKey: runMode === 'automatic' ? String(automationSlotKey || '').slice(0, 180) : '',
+    runMode: normalizedMode,
+    automationSlotKey: normalizedSlotKey,
+    deliveryRunKey: normalizedMode === 'automatic' ? `automatic:${normalizedSlotKey}` : `manual:${normalizedManualKey}`,
   };
   if (context.runMode === 'automatic' && !context.automationSlotKey) {
     throw new Error('Forecast-Abbruch: Dem automatischen Lauf fehlt der eindeutige Wochen-Slot.');
   }
+  if (context.runMode === 'manual' && !normalizedManualKey) {
+    throw new Error('Forecast-Abbruch: Dem manuellen Lauf fehlt die eindeutige Auftrags-ID.');
+  }
   const log = await loadLog();
-  const duplicate = log.entries.find(item => deliveryMatches(item, run)
+  const duplicate = log.entries.find(item => item.deliveryRunKey === context.deliveryRunKey
     && ['sent_verified', 'submitted_unverified', 'submission_started', 'submission_uncertain'].includes(item.status));
   const body = `Hallo Angelo,\n\nanbei die Planbar-Listen für ${run.period}.\n\nViele Grüße\nNadine`;
   const preview = {
@@ -216,6 +218,7 @@ export async function deliverValidatedPlanbarForecast(run, {
     sent: false,
     runMode: context.runMode,
     automationSlotKey: context.automationSlotKey,
+    deliveryRunKey: context.deliveryRunKey,
   };
   if (duplicate?.status === 'sent_verified') {
     return {
@@ -235,7 +238,8 @@ export async function deliverValidatedPlanbarForecast(run, {
         subject: run.subject,
         body,
         attachments: run.attachments,
-        lookbackSeconds: 8 * 24 * 60 * 60,
+        lookbackSeconds: Math.max(120, Math.min(8 * 24 * 60 * 60,
+          Math.ceil((now().getTime() - Date.parse(duplicate.createdAt || duplicate.sentAt || 0)) / 1000) + 120)),
       });
       duplicate.status = 'sent_verified';
       duplicate.sentFolderVerified = true;
@@ -256,7 +260,7 @@ export async function deliverValidatedPlanbarForecast(run, {
       duplicate.sentFolderVerificationError = String(error?.message || error).slice(0, 500);
       duplicate.lastVerificationAttemptAt = now().toISOString();
       await saveLog(log);
-      throw new Error(`Forecast-Abbruch: Für diesen Forecast existiert bereits ein Versandversuch; der Gesendet-Nachweis ist noch nicht sichtbar. Es wurde nicht erneut gesendet. ${duplicate.sentFolderVerificationError}`);
+      throw new Error(`Forecast-Abbruch: Für genau diesen Auftrag existiert bereits ein Versandversuch; der Gesendet-Nachweis ist noch nicht sichtbar. Derselbe Auftrag wurde nicht erneut gesendet. ${duplicate.sentFolderVerificationError}`);
     }
   }
 
@@ -266,25 +270,8 @@ export async function deliverValidatedPlanbarForecast(run, {
     subject: run.subject,
     body,
     attachments: run.attachments,
+    sentVerificationLookbackSeconds: 120,
   };
-  try {
-    const sentFolder = await verify({ ...message, lookbackSeconds: 8 * 24 * 60 * 60, pollAttempts: 1 });
-    const recovered = newDeliveryEntry(run, context, 'sent_verified', now);
-    recovered.recoveredFromSentFolder = true;
-    recovered.sentFolder = sentFolder;
-    log.entries.push(recovered);
-    await saveLog(log);
-    return {
-      ...preview, preview: false, sent: true, sentFolderVerified: true,
-      duplicateVerified: true, recoveredFromSentFolder: true, sendLogEntry: recovered,
-      outlook: { sent: true, sentFolderVerified: true, sentFolder, reverifiedWithoutResend: true },
-    };
-  } catch (error) {
-    if (!isOutlookSentMessageNotFound(error)) {
-      throw new Error(`Forecast-Abbruch: Der Gesendet-Ordner konnte vor dem Versand nicht sicher geprüft werden. Es wurde nichts gesendet. ${String(error?.message || error).slice(0, 500)}`);
-    }
-  }
-
   // Vor dem UI-Aufruf persistieren: Stirbt der Prozess während des Klicks,
   // darf der nächste Lauf nur nachprüfen und niemals blind erneut senden.
   const entry = newDeliveryEntry(run, context, 'submission_started', now);
@@ -304,7 +291,7 @@ export async function deliverValidatedPlanbarForecast(run, {
     entry.sentFolderVerificationError = String(sendError?.message || sendError).slice(0, 500);
     await saveLog(log);
     try {
-      const sentFolder = await verify({ ...message, lookbackSeconds: 8 * 24 * 60 * 60 });
+      const sentFolder = await verify({ ...message, lookbackSeconds: 120 });
       entry.status = 'sent_verified';
       entry.sentFolderVerified = true;
       entry.sentFolderVerificationError = '';
@@ -332,6 +319,7 @@ export async function sendPlanbarForecastRun(runDirectory, {
   verify = verifyOutlookSentMessage,
   runMode = 'manual',
   automationSlotKey = '',
+  deliveryRunKey = '',
 } = {}) {
   const run = await validatePlanbarForecastRun(runDirectory);
   if (!commit) {
@@ -342,9 +330,10 @@ export async function sendPlanbarForecastRun(runDirectory, {
       sent: false, preview: true,
       runMode: runMode === 'automatic' ? 'automatic' : 'manual',
       automationSlotKey: runMode === 'automatic' ? String(automationSlotKey || '') : '',
+      deliveryRunKey: runMode === 'automatic' ? `automatic:${String(automationSlotKey || '')}` : `manual:${String(deliveryRunKey || '')}`,
     };
   }
-  return deliverValidatedPlanbarForecast(run, { send, verify, runMode, automationSlotKey });
+  return deliverValidatedPlanbarForecast(run, { send, verify, runMode, automationSlotKey, deliveryRunKey });
 }
 
 export async function latestVerifiedPlanbarForecastDelivery({ after = '' } = {}) {
@@ -369,9 +358,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === MODULE_PATH) {
   const commit = process.argv.includes('--commit');
   const runModeIndex = process.argv.indexOf('--run-mode');
   const automationSlotIndex = process.argv.indexOf('--automation-slot');
+  const deliveryRunIndex = process.argv.indexOf('--delivery-run');
   const runMode = runModeIndex >= 0 ? process.argv[runModeIndex + 1] : 'manual';
   const automationSlotKey = automationSlotIndex >= 0 ? process.argv[automationSlotIndex + 1] : '';
-  const result = await sendPlanbarForecastRun(directory, { commit, runMode, automationSlotKey });
+  const deliveryRunKey = deliveryRunIndex >= 0 ? process.argv[deliveryRunIndex + 1] : '';
+  const result = await sendPlanbarForecastRun(directory, { commit, runMode, automationSlotKey, deliveryRunKey });
   console.log(JSON.stringify(result, null, 2));
   if (commit && result.sentFolderVerified !== true) process.exitCode = 2;
 }

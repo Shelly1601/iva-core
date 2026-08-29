@@ -287,6 +287,19 @@ try {
     runMode: 'automatic',
     automationSlotKey: 'planbar-weekly-export:weekly:2026-W35',
   });
+  const directManualForecast = await startProjectWorkflowTask({
+    workflowId: 'planbar-weekly-export',
+    runMode: 'manual',
+    requestId: 'planbar-weekly-export:manual:1787983200000',
+    findPreparedForecast: async () => ({ directory: '/prepared/forecast' }),
+    sendPreparedForecast: async (directory, context) => ({ directory, ...context }),
+  });
+  assert.deepEqual(directManualForecast, {
+    directory: '/prepared/forecast',
+    runMode: 'manual',
+    automationSlotKey: '',
+    deliveryRunKey: 'planbar-weekly-export:manual:1787983200000',
+  });
   const bootstrapSource = await readFile(new URL('../IVA-iMac-einmalig-verbinden.command', import.meta.url), 'utf8');
   assert.match(bootstrapSource, /nodejs\.org\/dist\/\$\{node_version\}/);
   assert.match(bootstrapSource, /shasum -a 256/);

@@ -158,15 +158,15 @@ const HEAT_HERO_PROJECT = {
     },
     {
       id: 'planbar-weekly-export',
-      specVersion: 6,
+      specVersion: 7,
       name: 'Planbar-Forecast als Excel-Listen',
       status: 'active',
       enabled: true,
       schedule: 'Freitag · 18:00 Uhr',
       execution: 'iMac · Chrome und Outlook',
       purpose: 'Die unmittelbar folgende Kalenderwoche auslassen und zehn Kalenderwochen ab der übernächsten Woche aus Planbar ohne David Service und Antonio Lausich als Gesamt-XLSX plus je Hersteller eine eigene XLSX an Angelo senden; PDFs sind ausgeschlossen.',
-      safety: 'Automatik und manuelle Aufträge werden getrennt protokolliert. Vor jedem Versand und nach jedem unklaren UI-Ergebnis wird ausschließlich lesend im Outlook-Ordner „Gesendet“ geprüft; derselbe Forecast wird niemals blind erneut versendet.',
-      nextStep: 'Der Railway-Wochenslot läuft freitags um 18:00 Uhr, übergibt an den iMac und schließt erst nach verifiziertem Outlook-Gesendet-Nachweis oder dem belegten bereits vorhandenen identischen Versand ab.',
+      safety: 'Automatik und manuelle Aufträge werden getrennt gezählt. Der Automatik-Slot darf einmal senden; jeder ausdrücklich neue manuelle Auftrag darf separat senden. Nur technische Wiederholungen derselben stabilen Auftrags-ID werden gesperrt und nach unklarem UI-Ergebnis ausschließlich im Outlook-Ordner „Gesendet“ geprüft.',
+      nextStep: 'Der Railway-Wochenslot läuft freitags um 18:00 Uhr und bleibt über seine Slot-ID idempotent. Manuelle Aufträge erhalten unabhängig davon jeweils eine eigene stabile Auftrags-ID.',
     },
     {
       id: 'planbar-completion-morning',
