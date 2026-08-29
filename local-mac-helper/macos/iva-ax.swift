@@ -847,11 +847,20 @@ do {
         let windowCountBefore = (attribute(appElement, kAXWindowsAttribute) as? [AXUIElement])?.count ?? 0
         let pressResult = AXUIElementPerformAction(sendButtons[0].element, kAXPressAction as CFString)
         if pressResult != .success { try click(sendButtons[0].element) }
-        usleep(1_500_000)
+        // Outlook schließt ein gesendetes Verfassen-Fenster je nach
+        // Synchronisationszustand erst einige Sekunden später. Die Anzahl der
+        // App-Fenster ist dabei kein belastbares Signal (Tabs und Hilfsfenster
+        // verändern sie nicht zwingend). Warte deshalb gezielt darauf, dass
+        // genau der geprüfte Betreff nicht mehr als Verfassen-Feld sichtbar ist.
+        var remainingCompose: [AXNode] = []
+        for _ in 0..<30 {
+            usleep(500_000)
+            remainingCompose = collect(focusedRoot(appElement), maxDepth: 16, maxNodes: 6000)
+                .filter { matches($0, role: "AXTextField", description: "subjectTextField") && safeValue($0.element) == expected.subject }
+            if remainingCompose.isEmpty { break }
+        }
         let windowCountAfter = (attribute(appElement, kAXWindowsAttribute) as? [AXUIElement])?.count ?? 0
-        let remainingCompose = collect(focusedRoot(appElement), maxDepth: 16, maxNodes: 6000)
-            .filter { matches($0, role: "AXTextField", description: "subjectTextField") && safeValue($0.element) == expected.subject }
-        guard remainingCompose.isEmpty && windowCountAfter < windowCountBefore else {
+        guard remainingCompose.isEmpty else {
             throw HelperError.message("Versand konnte nicht bestätigt werden: Das Verfassen-Fenster ist weiterhin geöffnet.")
         }
         try writeJSON([
