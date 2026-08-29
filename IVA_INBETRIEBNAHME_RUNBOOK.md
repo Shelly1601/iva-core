@@ -118,6 +118,26 @@ Pruefung nach dem Deploy:
 
 Datei- oder Datensatzloeschungen sind unabhaengig von der Variable im IVA-Code gesperrt. Fuer spaetere weitere Pipedrive-Konten kann stattdessen die bereits vorbereitete private OAuth-App verwendet werden.
 
+### Airtable fuer Heat-Hero-/ENTER-Workflows
+
+Der direkte Zugang ist rein lesend. In Airtable einen persönlichen Zugriffstoken
+`IVA – Heat Hero Workflows` anlegen, als Ressource ausschließlich die Base
+`appBsUeEsjEBzIMDc` wählen und nur `data.records:read` sowie
+`schema.bases:read` freigeben. Den Token unmittelbar als Railway-Secret
+`AIRTABLE_TOKEN` speichern; nicht in Chat, Datei oder Protokoll kopieren.
+
+Zusaetzlich setzen:
+
+- `AIRTABLE_HWP_BASE_ID=appBsUeEsjEBzIMDc`
+- `AIRTABLE_HWP_TABLE_ID=tblGcYRzV0X9i6dqc`
+
+Nach dem Deploy `/health/airtable`, `/api/airtable/probe`, die Liste
+`/api/airtable/records/installation-queue` und einen bekannten Einzelrecord
+pruefen. Der Probe muss die Interface-Spezifikation aus
+`PLANBAR_ENTER_AIRTABLE_WORKFLOW.md` ohne Schema-Drift bestaetigen. Ein
+`Angebot korrigiert` wird nur ueber den geschuetzten Record-/Attachment-Endpunkt
+geladen; IVA veraendert keine Airtable-Felder, Stages, Datensaetze oder Anhaenge.
+
 ### Qonekto
 
 - `QONEKTO_MCP_TOKEN`: in Qonekto als dedizierten Produktionszugang `IVA – Qonekto – Produktion` erzeugen

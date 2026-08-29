@@ -78,6 +78,25 @@ Live-Abnahme in dieser Reihenfolge:
 3. Einen bekannten Deal ueber `/api/pipedrive/deals/:id` lesen und Deal, Person, Notizen, Dateien und Aktivitaeten gegen Pipedrive vergleichen.
 4. Erst danach genau eine IVA-Testnotiz mit Ruecklesepruefung anlegen. Loeschen bleibt im Code immer gesperrt.
 
+### Airtable als direkte Workflowquelle
+
+Die Heat-Hero-Base `appBsUeEsjEBzIMDc`, Tabelle `tblGcYRzV0X9i6dqc`, bleibt
+fuehrende Quelle fuer den ENTER-/Planbar-Workflow. IVA liest live und speichert
+keine zweite Kundentabelle. Airtable-Schreiben und -Loeschen sind im Code gesperrt.
+
+| Status | Railway-Variable | Zweck / naechster Schritt |
+|---|---|---|
+| 🟡 | `AIRTABLE_TOKEN` | PAT nur fuer diese Base mit `data.records:read` und `schema.bases:read`; direkt als Railway-Secret speichern. |
+| ✅ | `AIRTABLE_HWP_BASE_ID` | Exakt `appBsUeEsjEBzIMDc`. |
+| ✅ | `AIRTABLE_HWP_TABLE_ID` | Exakt `tblGcYRzV0X9i6dqc`. |
+
+Live-Abnahme: `/health/airtable` muss `readReady: true` melden; der Probe muss
+Tabelle, Pflichtfelder und die Auswahl-ID `selAsWptav4Fc64UN` ohne Drift erkennen.
+Danach einen bekannten Record rein lesend mit den sichtbaren Airtable-Werten
+vergleichen und genau dessen `Angebot korrigiert` ueber den geschuetzten Download
+abrufen. Der API-Token und temporaere Airtable-Anhangs-URLs duerfen nie ausgegeben
+oder protokolliert werden.
+
 Noch zu prüfen:
 
 - Einen benannten Testkunden aus Qonekto rein lesend abrufen.

@@ -22,6 +22,7 @@ import { calendarSkill } from './skills/calendar.js';
 import { mailsSkill } from './skills/mails.js';
 import { crmSkill } from './skills/crm.js';
 import { pipedriveSkill } from './skills/pipedrive.js';
+import { airtableSkill } from './skills/airtable.js';
 import { marketingSkill } from './skills/marketing.js';
 import { researchSkill } from './skills/research.js';
 import { workspacesSkill } from './skills/workspaces.js';
@@ -201,6 +202,16 @@ import {
   searchPipedriveDeals,
   updatePipedriveDealStage,
 } from './integrations/pipedrive.js';
+import {
+  airtableStatus,
+  downloadAirtableCorrectedOffer,
+  getAirtableHwpSchema,
+  getAirtableWorkflowRecord,
+  listAirtableInstallationQueue,
+  listAirtableWorkflowStage,
+  probeAirtable,
+  searchAirtableWorkflowRecords,
+} from './integrations/airtable.js';
 import { classifyTooOftenReplyWithAi } from './heat-hero/too-often-classifier.js';
 import {
   TOO_OFTEN_LABEL_NAME,
@@ -815,6 +826,7 @@ Tool-Nutzung:
 - CRM-Namen aus Sprache oder freier Texteingabe können falsch geschrieben beziehungsweise transkribiert sein. Vor jeder CRM-Auskunft oder -Aktion zu einer namentlich genannten Person findHeatHeroLeads mit der gelieferten Schreibweise aufrufen. Das Werkzeug durchsucht Schreibvarianten. Bei matchStatus "unique" ausschließlich den gespeicherten CRM-Namen und die gespeicherte ID verwenden. Bei "ambiguous" mit höchstens drei Kandidaten nachfragen, welcher gemeint ist. Bei "not-found" genau eine Frage stellen: wie der Nachname geschrieben wird. Niemals einen ähnlich klingenden Namen stillschweigend auswählen. Bei anderen CRM-Projekten ohne eigenen Resolver gilt mindestens dieselbe Rückfragepflicht, bis der gespeicherte Vollname eindeutig ist.
 - Wenn Nadine verlangt, eine Kundenakte aus dem CRM anzulegen oder CRM-Daten in die Kundenakte zu ziehen, ausschließlich importCrmCustomerFile aufrufen. Dieses Werkzeug erstellt eine aktive Kundenakte, übernimmt vorhandene Kontaktdaten und CRM-Notizen und verhindert Dubletten. Dafür niemals mehrfach createWorkspace aufrufen. Eine Qonekto-/Blau-direkt-Übertragung erfolgt dadurch ausdrücklich noch nicht.
 - Pipedrive ist fuer Auftrags- und Montageprozesse eine eigene fuehrende Live-Datenquelle. Bei Pipedrive-Anfragen zuerst searchPipedriveDeals beziehungsweise listPipedriveDeals nutzen und einen eindeutigen Deal danach mit getPipedriveDeal vollstaendig lesen. Pipedrive-Daten nicht aus altem Gedächtnis oder Browser-Screenshots ableiten. Notizen und Phasen nur bei einem konkreten aktuellen Auftrag mit addPipedriveDealNote beziehungsweise movePipedriveDealStage schreiben; vor und nach der Aktion pruefen. Pipedrive-Löschungen sind verboten.
+- Airtable ist fuer den Heat-Hero-/ENTER-Workflow eine eigene fuehrende Live-Datenquelle. Nutze listAirtableInstallationQueue, searchAirtableWorkflowRecords und getAirtableWorkflowRecord statt alte Screenshots oder gespeicherte Kundenkopien. Diese IVA-Schnittstelle ist strikt lesend: Niemals Airtable-Datensaetze, Felder, Stages oder Anhaenge veraendern oder loeschen.
 - Mehrere Quellen relevant (z. B. Kalender + Mails + Leads): parallel abrufen.
 - Fach-/Recherche-Anfragen: askArchitect mit der präzisen Frage. Der Router entscheidet zwischen knowledge (zeitloses Fachwissen zu Finanz/Versicherung/Vorsorge/Rente) und web-research (aktuelle öffentliche Fakten wie Gesetze, Grenzwerte, Beitragssätze, Freibeträge, Fördersätze, Produktdatenblätter, Versicherungsbedingungen, Preise, Nachrichten, Öffnungszeiten). Für JEDE aktuelle Zahl / jeden aktuellen Grenzwert PFLICHT diesen Router nutzen statt aus dem Kopf zu antworten. Für eigene Systeme (Kalender/Mails/CRM/Leads/Kampagnen/Todos/Bilder) stattdessen direkt das passende Tool.
 - Kundinnen, Kunden, Vertraege, Dokumente, Archiv, Aufgaben oder Schaeden aus blau direkt/AMEISE/Qonekto: zuerst listQonektoTools nutzen. Lesende Werkzeuge mit callQonektoReadTool sofort ausfuehren. Veraendernde Werkzeuge ausschliesslich mit prepareQonektoWrite vorbereiten, Aenderung klar wiederholen und Nadine fragen, ob sie das wirklich will. Ausgefuehrt wird serverseitig erst nach ihrer separaten, exakten Antwort "Ja, Qonekto-Aenderung ausfuehren". Niemals behaupten, eine nur vorbereitete Aenderung sei bereits erfolgt. Destruktive Werkzeuge bleiben blockiert. Niemals Qonekto-Daten raten oder durch oeffentliche Web-Recherche ersetzen.
@@ -875,6 +887,13 @@ const ALL_SKILLS = {
     getDealBundle: getPipedriveDealBundle,
     createDealNote: createPipedriveDealNote,
     updateDealStage: updatePipedriveDealStage,
+  }),
+  airtable: airtableSkill({
+    status: airtableStatus,
+    listInstallationQueue: listAirtableInstallationQueue,
+    listWorkflowStage: listAirtableWorkflowStage,
+    searchRecords: searchAirtableWorkflowRecords,
+    getRecord: getAirtableWorkflowRecord,
   }),
   marketing: marketingSkill({ campaigns, brands, analyzeReferences, generateImage, generateContent }),
   research:  researchSkill({ askArchitect }),
@@ -1415,6 +1434,19 @@ app.post('/webhooks/pipedrive', (req, res) => {
   res.sendStatus(202);
   void recordPipedriveWebhook(req.body || {}).catch(error => console.error('Pipedrive-Webhook:', error.message));
 });
+app.get('/health/airtable', async (_req, res) => {
+  const status = await airtableStatus({ probe: true });
+  res.set('Cache-Control', 'no-store').status(status.readReady ? 200 : 503).json({
+    configured: status.configured,
+    readReady: status.readReady,
+    writeEnabled: false,
+    baseId: status.baseId,
+    tableId: status.tableId,
+    installationQueueRecords: status.lastProbe?.installationQueueRecords ?? null,
+    layoutMatches: status.lastProbe?.layoutMatches ?? false,
+    lastCheckedAt: status.lastProbe?.checkedAt || null,
+  });
+});
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type', 'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS' };
 app.use('/api', (req, res, next) => {
@@ -1896,6 +1928,46 @@ app.patch('/api/pipedrive/deals/:id/stage', async (req, res) => {
       confirmation: req.body?.confirmation,
     }));
   } catch (error) { res.status(error.message.includes('freigeschaltet') ? 409 : 400).json({ error: error.message }); }
+});
+app.get('/api/airtable/status', async (req, res) => {
+  try { res.json(await airtableStatus({ probe: req.query?.probe === '1' })); }
+  catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.post('/api/airtable/probe', async (_req, res) => {
+  try { res.json(await probeAirtable()); }
+  catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.get('/api/airtable/schema', async (_req, res) => {
+  try { res.json(await getAirtableHwpSchema()); }
+  catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.get('/api/airtable/records/installation-queue', async (req, res) => {
+  try { res.json(await listAirtableInstallationQueue({ maxRecords: req.query?.maxRecords })); }
+  catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.get('/api/airtable/records', async (req, res) => {
+  try { res.json(await listAirtableWorkflowStage({ stage: req.query?.stage, maxRecords: req.query?.maxRecords })); }
+  catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.get('/api/airtable/records/search', async (req, res) => {
+  try {
+    res.json(await searchAirtableWorkflowRecords(String(req.query?.q || ''), {
+      installationQueueOnly: req.query?.installationQueueOnly === '1',
+      limit: req.query?.limit,
+    }));
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.get('/api/airtable/records/:recordId', async (req, res) => {
+  try { res.json(await getAirtableWorkflowRecord(req.params.recordId)); }
+  catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.get('/api/airtable/records/:recordId/corrected-offer/:attachmentId', async (req, res) => {
+  try {
+    const file = await downloadAirtableCorrectedOffer({ recordId: req.params.recordId, attachmentId: req.params.attachmentId });
+    res.set('Cache-Control', 'no-store');
+    res.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.filename)}`);
+    res.type(file.type).send(file.buffer);
+  } catch (error) { res.status(404).json({ error: error.message }); }
 });
 app.get('/api/mails/klassifiziert', async (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query?.limit) || 15, 1), 50);
