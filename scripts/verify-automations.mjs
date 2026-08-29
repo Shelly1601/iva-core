@@ -29,6 +29,13 @@ check('Monatlicher Integrations-Check-up ist standardmäßig aktiv', initial.fin
 const fundingSequence = initial.find(item => item.id === 'funding-daily-sequence');
 check('Förder-Tageslauf ist täglich um 05:00 Uhr aktiv', fundingSequence?.enabled === true && fundingSequence.cron === '0 5 * * *');
 check('Förder-Tageslauf benennt die feste Reihenfolge', /1 → 2 → 3/.test(fundingSequence?.name || ''));
+const planbarForecast = initial.find(item => item.id === 'planbar-weekly-export');
+check('Planbar-Forecast ist zentral freitags um 19:00 Uhr aktiv', planbarForecast?.enabled === true && planbarForecast.cron === '0 19 * * 5');
+check('Alle angesetzten täglichen iMac-Projektworkflows sind zentral terminiert', [
+  ['funding-daily-sequence', '0 5 * * *'],
+  ['montage-required-fields-morning', '0 7 * * *'],
+  ['planbar-completion-morning', '0 8 * * *'],
+].every(([id, cron]) => initial.find(item => item.id === id)?.enabled === true && initial.find(item => item.id === id)?.cron === cron));
 await store.setAutomationEnabled('crm-qonekto-sync', true);
 check('Schalter wird persistent gespeichert', (await store.getAutomation('crm-qonekto-sync')).enabled === true);
 
@@ -58,6 +65,21 @@ const blockedRunner = createAutomationOrchestrator({
 const blockedFirst = await blockedRunner.runAutomation('report-email-daily', { now: fixedNow, slotKey: 'test:blocked' });
 const blockedDuplicate = await blockedRunner.runAutomation('report-email-daily', { now: fixedNow, slotKey: 'test:blocked' });
 check('Konfigurationsblocker wird nicht dreimal wiederholt', blockedFirst.run?.status === 'blocked' && blockedDuplicate.reason === 'duplicate' && blockedCalls === 1);
+
+let waitingCalls = 0;
+const waitingRunner = createAutomationOrchestrator({
+  'planbar-weekly-export': async ({ previousResult }) => {
+    waitingCalls += 1;
+    if (!previousResult.commandId) return { status: 'waiting', commandId: 'forecast-command', summary: 'iMac läuft.' };
+    return { commandId: previousResult.commandId, sentFolderVerified: true, summary: 'Outlook-Gesendet verifiziert.' };
+  },
+});
+const waitingFirst = await waitingRunner.runAutomation('planbar-weekly-export', { now: fixedNow, slotKey: 'test:forecast-waiting' });
+const waitingResumed = await waitingRunner.runAutomation('planbar-weekly-export', { now: fixedNow, slotKey: 'test:forecast-waiting' });
+const waitingDuplicate = await waitingRunner.runAutomation('planbar-weekly-export', { now: fixedNow, slotKey: 'test:forecast-waiting' });
+check('Ein wartender iMac-Lauf wird nach Serverzyklen fortgesetzt und erst mit Endnachweis abgeschlossen', waitingFirst.run?.status === 'waiting'
+  && waitingResumed.run?.status === 'completed' && waitingResumed.run?.result?.sentFolderVerified === true
+  && waitingDuplicate.reason === 'duplicate' && waitingCalls === 2);
 
 const automationStoreFile = path.join(testDir, 'automation-control.json');
 const staleStore = JSON.parse(await fs.readFile(automationStoreFile, 'utf8'));

@@ -263,6 +263,7 @@ import {
   setAutomationEnabled,
 } from './automations/store.js';
 import { createAutomationOrchestrator } from './automations/orchestrator.js';
+import { createPlanbarForecastAutomationHandler, createProjectWorkflowAutomationHandler } from './automations/imac-workflow.js';
 import { formatCheckupTelegram, getIntegrationCheckupStatus, runIntegrationCheckup } from './maintenance/checkup.js';
 import {
   buildAutomationReport,
@@ -1573,7 +1574,14 @@ app.get('/api/control/approvals', async (req, res) => res.json(await listApprova
 app.get('/api/control/audit', async (req, res) => res.json(await listAudit({ limit: req.query?.limit, category: String(req.query?.category || '') })));
 app.get('/api/automations', async (_req, res) => res.json(await listAutomations()));
 app.patch('/api/automations/:id', async (req, res) => {
-  try { res.json(await setAutomationEnabled(req.params.id, req.body?.enabled === true)); }
+  try {
+    const enabled = req.body?.enabled === true;
+    const updated = await setAutomationEnabled(req.params.id, enabled);
+    if (['planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning'].includes(req.params.id)) {
+      await setProjectAutomationEnabled('heat-hero', req.params.id, enabled);
+    }
+    res.json(updated);
+  }
   catch (error) { res.status(404).json({ error: error.message }); }
 });
 app.get('/api/automations/runs', async (req, res) => res.json(await listAutomationRuns({ automationId: String(req.query?.automationId || ''), status: String(req.query?.status || ''), limit: req.query?.limit, since: String(req.query?.since || '') })));
@@ -1744,6 +1752,9 @@ app.patch('/api/projects/:id/automations/:automationId', async (req, res) => {
           setAutomationEnabled('project-protocol-weekly', req.body?.enabled === true),
           setAutomationEnabled('project-protocol-cleanup', req.body?.enabled === true),
         ]);
+      }
+      if (['planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning'].includes(req.params.automationId)) {
+        await setAutomationEnabled(req.params.automationId, req.body?.enabled === true);
       }
       project = await setProjectAutomationEnabled(req.params.id, req.params.automationId, req.body?.enabled === true);
     }
@@ -2858,38 +2869,45 @@ const automationRunner = createAutomationOrchestrator({
       : `E-Mail-Zustellung fehlgeschlagen; Wochenreport ersatzweise per Telegram zugestellt. Grund: ${delivery.emailError}`;
     return { reportKey: report.key, delivery, summary };
   },
-  'funding-daily-sequence': async () => {
-    const project = await getProject('heat-hero');
-    const required = ['funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning'];
-    const disabled = required.filter(id => project?.automations?.find(item => item.id === id)?.enabled !== true);
-    if (disabled.length) return {
-      status: 'blocked',
-      summary: `Förderlauf nicht an den iMac übergeben: Projektschalter aus (${disabled.join(', ')}).`,
-      error: 'Mindestens ein Förder-Workflow ist in der Projektakte ausgeschaltet.',
-    };
-    const imac = await deviceAgentStatus();
-    if (imac.online !== true || !Array.isArray(imac.allowedActions)
-      || !imac.allowedActions.includes('funding.legacy-monitor.suspend')) {
-      return {
-        status: 'blocked',
-        summary: 'Förderlauf nicht gestartet: Die neue lokale Förderungslaufzeit ist auf dem iMac noch nicht attestiert.',
-        error: 'iMac-iCloud-Materialisierung muss zuerst erfolgreich abgeschlossen werden.',
-      };
-    }
-    const command = await enqueueDeviceCommand({
-      deviceId: IVA_IMAC_DEVICE_ID,
-      action: 'project.workflow.run',
-      payload: { projectId: 'heat-hero', workflowId: 'funding-daily-sequence', displayName: 'Förderung – Tageslauf 1 → 2 → 3' },
-      requestedBy: 'automation-funding-daily-sequence',
-      requestText: 'Täglicher Förderlauf um 05:00 Uhr ausschließlich auf dem iMac',
-    });
-    return {
-      commandId: command.id,
-      deviceId: IVA_IMAC_DEVICE_ID,
-      order: required,
-      summary: 'Geordneter Förderlauf wurde um 05:00 Uhr ausschließlich an den iMac übergeben.',
-    };
-  },
+  'funding-daily-sequence': createProjectWorkflowAutomationHandler({
+    projectId: 'heat-hero',
+    workflowId: 'funding-daily-sequence',
+    displayName: 'Förderung – Tageslauf 1 → 2 → 3',
+    enabledWorkflowIds: ['funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning'],
+    requiredAllowedActions: ['funding.legacy-monitor.suspend', 'project.workflow.run', 'codex.task.status'],
+    getProject,
+    deviceAgentStatus,
+    enqueueDeviceCommand,
+    deviceCommandStatus,
+    deviceId: IVA_IMAC_DEVICE_ID,
+  }),
+  'planbar-weekly-export': createPlanbarForecastAutomationHandler({
+    getProject,
+    deviceAgentStatus,
+    enqueueDeviceCommand,
+    deviceCommandStatus,
+    deviceId: IVA_IMAC_DEVICE_ID,
+  }),
+  'montage-required-fields-morning': createProjectWorkflowAutomationHandler({
+    projectId: 'heat-hero',
+    workflowId: 'montage-required-fields-morning',
+    displayName: 'Montage-Pflichtfelder morgens prüfen',
+    getProject,
+    deviceAgentStatus,
+    enqueueDeviceCommand,
+    deviceCommandStatus,
+    deviceId: IVA_IMAC_DEVICE_ID,
+  }),
+  'planbar-completion-morning': createProjectWorkflowAutomationHandler({
+    projectId: 'heat-hero',
+    workflowId: 'planbar-completion-morning',
+    displayName: 'Planbar Vervollständigung',
+    getProject,
+    deviceAgentStatus,
+    enqueueDeviceCommand,
+    deviceCommandStatus,
+    deviceId: IVA_IMAC_DEVICE_ID,
+  }),
   'daily-briefing': async () => sendBriefing(),
   'marketing-morning-report': async () => sendMarketingMorningReport(),
   'heat-hero-too-often-replies': async () => runHeatHeroTooOftenReplies(),

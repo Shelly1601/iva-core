@@ -1,6 +1,6 @@
 # Planbar-Forecast an Angelo – verbindlicher Freitagsworkflow
 
-Stand: 21.08.2026
+Stand: 29.08.2026
 
 ## Zeitplan und Empfänger
 
@@ -10,6 +10,8 @@ Stand: 21.08.2026
 - Absender: `n.sell@heat-hero.com`.
 - Empfänger: Angelo Keller, `a.keller@heat-hero.com`.
 - Versand: sichtbar über Outlook auf dem iMac; danach in „Gesendet“ verifizieren.
+- Ausführung: Der Railway-Wochenslot bleibt bis zum echten iMac-Endzustand offen. Ist Railway oder der iMac zum Termin nicht verfügbar, wird derselbe Kalenderwochenslot nachgeholt. Ein bloß eingereihter oder gestarteter iMac-Auftrag ist kein Erfolg.
+- Wiederanlauf: Slot-ID und iMac-Auftrags-ID bleiben über Serverneustarts stabil. Fehlversuche werden begrenzt neu gestartet; ein bereits von Outlook übernommener Versand wird ausschließlich in „Gesendet“ nachgeprüft und niemals erneut gesendet.
 
 ## Verbindliches Ausgabeformat
 
@@ -60,4 +62,4 @@ Der Sender übernimmt nur die exakten vollständigen XLSX-Pfade aus dem Manifest
 
 ## Protokollierung
 
-Jeder Lauf dokumentiert Zeitraum, Zahl der eingelesenen und wegen der beiden Planbar-Spalten ausgeschlossenen Termine, Zahl der verbleibenden Baustellen, Zahl der Hersteller, Zahl und Namen der XLSX-Anhänge, Absender, Empfänger sowie die Prüfung im Gesendet-Ordner. `outputs/planbar-weekly/send-log.json` verhindert Doppelversand.
+Jeder Lauf dokumentiert Zeitraum, Zahl der eingelesenen und wegen der beiden Planbar-Spalten ausgeschlossenen Termine, Zahl der verbleibenden Baustellen, Zahl der Hersteller, Zahl und Namen der XLSX-Anhänge, Absender, Empfänger sowie die Prüfung im Gesendet-Ordner. `outputs/planbar-weekly/send-log.json` verhindert Doppelversand. Die zentrale Automation erhält erst den Status `completed`, wenn `sentFolderVerified: true` vorliegt; während iMac- oder Outlook-Arbeit bleibt sie sichtbar auf `waiting`.

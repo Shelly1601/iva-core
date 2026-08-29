@@ -189,6 +189,9 @@ async function reportTaskState(request, state, resultPreview = '') {
       detail: state.detail,
       resultPreview: resultPreview || state.detail,
       error: state.error || (['failed', 'blocked', 'timed_out', 'incomplete'].includes(state.status) ? state.detail : ''),
+      proofs: state.workflowProof?.sentFolderVerified === true
+        ? [`Outlook-Gesendet verifiziert: ${state.workflowProof.subject || state.workflowProof.period || 'Planbar-Forecast'}`]
+        : [],
       startedAt: state.startedAt || request.createdAt,
       completedAt: terminal ? state.completedAt || state.updatedAt : '',
       updatedAt: state.updatedAt,
@@ -204,7 +207,12 @@ async function reportTaskState(request, state, resultPreview = '') {
         completedAt: terminal ? state.completedAt || state.updatedAt : state.updatedAt,
         summary: resultPreview || state.detail || 'Lokaler Projekt-Workflow läuft.',
         error: operational.error,
-        metrics: { jobId: request.jobId, phase: state.phase, progress: state.progress },
+        metrics: {
+          jobId: request.jobId,
+          phase: state.phase,
+          progress: state.progress,
+          ...(state.workflowProof || {}),
+        },
       });
     }
     return true;
@@ -382,7 +390,7 @@ const PROJECT_WORKFLOW_TASKS = Object.freeze({
   }),
 });
 
-export async function startProjectWorkflowTask({ workflowId, findPreparedForecast, sendPreparedForecast } = {}) {
+export async function startProjectWorkflowTask({ workflowId, requestId = '', findPreparedForecast, sendPreparedForecast } = {}) {
   const normalizedWorkflowId = clean(workflowId, 140);
   const definition = PROJECT_WORKFLOW_TASKS[normalizedWorkflowId];
   if (!definition) throw new Error('Dieser Projekt-Workflow ist für den operativen Codex-Start nicht freigegeben.');
@@ -423,7 +431,7 @@ export async function startProjectWorkflowTask({ workflowId, findPreparedForecas
     projectId: 'heat-hero',
     workflowId: normalizedWorkflowId,
     workflowName: definition.title,
-    requestId: `project-workflow-${normalizedWorkflowId}-${Date.now()}`,
+    requestId: requestId || `project-workflow-${normalizedWorkflowId}-${Date.now()}`,
   });
 }
 
@@ -659,6 +667,11 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   const resultText = await readFile(paths.lastMessage, 'utf8').catch(() => '');
   const planbarProgress = await readJson(paths.planbarProgress).catch(() => current.planbarProgress || null);
   const resultPreview = clean(planbarProgress ? `${planbarSchedulingSummary(planbarProgress)}\n${resultText}` : resultText, 1800);
+  const workflowProof = request.workflowId === 'planbar-weekly-export'
+    ? await import('./planbar-forecast-mail.mjs')
+      .then(module => module.latestVerifiedPlanbarForecastDelivery({ after: request.createdAt }))
+      .catch(() => null)
+    : null;
   const inferredWorkflowStatus = request.mode !== 'build'
     ? inferProjectWorkflowStatus(resultText)
     : '';
@@ -670,6 +683,8 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
       ? 'blocked'
       : exitCode !== 0
         ? 'failed'
+        : request.workflowId === 'planbar-weekly-export' && workflowProof?.sentFolderVerified !== true
+          ? 'incomplete'
         : (request.mode === 'build' && current.phase !== 'completed') || (request.mode === 'operational' && !/(?:^|\n)\s*Status\s*:\s*(?:\*\*)?erfolgreich\b/i.test(resultText))
           ? 'incomplete'
           : 'completed';
@@ -677,6 +692,7 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   const finalState = await writeState(paths, {
     ...current,
     planbarProgress,
+    workflowProof,
     jobId, title: request.title, requestId: request.requestId, status,
     phase: status === 'completed' ? 'completed' : current.phase,
     progress: finalProgress,

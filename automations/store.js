@@ -10,7 +10,10 @@ let writeQueue = Promise.resolve();
 export const AUTOMATION_DEFINITIONS = Object.freeze([
   { id: 'report-email-daily', name: 'Täglicher Workflow-Report: E-Mail mit Telegram-Ersatz', category: 'Reporting', schedule: 'Täglich · 06:45 Uhr', cron: '45 6 * * *', cadence: 'daily', hour: 6, minute: 45, defaultEnabled: true, maxSlotAttempts: 3, timeoutMs: 30_000, description: 'Sendet den Vortagsreport bevorzugt per E-Mail an Nadines HeatHero-Postfach; bei nicht möglicher E-Mail-Zustellung folgt genau ein Telegram-Ersatzreport.' },
   { id: 'report-email-weekly', name: 'Wöchentlicher Workflow-Report: E-Mail mit Telegram-Ersatz', category: 'Reporting', schedule: 'Montag · 06:50 Uhr', cron: '50 6 * * 1', cadence: 'weekly', weekday: 1, hour: 6, minute: 50, defaultEnabled: true, maxSlotAttempts: 3, timeoutMs: 30_000, description: 'Sendet den Wochenreport bevorzugt per E-Mail; bei nicht möglicher E-Mail-Zustellung folgt genau ein Telegram-Ersatzreport.' },
-  { id: 'funding-daily-sequence', name: 'Förderung – Tageslauf 1 → 2 → 3 auf dem iMac', category: 'Heat Hero', schedule: 'Täglich · 05:00 Uhr', cron: '0 5 * * *', cadence: 'daily', hour: 5, minute: 0, defaultEnabled: true, maxSlotAttempts: 2, timeoutMs: 30_000, description: 'Reiht genau einen geordneten iMac-Auftrag für Vollständigkeit, Förderhöhe und KfW-Zusagen ein. MacBook und iPhone dienen nur als Fernsteuerung.' },
+  { id: 'funding-daily-sequence', name: 'Förderung – Tageslauf 1 → 2 → 3 auf dem iMac', category: 'Heat Hero', schedule: 'Täglich · 05:00 Uhr', cron: '0 5 * * *', cadence: 'daily', hour: 5, minute: 0, defaultEnabled: true, maxSlotAttempts: 6, timeoutMs: 120_000, description: 'Führt den geordneten iMac-Auftrag für Vollständigkeit, Förderhöhe und KfW-Zusagen aus und bleibt bis zum echten lokalen Endstatus offen. Verpasste Slots werden nachgeholt.' },
+  { id: 'planbar-weekly-export', name: 'Planbar-Forecast als Excel-Listen', category: 'Heat Hero', schedule: 'Freitag · 19:00 Uhr', cron: '0 19 * * 5', cadence: 'weekly', weekday: 5, hour: 19, minute: 0, defaultEnabled: true, maxSlotAttempts: 6, timeoutMs: 120_000, description: 'Erstellt den rollierenden Zehn-Wochen-Forecast auf dem iMac und gilt erst nach verifiziertem Outlook-Versand als erfolgreich. Verpasste Slots werden nachgeholt.' },
+  { id: 'montage-required-fields-morning', name: 'Montage-Pflichtfelder morgens prüfen', category: 'Heat Hero', schedule: 'Täglich · 07:00 Uhr', cron: '0 7 * * *', cadence: 'daily', hour: 7, minute: 0, defaultEnabled: true, maxSlotAttempts: 6, timeoutMs: 120_000, description: 'Prüft offene Montage-Deals auf dem iMac und bleibt bis zum echten lokalen Endstatus offen. Verpasste Slots werden nachgeholt.' },
+  { id: 'planbar-completion-morning', name: 'Planbar Vervollständigung', category: 'Heat Hero', schedule: 'Täglich · 08:00 Uhr', cron: '0 8 * * *', cadence: 'daily', hour: 8, minute: 0, defaultEnabled: true, maxSlotAttempts: 6, timeoutMs: 120_000, description: 'Vervollständigt bestehende Planbar-Termine auf dem iMac und bleibt bis zum echten lokalen Endstatus offen. Verpasste Slots werden nachgeholt.' },
   { id: 'daily-briefing', name: 'IVA Morning-Briefing', category: 'Kommunikation', schedule: 'Täglich · 07:00 Uhr', cron: '0 7 * * *', cadence: 'daily', hour: 7, minute: 0, defaultEnabled: true, maxSlotAttempts: 2, timeoutMs: 120_000, description: 'Termine, Todos und CRM-Handlungsbedarf als täglicher Telegram-Überblick.' },
   { id: 'marketing-morning-report', name: 'Marketing-Morgenreport', category: 'Marketing', schedule: 'Täglich · 07:10 Uhr', cron: '10 7 * * *', cadence: 'daily', hour: 7, minute: 10, defaultEnabled: true, maxSlotAttempts: 2, timeoutMs: 60_000, description: 'Erzeugt den aktuellen Marketing-Entscheidungsreport und stellt ihn separat per Telegram zu.' },
   { id: 'heat-hero-too-often-replies', name: 'HeatHero-Rückmeldungen „Zu oft n.e.“', category: 'Kunden & CRM', schedule: 'Täglich · 08:15 Uhr', cron: '15 8 * * *', cadence: 'daily', hour: 8, minute: 15, defaultEnabled: true, maxSlotAttempts: 2, timeoutMs: 300_000, description: 'Liest Kundenantworten aus dem Gmail-Label, reklamiert eindeutige Absagen im eigenständigen großen HeatHero CRM mit Sonstiges-Anmerkung und Mail-PDF oder setzt konkrete Rückrufwünsche als Wiedervorlage an den Setter.' },
@@ -126,6 +129,12 @@ export async function beginAutomationRun(automationId, input = {}) {
     }
     const slotKey = clean(input.slotKey, 160);
     const sameSlot = store.runs.filter(item => item.automationId === definition.id && slotKey && item.slotKey === slotKey);
+    const waiting = sameSlot.find(item => item.status === 'waiting');
+    if (waiting) {
+      waiting.status = 'running';
+      waiting.updatedAt = completedAt;
+      return { duplicate: false, resumed: true, exhausted: false, run: clone(waiting) };
+    }
     const existing = sameSlot.find(item => ['running', 'completed', 'blocked', 'skipped'].includes(item.status));
     if (existing) return { duplicate: true, exhausted: false, run: clone(existing) };
     if (sameSlot.length >= Number(definition.maxSlotAttempts || 1)) {
@@ -147,12 +156,13 @@ export async function finishAutomationRun(runId, input = {}) {
     const run = store.runs.find(item => item.id === clean(runId, 100));
     if (!run) return null;
     const completedAt = new Date().toISOString();
-    run.status = ['completed', 'failed', 'blocked', 'skipped'].includes(input.status) ? input.status : 'completed';
+    run.status = ['completed', 'failed', 'blocked', 'skipped', 'waiting'].includes(input.status) ? input.status : 'completed';
     run.summary = clean(input.summary || 'Lauf abgeschlossen.', 4000);
     run.error = run.status === 'failed' || run.status === 'blocked' ? clean(input.error, 1200) : '';
     run.result = compactResult(input.result);
-    run.completedAt = completedAt;
-    run.durationMs = Math.max(0, Date.parse(completedAt) - Date.parse(run.startedAt));
+    run.updatedAt = completedAt;
+    run.completedAt = run.status === 'waiting' ? '' : completedAt;
+    run.durationMs = run.status === 'waiting' ? null : Math.max(0, Date.parse(completedAt) - Date.parse(run.startedAt));
     return clone(run);
   });
 }
@@ -214,6 +224,7 @@ export async function automationSummary() {
     enabled: automations.filter(item => item.enabled).length,
     disabled: automations.filter(item => !item.enabled).length,
     running: runs.filter(item => item.status === 'running').length,
+    waiting: runs.filter(item => item.status === 'waiting').length,
     failedToday: runs.filter(item => item.status === 'failed' && new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date(item.startedAt)) === today).length,
     reports: reports.length,
   };

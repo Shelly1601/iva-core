@@ -79,13 +79,20 @@ export function createAutomationOrchestrator(handlers = {}) {
     let timeout;
     try {
       const result = await Promise.race([
-        handler({ automation, now, trigger }),
+        handler({
+          automation,
+          now,
+          trigger,
+          slotKey: started.run.slotKey,
+          attempt: started.run.attempt,
+          previousResult: started.resumed ? started.run.result || {} : {},
+        }),
         new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error(`Zeitlimit nach ${automation.timeoutMs} ms überschritten.`)), automation.timeoutMs); }),
       ]);
-      const requestedStatus = ['blocked', 'skipped'].includes(result?.status) ? result.status : 'completed';
+      const requestedStatus = ['blocked', 'skipped', 'waiting'].includes(result?.status) ? result.status : 'completed';
       const run = await finishAutomationRun(started.run.id, {
         status: requestedStatus,
-        summary: result?.summary || (requestedStatus === 'completed' ? 'Automatischer Lauf erfolgreich abgeschlossen.' : 'Automatischer Lauf nicht ausgeführt.'),
+        summary: result?.summary || (requestedStatus === 'completed' ? 'Automatischer Lauf erfolgreich abgeschlossen.' : requestedStatus === 'waiting' ? 'Automatischer Lauf wartet auf das bestätigte Endergebnis.' : 'Automatischer Lauf nicht ausgeführt.'),
         error: result?.error || '', result: result || {},
       });
       return { automationId: id, skipped: requestedStatus === 'skipped', run, result };

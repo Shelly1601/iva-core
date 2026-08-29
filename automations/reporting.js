@@ -80,7 +80,7 @@ function escapeHtml(value) {
 }
 
 function statusLabel(status) {
-  return ({ completed: 'Erfolgreich durchgelaufen', successful: 'Erfolgreich durchgelaufen', partial: 'Teilweise erfolgreich', failed: 'Fehler', blocked: 'Blockiert', skipped: 'Übersprungen', missing: 'NICHT GELAUFEN', running: 'Läuft noch' })[status]
+  return ({ completed: 'Erfolgreich durchgelaufen', successful: 'Erfolgreich durchgelaufen', partial: 'Teilweise erfolgreich', failed: 'Fehler', blocked: 'Blockiert', skipped: 'Übersprungen', missing: 'NICHT GELAUFEN', running: 'Läuft noch', waiting: 'Läuft · wartet auf Endnachweis' })[status]
     || String(status || 'Unbekannt');
 }
 

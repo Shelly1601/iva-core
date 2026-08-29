@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { access, mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { sendVerifiedOutlookXlsxMessage } from './outlook.mjs';
+import { sendVerifiedOutlookXlsxMessage, verifyOutlookSentMessage } from './outlook.mjs';
 
 export const PLANBAR_FORECAST_SENDER = 'n.sell@heat-hero.com';
 export const PLANBAR_FORECAST_RECIPIENT = 'a.keller@heat-hero.com';
@@ -171,9 +171,7 @@ export async function sendPlanbarForecastRun(runDirectory, { commit = false, sen
   const run = await validatePlanbarForecastRun(runDirectory);
   const log = await loadSendLog();
   const duplicate = log.entries.find(item => item.subject === run.subject && ['sent_verified', 'submitted_unverified'].includes(item.status));
-  if (duplicate) {
-    throw new Error(`Forecast-Abbruch: Dieser Zeitraum wurde bereits am ${duplicate.sentAt || duplicate.createdAt} an Outlook übergeben.`);
-  }
+  const body = `Hallo Angelo,\n\nanbei die Planbar-Listen für ${run.period}.\n\nViele Grüße\nNadine`;
   const preview = {
     period: run.period,
     sender: run.sender,
@@ -185,7 +183,47 @@ export async function sendPlanbarForecastRun(runDirectory, { commit = false, sen
     sent: false,
   };
   if (!commit) return { ...preview, preview: true };
-  const body = `Hallo Angelo,\n\nanbei die Planbar-Listen für ${run.period}.\n\nViele Grüße\nNadine`;
+  if (duplicate?.status === 'sent_verified') {
+    return {
+      ...preview,
+      preview: false,
+      sent: true,
+      sentFolderVerified: true,
+      duplicateVerified: true,
+      sendLogEntry: duplicate,
+    };
+  }
+  if (duplicate?.status === 'submitted_unverified') {
+    try {
+      const sentFolder = await verifyOutlookSentMessage({
+        from: run.sender,
+        to: [run.recipient],
+        subject: run.subject,
+        body,
+        attachments: run.attachments,
+      });
+      duplicate.status = 'sent_verified';
+      duplicate.sentFolderVerified = true;
+      duplicate.sentFolderVerificationError = '';
+      duplicate.verifiedAt = new Date().toISOString();
+      duplicate.sentFolder = sentFolder;
+      await saveSendLog(log);
+      return {
+        ...preview,
+        preview: false,
+        sent: true,
+        sentFolderVerified: true,
+        duplicateVerified: true,
+        sendLogEntry: duplicate,
+        outlook: { sent: true, sentFolderVerified: true, sentFolder, reverifiedWithoutResend: true },
+      };
+    } catch (error) {
+      duplicate.sentFolderVerificationError = String(error?.message || error).slice(0, 500);
+      duplicate.lastVerificationAttemptAt = new Date().toISOString();
+      await saveSendLog(log);
+      throw new Error(`Forecast-Abbruch: Outlook-Versand wurde bereits bestätigt; der Gesendet-Nachweis ist noch nicht sichtbar. Es wurde nicht erneut gesendet. ${duplicate.sentFolderVerificationError}`);
+    }
+  }
   const result = await send({
     from: run.sender,
     to: [run.recipient],
@@ -210,6 +248,23 @@ export async function sendPlanbarForecastRun(runDirectory, { commit = false, sen
   log.entries.push(entry);
   await saveSendLog(log);
   return { ...preview, preview: false, sent: true, sentFolderVerified: entry.sentFolderVerified, sendLogEntry: entry, outlook: result };
+}
+
+export async function latestVerifiedPlanbarForecastDelivery({ after = '' } = {}) {
+  const cutoff = Date.parse(after || 0);
+  const entries = (await loadSendLog()).entries
+    .filter(item => item.status === 'sent_verified' && item.sentFolderVerified === true)
+    .filter(item => !Number.isFinite(cutoff) || Date.parse(item.sentAt || item.createdAt || 0) >= cutoff)
+    .sort((left, right) => String(right.sentAt || right.createdAt).localeCompare(String(left.sentAt || left.createdAt)));
+  const entry = entries[0];
+  if (!entry) return null;
+  return {
+    period: entry.period || '',
+    subject: entry.subject || '',
+    sentAt: entry.sentAt || entry.createdAt || '',
+    sentFolderVerified: true,
+    attachmentCount: Array.isArray(entry.attachments) ? entry.attachments.length : 0,
+  };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === MODULE_PATH) {

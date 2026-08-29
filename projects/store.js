@@ -158,14 +158,15 @@ const HEAT_HERO_PROJECT = {
     },
     {
       id: 'planbar-weekly-export',
-      specVersion: 4,
+      specVersion: 5,
       name: 'Planbar-Forecast als Excel-Listen',
       status: 'active',
+      enabled: true,
       schedule: 'Freitag · 19:00 Uhr',
       execution: 'iMac · Chrome und Outlook',
       purpose: 'Die unmittelbar folgende Kalenderwoche auslassen und zehn Kalenderwochen ab der übernächsten Woche aus Planbar ohne David Service und Antonio Lausich als Gesamt-XLSX plus je Hersteller eine eigene XLSX an Angelo senden; PDFs sind ausgeschlossen.',
       safety: 'Kein Versand bei fehlender Planbar-Spaltenzuordnung, enthaltenen Terminen aus David Service oder Antonio Lausich, fehlender Anmeldung, PDF-Anhängen, leeren/unvollständigen Excel-Dateien, falschem Absender/Empfänger, Manifest-Abweichung oder Doppelversand.',
-      nextStep: 'Nächsten Freitagslauf ausschließlich mit Gesamt-XLSX und einzelnen Hersteller-XLSX ausführen und im Projektprotokoll verifizieren.',
+      nextStep: 'Der Railway-Wochenslot übergibt an den iMac, holt verpasste Freitagsläufe nach und schließt erst nach verifiziertem Outlook-Gesendet-Nachweis ab.',
     },
     {
       id: 'planbar-completion-morning',

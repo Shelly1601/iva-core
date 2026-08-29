@@ -216,7 +216,12 @@ function validatePayload(action, payload = {}) {
     const workflowId = cleanText(payload.workflowId, 140);
     const allowed = new Set(['funding-daily-sequence', 'funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning', 'planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning']);
     if (projectId !== 'heat-hero' || !allowed.has(workflowId)) throw new Error('Dieser Projekt-Workflow ist für den manuellen iMac-Start nicht freigegeben.');
-    return { projectId, workflowId, displayName: cleanText(payload.displayName, 220) || workflowId };
+    return {
+      projectId,
+      workflowId,
+      displayName: cleanText(payload.displayName, 220) || workflowId,
+      ...(cleanText(payload.requestId, 160) ? { requestId: cleanText(payload.requestId, 160) } : {}),
+    };
   }
   if (action === 'portal.credentials.status' || action === 'portal.login') {
     const service = cleanText(payload.service, 40).toLowerCase();
