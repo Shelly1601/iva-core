@@ -220,6 +220,6 @@ async function main() {
   throw new Error('Erlaubte Befehle: dry-run, run --commit, status');
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && path.basename(process.argv[1]) === path.basename(fileURLToPath(import.meta.url))) {
   main().catch(error => { console.error(error.message); process.exitCode = 1; });
 }
