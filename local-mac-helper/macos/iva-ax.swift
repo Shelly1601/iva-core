@@ -746,6 +746,39 @@ do {
         exit(0)
     }
 
+    if command == "open-message-search-result-for-forward" {
+        guard arguments.count >= 4 else { throw HelperError.message("open-message-search-result-for-forward benötigt Betreff, Datum und Empfängerhinweis.") }
+        let expectedSubject = arguments[1]
+        let dateNeedle = arguments[2]
+        let recipientNeedle = arguments[3].lowercased()
+        let subjectNeedle = "Betreff: \(expectedSubject),"
+        let matchingCandidates = nodes.filter { node in
+            guard node.role == "AXCell", node.description.contains(subjectNeedle), node.description.contains(dateNeedle) else { return false }
+            return recipientNeedle.isEmpty || node.description.lowercased().contains(recipientNeedle)
+        }.sorted { $0.path.count < $1.path.count }
+        var seenDescriptions = Set<String>()
+        let candidates = matchingCandidates.filter { seenDescriptions.insert($0.description).inserted }
+        guard candidates.count == 1 else {
+            throw HelperError.message("Weiterleitung abgebrochen: Die ursprünglich gesendete Mail ist nicht eindeutig (\(candidates.count) Treffer).")
+        }
+        let rowPath = Array(candidates[0].path.dropLast())
+        let row = nodes.first { $0.role == "AXRow" && $0.path == rowPath }
+        if let row {
+            let selected = AXUIElementSetAttributeValue(row.element, kAXSelectedAttribute as CFString, kCFBooleanTrue)
+            if selected != .success { try click(row.element) }
+        } else {
+            try click(candidates[0].element)
+        }
+        usleep(1_000_000)
+        let refreshed = collect(focusedRoot(appElement), maxDepth: 22, maxNodes: 12000)
+        let forwardButtons = refreshed.filter { matches($0, role: "AXButton", description: "Weiterleiten") && (attribute($0.element, kAXEnabledAttribute) as? Bool ?? true) }
+        guard forwardButtons.count == 1 else {
+            throw HelperError.message("Weiterleitung abgebrochen: Die ausgewählte Originalmail besitzt keine eindeutig aktive Weiterleiten-Schaltfläche.")
+        }
+        try writeJSON(["opened": true, "subject": expectedSubject, "date": dateNeedle, "searchResult": dictionary(candidates[0])])
+        exit(0)
+    }
+
     if command == "select-search-suggestion" {
         guard arguments.count >= 2 else { throw HelperError.message("select-search-suggestion benötigt den exakten Suchtext.") }
         let expected = arguments[1]
@@ -783,6 +816,38 @@ do {
             "attachmentNodes": attachmentNodes.map(dictionary),
             "focusedWindowTitle": focusedWindowTitle(appElement),
         ])
+        exit(0)
+    }
+
+    if command == "prepend-compose-text" {
+        guard arguments.count >= 3 else { throw HelperError.message("prepend-compose-text benötigt Begleittext und Deduplizierungskennung.") }
+        let prepend = arguments[1]
+        let marker = arguments[2]
+        let composeNodes = collect(focusedRoot(appElement), maxDepth: 22, maxNodes: 12000)
+        let textArea = try largestComposeTextArea(composeNodes)
+        let original = safeValue(textArea.element)
+        if original.contains(marker) {
+            try writeJSON(["updated": false, "alreadyPresent": true, "marker": marker])
+            exit(0)
+        }
+        guard !original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw HelperError.message("Weiterleitung abgebrochen: Der Originalinhalt ist im Outlook-Entwurf nicht sichtbar.")
+        }
+        try pasteText(prepend + "\n\n" + original, into: textArea.element)
+        let verified = safeValue(textArea.element)
+        guard verified.contains(marker), verified.contains(original.prefix(min(80, original.count))) else {
+            throw HelperError.message("Weiterleitung abgebrochen: Begleittext und Originalinhalt wurden nicht gemeinsam verifiziert.")
+        }
+        try writeJSON(["updated": true, "marker": marker, "originalLength": original.count, "verifiedLength": verified.count])
+        exit(0)
+    }
+
+    if command == "compose-contains-marker" {
+        guard arguments.count >= 2 else { throw HelperError.message("compose-contains-marker benötigt eine Deduplizierungskennung.") }
+        let marker = arguments[1]
+        let composeNodes = collect(focusedRoot(appElement), maxDepth: 22, maxNodes: 12000)
+        let textArea = try largestComposeTextArea(composeNodes)
+        try writeJSON(["contains": safeValue(textArea.element).contains(marker), "marker": marker])
         exit(0)
     }
 

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 const root = await mkdtemp(path.join(os.tmpdir(), 'iva-scheduling-dispatch-'));
 process.env.DATA_DIR = root;
 process.env.IVA_CODEX_TASK_ROOT = path.join(root, 'tasks');
@@ -208,7 +209,7 @@ assert.equal(warnings.length, 2);
 
 // /current ist ein Symlink. Der CLI-Einstieg muss ausgeführt werden, nicht Exit 0 ohne Wirkung.
 const linked = path.join(root, 'linked-tasks.mjs');
-await symlink(new URL('../local-mac-helper/codex-tasks.mjs', import.meta.url).pathname, linked);
+await symlink(fileURLToPath(new URL('../local-mac-helper/codex-tasks.mjs', import.meta.url)), linked);
 assert.equal(tasks.isCodexTasksEntrypoint(linked), true);
 await assert.rejects(promisify(execFile)(process.execPath, [linked, 'planbar-progress', '00000000-0000-4000-8000-000000000000', '/invalid/receipt.json'], { env: process.env }), error => error.code === 1 && /Eingangsbeleg/.test(error.stderr));
 console.log('PASS Terminierungsstart: sofortige Übergabe, durable Outbox, sichere begrenzte Wiederholung, allgemeine Workflow-Lebenszeichen, kontrollierte Worker-Fortsetzung, Status, atomare Worker-Deduplizierung, Abbruchmeldung, Wake-Cleanup und current-Symlink. Keine Fachsystem-Schreibaktionen.');

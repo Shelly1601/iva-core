@@ -1,13 +1,20 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import os from 'node:os';
 import path from 'node:path';
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { classifyFundingDocumentName } from './funding-document-extractor.mjs';
 import { resolveFundingSupervisor } from './funding.mjs';
 import { resolveFundingStage } from './pipedrive-funding.mjs';
 
 const PIPEDRIVE_HOST = 'simplegategmbh.pipedrive.com';
 const MAX_OUTPUT_BYTES = 256 * 1024;
+const MAX_PIPEDRIVE_DOWNLOAD_BYTES = 50 * 1024 * 1024;
+const PIPEDRIVE_DOWNLOAD_ROOT = path.join(
+  process.env.IVA_MAC_HELPER_DATA_DIR || path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper'),
+  'tmp',
+  'funding-downloads',
+);
 export const IVA_PIPEDRIVE_NOTE_SIGNATURE = '(Notiz von Nadine via KI)';
 
 export const PIPEDRIVE_FILE_POLICY = Object.freeze({
@@ -1341,6 +1348,12 @@ async function readPipedriveApiBatchAsync(batch, sourceDealId) {
             vpPersonId: vpId ? String(vpId) : null,
             vpEmail: primaryEmail(vp) || (typeof vpId === 'string' && vpId.includes('@') ? vpId.toLowerCase() : null),
             files: (files || []).map(file => String(file.name || file.file_name || '').trim()).filter(Boolean),
+            fileRecords: (files || []).map(file => ({
+              id: file?.id ? String(file.id) : '',
+              name: String(file?.name || file?.file_name || '').trim(),
+              size: Number(file?.file_size || file?.size || 0),
+              mimeType: String(file?.file_type || file?.mime_type || ''),
+            })).filter(file => /^\d+$/.test(file.id) && file.name),
           };
         } catch (error) {
           return { dealId: id, error: error.message };
@@ -1430,6 +1443,145 @@ export async function readPipedriveFundingDealsFast({ dealIds, batchSize = 12, o
     mutated: false,
     source: 'pipedrive-read-api-async',
   };
+}
+
+function safePipedriveDownloadName(value, fileId) {
+  const original = path.basename(String(value || '')).normalize('NFKC');
+  const extension = path.extname(original).toLowerCase().replace(/[^.a-z0-9]/g, '').slice(0, 10);
+  const stem = path.basename(original, path.extname(original)).replace(/[^a-z0-9äöüß._ -]+/gi, '-').replace(/\s+/g, ' ').trim().slice(0, 120);
+  return `${stem || 'pipedrive-dokument'}-${String(fileId)}${extension}`;
+}
+
+async function listPipedriveDealFileRecords(dealId) {
+  const jobId = `iva-file-list-${randomUUID()}`;
+  const started = JSON.parse(await executePipedriveJavaScript(String.raw`(() => {
+    const dealId = ${JSON.stringify(String(dealId))};
+    const jobId = ${JSON.stringify(jobId)};
+    window.__ivaPipedriveFileLists ||= {};
+    window.__ivaPipedriveFileLists[jobId] = { status: 'running' };
+    (async () => {
+      const state = window.__ivaPipedriveFileLists[jobId];
+      try {
+        const resource = performance.getEntriesByType('resource').map(entry => entry.name).find(name => name.includes('session_token='));
+        const sessionToken = resource ? new URL(resource).searchParams.get('session_token') : '';
+        if (!sessionToken) throw new Error('missing_session_token');
+        const response = await fetch('/api/v1/deals/' + dealId + '/files?start=0&limit=500&strict_mode=true&session_token=' + encodeURIComponent(sessionToken), { credentials: 'same-origin' });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || payload?.success === false) throw new Error('HTTP ' + response.status);
+        state.status = 'complete';
+        state.files = (payload?.data || []).map(file => ({ id: String(file?.id || ''), name: String(file?.name || file?.file_name || ''), size: Number(file?.file_size || file?.size || 0), mimeType: String(file?.file_type || file?.mime_type || '') }));
+      } catch (error) {
+        state.status = 'error';
+        state.error = String(error?.message || error).slice(0, 300);
+      }
+    })();
+    return JSON.stringify({ started: true });
+  })()`, { dealId, timeoutMs: 30000 }));
+  if (!started.started) throw new Error(`Pipedrive-Dateiliste für Deal ${dealId} konnte nicht gestartet werden.`);
+  try {
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      await wait(300);
+      const result = JSON.parse(await executePipedriveJavaScript(String.raw`(() => {
+        const state = window.__ivaPipedriveFileLists?.[${JSON.stringify(jobId)}];
+        return JSON.stringify(state ? { status: state.status, files: state.files || [], error: state.error || '' } : { status: 'missing' });
+      })()`, { dealId, timeoutMs: 15000 }));
+      if (result.status === 'complete') return (result.files || []).filter(file => /^\d+$/.test(file.id) && file.name);
+      if (['error', 'missing'].includes(result.status)) throw new Error(`Pipedrive-Dateiliste für Deal ${dealId}: ${result.error || 'Status ging verloren.'}`);
+    }
+    throw new Error(`Pipedrive-Dateiliste für Deal ${dealId} überschritt 30 Sekunden.`);
+  } finally {
+    await executePipedriveJavaScript(String.raw`(() => {
+      if (window.__ivaPipedriveFileLists) delete window.__ivaPipedriveFileLists[${JSON.stringify(jobId)}];
+      return 'cleaned';
+    })()`, { dealId, timeoutMs: 15000 }).catch(() => {});
+  }
+}
+
+async function downloadPipedriveFileViaSignedInSession({ dealId, file }) {
+  const marker = `iva-download-${randomUUID()}`;
+  let signedUrl = '';
+  try {
+    const opened = await executePipedriveJavaScript(String.raw`(() => {
+      const resource = performance.getEntriesByType('resource').map(entry => entry.name).find(name => name.includes('session_token='));
+      const sessionToken = resource ? new URL(resource).searchParams.get('session_token') : '';
+      if (!sessionToken) return 'missing_session_token';
+      const anchor = document.createElement('a');
+      anchor.href = '/api/v1/files/${String(file.id)}/download?strict_mode=true&session_token=' + encodeURIComponent(sessionToken) + '#${marker}';
+      anchor.target = '_self';
+      anchor.style.display = 'none';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      return 'opened';
+    })()`, { dealId, timeoutMs: 15000 });
+    if (opened !== 'opened') throw new Error(`${file.name}: signierter Download konnte nicht geöffnet werden.`);
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      await wait(300);
+      signedUrl = await runAppleScript(`tell application "Google Chrome"
+repeat with w in windows
+  repeat with t in tabs of w
+    set candidateUrl to URL of t
+    if candidateUrl contains "pipedrive-files" or candidateUrl contains "amazonaws.com" then return candidateUrl
+  end repeat
+end repeat
+return ""
+end tell`, { timeoutMs: 10000 }).catch(() => '');
+      if (signedUrl) break;
+    }
+    if (!signedUrl) throw new Error(`${file.name}: signierte Pipedrive-Downloadadresse wurde nicht bereitgestellt.`);
+    const response = await fetch(signedUrl, { redirect: 'follow' });
+    if (!response.ok) throw new Error(`${file.name}: Pipedrive-Download HTTP ${response.status}.`);
+    const length = Number(response.headers.get('content-length') || 0);
+    if (length > MAX_PIPEDRIVE_DOWNLOAD_BYTES) throw new Error(`${file.name}: Datei ist größer als 50 MB.`);
+    const data = Buffer.from(await response.arrayBuffer());
+    if (!data.length || data.length > MAX_PIPEDRIVE_DOWNLOAD_BYTES) throw new Error(`${file.name}: Datei ist leer oder größer als 50 MB.`);
+    return { data, contentType: String(response.headers.get('content-type') || '') };
+  } finally {
+    await runAppleScript(`tell application "Google Chrome"
+repeat with w in windows
+  repeat with t in tabs of w
+    set candidateUrl to URL of t
+    if candidateUrl contains "pipedrive-files" or candidateUrl contains "amazonaws.com" or candidateUrl contains "/api/v1/files/${String(file.id)}/download" then set URL of t to "https://${PIPEDRIVE_HOST}/deal/${String(dealId)}"
+  end repeat
+end repeat
+end tell`, { timeoutMs: 10000 }).catch(() => {});
+  }
+}
+
+export async function downloadPipedriveDealFiles({ dealId, fileIds = [] } = {}) {
+  const id = String(dealId || '').replace(/\D/g, '');
+  if (!id) throw new Error('Für den Pipedrive-Dateidownload fehlt eine gültige Deal-ID.');
+  const requestedIds = new Set((Array.isArray(fileIds) ? fileIds : []).map(value => String(value).replace(/\D/g, '')).filter(Boolean));
+  const createdIds = await openTemporaryPipedriveDealTabs([id]);
+  let directory = '';
+  try {
+    await activatePipedriveDealTab(id);
+    await waitForPipedriveDealTab(id);
+    const records = await listPipedriveDealFileRecords(id);
+    const selected = requestedIds.size ? records.filter(file => requestedIds.has(file.id)) : records;
+    if (requestedIds.size && selected.length !== requestedIds.size) throw new Error('Mindestens eine angeforderte Pipedrive-Datei gehört nicht zu diesem Deal.');
+    if (!selected.length) return { dealId: id, directory: null, files: [], downloadedCount: 0, readOnlySource: true, deletedFromPipedrive: false };
+    if (selected.length > 100) throw new Error('Pro Deal dürfen höchstens 100 Dateien in einem Lauf heruntergeladen werden.');
+    await mkdir(PIPEDRIVE_DOWNLOAD_ROOT, { recursive: true, mode: 0o700 });
+    directory = await mkdtemp(path.join(PIPEDRIVE_DOWNLOAD_ROOT, `${id}-`));
+    const files = [];
+    for (const file of selected) {
+      const downloaded = await downloadPipedriveFileViaSignedInSession({ dealId: id, file });
+      const fileName = safePipedriveDownloadName(file.name, file.id);
+      const filePath = path.join(directory, fileName);
+      await writeFile(filePath, downloaded.data, { mode: 0o600, flag: 'wx' });
+      files.push({ id: file.id, originalName: file.name, fileName, filePath, size: downloaded.data.length, contentType: downloaded.contentType || file.mimeType || '' });
+      if (files.length < selected.length) await waitForPipedriveDealTab(id, { timeoutMs: 20_000 });
+    }
+    return { dealId: id, directory, files, downloadedCount: files.length, readOnlySource: true, deletedFromPipedrive: false };
+  } catch (error) {
+    if (directory) await rm(directory, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  } finally {
+    await closeTemporaryPipedriveDealTabs(createdIds).catch(() => {});
+  }
 }
 
 const WRITABLE_FUNDING_FIELDS = new Set(['Auftragsnummer', 'Kundennummer', 'Telefonnummer', 'E-Mail', 'Anlage']);

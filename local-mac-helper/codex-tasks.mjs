@@ -22,6 +22,14 @@ export const CODEX_TASK_MAX_LAUNCH_ATTEMPTS = 3;
 export const CODEX_TASK_MAX_RECOVERY_ATTEMPTS = 2;
 const CODEX_TASK_RETENTION_MS = 7 * 24 * 60 * 60_000;
 const TERMINAL_TASK_STATUSES = new Set(['completed', 'failed', 'blocked', 'timed_out', 'incomplete']);
+const FUNDING_WORKFLOW_STEPS = Object.freeze({
+  'funding-daily-sequence': Object.freeze(['completeness', 'amount', 'approval']),
+  'funding-monitor': Object.freeze(['completeness']),
+  'kfw-funding-amount-morning': Object.freeze(['amount']),
+  'kfw-approval-morning': Object.freeze(['approval']),
+});
+const WORKFLOW_STEP_STATUSES = new Set(['completed', 'partial', 'blocked']);
+const WORKFLOW_OUTCOMES = new Set(['completed', 'no_changes', 'partial', 'blocked', 'failed']);
 const BUILD_PHASES = Object.freeze({
   planning: 10,
   implementing: 30,
@@ -65,6 +73,7 @@ function jobPaths(jobId) {
     log: path.join(directory, 'codex.log'),
     lastMessage: path.join(directory, 'result.txt'),
     planbarProgress: path.join(directory, 'planbar-progress.json'),
+    workflowResult: path.join(directory, 'workflow-result.json'),
     executionClaim: path.join(directory, 'execution-claim.json'),
     heartbeat: path.join(directory, 'heartbeat.json'),
   };
@@ -211,6 +220,8 @@ async function reportTaskState(request, state, resultPreview = '') {
           jobId: request.jobId,
           phase: state.phase,
           progress: state.progress,
+          workflowOutcome: state.workflowOutcome || null,
+          workflowSteps: state.workflowSteps || [],
           ...(state.workflowProof || {}),
         },
       });
@@ -223,6 +234,21 @@ async function reportTaskState(request, state, resultPreview = '') {
     console.error(`Kontrollzentrum-Meldung fehlgeschlagen: ${clean(error.message, 300)}`);
     return false;
   }
+}
+
+function workflowResultInstructions(request) {
+  const stepIds = FUNDING_WORKFLOW_STEPS[request.workflowId];
+  if (request.resultProtocol !== 1 || !stepIds) return '';
+  const command = (...parts) => `node ${JSON.stringify(MODULE_PATH)} ${parts.join(' ')}`;
+  const stepLines = stepIds.map(stepId =>
+    `- Nach diesem Teil: ${command('workflow-step', request.jobId, stepId, '<completed|partial|blocked>', '<geprüfte_Fälle>', '<geänderte_Fälle>', '"kurze Zusammenfassung"')}`
+  );
+  return `Verbindliches maschinenlesbares Ergebnisprotokoll (Pflicht):
+- Lies zu Beginn den gespeicherten Stand mit: ${command('workflow-status', request.jobId)}
+- Bereits als completed gespeicherte Teilschritte nicht erneut ausführen; beim ersten offenen Teilschritt fortsetzen.
+${stepLines.join('\n')}
+- Ganz am Ende genau einmal: ${command('workflow-result', request.jobId, '<completed|no_changes|partial|blocked|failed>', '"kurze Gesamtzusammenfassung"')}
+completed/no_changes ist nur erlaubt, wenn jeder Pflicht-Teilschritt protokolliert und nicht partial/blockiert ist. Ein normal beendeter Codex-Prozess ohne dieses Ergebnisprotokoll gilt ausdrücklich nicht als Erfolg.`;
 }
 
 export function buildCodexPrompt(request) {
@@ -238,6 +264,8 @@ Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.
 Manueller Einmallauf:
 ${request.prompt}${recoveryInstruction}
 ${request.planbar ? planbarReceiptInstructions(request) : ''}
+
+${workflowResultInstructions(request)}
 
 Beende den Ergebnisbericht mit einer eigenen Zeile „Status: erfolgreich“ nur nach tatsächlicher Prüfung des Ergebnisses, sonst „Status: blockiert“ und dem konkreten Grund.
 
@@ -325,6 +353,7 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
     workflowName: clean(workflowName, 220),
     planbar,
     launchProtocol: 2,
+    resultProtocol: FUNDING_WORKFLOW_STEPS[clean(workflowId, 140)] ? 1 : 0,
     workspace: REPO_ROOT,
     workspaceReadiness: {
       iCloud: workspaceReadiness.iCloud,
@@ -355,12 +384,12 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
 const PROJECT_WORKFLOW_TASKS = Object.freeze({
   'funding-daily-sequence': Object.freeze({
     title: 'Förderung – Tageslauf 1 → 2 → 3',
-    prompt: 'Lies FUNDING_WORKFLOWS.md vollständig und führe den dort beschriebenen Tageslauf exakt in der Reihenfolge „Förderung 1 – Vollständigkeit & Unterlagen“ → „Förderung 2 – Förderhöhe prüfen“ → „Förderung 3 – KfW-Zusagen prüfen“ aus. Arbeite ausschließlich auf diesem iMac. Prüfe beim ersten produktiven Lauf alle relevanten Deals, bereits vorhandenen Deal-Dateien und zuordenbaren Fördermails, danach inkrementell plus tägliche Offenfall- und 7-Tage-Reaktionsprüfung. Prüfe die Google-Liste vor vollständigen Deal-Folgeaktionen auf genau eine Spalte Kundename/Name, Datum und Bemerkung; schreibe bei fehlender oder mehrdeutiger Überschrift keinesfalls in eine Ersatzspalte. Kunden- und interne Eskalationsmails bleiben ausnahmslos Outlook-Entwürfe und werden nicht versandt. Die ausdrücklich vorgesehenen echten Folgeaktionen bei eindeutig vollständigen Deals – verifizierte Pipedrive-Felder/Phasen, native WhatsApp an Viktoria, deduplizierter Eintrag in die Google-Tabelle und Verschieben vollständig in Pipedrive verarbeiteter Fördermails in Outlook nach „fertig“ – sind freigegeben. Unklare oder unvollständig verarbeitete Mails bleiben im Eingang. In Fachsystemen nichts löschen. Nach verifiziertem Korrektur-Upload darfst du ausschließlich die exakt zugehörigen Dateien im verwalteten lokalen IVA-Förderordner endgültig entfernen; leere nie den gesamten Benutzer-Papierkorb. Beende den Lauf mit einem kurzen Deal-für-Deal-Bericht; Geheimnisse und Steuerdetails auslassen.',
+    prompt: 'Lies FUNDING_WORKFLOWS.md vollständig und führe den dort beschriebenen Tageslauf exakt in der Reihenfolge „Förderung 1 – Vollständigkeit & Unterlagen“ → „Förderung 2 – Förderhöhe prüfen“ → „Förderung 3 – KfW-Zusagen prüfen“ aus. Arbeite ausschließlich auf diesem iMac. Prüfe beim ersten produktiven Lauf alle relevanten Deals, bereits vorhandenen Deal-Dateien und zuordenbaren Fördermails, danach inkrementell plus tägliche Offenfall- und 7-Tage-Reaktionsprüfung. Lade vorhandene Pipedrive-Dateien ausschließlich über den geprüften Helfer `node local-mac-helper/cli.mjs download-pipedrive-files <deal-id> [datei-ids]`; improvisiere keine privaten Download-URLs und gib niemals Sitzungstoken aus. Prüfe die Google-Liste vor vollständigen Deal-Folgeaktionen auf genau eine Spalte Kundename/Name, Datum und Bemerkung; schreibe bei fehlender oder mehrdeutiger Überschrift keinesfalls in eine Ersatzspalte. Kunden- und interne Eskalationsmails bleiben ausnahmslos Outlook-Entwürfe und werden nicht versandt. Die ausdrücklich vorgesehenen echten Folgeaktionen bei eindeutig vollständigen Deals – verifizierte Pipedrive-Felder/Phasen, native WhatsApp an Viktoria, deduplizierter Eintrag in die Google-Tabelle und Verschieben vollständig in Pipedrive verarbeiteter Fördermails in Outlook nach „fertig“ – sind freigegeben. Unklare oder unvollständig verarbeitete Mails bleiben im Eingang. In Fachsystemen nichts löschen. Nach verifiziertem Korrektur-Upload darfst du ausschließlich die exakt zugehörigen Dateien im verwalteten lokalen IVA-Förderordner endgültig entfernen; leere nie den gesamten Benutzer-Papierkorb. Beende den Lauf mit einem kurzen Deal-für-Deal-Bericht; Geheimnisse und Steuerdetails auslassen.',
     acceptanceCriteria: ['Alle drei Workflows laufen in der dokumentierten Reihenfolge und nie parallel.', 'Der Lauf wurde durch die iMac-Hostprüfung zugelassen; MacBook und iPhone waren nur Fernsteuerung.', 'Kunden- und Eskalationsmails sind ausschließlich Entwürfe; kein Mailversand und keine Löschung in Fachsystemen.', 'Bereits vorhandene Deal-Dateien wurden auf PDF-Format, Standardbezeichnung, Lesbarkeit und Vollständigkeit geprüft.', 'Jede Pipedrive-, WhatsApp-, Tabellen- und Mailverschiebeaktion ist eindeutig zugeordnet, dedupliziert und nach der Aktion verifiziert.', 'Nur vollständig in Pipedrive verarbeitete Fördermails wurden nach „fertig“ verschoben.', 'Nach sieben vollen Tagen ohne Antwort wurde EKD intern an Kati, alles andere an Patrick als echter Weiterleitungsentwurf vorbereitet.', 'Lokale Löschung traf ausschließlich verifiziert ersetzte IVA-Arbeitskopien; fremde Papierkorb-Inhalte blieben erhalten.', 'Der Abschluss enthält je Deal die tatsächlich ausgeführten Änderungen oder den konkreten offenen Punkt.'],
   }),
   'funding-monitor': Object.freeze({
     title: 'Förderung 1 – Vollständigkeit & Unterlagen',
-    prompt: 'Lies FUNDING_WORKFLOWS.md vollständig und führe ausschließlich „Förderung 1 – Vollständigkeit & Unterlagen“ genau einmal auf diesem iMac aus. Prüfe auch bereits im Deal vorhandene Dateien und die 7-Tage-Reaktionsfrist. Kunden- und interne Eskalationsmails bleiben Entwürfe; alle dort ausdrücklich genannten, eindeutig belegten Pipedrive-, native-WhatsApp-, Tabellen- und Mailverschiebeaktionen nach „fertig“ sind freigegeben. Unvollständig verarbeitete Mails bleiben im Eingang. In Fachsystemen nichts löschen; nur verifiziert ersetzte lokale IVA-Arbeitskopien im verwalteten Förderordner dürfen endgültig entfernt werden, niemals der gesamte Benutzer-Papierkorb. Berichte jede Dealaktion oder den konkreten Blocker.',
+    prompt: 'Lies FUNDING_WORKFLOWS.md vollständig und führe ausschließlich „Förderung 1 – Vollständigkeit & Unterlagen“ genau einmal auf diesem iMac aus. Prüfe auch bereits im Deal vorhandene Dateien und die 7-Tage-Reaktionsfrist. Lade vorhandene Pipedrive-Dateien ausschließlich über `node local-mac-helper/cli.mjs download-pipedrive-files <deal-id> [datei-ids]`; improvisiere keine privaten Download-URLs und gib niemals Sitzungstoken aus. Kunden- und interne Eskalationsmails bleiben Entwürfe; alle dort ausdrücklich genannten, eindeutig belegten Pipedrive-, native-WhatsApp-, Tabellen- und Mailverschiebeaktionen nach „fertig“ sind freigegeben. Unvollständig verarbeitete Mails bleiben im Eingang. In Fachsystemen nichts löschen; nur verifiziert ersetzte lokale IVA-Arbeitskopien im verwalteten Förderordner dürfen endgültig entfernt werden, niemals der gesamte Benutzer-Papierkorb. Berichte jede Dealaktion oder den konkreten Blocker.',
     acceptanceCriteria: ['Angebot-veröffentlicht-Deals, offene Förderunterlagen, bestehende Deal-Dateien und neue Fördermails sind vollständig geprüft.', 'Nur eindeutig belegte leere Felder und erlaubte Vorwärtsphasen wurden gespeichert und erneut gelesen.', 'Kunden- und 7-Tage-Eskalationsmails sind Entwürfe; WhatsApp und Tabelle folgen nur nach verifizierter Vollständigkeit und genau einmal.', 'Nur vollständig verarbeitete Fördermails wurden verifiziert nach „fertig“ verschoben.', 'Nur verifiziert ersetzte lokale IVA-Arbeitskopien wurden entfernt; in Fachsystemen und im fremden Papierkorb wurde nichts gelöscht.'],
   }),
   'kfw-funding-amount-morning': Object.freeze({
@@ -592,6 +621,82 @@ export async function recordPlanbarTaskProgress(jobId, input, { report = reportT
   return progress;
 }
 
+function workflowResultSummary(result) {
+  if (!result) return null;
+  const steps = Array.isArray(result.steps) ? result.steps : [];
+  return {
+    outcome: result.outcome || '',
+    summary: result.summary || '',
+    steps,
+    checked: steps.reduce((sum, step) => sum + Number(step.checked || 0), 0),
+    changed: steps.reduce((sum, step) => sum + Number(step.changed || 0), 0),
+    updatedAt: result.updatedAt || '',
+  };
+}
+
+export async function recordProjectWorkflowStep(jobId, stepId, stepStatus, checked, changed, summary = '', { report = reportTaskState } = {}) {
+  const paths = jobPaths(jobId);
+  const request = await readJson(paths.request);
+  const expectedSteps = FUNDING_WORKFLOW_STEPS[request.workflowId];
+  if (request.resultProtocol !== 1 || !expectedSteps) throw new Error('Dieser Auftrag verwendet kein strukturiertes Förder-Workflow-Protokoll.');
+  const normalizedStepId = clean(stepId, 40);
+  const normalizedStatus = clean(stepStatus, 20);
+  if (!expectedSteps.includes(normalizedStepId)) throw new Error(`Unbekannter Workflow-Teilschritt: ${normalizedStepId || 'leer'}.`);
+  if (!WORKFLOW_STEP_STATUSES.has(normalizedStatus)) throw new Error(`Ungültiger Teilschrittstatus: ${normalizedStatus || 'leer'}.`);
+  const checkedCount = Number(checked);
+  const changedCount = Number(changed);
+  if (!Number.isSafeInteger(checkedCount) || checkedCount < 0 || !Number.isSafeInteger(changedCount) || changedCount < 0 || changedCount > checkedCount) {
+    throw new Error('Fallzahlen müssen nichtnegative Ganzzahlen sein; Änderungen dürfen Prüfungen nicht überschreiten.');
+  }
+  const previous = await readJson(paths.workflowResult).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
+  const steps = Array.isArray(previous?.steps) ? [...previous.steps] : [];
+  const existingIndex = steps.findIndex(step => step.id === normalizedStepId);
+  if (existingIndex < 0) {
+    const expectedIndex = expectedSteps.indexOf(normalizedStepId);
+    const missingEarlier = expectedSteps.slice(0, expectedIndex).find(id => !steps.some(step => step.id === id && step.status === 'completed'));
+    if (missingEarlier) throw new Error(`Teilschritt ${normalizedStepId} darf erst nach abgeschlossenem Teilschritt ${missingEarlier} protokolliert werden.`);
+  } else if (steps[existingIndex].status === 'completed') {
+    const prior = steps[existingIndex];
+    if (prior.status === normalizedStatus && prior.checked === checkedCount && prior.changed === changedCount) return workflowResultSummary(previous);
+    throw new Error(`Teilschritt ${normalizedStepId} ist bereits abgeschlossen und darf nicht überschrieben werden.`);
+  }
+  const timestamp = new Date().toISOString();
+  const step = { id: normalizedStepId, status: normalizedStatus, checked: checkedCount, changed: changedCount, summary: clean(summary, 800), updatedAt: timestamp };
+  if (existingIndex >= 0) steps[existingIndex] = step;
+  else steps.push(step);
+  const result = { protocol: 1, jobId, workflowId: request.workflowId, steps, outcome: '', summary: '', updatedAt: timestamp };
+  await writeJsonAtomic(paths.workflowResult, result);
+  const state = await readJson(paths.state);
+  const normalized = workflowResultSummary(result);
+  const updated = await writeState(paths, { ...state, workflowSteps: normalized.steps, detail: step.summary || `Workflow-Teilschritt ${normalizedStepId}: ${normalizedStatus}.`, updatedAt: timestamp });
+  await report(request, updated, updated.detail);
+  return normalized;
+}
+
+export async function recordProjectWorkflowOutcome(jobId, outcome, summary = '', { report = reportTaskState } = {}) {
+  const paths = jobPaths(jobId);
+  const request = await readJson(paths.request);
+  const expectedSteps = FUNDING_WORKFLOW_STEPS[request.workflowId];
+  const normalizedOutcome = clean(outcome, 20);
+  if (request.resultProtocol !== 1 || !expectedSteps) throw new Error('Dieser Auftrag verwendet kein strukturiertes Förder-Workflow-Protokoll.');
+  if (!WORKFLOW_OUTCOMES.has(normalizedOutcome)) throw new Error(`Ungültiges Workflow-Ergebnis: ${normalizedOutcome || 'leer'}.`);
+  const previous = await readJson(paths.workflowResult).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
+  const steps = Array.isArray(previous?.steps) ? previous.steps : [];
+  if (['completed', 'no_changes'].includes(normalizedOutcome)) {
+    const missing = expectedSteps.filter(id => !steps.some(step => step.id === id && step.status === 'completed'));
+    if (missing.length) throw new Error(`Erfolg ist ohne abgeschlossene Pflicht-Teilschritte nicht zulässig: ${missing.join(', ')}.`);
+    if (normalizedOutcome === 'no_changes' && steps.some(step => Number(step.changed || 0) > 0)) throw new Error('no_changes widerspricht protokollierten Änderungen.');
+  }
+  const timestamp = new Date().toISOString();
+  const result = { protocol: 1, jobId, workflowId: request.workflowId, steps, outcome: normalizedOutcome, summary: clean(summary, 1200), updatedAt: timestamp };
+  await writeJsonAtomic(paths.workflowResult, result);
+  const state = await readJson(paths.state);
+  const normalized = workflowResultSummary(result);
+  const updated = await writeState(paths, { ...state, workflowOutcome: normalized.outcome, workflowSteps: normalized.steps, detail: normalized.summary || `Workflow-Ergebnis: ${normalized.outcome}.`, updatedAt: timestamp });
+  await report(request, updated, updated.detail);
+  return normalized;
+}
+
 export async function getCodexTaskStatus(jobId) {
   const paths = jobPaths(jobId);
   let state = await readJson(paths.state);
@@ -614,7 +719,8 @@ export async function getCodexTaskStatus(jobId) {
     resultPreview = clean(await readFile(paths.lastMessage, 'utf8').catch(() => ''), 1800);
   }
   const planbarProgress = await readJson(paths.planbarProgress).catch(() => state.planbarProgress || null);
-  return { ...state, planbarProgress, resultPreview: planbarProgress ? `${planbarSchedulingSummary(planbarProgress)}\n${resultPreview}`.trim() : resultPreview };
+  const workflowResult = workflowResultSummary(await readJson(paths.workflowResult).catch(() => null));
+  return { ...state, workflowOutcome: workflowResult?.outcome || state.workflowOutcome || '', workflowSteps: workflowResult?.steps || state.workflowSteps || [], workflowMetrics: workflowResult ? { checked: workflowResult.checked, changed: workflowResult.changed } : null, planbarProgress, resultPreview: planbarProgress ? `${planbarSchedulingSummary(planbarProgress)}\n${resultPreview}`.trim() : resultPreview };
 }
 
 export async function updateCodexTaskProgress(jobId, phase, detail = '') {
@@ -642,9 +748,18 @@ export async function updateCodexTaskProgress(jobId, phase, detail = '') {
 
 export function inferProjectWorkflowStatus(lastMessage = '') {
   const text = String(lastMessage || '');
-  return /(?:^|\n)\s*Status\s*:\s*(?:\*\*)?\s*(?:(?:fachlich|technisch)\s+)?blockiert\b/i.test(text)
+  return /(?:^|\n)\s*(?:(?:Status|Ergebnis)\s*:\s*(?:\*\*)?\s*)?(?:(?:fachlich|technisch)\s+)?blockiert\b/i.test(text)
+    || /(?:^|\n)\s*Technischer\s+Blocker\s*:/i.test(text)
     ? 'blocked'
     : '';
+}
+
+export function resolveProjectWorkflowResultStatus(result) {
+  if (result?.outcome === 'blocked') return 'blocked';
+  if (result?.outcome === 'failed') return 'failed';
+  if (result?.outcome === 'partial') return 'incomplete';
+  if (['completed', 'no_changes'].includes(result?.outcome)) return 'completed';
+  return 'incomplete';
 }
 
 export function buildCodexCliArguments(request) {
@@ -699,6 +814,7 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   const current = await readJson(paths.state).catch(() => ({}));
   const resultText = await readFile(paths.lastMessage, 'utf8').catch(() => '');
   const planbarProgress = await readJson(paths.planbarProgress).catch(() => current.planbarProgress || null);
+  const structuredResult = workflowResultSummary(await readJson(paths.workflowResult).catch(() => null));
   const resultPreview = clean(planbarProgress ? `${planbarSchedulingSummary(planbarProgress)}\n${resultText}` : resultText, 1800);
   const workflowProof = request.workflowId === 'planbar-weekly-export'
     ? await import('./planbar-forecast-mail.mjs')
@@ -708,12 +824,15 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   const inferredWorkflowStatus = request.mode !== 'build'
     ? inferProjectWorkflowStatus(resultText)
     : '';
+  const structuredStatus = request.resultProtocol === 1 ? resolveProjectWorkflowResultStatus(structuredResult) : '';
   const status = request.planbar && planbarProgress?.status !== 'completed'
     ? (planbarProgress?.reservation?.verified ? 'incomplete' : 'blocked')
     : timedOut
     ? 'timed_out'
-    : current.status === 'blocked' || inferredWorkflowStatus === 'blocked'
+    : current.status === 'blocked' || structuredStatus === 'blocked' || (request.resultProtocol !== 1 && inferredWorkflowStatus === 'blocked')
       ? 'blocked'
+      : request.resultProtocol === 1
+        ? (exitCode !== 0 ? 'failed' : structuredStatus)
       : exitCode !== 0
         ? 'failed'
         : request.workflowId === 'planbar-weekly-export' && workflowProof?.sentFolderVerified !== true
@@ -726,17 +845,21 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
     ...current,
     planbarProgress,
     workflowProof,
+    workflowOutcome: structuredResult?.outcome || current.workflowOutcome || '',
+    workflowSteps: structuredResult?.steps || current.workflowSteps || [],
     jobId, title: request.title, requestId: request.requestId, status,
     phase: status === 'completed' ? 'completed' : current.phase,
     progress: finalProgress,
     detail: request.planbar && planbarProgress
       ? planbarSchedulingSummary(planbarProgress)
       : status === 'incomplete'
-      ? (request.mode === 'build' ? 'Codex endete, bevor alle Pflichtschritte einschließlich Live-Prüfung bestätigt waren.' : 'Der operative Lauf endete ohne bestätigten Ergebnisnachweis.')
+      ? (request.mode === 'build' ? 'Codex endete, bevor alle Pflichtschritte einschließlich Live-Prüfung bestätigt waren.' : request.resultProtocol === 1 ? 'Der Förderlauf endete ohne vollständiges maschinenlesbares Ergebnis aller Pflichtschritte.' : 'Der operative Lauf endete ohne bestätigten Ergebnisnachweis.')
       : inferredWorkflowStatus === 'blocked' && current.status !== 'blocked'
         ? 'Der Workflow endete mit einem fachlichen oder technischen Blocker. Details stehen im Ergebnis.'
-        : status === 'completed' ? 'Auftrag abgeschlossen; Ergebnisprüfung liegt vor.' : current.detail,
-    error: inferredWorkflowStatus === 'blocked' && current.status !== 'blocked'
+        : status === 'completed' ? (structuredResult?.summary || 'Auftrag abgeschlossen; Ergebnisprüfung liegt vor.') : (structuredResult?.summary || current.detail),
+    error: structuredStatus === 'blocked'
+      ? (structuredResult?.summary || 'Der Förderlauf meldete einen konkreten Blocker.')
+      : inferredWorkflowStatus === 'blocked' && current.status !== 'blocked'
       ? 'Der Workflow endete mit einem fachlichen oder technischen Blocker.'
       : current.error,
     createdAt: request.createdAt, startedAt, completedAt, exitCode,
@@ -905,7 +1028,16 @@ export function isCodexTasksEntrypoint(entry = process.argv[1]) {
   try { return Boolean(entry) && realpathSync(entry) === realpathSync(MODULE_PATH); } catch { return false; }
 }
 
-if (isCodexTasksEntrypoint() && process.argv[2] === 'planbar-progress') {
+if (isCodexTasksEntrypoint() && process.argv[2] === 'workflow-status') {
+  try { console.log(JSON.stringify(await getCodexTaskStatus(process.argv[3]), null, 2)); }
+  catch (error) { console.error(error.message); process.exitCode = 1; }
+} else if (isCodexTasksEntrypoint() && process.argv[2] === 'workflow-step') {
+  try { console.log(JSON.stringify(await recordProjectWorkflowStep(process.argv[3], process.argv[4], process.argv[5], process.argv[6], process.argv[7], process.argv.slice(8).join(' ')))); }
+  catch (error) { console.error(error.message); process.exitCode = 1; }
+} else if (isCodexTasksEntrypoint() && process.argv[2] === 'workflow-result') {
+  try { console.log(JSON.stringify(await recordProjectWorkflowOutcome(process.argv[3], process.argv[4], process.argv.slice(5).join(' ')))); }
+  catch (error) { console.error(error.message); process.exitCode = 1; }
+} else if (isCodexTasksEntrypoint() && process.argv[2] === 'planbar-progress') {
   try {
     const paths = jobPaths(process.argv[3]);
     const receipt = path.resolve(process.argv[4] || '');

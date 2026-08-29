@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 
 const root = await mkdtemp(path.join(os.tmpdir(), 'iva-device-control-'));
@@ -325,6 +326,8 @@ try {
   assert.doesNotMatch(codexTaskSource, /'--sandbox'[^\n]+?'--approve-for-me'/, 'Codex CLI erlaubt --sandbox nicht zusammen mit --approve-for-me');
   assert.equal(inferProjectWorkflowStatus('Status: **fachlich blockiert**.\n\nGrund: Pflichtdaten fehlen.'), 'blocked');
   assert.equal(inferProjectWorkflowStatus('Status: technisch blockiert\nKeine Schreibaktion.'), 'blocked');
+  assert.equal(inferProjectWorkflowStatus('Ergebnis: technisch blockiert\nKeine Schreibaktion.'), 'blocked');
+  assert.equal(inferProjectWorkflowStatus('Technischer Blocker: Outlook-Konto nicht erreichbar.'), 'blocked');
   assert.equal(inferProjectWorkflowStatus('Status: erfolgreich\nKeine Blocker vorhanden.'), '');
   const deviceAgentRunnerSource = await readFile(new URL('../local-mac-helper/device-agent-runner.mjs', import.meta.url), 'utf8');
   assert.match(deviceAgentRunnerSource, /DEVICE_AGENT_HARD_TIMEOUT_MS = 240_000/, 'der äußere Agent darf die 180-Sekunden-Planbar-Prüfung nicht vorzeitig abbrechen');
@@ -413,7 +416,7 @@ try {
 
   console.log('Device-Control: zentrales Laufzeitpaket und UI-Serialisierung prüfen …');
   const { buildCentralRuntimeBundle, validateCentralRuntimeBundle, prepareCentralRuntime, activateCentralRuntime } = await import('../local-mac-helper/central-runtime.mjs');
-  const bundle = await buildCentralRuntimeBundle(path.resolve(new URL('..', import.meta.url).pathname));
+  const bundle = await buildCentralRuntimeBundle(path.resolve(fileURLToPath(new URL('..', import.meta.url))));
   validateCentralRuntimeBundle(bundle);
   assert.ok(bundle.files.some(file => file.path === 'operations/customer-scheduling.js'));
   assert.ok(bundle.files.every(file => !/\.env|outputs\//.test(file.path)));

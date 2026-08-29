@@ -72,7 +72,7 @@ import {
   resolvePipedriveFundingStageTransition,
 } from '../local-mac-helper/chrome-pipedrive.mjs';
 import { cleanupFundingWorkingCopy, stageFundingWorkingCopy } from '../local-mac-helper/local-working-files.mjs';
-import { fundingMessageFingerprint } from '../local-mac-helper/funding-monitor-state.mjs';
+import { fundingMessageFingerprint, normalizeFundingMonitorState } from '../local-mac-helper/funding-monitor-state.mjs';
 import { assessRegistrationCertificateDate, fundingDocumentPipelinePolicy } from '../local-mac-helper/funding-document-pipeline.mjs';
 import { loadFundingReview, saveFundingReview } from '../local-mac-helper/funding-review-queue.mjs';
 import { cleanupCompletedFundingReview, fundingLocalCleanupPolicy, recordFundingReviewCompletion } from '../local-mac-helper/funding-local-cleanup.mjs';
@@ -87,6 +87,11 @@ assert.equal(FUNDING_SIGNATURE.email, 'n.sell@heat-hero.com');
 assert.equal(FUNDING_SIGNATURE.website, 'https://www.heat-hero.com');
 assert.equal(FUNDING_ESCALATION_DELAY_DAYS, 7);
 assert.equal(FUNDING_ESCALATION_RECIPIENTS.ekd.email, 'k.bolz@heat-hero.com');
+const migratedMonitor = normalizeFundingMonitorState({ version: 1, mode: 'draft-review', emailSendEnabled: false, replyDraftsOnly: true });
+assert.equal(migratedMonitor.mode, 'review-only');
+assert.equal(migratedMonitor.migratedFromMode, 'draft-review');
+assert.equal(normalizeFundingMonitorState({ mode: 'draft-review', emailSendEnabled: true, replyDraftsOnly: true }).mode, 'draft-review');
+assert.equal(normalizeFundingMonitorState({ mode: 'draft-review', emailSendEnabled: false, replyDraftsOnly: false }).mode, 'draft-review');
 assert.equal(withFundingSender({}).from, FUNDING_SENDER_EMAIL);
 let activationAttempts = 0;
 let activationWaits = 0;
@@ -168,6 +173,7 @@ assert.match(escalationForward.script, /save forwardedMessage/);
 assert.doesNotMatch(escalationForward.script, /send forwardedMessage/);
 assert.equal(escalationForward.forward.to[0], 'k.bolz@heat-hero.com');
 assert.equal(escalationForward.forward.originalSubject, 'Max Mustermann - A-4711 - fehlende Unterlagen');
+assert.deepEqual(escalationForward.forward.sourceRecipients, ['max@example.com', 'vp@ekd-solar.de']);
 assert.throws(() => renderFundingNoResponseEscalationDraft({
   dealId: '7479', customerName: 'Max Mustermann', customerEmail: 'max@example.com', vpEmail: 'vp@example.com',
   orderNumber: 'A-4711', requestSentAt: '2026-08-01T08:00:00Z', originalSubject: 'Fehlende Unterlagen',

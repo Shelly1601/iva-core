@@ -77,7 +77,7 @@ console.log('PASS Planbar-Forecast-Automation verfolgt iMac und Outlook bis zum 
 {
   const commands = {
     start: { id: 'start', status: 'completed', result: { jobId: '12345678-1234-4234-8234-123456789012' } },
-    status: { id: 'status', status: 'completed', result: { status: 'completed' } },
+    status: { id: 'status', status: 'completed', result: { status: 'completed', workflowOutcome: 'no_changes', workflowSteps: [{ id: 'completeness', status: 'completed' }], workflowMetrics: { checked: 73, changed: 0 }, resultPreview: '73 Fälle geprüft; keine Änderungen erforderlich.' } },
   };
   const handler = createProjectWorkflowAutomationHandler({
     workflowId: 'planbar-completion-morning',
@@ -92,7 +92,9 @@ console.log('PASS Planbar-Forecast-Automation verfolgt iMac und Outlook bis zum 
     attempt: 1,
     previousResult: { commandId: 'start', jobId: commands.start.result.jobId, statusCommandId: 'status' },
   });
-  assert.match(result.summary, /vollständig abgeschlossen/);
+  assert.match(result.summary, /73 Fälle geprüft/);
+  assert.equal(result.workflowOutcome, 'no_changes');
+  assert.deepEqual(result.workflowMetrics, { checked: 73, changed: 0 });
 }
 
 console.log('PASS Wiederkehrende iMac-Projektworkflows bleiben bis zum lokalen Endstatus offen.');

@@ -216,6 +216,69 @@ export async function createOutlookDraftViaUi({ from, subject, body, html = '', 
   }
 }
 
+export async function createOutlookForwardDraftViaUi({ from, to = [], subject, body, originalSubject, requestSentAt, dealId, sourceRecipients = [] }) {
+  const requestedFrom = normalizeEmail(from);
+  const requestedTo = (Array.isArray(to) ? to : []).map(normalizeEmail).filter(Boolean);
+  if (!requestedFrom || requestedTo.length !== 1 || !subject || !body || !originalSubject || !dealId) {
+    throw new Error('Outlook-UI-Weiterleitung abgebrochen: Pflichtangaben fehlen.');
+  }
+  const sourceDate = new Date(requestSentAt);
+  if (Number.isNaN(sourceDate.getTime())) throw new Error('Outlook-UI-Weiterleitung abgebrochen: Originaldatum fehlt.');
+  const dateNeedle = new Intl.DateTimeFormat('de-DE', {
+    timeZone: 'Europe/Berlin', day: '2-digit', month: '2-digit', year: '2-digit',
+  }).format(sourceDate);
+  const marker = `Deal-ID: ${String(dealId).replace(/[^a-z0-9-]/gi, '').slice(0, 100)}`;
+  const sourceRecipient = (Array.isArray(sourceRecipients) ? sourceRecipients : []).map(normalizeEmail).find(Boolean) || '';
+
+  await openOutlookAccountFolder({ from: requestedFrom, folder: 'Entwürfe' });
+  await runMacUiBridge(['set-value-shallowest-and-confirm', 'AXTextField', 'Search Bar', marker], { timeoutMs: 30000 });
+  await new Promise(resolve => setTimeout(resolve, 1200));
+  try {
+    await runMacUiBridge(['open-draft-search-result', subject], { timeoutMs: 30000 });
+    const existing = await runMacUiBridge(['compose-contains-marker', marker], { timeoutMs: 30000 });
+    await runMacUiBridge(['close-window'], { timeoutMs: 15000 });
+    if (existing.contains === true) return { created: false, alreadyPresent: true, trueForward: true, savedInDrafts: true, sent: false, channel: 'macos-accessibility-forward-draft' };
+  } catch (error) {
+    if (!/gefunden wurden 0/.test(error.message)) throw error;
+  }
+
+  let composeOpened = false;
+  try {
+    await openOutlookAccountFolder({ from: requestedFrom, folder: 'Gesendet' });
+    await runMacUiBridge(['set-value-shallowest-and-confirm', 'AXTextField', 'Search Bar', originalSubject], { timeoutMs: 30000 });
+    await new Promise(resolve => setTimeout(resolve, 1400));
+    try {
+      await runMacUiBridge(['open-message-search-result-for-forward', originalSubject, dateNeedle, sourceRecipient], { timeoutMs: 30000 });
+    } catch (error) {
+      if (!/\(0 Treffer\)/.test(error.message)) throw error;
+      await runMacUiBridge(['select-search-suggestion', originalSubject], { timeoutMs: 30000 });
+      await runMacUiBridge(['open-message-search-result-for-forward', originalSubject, dateNeedle, sourceRecipient], { timeoutMs: 30000 });
+    }
+    await runMacUiBridge(['press-visible', 'AXButton', 'Weiterleiten'], { timeoutMs: 30000 });
+    composeOpened = true;
+    await new Promise(resolve => setTimeout(resolve, 900));
+    await selectExactOutlookComposeSender(requestedFrom);
+    await fillRecipientField('toTextField', requestedTo);
+    await runMacUiBridge(['replace-text-app-and-confirm', 'AXTextField', 'subjectTextField', subject], { timeoutMs: 30000 });
+    await runMacUiBridge(['prepend-compose-text', body, marker], { timeoutMs: 30000 });
+    const snapshot = await runMacUiBridge(['compose-summary'], { timeoutMs: 30000 });
+    const sender = emailFromAccountPicker(snapshot.account);
+    const recipients = (snapshot.recipientEmails || []).map(normalizeEmail);
+    if (sender !== requestedFrom || String(snapshot.subject || '') !== String(subject) || !recipients.includes(requestedTo[0])) {
+      throw new Error('Outlook-UI-Weiterleitung abgebrochen: Absender, Empfänger oder Betreff wurden nicht exakt verifiziert.');
+    }
+    await runMacUiBridge(['save-and-close'], { timeoutMs: 30000 });
+    composeOpened = false;
+    return { created: true, alreadyPresent: false, trueForward: true, savedInDrafts: true, sent: false, channel: 'macos-accessibility-forward-draft' };
+  } catch (error) {
+    if (composeOpened) {
+      await runMacUiBridge(['close-window'], { timeoutMs: 15000 }).catch(() => {});
+      await runMacUiBridge(['press', 'AXButton', 'Verwerfen'], { timeoutMs: 15000 }).catch(() => {});
+    }
+    throw error;
+  }
+}
+
 async function updatePreparedOutlookDraftInCurrentFolder({ from, subject, body, html = '', to = [], cc = [], bcc = [], attachments = [] }) {
   if (attachments.length) throw new Error('Outlook-UI-Abbruch: Ein vorhandener Förderentwurf mit Anlagen wird nicht automatisch überschrieben.');
   const requestedFrom = normalizeEmail(from);

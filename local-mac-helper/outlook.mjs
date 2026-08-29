@@ -1,7 +1,7 @@
 import { access, stat } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { createOutlookDraftViaUi, deleteOutlookDraftsViaUi, sendVerifiedOutlookXlsxMessageViaUi, updateOutlookDraftsViaUi, updateOutlookDraftViaUi } from './macos-ui.mjs';
+import { createOutlookDraftViaUi, createOutlookForwardDraftViaUi, deleteOutlookDraftsViaUi, sendVerifiedOutlookXlsxMessageViaUi, updateOutlookDraftsViaUi, updateOutlookDraftViaUi } from './macos-ui.mjs';
 
 const OUTLOOK_APP = '/Applications/Microsoft Outlook.app';
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -101,6 +101,11 @@ export function buildForwardDraftAppleScript(input = {}, now = new Date()) {
   if (ageSeconds < 0 || ageSeconds > 180 * 24 * 60 * 60) throw new Error('Der Originalversand liegt außerhalb des sicher prüfbaren Zeitfensters.');
   const toleranceSeconds = 15 * 60;
   const dedupeNeedle = String(input.dealId || '').replace(/[^a-z0-9-]/gi, '').slice(0, 100);
+  const sourceRecipients = recipients([
+    ...(Array.isArray(input.sourceRecipients) ? input.sourceRecipients : []),
+    input.customerEmail,
+    input.vpEmail,
+  ], 'Originalempfänger');
   if (!dedupeNeedle) throw new Error('Für den internen Weiterleitungsentwurf fehlt die eindeutige Deal-ID.');
   const lines = [
     'tell application id "com.microsoft.Outlook"',
@@ -149,7 +154,7 @@ export function buildForwardDraftAppleScript(input = {}, now = new Date()) {
   );
   return {
     script: lines.join('\n'),
-    forward: { from, to, originalSubject: sourceSubject, subject, body, requestSentAt: sentAt.toISOString(), dealId: dedupeNeedle },
+    forward: { from, to, originalSubject: sourceSubject, subject, body, requestSentAt: sentAt.toISOString(), dealId: dedupeNeedle, sourceRecipients },
   };
 }
 
@@ -483,6 +488,17 @@ export async function createOutlookDraft(input = {}) {
 export async function createOutlookForwardDraft(input = {}) {
   const { script, forward } = buildForwardDraftAppleScript(input);
   const diagnosis = await diagnoseOutlook();
+  if (!diagnosis.capabilities.createAccountDraft && diagnosis.capabilities.sharedSenderUiPrerequisitesReady) {
+    const result = await createOutlookForwardDraftViaUi(forward);
+    return {
+      ...result,
+      subject: forward.subject,
+      originalSubject: forward.originalSubject,
+      recipients: { to: forward.to, cc: [], bcc: [] },
+      requestedFrom: forward.from,
+      sourceSentAt: forward.requestSentAt,
+    };
+  }
   if (!diagnosis.outlook.installed || !diagnosis.outlook.running || !diagnosis.outlook.available) {
     throw new Error('Microsoft Outlook ist für den echten Weiterleitungsentwurf nicht über die native Schnittstelle verfügbar. Es wurde nichts erstellt.');
   }

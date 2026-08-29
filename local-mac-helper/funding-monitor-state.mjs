@@ -73,7 +73,23 @@ async function readFundingInboxDescriptions() {
 }
 
 export async function loadFundingMonitorState(filePath = defaultFundingMonitorStateFile()) {
-  return JSON.parse(await readFile(path.resolve(filePath), 'utf8'));
+  const state = JSON.parse(await readFile(path.resolve(filePath), 'utf8'));
+  const normalized = normalizeFundingMonitorState(state);
+  if (normalized !== state) await saveState(normalized, filePath);
+  return normalized;
+}
+
+export function normalizeFundingMonitorState(state) {
+  if (!state || typeof state !== 'object' || Array.isArray(state)) throw new Error('Ungültiger Fördermonitor-Zustand.');
+  if (state.mode !== 'draft-review') return state;
+  if (state.emailSendEnabled === true || state.replyDraftsOnly === false) return state;
+  return {
+    ...state,
+    version: Math.max(2, Number(state.version) || 0),
+    mode: 'review-only',
+    migratedFromMode: 'draft-review',
+    migratedAt: new Date().toISOString(),
+  };
 }
 
 export async function initializeFundingMonitor({ fundingScan, persist = true } = {}) {

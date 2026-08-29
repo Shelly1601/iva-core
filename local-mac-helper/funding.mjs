@@ -167,6 +167,8 @@ Ursprünglicher Betreff: ${originalSubject}`;
     originalSubject,
     requestSentAt: assessment.requestSentAt,
     dealId,
+    customerEmail: extractEmailAddress(input.customerEmail || input.email || input.kundenEmail) || null,
+    vpEmail: extractEmailAddress(input.vpEmail || input.vertriebspartnerEmail) || null,
     originalMessageMustBeForwarded: true,
     draftOnly: true,
     sent: false,

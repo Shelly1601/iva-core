@@ -174,7 +174,14 @@ export function createProjectWorkflowAutomationHandler({
         const local = statusCommand.result || {};
         if (TERMINAL_TASK_STATUSES.has(local.status)) {
           if (local.status === 'completed') {
-            return { commandId, jobId, summary: `${displayName} wurde auf dem iMac vollständig abgeschlossen.` };
+            return {
+              commandId,
+              jobId,
+              workflowOutcome: local.workflowOutcome || 'completed',
+              workflowSteps: Array.isArray(local.workflowSteps) ? local.workflowSteps : [],
+              workflowMetrics: local.workflowMetrics || null,
+              summary: local.resultPreview || local.detail || `${displayName} wurde auf dem iMac vollständig abgeschlossen.`,
+            };
           }
           throw new Error(local.error || local.detail || `Der lokale Workflow endete mit Status ${local.status}.`);
         }
