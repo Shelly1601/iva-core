@@ -181,6 +181,18 @@ const HEAT_HERO_PROJECT = {
       nextStep: 'Ersten automatischen Morgenlauf anhand des detaillierten E-Mail-Berichts, eines möglichen Telegram-Ersatzberichts und des Projektprotokolls prüfen.',
     },
     {
+      id: 'funding-daily-sequence',
+      specVersion: 1,
+      name: 'Förderung – Tageslauf 1 → 2 → 3',
+      status: 'active',
+      enabled: true,
+      schedule: 'Täglich · 05:00 Uhr · geordnet 1 → 2 → 3',
+      execution: 'Railway-Supervisor → ausschließlich iMac · drei Förder-Workflows nacheinander',
+      purpose: 'Die drei Förder-Workflows als einen überwachten Tageslauf starten, jeden Teilschritt maschinenlesbar quittieren und nach einer Unterbrechung am ersten offenen Schritt fortsetzen.',
+      safety: 'Kein paralleler Förderlauf, keine falsche Erfolgsmeldung ohne drei vollständige Teilschritt-Nachweise und keine Wiederholung bereits belegter Aktionen.',
+      nextStep: 'Der Gesamt-Lauf ist der zentrale manuelle und automatische Startpunkt; die drei Einzel-Workflows bleiben separat schaltbar.',
+    },
+    {
       id: 'funding-monitor',
       specVersion: 6,
       name: 'Förderung 1 – Vollständigkeit & Unterlagen',

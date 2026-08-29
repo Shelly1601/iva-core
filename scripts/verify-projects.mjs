@@ -36,6 +36,7 @@ check('Automationen sichtbar', heat.automations.length >= 6);
 check('Planbar aktiv', heat.automations.some(item => item.id === 'planbar-weekly-export' && item.status === 'active' && item.enabled));
 check('Planbar-Vervollständigung ist live schaltbar und aktiv', heat.automations.some(item => item.id === 'planbar-completion-morning' && item.toggleAvailable && item.status === 'active' && item.enabled));
 check('Förderung 1 ist benannt, aktiv und um 05:00 Uhr iMac-gebunden', heat.automations.some(item => item.id === 'funding-monitor' && item.name === 'Förderung 1 – Vollständigkeit & Unterlagen' && item.status === 'active' && item.enabled && /iMac/.test(item.execution)));
+check('Förder-Gesamtlauf ist als zentraler geordneter Start sichtbar und aktiv', heat.automations.some(item => item.id === 'funding-daily-sequence' && item.status === 'active' && item.enabled && /1 → 2 → 3/.test(item.name)));
 check('Förderung 2 ist benannt und aktiv', heat.automations.some(item => item.id === 'kfw-funding-amount-morning' && item.name === 'Förderung 2 – Förderhöhe prüfen' && item.status === 'active' && item.enabled));
 check('Förderung 3 ist benannt und aktiv', heat.automations.some(item => item.id === 'kfw-approval-morning' && item.name === 'Förderung 3 – KfW-Zusagen prüfen' && item.status === 'active' && item.enabled));
 check('Projektprotokoll erwartet den geordneten Förder-Tageslauf', heat.protocolPolicy.expectedWorkflows.some(item => item.workflowId === 'funding-daily-sequence' && item.cadence === 'daily'));
