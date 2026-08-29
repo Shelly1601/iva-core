@@ -12,6 +12,26 @@ const IVA_NOTE_SIGNATURE = '(Notiz von Nadine via KI)';
 const DEAL_CUSTOM_FIELD_KEYS = Object.values(PIPEDRIVE_LAYOUT.dealFields).map(field => field.key).join(',');
 export const PIPEDRIVE_WRITE_CONFIRMATION = 'Pipedrive schreiben';
 
+const STANDARD_EDITABLE_DEAL_FIELDS = Object.freeze({
+  title: Object.freeze({ apiKey: 'title', name: 'Deal-Titel', type: 'text' }),
+  value: Object.freeze({ apiKey: 'value', name: 'Deal-Wert', type: 'number' }),
+  currency: Object.freeze({ apiKey: 'currency', name: 'Waehrung', type: 'currency' }),
+  expectedCloseDate: Object.freeze({ apiKey: 'expected_close_date', name: 'Erwartetes Abschlussdatum', type: 'date' }),
+  probability: Object.freeze({ apiKey: 'probability', name: 'Abschlusswahrscheinlichkeit', type: 'probability' }),
+});
+
+const EDITABLE_DEAL_FIELDS = Object.freeze({
+  ...STANDARD_EDITABLE_DEAL_FIELDS,
+  ...Object.fromEntries(Object.entries(PIPEDRIVE_LAYOUT.dealFields).map(([name, field]) => [
+    name,
+    Object.freeze({ apiKey: field.key, name: field.name, type: 'custom', custom: true }),
+  ])),
+});
+
+export const PIPEDRIVE_EDITABLE_DEAL_FIELDS = Object.freeze(Object.fromEntries(
+  Object.entries(EDITABLE_DEAL_FIELDS).map(([key, field]) => [key, field.name]),
+));
+
 function dataDir() {
   return process.env.DATA_DIR || '/data';
 }
@@ -30,6 +50,67 @@ function webhookEventFile() {
 
 function clean(value, max = 1000) {
   return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+function validDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function safeDealFieldValue(value, descriptor) {
+  if (value === null) return null;
+  if (descriptor.type === 'text') {
+    const normalized = clean(value, 500);
+    if (!normalized) throw new Error(`${descriptor.name} darf nicht leer sein.`);
+    return normalized;
+  }
+  if (descriptor.type === 'number' || descriptor.type === 'probability') {
+    const normalized = Number(value);
+    if (!Number.isFinite(normalized) || normalized < 0 || (descriptor.type === 'probability' && normalized > 100)) {
+      throw new Error(`Ungueltiger Wert fuer ${descriptor.name}.`);
+    }
+    return normalized;
+  }
+  if (descriptor.type === 'currency') {
+    const normalized = clean(value, 3).toUpperCase();
+    if (!/^[A-Z]{3}$/.test(normalized)) throw new Error('Die Pipedrive-Waehrung muss ein dreistelliger ISO-Code sein.');
+    return normalized;
+  }
+  if (descriptor.type === 'date') {
+    const normalized = clean(value, 10);
+    if (!validDate(normalized)) throw new Error('Das Pipedrive-Datum muss im Format JJJJ-MM-TT vorliegen.');
+    return normalized;
+  }
+  if (Array.isArray(value)) {
+    if (value.length > 100 || value.some(item => !['string', 'number', 'boolean'].includes(typeof item))) {
+      throw new Error(`Ungueltiger Mehrfachwert fuer ${descriptor.name}.`);
+    }
+    return value.map(item => typeof item === 'string' ? clean(item, 1000) : item);
+  }
+  if (!['string', 'number', 'boolean'].includes(typeof value)) throw new Error(`Ungueltiger Wert fuer ${descriptor.name}.`);
+  if (typeof value === 'number' && !Number.isFinite(value)) throw new Error(`Ungueltiger Wert fuer ${descriptor.name}.`);
+  return typeof value === 'string' ? clean(value, 2000) : value;
+}
+
+function currentDealFieldValue(deal, descriptor) {
+  if (!descriptor.custom) return deal?.[descriptor.apiKey] ?? null;
+  return deal?.custom_fields?.[descriptor.apiKey] ?? deal?.[descriptor.apiKey] ?? null;
+}
+
+function comparableValue(value) {
+  if (Array.isArray(value)) return value.map(comparableValue);
+  if (value && typeof value === 'object') {
+    if (Object.hasOwn(value, 'id')) return comparableValue(value.id);
+    if (Object.hasOwn(value, 'value')) return comparableValue(value.value);
+    return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, comparableValue(item)]));
+  }
+  if (value === null || value === undefined) return null;
+  return String(value);
+}
+
+function sameFieldValue(left, right) {
+  return JSON.stringify(comparableValue(left)) === JSON.stringify(comparableValue(right));
 }
 
 function config() {
@@ -412,6 +493,31 @@ export async function updatePipedriveDealStage({ dealId, expectedStageId, target
   const after = (await pipedriveRequest(`/api/v2/deals/${id}`)).data || {};
   if (Number(after.stage_id) !== target) throw new Error('Pipedrive-Phasenänderung wurde nicht bestätigt.');
   return { changed: true, alreadyPresent: false, verified: true, fromStageId: expected, toStageId: target };
+}
+
+export async function updatePipedriveDealField({ dealId, field, expectedValue, value, confirmation } = {}) {
+  assertConfirmedWrite(confirmation);
+  const id = clean(dealId, 40);
+  const fieldName = clean(field, 100);
+  const descriptor = EDITABLE_DEAL_FIELDS[fieldName];
+  if (!/^\d+$/.test(id) || !descriptor) throw new Error('Ungueltige Deal-ID oder nicht freigegebenes Pipedrive-Deal-Feld.');
+  if (expectedValue === undefined) throw new Error('Der erwartete aktuelle Feldwert ist fuer die sichere Pipedrive-Aenderung erforderlich.');
+  const nextValue = safeDealFieldValue(value, descriptor);
+  const dealPath = `/api/v2/deals/${id}${queryString({ custom_fields: DEAL_CUSTOM_FIELD_KEYS, include_option_labels: true })}`;
+  const before = (await pipedriveRequest(dealPath)).data || {};
+  const previousValue = currentDealFieldValue(before, descriptor);
+  if (sameFieldValue(previousValue, nextValue)) {
+    return { changed: false, alreadyPresent: true, verified: true, dealId: id, field: fieldName, fieldName: descriptor.name, previousValue, value: previousValue };
+  }
+  if (!sameFieldValue(previousValue, expectedValue)) throw new Error(`Pipedrive-Feld „${descriptor.name}“ hat sich seit dem Lesen veraendert.`);
+  const body = descriptor.custom
+    ? { custom_fields: { [descriptor.apiKey]: nextValue } }
+    : { [descriptor.apiKey]: nextValue };
+  await pipedriveRequest(`/api/v2/deals/${id}`, { method: 'PATCH', body, write: true });
+  const after = (await pipedriveRequest(dealPath)).data || {};
+  const verifiedValue = currentDealFieldValue(after, descriptor);
+  if (!sameFieldValue(verifiedValue, nextValue)) throw new Error(`Pipedrive-Feld „${descriptor.name}“ wurde nach dem Speichern nicht bestaetigt.`);
+  return { changed: true, alreadyPresent: false, verified: true, dealId: id, field: fieldName, fieldName: descriptor.name, previousValue, value: verifiedValue };
 }
 
 export async function probePipedrive() {

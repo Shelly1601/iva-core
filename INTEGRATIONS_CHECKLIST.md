@@ -76,6 +76,7 @@ Live-Abnahme in dieser Reihenfolge:
 1. `GET /health/pipedrive` muss `readReady: true` liefern.
 2. `POST /api/pipedrive/probe` muss drei Pipelines, 15 Phasen und keinen Layout-Drift bestaetigen.
 3. Einen bekannten Deal ueber `/api/pipedrive/deals/:id` lesen und Deal, Person, Notizen, Dateien und Aktivitaeten gegen Pipedrive vergleichen.
+4. Nach bewusstem Aktivieren des Schreibschutzschalters koennen IVA-Workflows Notizen anlegen, freigegebene Deal-Felder aktualisieren und Deals zwischen den bekannten Phasen verschieben. Jede Feld- oder Phasenaenderung prueft den zuvor gelesenen Ist-Wert und liest das Ergebnis nach dem Speichern erneut; Loeschungen bleiben gesperrt.
 4. Erst danach genau eine IVA-Testnotiz mit Ruecklesepruefung anlegen. Loeschen bleibt im Code immer gesperrt.
 
 ### Airtable als direkte Workflowquelle

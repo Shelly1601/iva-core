@@ -19,6 +19,17 @@ const stages = Object.values(PIPEDRIVE_LAYOUT.stages).map(item => ({ id: item.id
 const dealFields = Object.values(PIPEDRIVE_LAYOUT.dealFields).map(item => ({ id: item.id, key: item.key, name: item.name, field_type: 'varchar', active_flag: true }));
 let notes = [];
 let dealStage = 20;
+let dealValues = {
+  title: 'Testdeal',
+  value: 1000,
+  currency: 'EUR',
+  expected_close_date: null,
+  probability: null,
+  custom_fields: {
+    [PIPEDRIVE_LAYOUT.dealFields.orderNumber.key]: 'HH-100',
+    [PIPEDRIVE_LAYOUT.dealFields.installationWeek.key]: null,
+  },
+};
 let tokenRefreshes = 0;
 let lastApiTokenQuery = '';
 let lastDealCustomFields = '';
@@ -56,15 +67,21 @@ globalThis.fetch = async (input, options = {}) => {
   if (url.pathname === '/api/v1/activityTypes') return ok([{ id: 1, key_string: 'call', name: 'Anruf' }]);
   if (url.pathname === '/api/v2/deals/search') return ok({ items: [{ item: { id: 123, title: 'Testdeal' } }] });
   if (url.pathname === '/api/v2/deals' && options.method !== 'PATCH') return json(
-    { success: true, data: [{ id: 123, title: 'Testdeal', stage_id: dealStage }], additional_data: { next_cursor: null } },
+    { success: true, data: [{ id: 123, ...dealValues, stage_id: dealStage }], additional_data: { next_cursor: null } },
     200,
     { 'x-ratelimit-limit': '80', 'x-ratelimit-remaining': '79' },
   );
   if (url.pathname === '/api/v2/deals/123' && String(options.method || 'GET').toUpperCase() === 'PATCH') {
-    dealStage = Number(JSON.parse(String(options.body || '{}')).stage_id);
-    return ok({ id: 123, stage_id: dealStage });
+    const body = JSON.parse(String(options.body || '{}'));
+    if (Object.hasOwn(body, 'stage_id')) dealStage = Number(body.stage_id);
+    dealValues = {
+      ...dealValues,
+      ...Object.fromEntries(Object.entries(body).filter(([key]) => key !== 'stage_id' && key !== 'custom_fields')),
+      custom_fields: { ...dealValues.custom_fields, ...(body.custom_fields || {}) },
+    };
+    return ok({ id: 123, ...dealValues, stage_id: dealStage });
   }
-  if (url.pathname === '/api/v2/deals/123') return ok({ id: 123, title: 'Testdeal', stage_id: dealStage, person_id: 5, org_id: 7 });
+  if (url.pathname === '/api/v2/deals/123') return ok({ id: 123, ...dealValues, stage_id: dealStage, person_id: 5, org_id: 7 });
   if (url.pathname === '/api/v2/persons/5') return ok({ id: 5, name: 'Max Muster' });
   if (url.pathname === '/api/v2/organizations/7') return ok({ id: 7, name: 'Muster GmbH' });
   if (url.pathname === '/api/v1/notes' && String(options.method || 'GET').toUpperCase() === 'POST') {
@@ -93,6 +110,7 @@ const {
   pipedriveWebhookStatus,
   recordPipedriveWebhook,
   searchPipedriveDeals,
+  updatePipedriveDealField,
   updatePipedriveDealStage,
 } = await import('../integrations/pipedrive.js');
 const { pipedriveSkill, pipedriveSkillMeta } = await import('../skills/pipedrive.js');
@@ -154,6 +172,51 @@ try {
   assert.equal(moved.verified, true);
   assert.equal(dealStage, 19);
 
+  const titleUpdate = await updatePipedriveDealField({
+    dealId: 123,
+    field: 'title',
+    expectedValue: 'Testdeal',
+    value: 'Testdeal aktualisiert',
+    confirmation: PIPEDRIVE_WRITE_CONFIRMATION,
+  });
+  assert.equal(titleUpdate.changed, true);
+  assert.equal(titleUpdate.verified, true);
+  assert.equal(dealValues.title, 'Testdeal aktualisiert');
+
+  const orderNumberUpdate = await updatePipedriveDealField({
+    dealId: 123,
+    field: 'orderNumber',
+    expectedValue: 'HH-100',
+    value: 'HH-101',
+    confirmation: PIPEDRIVE_WRITE_CONFIRMATION,
+  });
+  assert.equal(orderNumberUpdate.changed, true);
+  assert.equal(orderNumberUpdate.value, 'HH-101');
+  assert.equal(dealValues.custom_fields[PIPEDRIVE_LAYOUT.dealFields.orderNumber.key], 'HH-101');
+
+  const unchangedWeek = await updatePipedriveDealField({
+    dealId: 123,
+    field: 'installationWeek',
+    expectedValue: null,
+    value: null,
+    confirmation: PIPEDRIVE_WRITE_CONFIRMATION,
+  });
+  assert.equal(unchangedWeek.alreadyPresent, true);
+  await assert.rejects(updatePipedriveDealField({
+    dealId: 123,
+    field: 'orderNumber',
+    expectedValue: 'veraltet',
+    value: 'HH-102',
+    confirmation: PIPEDRIVE_WRITE_CONFIRMATION,
+  }), /seit dem Lesen/);
+  await assert.rejects(updatePipedriveDealField({
+    dealId: 123,
+    field: 'beliebigerApiKey',
+    expectedValue: null,
+    value: 'unerlaubt',
+    confirmation: PIPEDRIVE_WRITE_CONFIRMATION,
+  }), /nicht freigegeben/);
+
   await assert.rejects(pipedriveRequest('/api/v1/files/1', { method: 'DELETE', write: true }), /Löschaktionen/);
   await assert.rejects(createPipedriveDealNote({ dealId: 123, text: 'Ohne Freigabe' }), /Schreibbestätigung/);
 
@@ -183,6 +246,7 @@ try {
     getDealBundle: getPipedriveDealBundle,
     createDealNote: createPipedriveDealNote,
     updateDealStage: updatePipedriveDealStage,
+    updateDealField: updatePipedriveDealField,
   });
   assert.deepEqual(Object.keys(registeredTools), pipedriveSkillMeta.toolNames);
   assert.equal(Object.hasOwn(registeredTools, 'deletePipedriveDeal'), false);

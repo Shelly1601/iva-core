@@ -21,6 +21,7 @@ export function pipedriveSkill({
   getDealBundle,
   createDealNote,
   updateDealStage,
+  updateDealField,
 }) {
   return {
     getPipedriveStatus: tool({
@@ -72,6 +73,17 @@ export function pipedriveSkill({
       }),
       execute: async input => updateDealStage(input),
     }),
+    updatePipedriveDealField: tool({
+      description: `Aktualisiert genau ein freigegebenes Deal-Feld mit Schutz gegen parallele Aenderungen und Ruecklesepruefung. Erlaubt sind Deal-Titel, Wert, Waehrung, erwartetes Abschlussdatum, Wahrscheinlichkeit sowie die bekannten Heat-Hero-Felder. Nur aufrufen, wenn Nadine genau diese Aenderung aktuell ausdruecklich beauftragt oder mit „${WRITE_CONFIRMATION}“ bestaetigt hat. Den erwarteten aktuellen Wert immer unmittelbar vorher mit getPipedriveDeal lesen.`,
+      parameters: z.object({
+        dealId: z.union([z.string().regex(/^\d+$/), z.number().int().positive()]),
+        field: z.enum(['title', 'value', 'currency', 'expectedCloseDate', 'probability', 'salesPartner', 'leadId', 'salesStructure', 'salesId', 'installationWeek', 'orderNumber', 'plant', 'projectManager', 'installationTeam', 'transferredToHero']),
+        expectedValue: z.union([z.string(), z.number(), z.boolean(), z.array(z.union([z.string(), z.number(), z.boolean()])), z.null()]),
+        value: z.union([z.string(), z.number(), z.boolean(), z.array(z.union([z.string(), z.number(), z.boolean()])), z.null()]),
+        confirmation: z.literal(WRITE_CONFIRMATION),
+      }),
+      execute: async input => updateDealField(input),
+    }),
   };
 }
 
@@ -84,5 +96,6 @@ export const pipedriveSkillMeta = {
     'getPipedriveDeal',
     'addPipedriveDealNote',
     'movePipedriveDealStage',
+    'updatePipedriveDealField',
   ],
 };

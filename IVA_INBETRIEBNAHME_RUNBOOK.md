@@ -115,6 +115,7 @@ Pruefung nach dem Deploy:
 2. `/api/pipedrive/probe` erkennt drei Pipelines und 15 Phasen ohne Drift.
 3. Ein bekannter Deal wird inklusive Notizen, Dateien und Aktivitaeten gelesen.
 4. Erst nach diesem Vergleich `PIPEDRIVE_WRITE_ENABLED=true` setzen und eine einzelne Testnotiz mit exakter Ruecklesepruefung anlegen.
+5. Danach ein freigegebenes Deal-Feld mit dem unmittelbar zuvor gelesenen Erwartungswert aktualisieren. IVA akzeptiert nur bekannte Standard- und Heat-Hero-Felder, prueft Konflikte und liest den gespeicherten Wert erneut; beliebige Feldschluessel und Loeschaktionen bleiben gesperrt.
 
 Datei- oder Datensatzloeschungen sind unabhaengig von der Variable im IVA-Code gesperrt. Fuer spaetere weitere Pipedrive-Konten kann stattdessen die bereits vorbereitete private OAuth-App verwendet werden.
 

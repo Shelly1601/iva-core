@@ -200,6 +200,7 @@ import {
   probePipedrive,
   recordPipedriveWebhook,
   searchPipedriveDeals,
+  updatePipedriveDealField,
   updatePipedriveDealStage,
 } from './integrations/pipedrive.js';
 import {
@@ -825,7 +826,7 @@ Tool-Nutzung:
 - Alle beauftragten Rechneraktionen laufen standardmäßig auf dem iMac über denselben zentralen IVA-Gerätekanal, unabhängig von Handy, Telegram, Sprache oder MacBook als Eingang. Das MacBook bleibt Nadines Arbeitsgerät. Eine erneute Bestätigung des Ausführungsortes ist nicht nötig. Der konkrete Auftrag autorisiert seine üblichen Zwischenschritte; fremde Daten ändern, Geld ausgeben oder extern kommunizieren nur im ausdrücklich beauftragten Rahmen. Das Wort "oben" bedeutet bei Nadine immer den iMac. Wenn eine normale freigegebene Aktion "oben" oder "auf dem iMac" passieren soll, darf sie niemals auf dem MacBook ausgeführt werden. Für eine direkt unterstützte Geräteaktion sendCommandToImac verwenden. Passt keine engere Geräteaktion, aber Nadine hat eine gewöhnliche lokale iMac-Aktion ausdrücklich beauftragt, runTaskOnImac verwenden. Für Panasonic, Bosch, Pipedrive, Airtable oder Planbar bei Bedarf ensureImacPortalLogin verwenden: normale Wiederanmeldungen sind von Nadine dauerhaft freigegeben und brauchen keine neue Rückfrage; Zugangsdaten bleiben im lokalen macOS-Schlüsselbund, Panasonic-2FA wird ohne Zwischenablage direkt aus dem fest freigegebenen Ente-Auth-Eintrag eingesetzt. Erst CAPTCHA, Kontosperre, externe Bestätigung, ausdrücklich abgelehnte oder lokal nicht vorhandene Zugangsdaten sind ein echter Login-Blocker. Für ausdrücklich beauftragte IVA-Code-, App- oder Systemänderungen stattdessen startIvaBuild verwenden; dieses Werkzeug übergibt den vollständigen Auftrag kontrolliert an Codex. Niemals so tun, als sei ein nur eingereihter Befehl bereits ausgeführt; anschließend den passenden Befehls- beziehungsweise Codex-Auftragsstatus prüfen. Keine Zugangsdaten und keine beliebigen Dateipfade an den Gerätekanal übergeben.
 - CRM-Namen aus Sprache oder freier Texteingabe können falsch geschrieben beziehungsweise transkribiert sein. Vor jeder CRM-Auskunft oder -Aktion zu einer namentlich genannten Person findHeatHeroLeads mit der gelieferten Schreibweise aufrufen. Das Werkzeug durchsucht Schreibvarianten. Bei matchStatus "unique" ausschließlich den gespeicherten CRM-Namen und die gespeicherte ID verwenden. Bei "ambiguous" mit höchstens drei Kandidaten nachfragen, welcher gemeint ist. Bei "not-found" genau eine Frage stellen: wie der Nachname geschrieben wird. Niemals einen ähnlich klingenden Namen stillschweigend auswählen. Bei anderen CRM-Projekten ohne eigenen Resolver gilt mindestens dieselbe Rückfragepflicht, bis der gespeicherte Vollname eindeutig ist.
 - Wenn Nadine verlangt, eine Kundenakte aus dem CRM anzulegen oder CRM-Daten in die Kundenakte zu ziehen, ausschließlich importCrmCustomerFile aufrufen. Dieses Werkzeug erstellt eine aktive Kundenakte, übernimmt vorhandene Kontaktdaten und CRM-Notizen und verhindert Dubletten. Dafür niemals mehrfach createWorkspace aufrufen. Eine Qonekto-/Blau-direkt-Übertragung erfolgt dadurch ausdrücklich noch nicht.
-- Pipedrive ist fuer Auftrags- und Montageprozesse eine eigene fuehrende Live-Datenquelle. Bei Pipedrive-Anfragen zuerst searchPipedriveDeals beziehungsweise listPipedriveDeals nutzen und einen eindeutigen Deal danach mit getPipedriveDeal vollstaendig lesen. Pipedrive-Daten nicht aus altem Gedächtnis oder Browser-Screenshots ableiten. Notizen und Phasen nur bei einem konkreten aktuellen Auftrag mit addPipedriveDealNote beziehungsweise movePipedriveDealStage schreiben; vor und nach der Aktion pruefen. Pipedrive-Löschungen sind verboten.
+- Pipedrive ist fuer Auftrags- und Montageprozesse eine eigene fuehrende Live-Datenquelle. Bei Pipedrive-Anfragen zuerst searchPipedriveDeals beziehungsweise listPipedriveDeals nutzen und einen eindeutigen Deal danach mit getPipedriveDeal vollstaendig lesen. Pipedrive-Daten nicht aus altem Gedächtnis oder Browser-Screenshots ableiten. Notizen, Deal-Felder und Phasen nur bei einem konkreten aktuellen Auftrag mit addPipedriveDealNote, updatePipedriveDealField beziehungsweise movePipedriveDealStage schreiben; vor und nach der Aktion pruefen. Pipedrive-Löschungen sind verboten.
 - Airtable ist fuer den Heat-Hero-/ENTER-Workflow eine eigene fuehrende Live-Datenquelle. Nutze listAirtableInstallationQueue, searchAirtableWorkflowRecords und getAirtableWorkflowRecord statt alte Screenshots oder gespeicherte Kundenkopien. Diese IVA-Schnittstelle ist strikt lesend: Niemals Airtable-Datensaetze, Felder, Stages oder Anhaenge veraendern oder loeschen.
 - Mehrere Quellen relevant (z. B. Kalender + Mails + Leads): parallel abrufen.
 - Fach-/Recherche-Anfragen: askArchitect mit der präzisen Frage. Der Router entscheidet zwischen knowledge (zeitloses Fachwissen zu Finanz/Versicherung/Vorsorge/Rente) und web-research (aktuelle öffentliche Fakten wie Gesetze, Grenzwerte, Beitragssätze, Freibeträge, Fördersätze, Produktdatenblätter, Versicherungsbedingungen, Preise, Nachrichten, Öffnungszeiten). Für JEDE aktuelle Zahl / jeden aktuellen Grenzwert PFLICHT diesen Router nutzen statt aus dem Kopf zu antworten. Für eigene Systeme (Kalender/Mails/CRM/Leads/Kampagnen/Todos/Bilder) stattdessen direkt das passende Tool.
@@ -887,6 +888,7 @@ const ALL_SKILLS = {
     getDealBundle: getPipedriveDealBundle,
     createDealNote: createPipedriveDealNote,
     updateDealStage: updatePipedriveDealStage,
+    updateDealField: updatePipedriveDealField,
   }),
   airtable: airtableSkill({
     status: airtableStatus,
@@ -1928,6 +1930,17 @@ app.patch('/api/pipedrive/deals/:id/stage', async (req, res) => {
       confirmation: req.body?.confirmation,
     }));
   } catch (error) { res.status(error.message.includes('freigeschaltet') ? 409 : 400).json({ error: error.message }); }
+});
+app.patch('/api/pipedrive/deals/:id/field', async (req, res) => {
+  try {
+    res.json(await updatePipedriveDealField({
+      dealId: req.params.id,
+      field: req.body?.field,
+      expectedValue: req.body?.expectedValue,
+      value: req.body?.value,
+      confirmation: req.body?.confirmation,
+    }));
+  } catch (error) { res.status(error.message.includes('freigeschaltet') || error.message.includes('seit dem Lesen') ? 409 : 400).json({ error: error.message }); }
 });
 app.get('/api/airtable/status', async (req, res) => {
   try { res.json(await airtableStatus({ probe: req.query?.probe === '1' })); }
