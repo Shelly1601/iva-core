@@ -44,11 +44,13 @@ await assert.rejects(() => searchPlanbarAppointments({ query: 'x' }), /mindesten
 
 const html = await fs.readFile(new URL('../public/projects.html', import.meta.url), 'utf8');
 const js = await fs.readFile(new URL('../public/projects.js', import.meta.url), 'utf8');
+const server = await fs.readFile(new URL('../index.js', import.meta.url), 'utf8');
 assert.match(html, /planbar-search/);
 assert.match(js, /Planbar-Suche/);
 assert.match(js, /planbar\.search\.refresh/);
 assert.match(js, /planbar-search\?/);
 assert.match(js, /Der durchsuchte Stand ist veraltet/);
+assert.match(server, /express\.json\(\{[\s\S]*?limit: '2mb'/, 'Planbar-Snapshots passen sicher durch den begrenzten JSON-Parser');
 
 const { collectFreshPlanbarSearchSnapshot, planbarSearchIndexPayload } = await import(`../local-mac-helper/device-agent.mjs?test=${Date.now()}`);
 let reloads = 0;

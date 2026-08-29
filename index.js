@@ -305,6 +305,11 @@ import { createPublicScheduling } from './heat-hero/public-scheduling.js';
 
 const app = express();
 app.use(express.json({
+  // Authenticated iMac snapshots can contain several hundred Planbar entries.
+  // Keep a bounded allowance above Express' 100 KB default; the agent also
+  // sends a compact search payload so this is compatibility headroom, not an
+  // invitation to upload arbitrary files through JSON routes.
+  limit: '2mb',
   verify(req, _res, buffer) {
     if (req.originalUrl?.startsWith('/webhooks/whatsapp')) req.rawBody = Buffer.from(buffer);
   },
