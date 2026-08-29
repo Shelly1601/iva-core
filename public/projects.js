@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id);
 const TOKEN_KEY = 'iva_token';
-const state = { projects: [], current: null, activeFolderId: 'all', capacityOffset: 0, uploading: false, planbarRefreshing: false, logoUrls: new Map() };
+const state = { projects: [], current: null, activeFolderId: 'all', capacityOffset: 0, uploading: false, planbarRefreshing: false, planbarRefreshError: '', logoUrls: new Map() };
 const MANUAL_WORKFLOW_IDS = new Set(['workflow-protocol-summaries', 'funding-monitor', 'planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning']);
 
 function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
@@ -367,12 +367,14 @@ function renderPlanbarSearchResults(result) {
   if (!result.indexedAppointments) {
     container.innerHTML = '<div class="planbar-search-empty">Noch kein Planbar-Datenstand vorhanden. Bitte einmal „Planbar aktualisieren“ drücken.</div>';
   } else if (!result.matches.length) {
-    container.innerHTML = `<div class="planbar-search-empty">Kein Treffer für „${esc(result.query)}“${result.weeks ? ` in den nächsten ${esc(result.weeks)} Wochen` : ''}.</div>`;
+    const reliability = result.stale ? ' Der durchsuchte Stand ist veraltet; bitte Planbar aktualisieren, bevor du dich darauf verlässt.' : '';
+    container.innerHTML = `<div class="planbar-search-empty">Kein Treffer für „${esc(result.query)}“${result.weeks ? ` in den nächsten ${esc(result.weeks)} Wochen` : ''}.${reliability}</div>`;
   } else {
     container.innerHTML = result.matches.map(item => `<article class="planbar-hit"><div class="planbar-hit-week">KW ${esc(item.week)}/${esc(item.isoYear)}</div><div><b>${esc(item.customerName)}</b><small>${esc(formatPlanbarDate(item.startDate))}–${esc(planbarEndDate(item.endDateExclusive))}${item.description ? ` · ${esc(item.description.slice(0, 180))}` : ''}</small></div><div class="planbar-hit-team">${esc(item.team)}</div></article>`).join('');
   }
   const freshness = result.stale ? ' · Stand älter als 36 Stunden – bitte aktualisieren' : '';
-  meta.textContent = result.indexedAppointments ? `Planbar-Stand ${formatDate(result.updatedAt)} · ${result.indexedAppointments} Termine eingelesen${freshness}` : '';
+  const refreshError = state.planbarRefreshError ? ` · Letzte Aktualisierung fehlgeschlagen: ${state.planbarRefreshError}` : '';
+  meta.textContent = result.indexedAppointments ? `Planbar-Stand ${formatDate(result.updatedAt)} · ${result.indexedAppointments} Termine eingelesen${freshness}${refreshError}` : '';
 }
 
 async function searchPlanbar(event) {
@@ -426,16 +428,28 @@ async function refreshPlanbarSearch() {
       body: { action: 'planbar.search.refresh', requestedBy: 'projects-planbar-search', requestText: 'Planbar-Suchindex rein lesend aktualisieren' },
     });
     let command = queued.command;
-    for (let attempt = 0; attempt < 60 && !['completed', 'failed', 'expired', 'canceled'].includes(command.status); attempt += 1) {
+    // The normal live read finishes within seconds. Allow enough time for the
+    // verified re-login/reload fallback without abandoning a still-running
+    // iMac command and leaving the visible result on an old index.
+    for (let attempt = 0; attempt < 105 && !['completed', 'failed', 'expired', 'canceled'].includes(command.status); attempt += 1) {
       await pause(2000);
       command = (await api(`/api/devices/imac-nadine/commands/${encodeURIComponent(command.id)}`)).command;
     }
     if (command.status !== 'completed') throw new Error(command.error || 'Der iMac hat die Planbar-Aktualisierung nicht rechtzeitig abgeschlossen.');
+    state.planbarRefreshError = '';
     const count = Number(command.result?.appointmentCount || 0);
     showToast(`Planbar aktualisiert: ${count} Kundentermine eingelesen.`);
     if ($('planbarSearchQuery')?.value.trim()) await searchPlanbar();
     else if ($('planbarSearchMeta')) $('planbarSearchMeta').textContent = `Aktualisiert ${formatDate(command.result?.updatedAt)} · ${count} Termine eingelesen`;
-  } catch (error) { showToast(error.message, true); }
+  } catch (error) {
+    state.planbarRefreshError = error.message;
+    const meta = $('planbarSearchMeta');
+    if (meta) {
+      const previous = meta.textContent.replace(/ · Letzte Aktualisierung fehlgeschlagen:.*$/, '');
+      meta.textContent = `${previous ? `${previous} · ` : ''}Letzte Aktualisierung fehlgeschlagen: ${error.message}`;
+    }
+    showToast(error.message, true);
+  }
   finally {
     state.planbarRefreshing = false;
     if (button && document.body.contains(button)) { button.disabled = false; button.textContent = '↻ Planbar aktualisieren'; }

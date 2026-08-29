@@ -18,10 +18,11 @@ const snapshot = await replacePlanbarSearchIndex({
   appointments: [
     { customerName: 'HH Stefanie Schneider', description: '7 kW Cuderos, Kombispeicher', team: 'Team Vitalij 1', resourceId: 'a', startDate: '2026-09-21', endDateExclusive: '2026-09-26' },
     { customerName: 'HH Max Mustermann', description: 'Panasonic', team: 'Infinity Solution', resourceId: 'b', startDate: '2026-10-05', endDateExclusive: '2026-10-10' },
+    { customerName: 'HH Peter Galle', description: 'Kundentermin', team: 'Team Vitalij 1', resourceId: 'c', startDate: '2026-09-07', endDateExclusive: '2026-09-12' },
   ],
 });
-assert.equal(snapshot.appointmentCount, 2);
-assert.equal((await getPlanbarSearchIndex()).appointments[0].week, 39);
+assert.equal(snapshot.appointmentCount, 3);
+assert.equal((await getPlanbarSearchIndex()).appointments.find(item => item.customerName.includes('Schneider')).week, 39);
 
 const byName = await searchPlanbarAppointments({ query: 'Schneider' });
 assert.equal(byName.count, 1);
@@ -31,6 +32,10 @@ assert.equal(byName.matches[0].week, 39);
 const byDescription = await searchPlanbarAppointments({ query: 'cuderos', weeks: 3, fromDate: '2026-09-07' });
 assert.equal(byDescription.count, 1);
 assert.equal(byDescription.matches[0].customerName, 'HH Stefanie Schneider');
+
+const byUnprefixedFullName = await searchPlanbarAppointments({ query: 'peter galle' });
+assert.equal(byUnprefixedFullName.count, 1, 'ein sichtbares Planbar-Kürzel darf die Namenssuche nicht verhindern');
+assert.equal(byUnprefixedFullName.matches[0].customerName, 'HH Peter Galle');
 
 const outsideWindow = await searchPlanbarAppointments({ query: 'Panasonic', weeks: 3, fromDate: '2026-09-07' });
 assert.equal(outsideWindow.count, 0);
@@ -43,6 +48,29 @@ assert.match(html, /planbar-search/);
 assert.match(js, /Planbar-Suche/);
 assert.match(js, /planbar\.search\.refresh/);
 assert.match(js, /planbar-search\?/);
+assert.match(js, /Der durchsuchte Stand ist veraltet/);
+
+const { collectFreshPlanbarSearchSnapshot } = await import(`../local-mac-helper/device-agent.mjs?test=${Date.now()}`);
+let reloads = 0;
+const direct = await collectFreshPlanbarSearchSnapshot({
+  collect: async () => ({ updatedAt: '2026-08-29T12:00:00.000Z', appointments: [{ customerName: 'HH Peter Galle' }] }),
+  refresh: async () => { reloads += 1; return { refreshedAt: 'never' }; },
+});
+assert.equal(direct.refreshMode, 'direct-live-read');
+assert.equal(reloads, 0, 'die Live-Lesung wartet nicht unnötig auf einen Planbar-Seitenreload');
+
+let reads = 0;
+const fallback = await collectFreshPlanbarSearchSnapshot({
+  collect: async () => {
+    reads += 1;
+    if (reads === 1) throw new Error('Sitzung abgelaufen');
+    return { updatedAt: '2026-08-29T12:01:00.000Z', appointments: [{ customerName: 'HH Peter Galle' }] };
+  },
+  refresh: async () => { reloads += 1; return { refreshedAt: '2026-08-29T12:00:30.000Z' }; },
+});
+assert.equal(fallback.refreshMode, 'page-reload-fallback');
+assert.equal(fallback.pageRefreshedAt, '2026-08-29T12:00:30.000Z');
+assert.equal(reads, 2);
 
 await fs.rm(tempDir, { recursive: true, force: true });
 console.log('PASS: Planbar-Suche nach Name, Beschreibung, Zeitraum und Team');

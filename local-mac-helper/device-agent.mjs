@@ -25,7 +25,7 @@ const APP_ALLOWLIST = Object.freeze({
 });
 // Reine Task-Starts bedienen keine UI. Der gestartete Worker hält selbst die
 // UI-Sperre und den Wachschutz; Display-/Lockfehler dürfen die Übergabe nicht verdecken.
-const UI_ACTIONS = new Set(['computer.status', 'planbar.search.refresh', 'project.workflow.run', 'portal.login', 'app.open']);
+const UI_ACTIONS = new Set(['computer.status', 'project.workflow.run', 'portal.login', 'app.open']);
 const AGENT_WORKSPACE = path.resolve(process.env.IVA_DEVICE_WORKSPACE || path.join(path.dirname(fileURLToPath(import.meta.url)), '..'));
 const ALLOWED_ACTIONS = Object.freeze([
   'agent.status',
@@ -170,6 +170,39 @@ async function openApplication(appName) {
   });
 }
 
+// The tooltip endpoint behind the open Planbar board already returns the live
+// scheduling data for an explicit date range. Reading it must not wait for the
+// shared UI lock or reload the page first: either condition can leave IVA on an
+// old index while another iMac workflow is using Chrome. A verified page reload
+// remains a fallback for an expired/missing board session.
+export async function collectFreshPlanbarSearchSnapshot({ collect, refresh } = {}) {
+  const planbar = (!collect || !refresh) ? await import('./planbar.mjs') : null;
+  const readLiveIndex = collect || planbar.collectPlanbarSearchIndex;
+  const reloadPlanbar = refresh || planbar.refreshPlanbarPage;
+  let directError;
+  try {
+    return {
+      ...await readLiveIndex({ timeoutMs: 30_000 }),
+      pageRefreshedAt: null,
+      refreshMode: 'direct-live-read',
+    };
+  } catch (error) {
+    directError = error;
+  }
+  try {
+    const page = await reloadPlanbar();
+    return {
+      ...await readLiveIndex({ timeoutMs: 60_000 }),
+      pageRefreshedAt: page?.refreshedAt || null,
+      refreshMode: 'page-reload-fallback',
+    };
+  } catch (fallbackError) {
+    const directMessage = String(directError?.message || directError || 'unbekannter Fehler');
+    const fallbackMessage = String(fallbackError?.message || fallbackError || 'unbekannter Fehler');
+    throw new Error(`Planbar-Live-Lesung fehlgeschlagen (${directMessage}). Auch die erneute Anmeldung/Aktualisierung war nicht möglich (${fallbackMessage}).`);
+  }
+}
+
 async function executeDeviceCommand(command) {
   if (command.action === 'agent.status') {
     let launchd;
@@ -244,8 +277,14 @@ async function executeDeviceCommand(command) {
   }
   if (command.action === 'planbar.search.refresh') {
     const { buildPlanbarCapacitySnapshot, collectPlanbarSearchIndex, refreshPlanbarPage } = await import('./planbar.mjs');
-    const page = await refreshPlanbarPage();
-    const snapshot = { ...await collectPlanbarSearchIndex(), pageRefreshedAt: page.refreshedAt };
+    const { withMacWakeGuard } = await import('./mac-wake-guard.mjs');
+    const snapshot = await collectFreshPlanbarSearchSnapshot({
+      collect: collectPlanbarSearchIndex,
+      refresh: () => withImacExecutionLock(
+        () => withMacWakeGuard(() => refreshPlanbarPage(), { maxSeconds: 90 }),
+        { timeoutMs: 20_000 },
+      ),
+    });
     const capacity = buildPlanbarCapacitySnapshot(snapshot);
     const [stored, storedCapacity] = await Promise.all([
       request(`/device-agent/${IMAC_DEVICE_ID}/planbar-search-index`, { method: 'POST', body: snapshot }),
@@ -258,6 +297,7 @@ async function executeDeviceCommand(command) {
       rangeEndExclusive: stored.rangeEndExclusive,
       capacityWeeks: storedCapacity.planbarCapacity?.weeks || capacity.weeks,
       minimumCapacityBlockDays: capacity.minimumBlockDays,
+      refreshMode: snapshot.refreshMode,
       readOnly: true,
     };
   }
@@ -315,7 +355,7 @@ export async function runImacDeviceAgentOnce() {
   try {
     if (UI_ACTIONS.has(command.action)) {
       const { withMacWakeGuard } = await import('./mac-wake-guard.mjs');
-      result = await withImacExecutionLock(() => withMacWakeGuard(() => executeDeviceCommand(command), { maxSeconds: command.action === 'planbar.search.refresh' ? 180 : 120 }), { timeoutMs: 20_000 });
+      result = await withImacExecutionLock(() => withMacWakeGuard(() => executeDeviceCommand(command), { maxSeconds: 120 }), { timeoutMs: 20_000 });
     } else {
       result = await executeDeviceCommand(command);
     }
