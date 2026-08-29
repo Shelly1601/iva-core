@@ -50,7 +50,7 @@ assert.match(js, /planbar\.search\.refresh/);
 assert.match(js, /planbar-search\?/);
 assert.match(js, /Der durchsuchte Stand ist veraltet/);
 
-const { collectFreshPlanbarSearchSnapshot } = await import(`../local-mac-helper/device-agent.mjs?test=${Date.now()}`);
+const { collectFreshPlanbarSearchSnapshot, planbarSearchIndexPayload } = await import(`../local-mac-helper/device-agent.mjs?test=${Date.now()}`);
 let reloads = 0;
 const direct = await collectFreshPlanbarSearchSnapshot({
   collect: async () => ({ updatedAt: '2026-08-29T12:00:00.000Z', appointments: [{ customerName: 'HH Peter Galle' }] }),
@@ -71,6 +71,18 @@ const fallback = await collectFreshPlanbarSearchSnapshot({
 assert.equal(fallback.refreshMode, 'page-reload-fallback');
 assert.equal(fallback.pageRefreshedAt, '2026-08-29T12:00:30.000Z');
 assert.equal(reads, 2);
+
+const compactPayload = planbarSearchIndexPayload({
+  updatedAt: '2026-08-29T12:02:00.000Z',
+  rangeStart: '2026-08-24',
+  rangeEndExclusive: '2026-12-14',
+  appointments: [{ customerName: 'HH Peter Galle' }],
+  resources: Array.from({ length: 500 }, (_, id) => ({ id, name: `Team ${id}` })),
+  capacityBookings: Array.from({ length: 1000 }, (_, id) => ({ id, text: 'Belegt' })),
+  stats: { entries: 1000 },
+});
+assert.deepEqual(Object.keys(compactPayload).sort(), ['appointments', 'rangeEndExclusive', 'rangeStart', 'updatedAt']);
+assert.equal(compactPayload.appointments[0].customerName, 'HH Peter Galle');
 
 await fs.rm(tempDir, { recursive: true, force: true });
 console.log('PASS: Planbar-Suche nach Name, Beschreibung, Zeitraum und Team');

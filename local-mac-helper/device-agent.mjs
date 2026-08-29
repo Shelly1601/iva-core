@@ -203,6 +203,15 @@ export async function collectFreshPlanbarSearchSnapshot({ collect, refresh } = {
   }
 }
 
+export function planbarSearchIndexPayload(snapshot = {}) {
+  return {
+    updatedAt: snapshot.updatedAt,
+    rangeStart: snapshot.rangeStart,
+    rangeEndExclusive: snapshot.rangeEndExclusive,
+    appointments: Array.isArray(snapshot.appointments) ? snapshot.appointments : [],
+  };
+}
+
 async function executeDeviceCommand(command) {
   if (command.action === 'agent.status') {
     let launchd;
@@ -287,7 +296,7 @@ async function executeDeviceCommand(command) {
     });
     const capacity = buildPlanbarCapacitySnapshot(snapshot);
     const [stored, storedCapacity] = await Promise.all([
-      request(`/device-agent/${IMAC_DEVICE_ID}/planbar-search-index`, { method: 'POST', body: snapshot }),
+      request(`/device-agent/${IMAC_DEVICE_ID}/planbar-search-index`, { method: 'POST', body: planbarSearchIndexPayload(snapshot) }),
       request(`/device-agent/${IMAC_DEVICE_ID}/planbar-capacity`, { method: 'POST', body: capacity }),
     ]);
     return {
