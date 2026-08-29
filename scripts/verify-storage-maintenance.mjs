@@ -3,7 +3,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { access } from 'node:fs/promises';
-import { buildStorageMaintenanceLaunchAgent } from '../local-mac-helper/storage-maintenance-launchd.mjs';
 import {
   STORAGE_MAINTENANCE_INTERVAL_SECONDS,
   emptyCurrentUserTrash,
@@ -64,10 +63,5 @@ assert.deepEqual(partial.failureCodes, ['EACCES']);
 assert.doesNotMatch(JSON.stringify(partial), /blocked\.tmp|deleteable\.tmp/);
 
 assert.equal(STORAGE_MAINTENANCE_INTERVAL_SECONDS, 172800);
-const plist = buildStorageMaintenanceLaunchAgent({ nodePath: '/node', runnerPath: '/runtime/current/storage-maintenance.mjs', root });
-assert.match(plist, /<key>StartInterval<\/key><integer>172800<\/integer>/);
-assert.match(plist, /<string>run<\/string><string>--commit<\/string>/);
-assert.doesNotMatch(plist, /RunAtLoad|\/Volumes|\.Trashes/);
-assert.match(plist, /de\.iva\.storage-maintenance/);
 
 console.log('Storage maintenance verification passed.');

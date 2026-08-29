@@ -5,7 +5,6 @@ import { appendFile, lstat, mkdir, readFile, readdir, rename, rm, statfs, writeF
 import { fileURLToPath } from 'node:url';
 
 export const STORAGE_MAINTENANCE_INTERVAL_SECONDS = 48 * 60 * 60;
-export const STORAGE_MAINTENANCE_LABEL = 'de.iva.storage-maintenance';
 export const STORAGE_MAINTENANCE_LOG_LIMIT_BYTES = 1024 * 1024;
 export const STORAGE_MAINTENANCE_LOG_RETAIN_BYTES = 512 * 1024;
 
