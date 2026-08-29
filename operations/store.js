@@ -34,6 +34,8 @@ function normalizedRunStatus(value) {
     : 'running';
 }
 
+const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'blocked', 'stopped', 'timed_out', 'incomplete']);
+
 function sessionHash(value) {
   return value ? crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 12) : '';
 }
@@ -125,9 +127,14 @@ export async function upsertExternalAgentRun(input = {}) {
   return mutate(store => {
     const now = new Date().toISOString();
     const existing = store.runs.find(run => run.externalKey === externalKey);
-    if (existing?.schedulingKey && Date.parse(input.updatedAt) < Date.parse(existing.updatedAt)) {
+    const incomingStatus = normalizedRunStatus(input.status);
+    const incomingUpdatedAt = input.updatedAt ? Date.parse(input.updatedAt) : Number.NaN;
+    const existingUpdatedAt = Date.parse(existing?.updatedAt || 0);
+    if (existing && ((Number.isFinite(incomingUpdatedAt) && incomingUpdatedAt < existingUpdatedAt)
+      || (TERMINAL_RUN_STATUSES.has(existing.status) && !TERMINAL_RUN_STATUSES.has(incomingStatus)))) {
       // Der Geräteabgleich darf einen neueren Abschluss nicht mit einem alten
-      // Zwischenstand überschreiben. Einen verspäteten ERSTEN Slotbeleg behalten.
+      // Zwischenstand überschreiben. Das gilt für alle Workflows; einen
+      // verspäteten ERSTEN Slotbeleg behalten wir trotzdem.
       if (!existing.planbarProgress?.reservation?.verified && input.planbarProgress?.reservation?.verified) {
         const reserved = mergePlanbarSchedulingProgress(null, { ...input.planbarProgress, status: 'reserved' });
         existing.planbarProgress = mergePlanbarSchedulingProgress(reserved, input.planbarProgress);
@@ -142,7 +149,7 @@ export async function upsertExternalAgentRun(input = {}) {
       tools: [],
       durationMs: null,
     };
-    const status = normalizedRunStatus(input.status);
+    const status = incomingStatus;
     const startedAt = safeTimestamp(input.startedAt, item.startedAt || item.createdAt);
     const completedAt = ['completed', 'failed', 'blocked', 'stopped', 'timed_out', 'incomplete'].includes(status)
       ? safeTimestamp(input.completedAt || input.updatedAt, now)

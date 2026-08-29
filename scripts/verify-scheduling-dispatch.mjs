@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtemp, readFile, writeFile, symlink } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, writeFile, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -88,6 +88,10 @@ const lateProof = await operations.upsertExternalAgentRun({ externalKey: 'fixtur
 assert.equal(lateProof.status, 'failed');
 assert.equal(lateProof.planbarProgress.reservation.verified, true, 'Verspäteter Erstbeleg bleibt erhalten');
 assert.equal((await operations.upsertExternalAgentRun({ externalKey: 'fixture-out-of-order', status: 'queued', updatedAt: '2026-08-27T14:58:00.000Z' })).status, 'failed');
+await operations.upsertExternalAgentRun({ externalKey: 'fixture-general-terminal', status: 'completed', updatedAt: '2026-08-27T16:00:00.000Z', resultPreview: 'Fertig' });
+const lateGeneralHeartbeat = await operations.upsertExternalAgentRun({ externalKey: 'fixture-general-terminal', status: 'running', updatedAt: '2026-08-27T16:00:01.000Z', resultPreview: 'Noch aktiv' });
+assert.equal(lateGeneralHeartbeat.status, 'completed', 'ein spätes Lebenszeichen darf keinen allgemeinen Workflow-Abschluss zurücksetzen');
+assert.equal(lateGeneralHeartbeat.resultPreview, 'Fertig');
 
 // Echte iCloud-Dateien, Codex-CLI und Fachsysteme werden nicht angefasst.
 let spawned = 0;
@@ -143,6 +147,58 @@ await writeFile(restartPath, JSON.stringify({ ...restartState, launchAttempts: 3
 await tasks.syncSchedulingTaskStates({ now: Date.now() + 140_000, report: async () => true, launch: async () => { throw new Error('Kein vierter Start'); } });
 assert.equal(JSON.parse(await readFile(restartPath, 'utf8')).status, 'failed');
 
+// Alle iMac-Codex-Workflows melden Lebenszeichen und werden nach einem sicher
+// erkannten toten Worker mit demselben Auftrag kontrolliert fortgesetzt.
+const operationalInput = { prompt: 'Fixture operativer Durchlauf ohne Fachsystem', title: 'Fixture Workflow-Aufsicht', requestId: 'fixture-operational-recovery', mode: 'operational' };
+const operational = await tasks.startCodexTask(operationalInput, dependencies);
+assert.equal(await tasks.claimCodexTaskExecution(operational.jobId, { report: async () => true }), true);
+const heartbeatAt = Date.now() + 180_000;
+const heartbeat = await tasks.recordCodexTaskHeartbeat(operational.jobId, { now: heartbeatAt, workerPid: 4321, childPid: 4322, report: async () => true });
+assert.equal(heartbeat.workerPid, 4321);
+assert.equal(heartbeat.childPid, 4322);
+assert.match(heartbeat.detail, /Workflow aktiv/);
+const heartbeatStatus = await tasks.getCodexTaskStatus(operational.jobId);
+assert.equal(heartbeatStatus.heartbeatAt, new Date(heartbeatAt).toISOString());
+assert.equal(heartbeatStatus.childPid, 4322);
+let orphanRelaunch = false;
+await tasks.syncCodexTaskStates({ force: true, now: heartbeatAt + 60_000, processAlive: pid => pid === 4322, report: async () => true, launch: async () => { orphanRelaunch = true; } });
+assert.equal(orphanRelaunch, false, 'ein noch laufender Codex-Unterprozess darf keinen Doppelstart auslösen');
+assert.equal((await tasks.getCodexTaskStatus(operational.jobId)).phase, 'orphan_child_running');
+let operationalRecoveries = 0;
+const recoverySummary = await tasks.syncCodexTaskStates({ force: true, now: heartbeatAt + 120_000, processAlive: () => false, report: async () => true, launch: async request => {
+  operationalRecoveries++;
+  return tasks.startCodexTask(request, dependencies);
+} });
+assert.equal(operationalRecoveries, 1);
+assert.equal(recoverySummary.recovered, 1);
+const operationalPath = path.join(process.env.IVA_CODEX_TASK_ROOT, operational.jobId);
+let operationalState = JSON.parse(await readFile(path.join(operationalPath, 'state.json'), 'utf8'));
+assert.equal(operationalState.status, 'queued');
+assert.equal(operationalState.recoveryAttempts, 1);
+assert.equal((await readdir(operationalPath)).some(name => name.startsWith('execution-claim-interrupted-')), true);
+assert.match(tasks.buildCodexPrompt({ ...operationalInput, jobId: operational.jobId, acceptanceCriteria: [], recoveryAttempt: 1 }), /automatische Wiederanlauf 1/);
+assert.equal(await tasks.claimCodexTaskExecution(operational.jobId, { report: async () => true }), true);
+operationalState = JSON.parse(await readFile(path.join(operationalPath, 'state.json'), 'utf8'));
+await writeFile(path.join(operationalPath, 'state.json'), JSON.stringify({ ...operationalState, recoveryAttempts: tasks.CODEX_TASK_MAX_RECOVERY_ATTEMPTS }));
+await tasks.syncCodexTaskStates({ force: true, now: heartbeatAt + 240_000, processAlive: () => false, report: async () => true, launch: async () => { throw new Error('Keine weitere Fortsetzung'); } });
+operationalState = JSON.parse(await readFile(path.join(operationalPath, 'state.json'), 'utf8'));
+assert.equal(operationalState.status, 'failed');
+assert.match(operationalState.error, /automatischen Fortsetzungen/);
+
+// Stirbt nur der äußere Worker nach bereits geschriebenem Endergebnis, wird
+// der belegte Erfolg übernommen statt den Geschäftsablauf erneut auszuführen.
+const salvageInput = { ...operationalInput, requestId: 'fixture-operational-salvage', title: 'Fixture Ergebnisrettung' };
+const salvage = await tasks.startCodexTask(salvageInput, dependencies);
+assert.equal(await tasks.claimCodexTaskExecution(salvage.jobId, { report: async () => true }), true);
+const salvagePath = path.join(process.env.IVA_CODEX_TASK_ROOT, salvage.jobId);
+await writeFile(path.join(salvagePath, 'result.txt'), 'Ergebnis sichtbar geprüft.\n\nStatus: erfolgreich\n');
+let unsafeSalvageRelaunch = false;
+await tasks.syncCodexTaskStates({ force: true, now: heartbeatAt + 360_000, processAlive: () => false, report: async () => true, launch: async () => { unsafeSalvageRelaunch = true; } });
+const salvagedState = JSON.parse(await readFile(path.join(salvagePath, 'state.json'), 'utf8'));
+assert.equal(salvagedState.status, 'completed');
+assert.equal(salvagedState.progress, 100);
+assert.equal(unsafeSalvageRelaunch, false);
+
 const warnings = [];
 const wakeOptions = { spawnProcess: fakeSpawn(false), exec: async () => { throw new Error('Fixture pmset Fehler'); }, onCleanupWarning: warning => warnings.push(warning) };
 assert.deepEqual(await withMacWakeGuard(async () => ({ jobId: 'kept' }), wakeOptions), { jobId: 'kept' });
@@ -155,4 +211,4 @@ const linked = path.join(root, 'linked-tasks.mjs');
 await symlink(new URL('../local-mac-helper/codex-tasks.mjs', import.meta.url).pathname, linked);
 assert.equal(tasks.isCodexTasksEntrypoint(linked), true);
 await assert.rejects(promisify(execFile)(process.execPath, [linked, 'planbar-progress', '00000000-0000-4000-8000-000000000000', '/invalid/receipt.json'], { env: process.env }), error => error.code === 1 && /Eingangsbeleg/.test(error.stderr));
-console.log('PASS Terminierungsstart: sofortige Übergabe, durable Outbox, sichere begrenzte Wiederholung, Status, atomare Worker-Deduplizierung, Abbruchmeldung, Wake-Cleanup und current-Symlink. Keine Fachsystem-Schreibaktionen.');
+console.log('PASS Terminierungsstart: sofortige Übergabe, durable Outbox, sichere begrenzte Wiederholung, allgemeine Workflow-Lebenszeichen, kontrollierte Worker-Fortsetzung, Status, atomare Worker-Deduplizierung, Abbruchmeldung, Wake-Cleanup und current-Symlink. Keine Fachsystem-Schreibaktionen.');

@@ -1,6 +1,6 @@
 # Zentraler iMac-Kanal
 
-Stand: 27. August 2026. Auftrag von Nadine: alle Rechneraktionen zentral auf dem iMac ausführen; MacBook als Arbeitsgerät freihalten.
+Stand: 29. August 2026. Auftrag von Nadine: alle Rechneraktionen zentral auf dem iMac ausführen; MacBook als Arbeitsgerät freihalten. Operative Workflows haben Vorrang und werden bis zu einem belegten Endstatus beaufsichtigt.
 
 ## Ein Weg für alle Eingänge
 
@@ -27,6 +27,12 @@ Keine alten Installations- oder Bootstrap-Skripte als normalen Aktualisierungswe
 - Serielle Speichertransaktionen verhindern verlorene Befehle bei gleichzeitigen Heartbeats und Aufträgen.
 - Eindeutige Ausführungsrechte und stabile Codex-Auftrags-IDs schützen vor Doppelstarts.
 - UI-Aufträge teilen eine lokale Sperre. Weitere Aufträge warten; Statusabfragen bleiben möglich.
+- Jeder laufende Codex-Workflow meldet alle 30 Sekunden ein eigenes Lebenszeichen samt Worker-/Unterprozess- und letzter Logaktivität. Das gilt auch während der Wartezeit auf einen anderen UI-Auftrag.
+- Die lokale UI-Warteschlange darf bis zu zwölf Stunden warten; die eigentliche Workflow-Laufzeit ist auf sechs Stunden erweitert. Der Systemschlaf bleibt während der Ausführung verhindert.
+- Der Agent gleicht alle lokalen Codex-Aufträge fortlaufend ab. Ein vor der Ausführungsfreigabe verlorener Start wird begrenzt wiederholt; ein nachweislich toter Worker wird mit demselben Auftrag höchstens zweimal kontrolliert fortgesetzt.
+- Vor einer Fortsetzung prüft Codex vorhandene Belege und den sichtbaren Zielzustand und setzt am ersten nicht verifizierten Schritt fort. Bereits sichtbare oder gespeicherte Aktionen dürfen nicht wiederholt werden.
+- Hat der unterbrochene Worker bereits einen vollständigen Erfolgs- oder Blockernachweis geschrieben, übernimmt die Aufsicht diesen Endstatus ohne erneute Geschäftsausführung.
+- Planbar-Terminierungen bleiben strenger: Nach möglicher Schreibaktion gibt es keinen automatischen Neustart, bevor der Zielzustand geprüft wurde; ein belegter Slot bleibt erhalten und wird nie doppelt gebucht.
 - `dispatchReady` bestätigt eine aktuelle Befehlsabholung. Ein Heartbeat allein reicht dafür nicht.
 - Unklar abgeschlossene schreibende Aktionen werden nicht blind wiederholt.
 - Normale Zwischenschritte im beauftragten Umfang brauchen keine neue Planbestätigung. Codex verwendet die vorhandene automatische Freigabeprüfung und den begrenzten Schreibbereich. Technisch erzwungene macOS-/Kontobestätigungen und außerhalb des Auftrags liegende Aktionen werden dadurch nicht aufgehoben.

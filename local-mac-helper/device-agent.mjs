@@ -299,10 +299,12 @@ export async function runImacDeviceAgentOnce() {
     // Heartbeat-Endpunkt den bisherigen Agentenabruf nicht unterbrechen.
     if (!/HTTP 404\b/.test(String(error?.message || error))) throw error;
   });
-  // Verlorene Statusmeldungen nachliefern, tote Worker sichtbar machen. Kein
-  // Wiederholen einer Terminbuchung; der lokale Reservierungsbeleg bleibt führend.
-  const { syncSchedulingTaskStates } = await import('./codex-tasks.mjs');
-  await syncSchedulingTaskStates().catch(error => console.error(`Terminierungsstatus: ${error.message}`));
+  // Für alle lokalen Codex-Workflows Lebenszeichen nachliefern, verlorene
+  // Abschlussmeldungen synchronisieren und unterbrochene Worker kontrolliert
+  // fortsetzen. Gesicherte Planbar-Reservierungen bleiben dabei hart vor einer
+  // automatischen Doppelbuchung geschützt.
+  const { syncCodexTaskStates } = await import('./codex-tasks.mjs');
+  await syncCodexTaskStates().catch(error => console.error(`Workflow-Aufsicht: ${error.message}`));
   const payload = await request(`/device-agent/${IMAC_DEVICE_ID}/commands/next`);
   const command = payload?.command;
   if (!command) return { status: 'no_command', deviceId: IMAC_DEVICE_ID };
