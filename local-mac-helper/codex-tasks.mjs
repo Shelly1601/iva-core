@@ -409,8 +409,8 @@ const PROJECT_WORKFLOW_TASKS = Object.freeze({
   }),
   'planbar-completion-morning': Object.freeze({
     title: 'Planbar-Vervollständigung manuell ausführen',
-    prompt: 'Lies PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md vollständig und führe den dort beschriebenen Morgenworkflow jetzt genau einmal außerplanmäßig aus. Verarbeite nur die dort erlaubten Eingänge, ändere nur die ausdrücklich freigegebenen leeren beziehungsweise eindeutig belegten Zielfelder und verifiziere jede Speicherung sichtbar. Beachte Laufzeitlimit, Idempotenz, Bericht und Display-Regel.',
-    acceptanceCriteria: ['Kein Termin wird angelegt, gelöscht, verschoben oder einer anderen Ressource zugeordnet.', 'Pipedrive und HH-Beispiele bleiben rein lesend.', 'Jede Änderung oder jeder Blocker wird im vorgesehenen Ergebnisbericht dokumentiert.'],
+    prompt: 'Lies PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md vollständig und führe den dort beschriebenen Morgenworkflow jetzt genau einmal außerplanmäßig aus. Verarbeite die dort erlaubten WhatsApp- und Übergabeeingänge und prüfe zusätzlich bestehende relevante Kundentermine im beschriebenen Bestands- und Forecast-Horizont auf die Präfixe `HH`, `EN` und `DW` sowie auf fehlende Auftragsnummer oder Beschreibung. Ändere nur die ausdrücklich freigegebenen leeren beziehungsweise eindeutig belegten Zielfelder und verifiziere jede Speicherung sichtbar. Beachte Laufzeitlimit, Idempotenz, Bericht und Display-Regel.',
+    acceptanceCriteria: ['Kein Termin wird angelegt, gelöscht, verschoben oder einer anderen Ressource zugeordnet.', 'Pipedrive und HH-Beispiele bleiben rein lesend.', 'Präfixe werden nur bei eindeutig belegtem Partner auf genau einmal `HH`, `EN` oder `DW` korrigiert.', 'Jede Änderung oder jeder Blocker wird im vorgesehenen Ergebnisbericht dokumentiert.'],
   }),
   'montage-required-fields-morning': Object.freeze({
     title: 'Montage-Pflichtfelder manuell prüfen',

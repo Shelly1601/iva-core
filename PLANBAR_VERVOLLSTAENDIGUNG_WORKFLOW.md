@@ -4,8 +4,9 @@
 
 - Name: `Planbar Vervollständigung`
 - Ausführung: täglich um 08:00 Uhr, Zeitzone `Europe/Berlin`, lokal auf Nadines iMac.
-- Quelle: ausschließlich Nadines eigene Nachrichten vom vorherigen Kalendertag in der WhatsApp-Gruppe `Terminierungen Dispo` innerhalb der Community `Heat Hero GmbH`.
-- Ziel: den bereits von Nadine angelegten Planbar-Termin anhand von Kundenname und Kalenderwoche finden, **Auftragsnummer** und **Beschreibung** vervollständigen und beim eindeutig verknüpften Planbar-Kunden fehlende Stammdaten ergänzen.
+- Primäre Quelle: Nadines eigene Nachrichten vom vorherigen Kalendertag in der WhatsApp-Gruppe `Terminierungen Dispo` innerhalb der Community `Heat Hero GmbH`.
+- Zusätzlicher Tagescheck: bereits vorhandene sichtbare Kundentermine im aktuell relevanten Dispo- und Forecast-Horizont dürfen auf fehlende Kürzel, fehlende Auftragsnummer und fehlende Beschreibung geprüft werden.
+- Ziel: den bereits von Nadine angelegten Planbar-Termin anhand von Kundenname und Kalenderwoche finden, **Auftragsnummer** und **Beschreibung** vervollständigen, beim eindeutig verknüpften Planbar-Kunden fehlende Stammdaten ergänzen und täglich offensichtliche Bestandslücken vor einem Forecast-Lauf schließen.
 - Laufzeitlimit: maximal 20 Minuten. Während des Laufs bleibt das Display stabil an; danach wird es genau einmal ausgeschaltet. Keine Wiederholungs- oder Aufweckschleife außerhalb des nächsten regulären Laufs.
 
 ## Sichere Fallzuordnung
@@ -14,6 +15,15 @@
 2. Aus jeder relevanten Nachricht Kundenname und Kalenderwoche lesen. Mehrere identische Hinweise zu demselben Kunden und derselben KW bilden einen Fall. Widersprüchliche KW-Angaben werden nicht geraten.
 3. In Planbar genau einen bestehenden Termin mit diesem Kunden in dieser sichtbaren Kalenderwoche verlangen. Der sichtbare Kalender ist für die KW allein maßgeblich. Eine abweichende interne Datums- oder Zeitraumangabe im Termindetail ist kein Blocker und wird nicht verändert.
 4. Niemals einen Termin neu anlegen, löschen, verschieben oder einer anderen Ressource zuordnen. Bei keinem oder mehreren Treffern bleibt Planbar unverändert und der Fall kommt als Blocker in den Bericht.
+
+## Täglicher Bestandscheck für Kürzel und Vollständigkeit
+
+1. Nach den expliziten Eingängen aus WhatsApp und der einmaligen Übergabeliste, und nur solange das Laufzeitlimit sicher eingehalten werden kann, den aktuell relevanten sichtbaren Planbar-Zeitraum vom Beginn der laufenden Kalenderwoche bis zum Ende des derzeit für Angelo maßgeblichen rollierenden Forecast-Horizonts prüfen.
+2. Geprüft werden nur echte Kundentermine. Urlaub, `nicht verfügbar`, Blocker und interne Standardaufgaben sind kein Prüfziel.
+3. Bei jedem geprüften Kundentermin kontrollieren, ob im Feld `Vorname` genau einmal ein belegtes Partnerpräfix vorangestellt ist. Verbindliche Standardpräfixe sind `HH` für Heat Hero, `EN` für Enter und `DW` für D Warmte.
+4. Fehlt das Präfix oder ist es falsch, darf es nur dann korrigiert werden, wenn der Partner für genau diesen bestehenden Fall eindeutig belegt ist, zum Beispiel durch die aktuelle WhatsApp-Nachricht, die einmalige Übergabeliste, den passenden ENTER-Airtable-Fall oder einen anderen im Lauf sichtbar geöffneten Primärbeleg. Ohne eindeutigen Partnerbeleg keine Präfix-Schätzung; der Fall bleibt unverändert und wird als Blocker gemeldet.
+5. Fehlen bei einem bestehenden Kundentermin Auftragsnummer oder Beschreibung ganz oder teilweise, darf dieser Termin auch ohne neue WhatsApp-Nachricht vervollständigt werden, sofern Kunde und KW eindeutig sind und die unten stehende Dokumentlogik den Fall eindeutig belegt.
+6. Bereits vollständige und korrekt präfixierte Termine bleiben unverändert.
 
 ## Lesender Formatvergleich mit Nadines Einträgen
 
@@ -75,11 +85,12 @@
 4. Fehlende E-Mail-Adresse und Telefonnummer aus dem eindeutigen Pipedrive-Kontakt übernehmen. Pipedrive bleibt dabei strikt lesend. Ein separates Mobilfeld nur befüllen, wenn es vollständig, eindeutig und ausdrücklich als Mobilnummer belegt ist.
 5. Bereits gefüllte, widersprüchliche Planbar-Werte nicht automatisch überschreiben. Bei Konflikten zwischen Planbar, Angebot und Pipedrive bleibt der betreffende Stammdatenwert unverändert und kommt in `Manuell prüfen`.
 6. Keine unnötigen Kontaktdaten in Bericht oder Laufprotokoll wiedergeben. Dort nur nennen, welche Felder ergänzt, unverändert gelassen oder blockiert wurden.
+7. Im Bestandscheck dürfen zusätzlich nur eindeutig belegte Präfix-Korrekturen auf `HH `, `EN ` oder `DW ` vorgenommen werden. Ein vorhandenes korrektes Präfix wird niemals verdoppelt.
 
 ## Schreiben und Verifizieren
 
 1. Planbar-Seite vor der Bearbeitung einmal aktualisieren und den eingeloggten Zustand prüfen. Bei Bedarf ist die erneute Anmeldung mit den in Chrome gespeicherten Zugangsdaten freigegeben.
-2. Am Termin ausschließlich Auftragsnummer und Beschreibung ändern. Beim eindeutig verknüpften Kunden dürfen zusätzlich nur `Vorname` für das Präfix `HH ` sowie fehlende Straße/Hausnummer, Postleitzahl, Ort, E-Mail, Telefon und bei eindeutigem Beleg Mobil ergänzt werden. Alle anderen Felder und Termine bleiben unangetastet.
+2. Am Termin ausschließlich Auftragsnummer und Beschreibung ändern. Beim eindeutig verknüpften Kunden dürfen zusätzlich nur `Vorname` für ein eindeutig belegtes Präfix `HH `, `EN ` oder `DW ` sowie fehlende Straße/Hausnummer, Postleitzahl, Ort, E-Mail, Telefon und bei eindeutigem Beleg Mobil ergänzt werden. Alle anderen Felder und Termine bleiben unangetastet.
 3. Vor dem Speichern Kundenname, sichtbare KW, Auftragsnummer, Beschreibung und alle vorgesehenen Stammdatenänderungen nochmals gegen WhatsApp, Pipedrive, Angebot und gegebenenfalls TMB prüfen.
 4. Nach jedem Speichern den Termin beziehungsweise die Kundenansicht erneut öffnen und alle geänderten Zielwerte sichtbar verifizieren. Bei Abweichung keine weiteren Schreibversuche; Fehler dokumentieren.
 5. Ein lokales Laufprotokoll verhindert die erneute Verarbeitung derselben WhatsApp-Nachricht beziehungsweise desselben Kunden-KW-Falls.
@@ -104,7 +115,7 @@ Der Bericht enthält:
 - pro Fall Kundenname und KW, verwendete Quellen, eindeutigen Planbar-Treffer, geprüfte Dokumentarten, vorherige und neue Terminwerte, geänderte Kundenstammdatenfelder ohne deren vollständige sensible Inhalte sowie die tatsächlich ausgeführten Klicks/Änderungen;
 - die sichtbare Kontrolle nach dem Speichern und jede Abweichung zwischen Soll und Ist;
 - konkrete Gründe für übersprungene oder blockierte Fälle;
-- Summen für gefunden, geändert, unverändert, übersprungen und blockiert;
+- Summen für gefunden, geändert, unverändert, übersprungen und blockiert sowie separat die Zahl der Präfix-Korrekturen und der im Bestandscheck vervollständigten vorhandenen Termine;
 - bei keinen relevanten Nachrichten ausdrücklich `Keine relevanten Nachrichten von gestern`;
 - einen Abschnitt `Manuell prüfen` mit allen Unsicherheiten oder auffälligen Ergebnissen.
 

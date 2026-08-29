@@ -176,9 +176,9 @@ const HEAT_HERO_PROJECT = {
       enabled: true,
       schedule: 'Täglich · 08:00 Uhr',
       execution: 'Codex-Automation · lokaler iMac · WhatsApp, Chrome, Pipedrive, Planbar, Outlook und Telegram-Fallback',
-      purpose: 'Nadines Nachrichten aus „Terminierungen Dispo“ vom Vortag Kunden und KW zuordnen, vorhandene HH-Einträge als reine Formatbeispiele lesen und beim bestehenden Planbar-Termin ausschließlich Auftragsnummer und belegte Kurzbeschreibung vervollständigen.',
-      safety: 'Nur eindeutige Einzelfälle bearbeiten; Pipedrive und HH-Beispiele rein lesend, nichts in Planbar anlegen, löschen oder verschieben. Unklare Dokumente oder TMB-Maße blockieren den Fall. Maximal 20 Minuten, danach Display genau einmal aus.',
-      nextStep: 'Ersten automatischen Morgenlauf anhand des detaillierten E-Mail-Berichts, eines möglichen Telegram-Ersatzberichts und des Projektprotokolls prüfen.',
+      purpose: 'Nadines Nachrichten aus „Terminierungen Dispo“ vom Vortag Kunden und KW zuordnen, vorhandene HH-Einträge als reine Formatbeispiele lesen und zusätzlich täglich bestehende relevante Kundentermine auf Präfixe `HH`/`EN`/`DW` sowie fehlende Auftragsnummer oder Kurzbeschreibung prüfen und vervollständigen.',
+      safety: 'Nur eindeutige Einzelfälle und eindeutig belegte Bestandskorrekturen bearbeiten; Pipedrive und HH-Beispiele rein lesend, nichts in Planbar anlegen, löschen oder verschieben. Unklare Dokumente, Partner oder TMB-Maße blockieren den Fall. Maximal 20 Minuten, danach Display genau einmal aus.',
+      nextStep: 'Nächsten automatischen Morgenlauf darauf prüfen, ob Bestandscheck und Forecast-Horizont nur eindeutige Präfix- und Vervollständigungsfälle ändern und alle übrigen sauber blockieren.',
     },
     {
       id: 'funding-daily-sequence',
