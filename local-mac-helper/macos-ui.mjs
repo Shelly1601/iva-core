@@ -13,6 +13,7 @@ const COMPILE_LOCK = `${BINARY}.compile-lock`;
 const TEMP_DIR = path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper', 'tmp');
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 const SWIFT_COMPILE_TIMEOUT_MS = 240_000;
+const STALE_COMPILE_LOCK_MS = SWIFT_COMPILE_TIMEOUT_MS + 60_000;
 const OUTLOOK_ACCOUNT_LABELS = Object.freeze({
   'foerderung@heat-hero.com': 'Förderung | HEAT HERO',
 });
@@ -79,6 +80,11 @@ export async function ensureMacUiBridge() {
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
       if (await isCurrent()) return BINARY;
+      const lock = await stat(COMPILE_LOCK).catch(() => null);
+      if (lock && Date.now() - lock.mtimeMs > STALE_COMPILE_LOCK_MS) {
+        await rmdir(COMPILE_LOCK).catch(() => {});
+        continue;
+      }
       if (Date.now() >= lockDeadline) throw new Error('Die macOS-Helferkompilierung ist durch einen parallelen Lauf blockiert.');
       await new Promise(resolve => setTimeout(resolve, 250));
     }
@@ -476,9 +482,18 @@ export async function openOutlookAccountFolder({ from, folder }) {
   // wieder her. Der Monitor öffnet die App deshalb zuerst idempotent und darf
   // erst danach den fest hinterlegten Kontoordner auswählen.
   await run('/usr/bin/open', ['-a', 'Microsoft Outlook'], { timeoutMs: 15000 });
-  await runMacUiBridge(['activate']);
-  await runMacUiBridge(['press-shallowest', 'AXButton', 'Cancel Search Button']).catch(() => {});
-  return runMacUiBridge(['open-account-folder', accountLabel, folderName], { timeoutMs: 30000 });
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await runMacUiBridge(['activate']);
+      await runMacUiBridge(['press-shallowest', 'AXButton', 'Cancel Search Button']).catch(() => {});
+      return await runMacUiBridge(['open-account-folder', accountLabel, folderName], { timeoutMs: 30000 });
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+    }
+  }
+  throw lastError;
 }
 
 export async function inspectOutlookMessageAttachments(description) {

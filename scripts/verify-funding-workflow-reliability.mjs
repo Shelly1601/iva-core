@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { prioritizedPipedriveApiSourceDealIds } from '../local-mac-helper/chrome-pipedrive.mjs';
 
 const taskRoot = await mkdtemp(path.join(os.tmpdir(), 'iva-funding-workflow-'));
 process.env.IVA_CODEX_TASK_ROOT = taskRoot;
@@ -25,6 +26,9 @@ function fakeSpawn() {
 }
 
 try {
+  assert.deepEqual(prioritizedPipedriveApiSourceDealIds(['8503', '8153', '8503', '317']), ['8153', '8503', '317']);
+  assert.deepEqual(prioritizedPipedriveApiSourceDealIds(['8503', '317', '42'], { limit: 2 }), ['8503', '317']);
+
   const started = await startCodexTask({
     prompt: 'Führe den geordneten Förder-Tageslauf vollständig und geprüft aus.',
     title: 'Förderung – strukturierter Testlauf',
@@ -48,8 +52,16 @@ try {
   assert.match(prompt, /ohne dieses Ergebnisprotokoll gilt ausdrücklich nicht als Erfolg/);
 
   const codexTaskSource = await readFile(new URL('../local-mac-helper/codex-tasks.mjs', import.meta.url), 'utf8');
+  const pipedriveSource = await readFile(new URL('../local-mac-helper/chrome-pipedrive.mjs', import.meta.url), 'utf8');
+  const macUiSource = await readFile(new URL('../local-mac-helper/macos-ui.mjs', import.meta.url), 'utf8');
+  const macBridgeSource = await readFile(new URL('../local-mac-helper/macos/iva-ax.swift', import.meta.url), 'utf8');
   assert.match(codexTaskSource, /recoveryAttempts: Number\(previousState\.recoveryAttempts \|\| 0\)/,
     'ein laufender Task muss seinen begrenzten Wiederholungszähler behalten');
+  assert.match(pipedriveSource, /hasAuthenticatedApiSession/);
+  assert.match(pipedriveSource, /openAuthenticatedPipedriveApiSource/);
+  assert.match(macUiSource, /for \(let attempt = 1; attempt <= 3; attempt \+= 1\)/);
+  assert.match(macBridgeSource, /sidebarNodesEnsuringFolder/);
+  assert.match(macBridgeSource, /AXPress erfolgreich quittieren/);
 
   const preparedApps = [];
   const openedApps = [];

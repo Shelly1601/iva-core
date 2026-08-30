@@ -62,7 +62,8 @@ export async function executePipedriveJavaScript(javascript, { dealId = '', time
   const workspace = await requireRightDisplayWorkspace();
   const windowCondition = `set windowBounds to bounds of w
   set isRightWorkspace to (item 1 of windowBounds) is greater than or equal to ${Math.round(workspace.target.x)} and (item 3 of windowBounds) is less than or equal to ${Math.round(workspace.target.x + workspace.target.width)}`;
-  const runInRightWindow = () => runAppleScript(`tell application "Google Chrome"
+  const runInRightWindow = async () => {
+    const script = `tell application "Google Chrome"
 repeat with w in windows
   ${windowCondition}
   if isRightWorkspace then
@@ -72,7 +73,19 @@ repeat with w in windows
   end if
 end repeat
 return "NO_TAB"
-end tell`, { timeoutMs });
+end tell`;
+    let lastError = null;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try { return await runAppleScript(script, { timeoutMs }); }
+      catch (error) {
+        lastError = error;
+        const transient = /connection invalid|appleevent|zeitlimit|timed out|-600|-1712/i.test(String(error?.message || error));
+        if (!transient || attempt === 3) throw error;
+        await wait(250 * attempt);
+      }
+    }
+    throw lastError;
+  };
   let output = await runInRightWindow();
   if (output === 'NO_TAB' && !dealId) {
     await runAppleScript(`tell application "Google Chrome"
@@ -563,13 +576,41 @@ async function waitForPipedriveDealTab(dealId, { timeoutMs = 12000 } = {}) {
         readyState: document.readyState,
         dealId: location.pathname.match(/\/deal\/(\d+)/)?.[1] || null,
         hasBody: Boolean(document.body?.innerText?.trim()),
-        hasStage: Boolean(document.querySelector('button.cui5-stage-selector__stage[aria-selected="true"]')),
+        hasAuthenticatedApiSession: performance.getEntriesByType('resource').some(entry => entry.name.includes('session_token=')),
       }))()`, { dealId }));
-      if (state.readyState === 'complete' && state.dealId === String(dealId) && state.hasBody && state.hasStage) return true;
+      // Pipedrive rendert die Stage-Auswahl nicht in jedem Deal gleich. Alle
+      // nachfolgenden Förderoperationen arbeiten über die angemeldete API-
+      // Sitzung; deren Nachweis ist deshalb das stabile Bereitschaftssignal.
+      if (state.readyState === 'complete'
+        && state.dealId === String(dealId)
+        && state.hasBody
+        && state.hasAuthenticatedApiSession) return true;
     } catch {}
     await wait(300);
   }
   throw new Error(`Pipedrive-Deal ${dealId} wurde nicht rechtzeitig vollständig geladen.`);
+}
+
+export function prioritizedPipedriveApiSourceDealIds(dealIds, { limit = 5 } = {}) {
+  const ids = [...new Set((Array.isArray(dealIds) ? dealIds : []).map(String))].filter(id => /^\d+$/.test(id));
+  const preferred = ids.includes('8153') ? ['8153'] : [];
+  return [...new Set([...preferred, ...ids])].slice(0, Math.max(1, Math.min(10, Number(limit) || 5)));
+}
+
+async function openAuthenticatedPipedriveApiSource(dealIds) {
+  const failures = [];
+  for (const dealId of prioritizedPipedriveApiSourceDealIds(dealIds)) {
+    const createdIds = await openTemporaryPipedriveDealTabs([dealId]);
+    try {
+      await activatePipedriveDealTab(dealId, { timeoutMs: 20_000 });
+      await waitForPipedriveDealTab(dealId, { timeoutMs: 25_000 });
+      return { dealId, createdIds };
+    } catch (error) {
+      failures.push({ dealId, error: String(error?.message || error).slice(0, 240) });
+      await closeTemporaryPipedriveDealTabs(createdIds).catch(() => {});
+    }
+  }
+  throw new Error(`Keine der ${failures.length} geprüften Pipedrive-Lesequellen wurde rechtzeitig bereit.`);
 }
 
 export async function readPipedriveFundingDealsBulk({ dealIds, batchSize = 4, onProgress } = {}) {
@@ -615,11 +656,9 @@ export async function readPipedriveFundingDealsViaApi({ dealIds, batchSize = 8, 
   const safeBatchSize = Math.max(1, Math.min(100, Number(batchSize) || 8));
   const snapshots = [];
   const errors = [];
-  const sourceDealId = ids.includes('8153') ? '8153' : ids[0];
-  const sourceCreatedIds = await openTemporaryPipedriveDealTabs([sourceDealId]);
+  const source = await openAuthenticatedPipedriveApiSource(ids);
+  const sourceDealId = source.dealId;
   try {
-    await activatePipedriveDealTab(sourceDealId);
-    await waitForPipedriveDealTab(sourceDealId);
   for (let offset = 0; offset < ids.length; offset += safeBatchSize) {
     const batch = ids.slice(offset, offset + safeBatchSize);
     const raw = await executePipedriveJavaScript(String.raw`(() => {
@@ -789,7 +828,7 @@ export async function readPipedriveFundingDealsViaApi({ dealIds, batchSize = 8, 
     source: 'pipedrive-read-api',
   };
   } finally {
-    await closeTemporaryPipedriveDealTabs(sourceCreatedIds).catch(() => {});
+    await closeTemporaryPipedriveDealTabs(source.createdIds).catch(() => {});
   }
 }
 

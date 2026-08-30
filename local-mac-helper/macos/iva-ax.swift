@@ -379,6 +379,34 @@ func sidebarFolder(after account: AXNode, named folderName: String, in nodes: [A
     }.sorted { $0.path[indexPosition] < $1.path[indexPosition] }.first
 }
 
+func sidebarNodesEnsuringFolder(in window: AXUIElement, account: AXNode, folderName: String, initialNodes: [AXNode]) -> [AXNode] {
+    if sidebarFolder(after: account, named: folderName, in: initialNodes) != nil { return initialNodes }
+    let accountRowPath = Array(account.path.dropLast())
+    if let accountRow = initialNodes.first(where: { $0.role == "AXRow" && $0.path == accountRowPath }) {
+        _ = AXUIElementSetAttributeValue(accountRow.element, kAXDisclosingAttribute as CFString, kCFBooleanTrue)
+        _ = AXUIElementSetAttributeValue(accountRow.element, kAXExpandedAttribute as CFString, kCFBooleanTrue)
+        usleep(350_000)
+        let expanded = collect(window)
+        if sidebarFolder(after: account, named: folderName, in: expanded) != nil { return expanded }
+    }
+    let disclosure = initialNodes.first { node in
+        guard node.role == "AXDisclosureTriangle", node.path.count > account.path.count else { return false }
+        return Array(node.path.prefix(account.path.count)) == account.path
+    }
+    guard let disclosure else { return initialNodes }
+    let result = AXUIElementPerformAction(disclosure.element, kAXPressAction as CFString)
+    usleep(350_000)
+    var refreshed = collect(window)
+    if result == .success, sidebarFolder(after: account, named: folderName, in: refreshed) != nil { return refreshed }
+    // New Outlook kann AXPress erfolgreich quittieren, ohne die Kontenzeile
+    // sichtbar aufzuklappen. Der verifizierte Klick ist dann der notwendige
+    // Rückfallweg; anschließend wird der Ordner erneut im AX-Baum gesucht.
+    try? click(disclosure.element)
+    usleep(650_000)
+    refreshed = collect(window)
+    return refreshed
+}
+
 func centerPoint(_ element: AXUIElement) throws -> CGPoint {
     guard let positionValue = attribute(element, kAXPositionAttribute), CFGetTypeID(positionValue) == AXValueGetTypeID(),
           let sizeValue = attribute(element, kAXSizeAttribute), CFGetTypeID(sizeValue) == AXValueGetTypeID() else {
@@ -1653,7 +1681,10 @@ do {
         guard accountCells.count == 1 else {
             throw HelperError.message("Das Outlook-Konto ist in der Ordnerleiste nicht eindeutig sichtbar.")
         }
-        guard let draftCell = sidebarFolder(after: accountCells[0], named: "Entwürfe", in: nodes) else {
+        let outlookWindows = (attribute(appElement, kAXWindowsAttribute) as? [AXUIElement]) ?? []
+        let accountWindow = outlookWindows.first { window in collect(window).contains { $0.element == accountCells[0].element } }
+        let preparedNodes = accountWindow.map { sidebarNodesEnsuringFolder(in: $0, account: accountCells[0], folderName: "Entwürfe", initialNodes: nodes) } ?? nodes
+        guard let draftCell = sidebarFolder(after: accountCells[0], named: "Entwürfe", in: preparedNodes) else {
             throw HelperError.message("Der Entwürfe-Ordner des Outlook-Kontos ist nicht sichtbar.")
         }
         if draftCell.role == "AXRow" {
@@ -1661,7 +1692,7 @@ do {
             if selected != .success { try click(draftCell.element) }
         } else {
             let rowPath = Array(draftCell.path.dropLast())
-            let row = nodes.first { $0.role == "AXRow" && $0.path == rowPath }
+            let row = preparedNodes.first { $0.role == "AXRow" && $0.path == rowPath }
             if let row {
                 let selected = AXUIElementSetAttributeValue(row.element, kAXSelectedAttribute as CFString, kCFBooleanTrue)
                 if selected != .success { try click(row.element) }
@@ -1701,7 +1732,8 @@ do {
         _ = AXUIElementSetAttributeValue(selectedWindow.window, kAXMainAttribute as CFString, kCFBooleanTrue)
         _ = AXUIElementSetAttributeValue(selectedWindow.window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         usleep(250_000)
-        guard let folderCell = sidebarFolder(after: selectedWindow.account, named: folderName, in: selectedWindow.nodes) else {
+        let preparedNodes = sidebarNodesEnsuringFolder(in: selectedWindow.window, account: selectedWindow.account, folderName: folderName, initialNodes: selectedWindow.nodes)
+        guard let folderCell = sidebarFolder(after: selectedWindow.account, named: folderName, in: preparedNodes) else {
             throw HelperError.message("Der Outlook-Ordner \(folderName) des Kontos ist nicht sichtbar.")
         }
         if folderCell.role == "AXRow" {
@@ -1709,7 +1741,7 @@ do {
             if selected != .success { try click(folderCell.element) }
         } else {
             let rowPath = Array(folderCell.path.dropLast())
-            let row = selectedWindow.nodes.first { $0.role == "AXRow" && $0.path == rowPath }
+            let row = preparedNodes.first { $0.role == "AXRow" && $0.path == rowPath }
             if let row {
                 let selected = AXUIElementSetAttributeValue(row.element, kAXSelectedAttribute as CFString, kCFBooleanTrue)
                 if selected != .success { try click(row.element) }

@@ -126,6 +126,7 @@ assert.match(whatsappSource, /ensureAppWindowOnRightDisplay\('net\.whatsapp\.Wha
 assert.match(macUiSource, /const BINARY = path\.join\(BIN_DIR, 'iva-ax'\)/);
 assert.match(macUiSource, /sourceDigest: digest, binaryDigest/);
 assert.match(macUiSource, /2100-01-01T00:00:00\.000Z/);
+assert.match(macUiSource, /STALE_COMPILE_LOCK_MS/);
 assert.doesNotMatch(macUiSource, /`iva-ax-\$\{digest/);
 assert.match(macBridgeSource, /command == "display-status"/);
 assert.match(macBridgeSource, /command == "display-layout"/);
