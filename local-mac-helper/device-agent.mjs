@@ -134,7 +134,7 @@ async function request(pathname, { method = 'GET', body } = {}) {
   return payload;
 }
 
-export async function publishDewarmtePdf({ filePath, jobId }) {
+export async function publishDewarmtePdf({ filePath, jobId, revision = false }) {
   const absolutePath = path.resolve(String(filePath || ''));
   const safeJobId = String(jobId || '').trim();
   if (!path.isAbsolute(absolutePath) || !/^[a-f0-9-]{36}$/i.test(safeJobId)) throw new Error('PDF-Pfad oder DeWarmte-Job-Schlüssel ist ungültig.');
@@ -147,7 +147,7 @@ export async function publishDewarmtePdf({ filePath, jobId }) {
   const server = cleanServerUrl(process.env.IVA_DEVICE_SERVER_URL);
   const token = await readImacDeviceToken();
   const agent = imacDeviceAgentMetadata();
-  const query = new URLSearchParams({ name: path.basename(absolutePath), jobId: safeJobId });
+  const query = new URLSearchParams({ name: path.basename(absolutePath), jobId: safeJobId, ...(revision ? { revision: 'append' } : {}) });
   const response = await fetch(`${server}/device-agent/${IMAC_DEVICE_ID}/projects/dewarmte/files?${query}`, {
     method: 'POST',
     headers: {

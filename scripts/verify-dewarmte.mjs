@@ -134,6 +134,7 @@ try {
 
   const cli = await readFile(new URL('../local-mac-helper/cli.mjs', import.meta.url), 'utf8');
   assert.match(cli, /publish-dewarmte-pdf/);
+  assert.match(cli, /revise-dewarmte-pdf/);
   assert.match(cli, /deliver-dewarmte-pdf/);
   assert.match(cli, /beginDewarmteDelivery/);
   const server = await readFile(new URL('../index.js', import.meta.url), 'utf8');

@@ -172,14 +172,20 @@ const duplicateDewarmteFile = await storeProjectFile('dewarmte', {
   workflowId: 'dewarmte-link-to-material-pdf', jobId: dewarmteJobId,
 });
 check('Wiederholter DeWarmte-Upload erzeugt keine PDF-Dublette', duplicateDewarmteFile?.id === dewarmteFile.id);
+await new Promise(resolve => setTimeout(resolve, 5));
+const revisedDewarmteFile = await storeProjectFile('dewarmte', {
+  name: 'DeWarmte_Materialliste_Test_mit_Bestellseiten.pdf', mime: 'application/pdf', buffer: Buffer.from('%PDF-revised'),
+  workflowId: 'dewarmte-link-to-material-pdf', jobId: dewarmteJobId, allowRevision: true,
+});
+check('Neue DeWarmte-PDF-Fassung wird append-only neben dem Original gespeichert', revisedDewarmteFile?.id !== dewarmteFile.id);
 const dewarmteJobs = summarizeDewarmteLinkPdfJobs([{
   id: 'command-test', action: 'project.workflow.run', status: 'completed', createdAt: '2026-08-30T07:00:00Z', result: { jobId: dewarmteJobId },
   payload: { projectId: 'dewarmte', workflowId: 'dewarmte-link-to-material-pdf', deliveryMode: 'download' },
-}], [dewarmteFile], [], [{
+}], [dewarmteFile, revisedDewarmteFile], [], [{
   projectId: 'dewarmte', workflowId: 'dewarmte-link-to-material-pdf', jobId: dewarmteJobId,
   status: 'completed', phase: 'live_verification', progress: 100, updatedAt: '2026-08-30T07:04:00Z',
 }]);
-check('DeWarmte-Job wird nach PDF-Upload als fertig und downloadbar angezeigt', dewarmteJobs[0]?.status === 'completed' && dewarmteJobs[0]?.file?.id === dewarmteFile.id);
+check('DeWarmte-Job verlinkt nach einer Ergänzung die neueste PDF-Fassung', dewarmteJobs[0]?.status === 'completed' && dewarmteJobs[0]?.file?.id === revisedDewarmteFile.id);
 const dewarmteMailStillRunning = summarizeDewarmteLinkPdfJobs([{
   id: 'command-mail-running', action: 'project.workflow.run', status: 'completed', createdAt: '2026-08-30T07:00:00Z', result: { jobId: dewarmteJobId },
   payload: { projectId: 'dewarmte', workflowId: 'dewarmte-link-to-material-pdf', deliveryMode: 'email-send', recipientEmail: 'kunde@example.com' },

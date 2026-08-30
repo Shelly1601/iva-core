@@ -1003,7 +1003,7 @@ export async function deleteProjectLogo(id) {
   return result.project;
 }
 
-export async function storeProjectFile(id, { name, mime, folderId, buffer, workflowId = '', jobId = '' }) {
+export async function storeProjectFile(id, { name, mime, folderId, buffer, workflowId = '', jobId = '', allowRevision = false }) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error('Die Datei ist leer.');
   if (buffer.length > MAX_FILE_BYTES) throw new Error('Die Datei ist größer als 25 MB.');
   const safeName = clean(name, 240) || 'Dokument';
@@ -1017,8 +1017,9 @@ export async function storeProjectFile(id, { name, mime, folderId, buffer, workf
     if (requestedFolderId && !(project.folders || []).some(folder => folder.id === requestedFolderId)) throw new Error('Der Zielordner wurde nicht gefunden.');
     const existing = safeJobId ? (project.files || []).find(file => file.jobId === safeJobId && file.workflowId === safeWorkflowId) : null;
     if (existing) {
-      if (existing.sha256 !== sha256) throw new Error('Für diesen Workflow-Auftrag liegt bereits eine andere Datei in der Projektakte. Es wurde nichts überschrieben.');
-      return publicProject({ ...project, files: [existing] }).files[0];
+      const identical = (project.files || []).find(file => file.jobId === safeJobId && file.workflowId === safeWorkflowId && file.sha256 === sha256);
+      if (identical) return publicProject({ ...project, files: [identical] }).files[0];
+      if (allowRevision !== true) throw new Error('Für diesen Workflow-Auftrag liegt bereits eine andere Datei in der Projektakte. Es wurde nichts überschrieben.');
     }
     const extension = path.extname(safeName).replace(/[^a-z0-9.]/gi, '').slice(0, 16);
     const storageName = `${crypto.randomUUID()}${extension}`;

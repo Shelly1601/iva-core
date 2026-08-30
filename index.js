@@ -1352,6 +1352,7 @@ app.post('/device-agent/:deviceId/projects/:projectId/files', express.raw({ type
       buffer: req.body,
       workflowId: 'dewarmte-link-to-material-pdf',
       jobId,
+      allowRevision: req.query?.revision === 'append',
     });
     res.status(file ? 201 : 404).json(file || { error: 'DeWarmte-Projekt nicht gefunden.' });
   } catch (error) {

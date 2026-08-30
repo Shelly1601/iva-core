@@ -394,6 +394,7 @@ try {
   const deviceAgentRuntimeSource = await readFile(new URL('../local-mac-helper/device-agent.mjs', import.meta.url), 'utf8');
   assert.match(deviceAgentRuntimeSource, /runtimeMode: process\.env\.IVA_DEVICE_LOCAL_RUNTIME === 'true' \? 'local' : 'icloud'/);
   assert.match(deviceAgentRuntimeSource, /'codex\.task\.start'/);
+  assert.match(deviceAgentRuntimeSource, /revision: 'append'/);
   assert.match(deviceAgentRuntimeSource, /ChatGPT: Object\.freeze\(\['\/Applications\/ChatGPT\.app'/);
   assert.match(deviceAgentRuntimeSource, /chrome-pipedrive-status\.mjs/);
   assert.match(deviceAgentRunnerSource, /LOCAL_RUNTIME \? path\.join\(LOCAL_HELPER_DIR, 'device-agent\.mjs'\)/);

@@ -136,6 +136,10 @@ async function main() {
     if (extra !== '--commit') throw new Error('Die PDF wurde nicht in die DeWarmte-Projektakte hochgeladen. Zum Bestätigen --commit anhängen.');
     return console.log(JSON.stringify(await publishDewarmtePdf({ filePath, jobId: confirmation }), null, 2));
   }
+  if (command === 'revise-dewarmte-pdf') {
+    if (extra !== '--commit') throw new Error('Die neue PDF-Fassung wurde nicht in die DeWarmte-Projektakte hochgeladen. Zum Bestätigen --commit anhängen.');
+    return console.log(JSON.stringify(await publishDewarmtePdf({ filePath, jobId: confirmation, revision: true }), null, 2));
+  }
   if (command === 'deliver-dewarmte-pdf') {
     if (sixth !== '--commit') throw new Error('Die DeWarmte-Mail wurde nicht erstellt oder versandt. Zum Bestätigen --commit anhängen.');
     const deliveryMode = String(confirmation || 'download');
@@ -342,6 +346,7 @@ async function main() {
   node local-mac-helper/cli.mjs right-display-status
   node local-mac-helper/cli.mjs place-app-right <bundle-id>
   node local-mac-helper/cli.mjs publish-dewarmte-pdf <pdf-pfad> <job-id> --commit
+  node local-mac-helper/cli.mjs revise-dewarmte-pdf <pdf-pfad> <job-id> --commit
   node local-mac-helper/cli.mjs deliver-dewarmte-pdf <pdf-pfad> <email-draft|email-send> <empfaenger> <job-id> --commit
   node local-mac-helper/cli.mjs direct-sales-roster-status
   node local-mac-helper/cli.mjs sync-direct-sales-roster --commit

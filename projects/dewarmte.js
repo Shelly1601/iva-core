@@ -93,7 +93,9 @@ export function summarizeDewarmteLinkPdfJobs(commands = [], files = [], runs = [
       const agentRun = agentRuns.find(item => item?.projectId === 'dewarmte'
         && item?.workflowId === 'dewarmte-link-to-material-pdf'
         && item?.jobId === jobId) || null;
-      const file = files.find(item => item.jobId === jobId) || null;
+      const file = files
+        .filter(item => item.jobId === jobId)
+        .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0] || null;
       const local = statusCommand?.result || {};
       const commandFallbackStatus = command.status === 'completed' ? (jobId ? 'running' : 'queued') : command.status;
       const reportedStatus = clean(agentRun?.status || run?.status || local.status || command.result?.status || commandFallbackStatus, 50) || 'queued';
