@@ -695,7 +695,7 @@ export async function readPipedriveFundingDealsBulk({ dealIds, batchSize = 4, on
 export async function readPipedriveFundingDealsViaApi({ dealIds, batchSize = 8, onProgress } = {}) {
   const ids = [...new Set((Array.isArray(dealIds) ? dealIds : []).map(String))].filter(id => /^\d+$/.test(id));
   if (!ids.length) throw new Error('Für den Förder-Prüflauf fehlen Deal-IDs.');
-  const safeBatchSize = Math.max(1, Math.min(100, Number(batchSize) || 8));
+  const safeBatchSize = Math.max(1, Math.min(8, Number(batchSize) || 8));
   const snapshots = [];
   const errors = [];
   const source = await openAuthenticatedPipedriveApiSource(ids);
@@ -703,26 +703,37 @@ export async function readPipedriveFundingDealsViaApi({ dealIds, batchSize = 8, 
   try {
   for (let offset = 0; offset < ids.length; offset += safeBatchSize) {
     const batch = ids.slice(offset, offset + safeBatchSize);
-    const raw = await executePipedriveJavaScript(String.raw`(() => {
+    const jobId = `iva-funding-read-${randomUUID()}`;
+    const started = JSON.parse(await executePipedriveJavaScript(String.raw`(() => {
       const ids = ${JSON.stringify(batch)};
+      const jobId = ${JSON.stringify(jobId)};
+      const state = (window.__ivaPipedriveFundingReads ||= {})[jobId] = { status: 'running', items: [], error: '' };
+      (async () => {
+      try {
       const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
       const resource = performance.getEntriesByType('resource').map(entry => entry.name).find(name => name.includes('session_token='));
       const sessionToken = resource ? new URL(resource).searchParams.get('session_token') : '';
-      if (!sessionToken) return JSON.stringify({ fatal: 'missing_session_token', items: [] });
-      const request = path => {
+      if (!sessionToken) throw new Error('missing_session_token');
+      const request = async path => {
         const separator = path.includes('?') ? '&' : '?';
-        const xhr = new XMLHttpRequest();
-        xhr.open('GET', path + separator + 'strict_mode=true&session_token=' + encodeURIComponent(sessionToken), false);
-        xhr.send();
-        let payload = null;
-        try { payload = JSON.parse(xhr.responseText); } catch {}
-        if (xhr.status < 200 || xhr.status >= 300 || payload?.success === false) {
-          throw new Error('HTTP ' + xhr.status + ' für ' + path.split('?')[0]);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 15_000);
+        try {
+          const response = await fetch(path + separator + 'strict_mode=true&session_token=' + encodeURIComponent(sessionToken), {
+            credentials: 'same-origin',
+            signal: controller.signal,
+          });
+          const payload = await response.json().catch(() => null);
+          if (!response.ok || payload?.success === false) {
+            throw new Error('HTTP ' + response.status + ' für ' + path.split('?')[0]);
+          }
+          return payload?.data;
+        } finally {
+          clearTimeout(timer);
         }
-        return payload?.data;
       };
-      const fields = request('/api/v1/dealFields?start=0&limit=500') || [];
-      const stages = request('/api/v1/stages?pipeline_id=1&start=0&limit=500') || [];
+      const fields = await request('/api/v1/dealFields?start=0&limit=500') || [];
+      const stages = await request('/api/v1/stages?pipeline_id=1&start=0&limit=500') || [];
       const fieldByName = new Map(fields.map(field => [String(field.name || '').toLowerCase(), field]));
       const stageById = new Map(stages.map(stage => [String(stage.id), stage.name]));
       const personCache = new Map();
@@ -732,11 +743,11 @@ export async function readPipedriveFundingDealsViaApi({ dealIds, batchSize = 8, 
         return definition ? deal?.[definition.key] ?? null : null;
       };
       const enumLabel = (rawValue, definition) => definition?.options?.find(option => String(option.id) === String(rawValue))?.label || rawValue || null;
-      const person = id => {
+      const person = async id => {
         if (!id) return null;
         const key = String(id);
-        if (!personCache.has(key)) personCache.set(key, request('/api/v1/persons/' + encodeURIComponent(key)) || null);
-        return personCache.get(key);
+        if (!personCache.has(key)) personCache.set(key, request('/api/v1/persons/' + encodeURIComponent(key)).catch(() => null));
+        return await personCache.get(key);
       };
       const primaryEmail = record => {
         const emails = Array.isArray(record?.email) ? record.email : [];
@@ -745,9 +756,9 @@ export async function readPipedriveFundingDealsViaApi({ dealIds, batchSize = 8, 
       const items = [];
       for (const id of ids) {
         try {
-          const deal = request('/api/v1/deals/' + id + '?get_activity_summary=false&get_updated_deal_stage_averages=false') || {};
-          const files = request('/api/v1/deals/' + id + '/files?start=0&limit=500') || [];
-          const notes = request('/api/v1/notes?deal_id=' + encodeURIComponent(id) + '&start=0&limit=500') || [];
+          const deal = await request('/api/v1/deals/' + id + '?get_activity_summary=false&get_updated_deal_stage_averages=false') || {};
+          const files = await request('/api/v1/deals/' + id + '/files?start=0&limit=500') || [];
+          const notes = await request('/api/v1/notes?deal_id=' + encodeURIComponent(id) + '&start=0&limit=500') || [];
           const noteEvidence = notes.map(note => {
             const content = String(note?.content || '');
             const document = new DOMParser().parseFromString(content, 'text/html');
@@ -795,8 +806,8 @@ export async function readPipedriveFundingDealsViaApi({ dealIds, batchSize = 8, 
             return candidate;
           })();
           const vpId = value(deal, 'Vertriebspartner');
-          const vp = person(vpId);
-          const customer = person(deal.person_id);
+          const vp = await person(vpId);
+          const customer = await person(deal.person_id);
           const plantField = field('Anlage');
           const incomeBonusValue = value(deal, 'Einkommensbonus', 'Einkommens-Bonus');
           const incomeBonusRequested = incomeBonusValue == null ? null
@@ -839,10 +850,37 @@ export async function readPipedriveFundingDealsViaApi({ dealIds, batchSize = 8, 
           items.push({ dealId: id, error: error.message });
         }
       }
-      return JSON.stringify({ items });
-    })()`, { dealId: sourceDealId, timeoutMs: 120000 });
-    const parsed = JSON.parse(raw);
-    if (parsed.fatal) throw new Error('Der angemeldete Pipedrive-Lesezugriff ist nicht verfügbar.');
+      state.status = 'complete';
+      state.items = items;
+      } catch (error) {
+        state.status = 'error';
+        state.error = String(error?.message || error);
+      }
+      })();
+      return JSON.stringify({ started: true });
+    })()`, { dealId: sourceDealId, timeoutMs: 30_000 }));
+    if (!started.started) throw new Error('Der asynchrone Pipedrive-Lesejob konnte nicht gestartet werden.');
+    let parsed = null;
+    try {
+      const deadline = Date.now() + 3 * 60_000;
+      while (Date.now() < deadline) {
+        await wait(400);
+        const current = JSON.parse(await executePipedriveJavaScript(String.raw`(() => {
+          const state = window.__ivaPipedriveFundingReads?.[${JSON.stringify(jobId)}];
+          return JSON.stringify(state
+            ? { status: state.status, items: state.status === 'complete' ? state.items : [], error: state.error || '' }
+            : { status: 'missing', items: [], error: 'Lesejob ging verloren.' });
+        })()`, { dealId: sourceDealId, timeoutMs: 15_000 }));
+        if (current.status === 'complete') { parsed = current; break; }
+        if (['error', 'missing'].includes(current.status)) throw new Error(`Pipedrive-Lesejob: ${current.error || current.status}`);
+      }
+      if (!parsed) throw new Error('Pipedrive-Lesejob überschritt drei Minuten.');
+    } finally {
+      await executePipedriveJavaScript(String.raw`(() => {
+        if (window.__ivaPipedriveFundingReads) delete window.__ivaPipedriveFundingReads[${JSON.stringify(jobId)}];
+        return 'cleaned';
+      })()`, { dealId: sourceDealId, timeoutMs: 15_000 }).catch(() => {});
+    }
     for (const item of parsed.items || []) {
       if (item.error) {
         errors.push({ dealId: item.dealId, error: item.error });
