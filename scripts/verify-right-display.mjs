@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
   encodeRightDisplayAttestation,
+  ensureAppWindowOnRightDisplay,
+  IVA_RIGHT_DISPLAY_ATTESTATION_ENV,
   requireRightDisplayWorkspace,
   resolveRightDisplayAttestation,
   resolveRightDisplayWorkspace,
@@ -38,6 +40,27 @@ assert.throws(
   () => resolveRightDisplayAttestation(attestation, { now: verifiedAt + 60_001 }),
   /ungültig oder abgelaufen/,
 );
+
+const priorAttestation = process.env[IVA_RIGHT_DISPLAY_ATTESTATION_ENV];
+process.env[IVA_RIGHT_DISPLAY_ATTESTATION_ENV] = encodeRightDisplayAttestation(workspace, {
+  preparedBundleIdentifiers: ['com.google.Chrome'],
+});
+try {
+  const sandboxFallback = await ensureAppWindowOnRightDisplay('com.google.Chrome', {
+    run: async () => { throw new Error('macOS-Bedienungshilfe ist für die IVA-Displayregel nicht freigegeben.'); },
+  });
+  assert.equal(sandboxFallback.onRightDisplay, true);
+  assert.equal(sandboxFallback.verifiedBy, 'trusted-imac-runner-attestation');
+  await assert.rejects(
+    ensureAppWindowOnRightDisplay('com.microsoft.Outlook', {
+      run: async () => { throw new Error('macOS-Bedienungshilfe ist für die IVA-Displayregel nicht freigegeben.'); },
+    }),
+    /macOS-Bedienungshilfe/,
+  );
+} finally {
+  if (priorAttestation == null) delete process.env[IVA_RIGHT_DISPLAY_ATTESTATION_ENV];
+  else process.env[IVA_RIGHT_DISPLAY_ATTESTATION_ENV] = priorAttestation;
+}
 assert.throws(() => resolveRightDisplayWorkspace({ displays: [
   { id: '1', main: true, x: 0, y: 0, width: 2240, height: 1260 },
 ] }), /rechte Arbeitsdisplay ist nicht angeschlossen/);

@@ -12,6 +12,7 @@ const {
   getCodexTaskStatus,
   recordProjectWorkflowOutcome,
   recordProjectWorkflowStep,
+  prepareProjectWorkflowWindows,
   resolveProjectWorkflowResultStatus,
   startCodexTask,
 } = await import('../local-mac-helper/codex-tasks.mjs');
@@ -42,12 +43,23 @@ try {
   assert.match(prompt, /workflow-step .* approval/);
   assert.match(prompt, /workflow-result/);
   assert.match(prompt, /Bediene ausschließlich das physisch rechte Display/);
+  assert.match(prompt, /Chrome und Outlook unmittelbar vor dem Start geöffnet, rechts platziert/);
   assert.match(prompt, /Ein mit partial abgeschlossenes Teilprotokoll beendet diesen Teilschritt ebenfalls/);
   assert.match(prompt, /ohne dieses Ergebnisprotokoll gilt ausdrücklich nicht als Erfolg/);
 
   const codexTaskSource = await readFile(new URL('../local-mac-helper/codex-tasks.mjs', import.meta.url), 'utf8');
   assert.match(codexTaskSource, /recoveryAttempts: Number\(previousState\.recoveryAttempts \|\| 0\)/,
     'ein laufender Task muss seinen begrenzten Wiederholungszähler behalten');
+
+  const preparedApps = [];
+  const openedApps = [];
+  assert.deepEqual(await prepareProjectWorkflowWindows(request, {
+    openApp: async app => openedApps.push(app),
+    ensureWindow: async bundle => preparedApps.push(bundle),
+    waitFn: async () => {},
+  }), ['com.google.Chrome', 'com.microsoft.Outlook']);
+  assert.deepEqual(openedApps, ['Google Chrome', 'Microsoft Outlook']);
+  assert.deepEqual(preparedApps, ['com.google.Chrome', 'com.microsoft.Outlook']);
 
   await assert.rejects(
     recordProjectWorkflowStep(started.jobId, 'amount', 'completed', 2, 0, 'zu früh', { report: async () => true }),

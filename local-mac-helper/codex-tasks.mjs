@@ -51,6 +51,46 @@ function clean(value, max = 500) {
   return String(value || '').replace(/\u0000/g, '').trim().slice(0, max);
 }
 
+async function openMacApplication(appName) {
+  const child = spawn('/usr/bin/open', ['-a', appName], { stdio: 'ignore' });
+  const exitCode = await new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', code => resolve(code));
+  });
+  if (exitCode !== 0) throw new Error(`${appName} konnte für den Rechtsbildschirm-Workflow nicht geöffnet werden.`);
+}
+
+export async function prepareProjectWorkflowWindows(request, {
+  openApp = openMacApplication,
+  ensureWindow,
+  waitFn = delay => new Promise(resolve => setTimeout(resolve, delay)),
+} = {}) {
+  if (!FUNDING_WORKFLOW_STEPS[request?.workflowId]) return [];
+  const ensure = ensureWindow || (await import('./display-workspace.mjs')).ensureAppWindowOnRightDisplay;
+  const targets = [
+    ['Google Chrome', 'com.google.Chrome'],
+    ['Microsoft Outlook', 'com.microsoft.Outlook'],
+  ];
+  const prepared = [];
+  for (const [appName, bundleIdentifier] of targets) {
+    await openApp(appName);
+    let lastError;
+    for (let attempt = 1; attempt <= 8; attempt += 1) {
+      try {
+        await ensure(bundleIdentifier);
+        prepared.push(bundleIdentifier);
+        lastError = null;
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 8) await waitFn(750);
+      }
+    }
+    if (lastError) throw lastError;
+  }
+  return prepared;
+}
+
 function safeJobId(value) {
   const jobId = clean(value, 80);
   if (!/^[a-f0-9-]{20,80}$/i.test(jobId)) throw new Error('Ungültige Codex-Auftrags-ID.');
@@ -260,7 +300,10 @@ export function buildCodexPrompt(request) {
     ? `\n\nDies ist der automatische Wiederanlauf ${Number(request.recoveryAttempt)} nach einem unterbrochenen lokalen Worker. Prüfe vor jeder Schreib- oder Sendeaktion zuerst vorhandene lokale Belege, den sichtbaren Zielzustand und bereits erzeugte Ergebnisse. Setze beim ersten noch nicht verifizierten Schritt fort. Wiederhole niemals eine bereits sichtbare, gespeicherte oder anderweitig belegte Aktion. Der Wiederanlauf ist eine Fortsetzung desselben Auftrags, kein neuer Auftrag.`
     : '';
   const runtimeInstruction = `Die verbindlichen Projektanweisungen stehen in ${path.join(REPO_ROOT, '..', 'AGENTS.md')}; lies diese Datei, auch wenn im Unterordner iva-core keine eigene AGENTS.md liegt. Bestehende lokale IVA-Helfer startest du mit absolutem Pfad aus ${path.dirname(MODULE_PATH)}. Dieser geprüfte Laufzeitstand kommt vom zentralen IVA-Core. Projektquellen und Dokumente bleiben im gesetzten iCloud-Workspace. Keine zweite lokale Kopie als laufenden Agenten starten.`;
-  const displayInstruction = 'Verbindliche Displayregel: Bediene ausschließlich das physisch rechte Display. Der zentrale iMac-Runner hat dessen Geometrie unmittelbar vor deinem Start geprüft und als laufzeitgebundenen Nachweis vererbt; `right-display-check.mjs --require-second-display` verwendet diesen Nachweis auch innerhalb der Sandbox. Öffne für IVA bei Bedarf ein eigenes zweites App-Fenster beziehungsweise eigene Tabs rechts; verwende, verschiebe oder übernimm kein Arbeitsfenster auf dem linken Display. Die lokalen Pipedrive-, Outlook- und WhatsApp-Helfer erzwingen diese Regel zusätzlich pro Zielfenster. Wenn ein Zielfenster dort nicht verifiziert werden kann, stoppe konkret statt links weiterzuarbeiten.';
+  const fundingWindowInstruction = FUNDING_WORKFLOW_STEPS[request.workflowId]
+    ? ' Der zentrale iMac-Runner hat zusätzlich Chrome und Outlook unmittelbar vor dem Start geöffnet, rechts platziert und im selben laufzeitgebundenen Nachweis bestätigt. `place-app-right` darfst du zur Diagnose aufrufen; eine sandboxbedingte Accessibility-Ablehnung wird nur für genau diese vorgeprüften Apps über den Nachweis aufgelöst.'
+    : '';
+  const displayInstruction = `Verbindliche Displayregel: Bediene ausschließlich das physisch rechte Display. Der zentrale iMac-Runner hat dessen Geometrie unmittelbar vor deinem Start geprüft und als laufzeitgebundenen Nachweis vererbt; \`right-display-check.mjs --require-second-display\` verwendet diesen Nachweis auch innerhalb der Sandbox.${fundingWindowInstruction} Öffne für IVA bei Bedarf ein eigenes zweites App-Fenster beziehungsweise eigene Tabs rechts; verwende, verschiebe oder übernimm kein Arbeitsfenster auf dem linken Display. Die lokalen Pipedrive-, Outlook- und WhatsApp-Helfer erzwingen diese Regel zusätzlich pro Zielfenster. Wenn ein Zielfenster dort nicht verifiziert werden kann, stoppe konkret statt links weiterzuarbeiten.`;
   if (request.mode === 'project-workflow') {
     return `Nadine hat diesen Projekt-Workflow in IVA ausdrücklich über den Button „Manuell auslösen“ gestartet. Führe jetzt genau einen operativen Einmallauf aus, ohne eine weitere Planbestätigung zu verlangen.
 
@@ -829,7 +872,9 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   let rightDisplayAttestation = '';
   if (['operational', 'project-workflow'].includes(request.mode)) {
     const { encodeRightDisplayAttestation, requireRightDisplayWorkspace } = await import('./display-workspace.mjs');
-    rightDisplayAttestation = encodeRightDisplayAttestation(await requireRightDisplayWorkspace());
+    const workspace = await requireRightDisplayWorkspace();
+    const preparedBundleIdentifiers = await prepareProjectWorkflowWindows(request);
+    rightDisplayAttestation = encodeRightDisplayAttestation(workspace, { preparedBundleIdentifiers });
   }
   // Public scheduling refreshes inside the supported Browser session. A native
   // AppleEvents preflight would block that working channel before it can start.

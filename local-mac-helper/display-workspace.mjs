@@ -61,6 +61,7 @@ export function windowBoundsInsideRightDisplay(bounds = [], workspace) {
 export function encodeRightDisplayAttestation(workspace, {
   verifiedAt = Date.now(),
   expiresAt = Number(verifiedAt) + MAX_ATTESTATION_LIFETIME_MS,
+  preparedBundleIdentifiers = [],
 } = {}) {
   const verified = Number(verifiedAt);
   const expires = Number(expiresAt);
@@ -85,6 +86,8 @@ export function encodeRightDisplayAttestation(workspace, {
     displayCount: Number(workspace.displayCount),
     target: workspace.target,
     bounds: workspace.bounds,
+    preparedBundleIdentifiers: [...new Set(preparedBundleIdentifiers.map(value => String(value || '').trim()))]
+      .filter(value => /^[a-z0-9.-]{3,160}$/i.test(value)),
   };
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
 }
@@ -124,6 +127,9 @@ export function resolveRightDisplayAttestation(encoded, { now = Date.now() } = {
     }),
     attestedAt: payload.verifiedAt,
     attestationExpiresAt: payload.expiresAt,
+    preparedBundleIdentifiers: Object.freeze((Array.isArray(payload.preparedBundleIdentifiers)
+      ? payload.preparedBundleIdentifiers : []).map(value => String(value || '').trim())
+      .filter(value => /^[a-z0-9.-]{3,160}$/i.test(value))),
   });
   if (workspace.displayCount < 2 || workspace.target.width <= 0 || workspace.target.height <= 0
     || !windowBoundsInsideRightDisplay([
@@ -184,11 +190,30 @@ export async function requireRightDisplayWorkspace({
   }
 }
 
-export async function ensureAppWindowOnRightDisplay(bundleIdentifier) {
+export async function ensureAppWindowOnRightDisplay(bundleIdentifier, { run = runMacUiBridge } = {}) {
   const bundleId = String(bundleIdentifier || '').trim();
   if (!/^[a-z0-9.-]{3,160}$/i.test(bundleId)) throw new Error('Ungültige App-ID für die IVA-Displayregel.');
   const workspace = await requireRightDisplayWorkspace();
-  const result = await runMacUiBridge(['ensure-app-window-right', bundleId], { timeoutMs: 20000 });
+  let result;
+  try {
+    result = await run(['ensure-app-window-right', bundleId], { timeoutMs: 20000 });
+  } catch (error) {
+    // Accessibility permission is attached to the responsible process on
+    // macOS. A sandboxed Codex child may therefore be denied even though the
+    // trusted launchd runner pre-positioned and verified this exact app only
+    // moments earlier. Accept only that task-scoped, expiring app receipt.
+    if (workspace.attestedAt
+      && workspace.preparedBundleIdentifiers?.includes(bundleId)
+      && /macOS-Bedienungshilfe.*nicht freigegeben/i.test(String(error?.message || error))) {
+      return {
+        bundleIdentifier: bundleId,
+        onRightDisplay: true,
+        verifiedBy: 'trusted-imac-runner-attestation',
+        workspace,
+      };
+    }
+    throw error;
+  }
   if (result.onRightDisplay !== true) throw new Error('IVA-Displayregel blockiert: Das App-Fenster konnte rechts nicht verifiziert werden.');
   return { ...result, workspace };
 }
