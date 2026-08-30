@@ -537,7 +537,11 @@ export async function startProjectWorkflowTask({
       const request = await readJson(paths.request).catch(() => null);
       if (request?.mode !== 'project-workflow' || request?.workflowId !== normalizedWorkflowId || berlinDay(request.createdAt) !== today) continue;
       const state = await readJson(paths.state).catch(() => null);
-      if (state && ['queued', 'running', 'completed'].includes(state.status)) {
+      const isActive = state && ['queued', 'running'].includes(state.status);
+      const isVerifiedAutomaticSuccess = runMode !== 'manual'
+        && state?.status === 'completed'
+        && ['completed', 'no_changes'].includes(state.workflowOutcome);
+      if (isActive || isVerifiedAutomaticSuccess) {
         return { jobId: request.jobId, status: state.status, title: request.title, workspace: 'iva-core', startedLocally: state.status !== 'completed', deduplicated: true };
       }
     }

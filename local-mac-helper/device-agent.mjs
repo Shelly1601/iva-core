@@ -33,7 +33,7 @@ const APP_BUNDLE_IDENTIFIERS = Object.freeze({
 });
 // Reine Task-Starts bedienen keine UI. Der gestartete Worker hält selbst die
 // UI-Sperre und den Wachschutz; Display-/Lockfehler dürfen die Übergabe nicht verdecken.
-const UI_ACTIONS = new Set(['computer.status', 'project.workflow.run', 'portal.login', 'app.open']);
+const UI_ACTIONS = new Set(['computer.status', 'portal.login', 'app.open']);
 const AGENT_WORKSPACE = path.resolve(process.env.IVA_DEVICE_WORKSPACE || path.join(path.dirname(fileURLToPath(import.meta.url)), '..'));
 const ALLOWED_ACTIONS = Object.freeze([
   'agent.status',
@@ -65,6 +65,10 @@ export function isAllowedImacExecutionHost(hostname = os.hostname(), expectedHos
 export function assertImacExecutionHost(hostname = os.hostname(), expectedHostname = process.env.IVA_IMAC_HOSTNAME) {
   if (isAllowedImacExecutionHost(hostname, expectedHostname)) return true;
   throw new Error(`Der iMac-Geräteagent darf auf diesem Rechner nicht laufen (${normalizedHost(hostname) || 'unbekannt'}).`);
+}
+
+export function deviceCommandNeedsImmediateUiLock(action) {
+  return UI_ACTIONS.has(String(action || ''));
 }
 
 export function isAuthoritativeIcloudWorkspace(workspace = AGENT_WORKSPACE) {
@@ -456,7 +460,7 @@ export async function runImacDeviceAgentOnce() {
   let error = '';
   let failureStage = '';
   try {
-    if (UI_ACTIONS.has(command.action)) {
+    if (deviceCommandNeedsImmediateUiLock(command.action)) {
       const { withMacWakeGuard } = await import('./mac-wake-guard.mjs');
       result = await withImacExecutionLock(() => withMacWakeGuard(() => executeDeviceCommand(command), { maxSeconds: 120 }), { timeoutMs: 20_000 });
     } else {

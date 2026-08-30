@@ -7,6 +7,9 @@ import { mkdir, mkdtemp, readFile, readlink, realpath, symlink, writeFile, rm } 
 const root = await mkdtemp(path.join(os.tmpdir(), 'iva-device-control-'));
 process.env.DATA_DIR = root;
 try {
+  const { deviceCommandNeedsImmediateUiLock } = await import('../local-mac-helper/device-agent.mjs');
+  assert.equal(deviceCommandNeedsImmediateUiLock('project.workflow.run'), false, 'Workflow-Starts müssen ohne UI-Sperre eingereiht werden; der Worker wartet selbst auf den freien iMac');
+  assert.equal(deviceCommandNeedsImmediateUiLock('app.open'), true, 'Direkte App-Bedienung bleibt UI-gesperrt');
   console.log('Device-Control: Store laden …');
   const {
     IVA_IMAC_DEVICE_ID,

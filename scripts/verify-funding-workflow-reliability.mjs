@@ -57,6 +57,10 @@ try {
   const macBridgeSource = await readFile(new URL('../local-mac-helper/macos/iva-ax.swift', import.meta.url), 'utf8');
   assert.match(codexTaskSource, /recoveryAttempts: Number\(previousState\.recoveryAttempts \|\| 0\)/,
     'ein laufender Task muss seinen begrenzten Wiederholungszähler behalten');
+  assert.match(codexTaskSource, /runMode !== 'manual'/,
+    'ein manueller Förderlauf darf nach einem früheren Tagesabschluss bewusst erneut gestartet werden');
+  assert.match(codexTaskSource, /\['completed', 'no_changes'\]\.includes\(state\.workflowOutcome\)/,
+    'nur ein fachlich verifizierter automatischer Förderabschluss darf den Tag deduplizieren');
   assert.match(pipedriveSource, /hasAuthenticatedApiSession/);
   assert.match(pipedriveSource, /openAuthenticatedPipedriveApiSource/);
   assert.match(macUiSource, /for \(let attempt = 1; attempt <= 3; attempt \+= 1\)/);
