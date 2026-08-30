@@ -69,6 +69,8 @@ try {
   );
   assert.match(fundingReadSource, /__ivaPipedriveFundingReads/);
   assert.match(fundingReadSource, /new AbortController\(\)/);
+  assert.match(fundingReadSource, /const safeBatchSize = 1/);
+  assert.match(fundingReadSource, /Promise\.all\(\[/);
   assert.doesNotMatch(fundingReadSource, /xhr\.open\([^\n]+,\s*false\)/,
     'der Förder-Vollscan darf den rechten Pipedrive-Tab nicht mit synchronen XHR blockieren');
   assert.match(macUiSource, /for \(let attempt = 1; attempt <= 3; attempt \+= 1\)/);

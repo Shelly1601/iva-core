@@ -695,7 +695,9 @@ export async function readPipedriveFundingDealsBulk({ dealIds, batchSize = 4, on
 export async function readPipedriveFundingDealsViaApi({ dealIds, batchSize = 8, onProgress } = {}) {
   const ids = [...new Set((Array.isArray(dealIds) ? dealIds : []).map(String))].filter(id => /^\d+$/.test(id));
   if (!ids.length) throw new Error('Für den Förder-Prüflauf fehlen Deal-IDs.');
-  const safeBatchSize = Math.max(1, Math.min(8, Number(batchSize) || 8));
+  // One deal per browser job keeps progress observable and bounds a slow API
+  // response to this deal instead of holding the complete funding scan.
+  const safeBatchSize = 1;
   const snapshots = [];
   const errors = [];
   const source = await openAuthenticatedPipedriveApiSource(ids);
@@ -756,9 +758,14 @@ export async function readPipedriveFundingDealsViaApi({ dealIds, batchSize = 8, 
       const items = [];
       for (const id of ids) {
         try {
-          const deal = await request('/api/v1/deals/' + id + '?get_activity_summary=false&get_updated_deal_stage_averages=false') || {};
-          const files = await request('/api/v1/deals/' + id + '/files?start=0&limit=500') || [];
-          const notes = await request('/api/v1/notes?deal_id=' + encodeURIComponent(id) + '&start=0&limit=500') || [];
+          const [dealResult, filesResult, notesResult] = await Promise.all([
+            request('/api/v1/deals/' + id + '?get_activity_summary=false&get_updated_deal_stage_averages=false'),
+            request('/api/v1/deals/' + id + '/files?start=0&limit=500'),
+            request('/api/v1/notes?deal_id=' + encodeURIComponent(id) + '&start=0&limit=500'),
+          ]);
+          const deal = dealResult || {};
+          const files = filesResult || [];
+          const notes = notesResult || [];
           const noteEvidence = notes.map(note => {
             const content = String(note?.content || '');
             const document = new DOMParser().parseFromString(content, 'text/html');
@@ -806,8 +813,7 @@ export async function readPipedriveFundingDealsViaApi({ dealIds, batchSize = 8, 
             return candidate;
           })();
           const vpId = value(deal, 'Vertriebspartner');
-          const vp = await person(vpId);
-          const customer = await person(deal.person_id);
+          const [vp, customer] = await Promise.all([person(vpId), person(deal.person_id)]);
           const plantField = field('Anlage');
           const incomeBonusValue = value(deal, 'Einkommensbonus', 'Einkommens-Bonus');
           const incomeBonusRequested = incomeBonusValue == null ? null
