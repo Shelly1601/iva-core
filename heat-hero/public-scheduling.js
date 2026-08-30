@@ -9,6 +9,7 @@ export const PUBLIC_SCHEDULING_RELEASE = 'imac-central-v7';
 export const PUBLIC_SCHEDULING_PATH = '/heat-hero/termin';
 export const PUBLIC_SCHEDULING_API = '/heat-hero-termin-api';
 const MAX_AGE = 5 * 60_000;
+const REFRESH_ATTEMPT_MAX_AGE = 20 * 60_000;
 // A dated proposal is not a booking or a claim of live availability. Never use
 // this longer display window in the actual Planbar reservation/receipt gate.
 export const PUBLIC_SCHEDULING_PREVIEW_MAX_AGE = 24 * 60 * 60_000;
@@ -56,6 +57,7 @@ export function createPublicScheduling({
   now = () => Date.now(), secret = crypto.randomBytes(32),
 } = {}) {
   const limits = new Map();
+  const refreshAttempts = new Map();
   let serial = Promise.resolve();
   const transaction = work => { const next = serial.then(work); serial = next.catch(() => {}); return next; };
   const sign = value => crypto.createHmac('sha256', secret).update(value).digest('base64url');
@@ -98,30 +100,74 @@ export function createPublicScheduling({
       || snapshot.minimumBlockDays !== 5 || snapshot.countingRuleVersion !== PLANBAR_CAPACITY_RULE_VERSION
       || now() - refreshed > PUBLIC_SCHEDULING_PREVIEW_MAX_AGE) return null;
     const weeks = (snapshot.weeks || []).filter(item => {
-      try { return item.freeSlots > 0 && Date.parse(isoWeekRange(item.isoYear, item.week).startDate) > now(); }
+      try { return Number.isInteger(item.freeSlots) && item.freeSlots > 0 && item.freeSlots <= 500
+        && Date.parse(isoWeekRange(item.isoYear, item.week).startDate) > now(); }
       catch { return false; }
-    }).map(({ isoYear, week }) => ({ isoYear, week, ...isoWeekRange(isoYear, week) }));
+    }).map(({ isoYear, week, freeSlots }) => {
+      const range = isoWeekRange(isoYear, week);
+      const endDate = new Date(`${range.endDateExclusive}T00:00:00Z`);
+      endDate.setUTCDate(endDate.getUTCDate() - 1);
+      return { isoYear, week, startDate: range.startDate, endDate: endDate.toISOString().slice(0, 10), availableBlocks: freeSlots };
+    });
     const fresh = now() - refreshed <= MAX_AGE;
     return { status: fresh ? 'ready' : 'preview', weeks, updatedAt: snapshot.updatedAt,
       expiresAt: new Date(refreshed + MAX_AGE).toISOString(),
       requestExpiresAt: new Date(refreshed + PUBLIC_SCHEDULING_PREVIEW_MAX_AGE).toISOString(),
       refreshing: false };
   }
+  function snapshotTimes(snapshot) {
+    const refreshedAt = Date.parse(snapshot?.pageRefreshedAt || '');
+    const updatedAt = Date.parse(snapshot?.updatedAt || '');
+    return { refreshedAt: Number.isFinite(refreshedAt) ? refreshedAt : 0, updatedAt: Number.isFinite(updatedAt) ? updatedAt : 0 };
+  }
+  function pruneRefreshAttempts() {
+    for (const [nonce, attempt] of refreshAttempts) if (now() - attempt.startedAt > REFRESH_ATTEMPT_MAX_AGE) refreshAttempts.delete(nonce);
+  }
+  function hasNewSnapshot(snapshot, attempt) {
+    const times = snapshotTimes(snapshot);
+    return snapshotResult(snapshot) && times.refreshedAt > attempt.baselineRefreshedAt
+      && times.updatedAt > attempt.baselineUpdatedAt && times.refreshedAt >= attempt.startedAt - 5_000;
+  }
+  function previewResult(snapshot, phase = 'queued') {
+    const visible = snapshotResult(snapshot);
+    return { ...(visible ? { ...visible, status: 'preview' } : { status: 'refreshing', weeks: [], updatedAt: null }),
+      refreshing: true, phase };
+  }
+  function failedRefreshResult(snapshot) {
+    const visible = snapshotResult(snapshot);
+    return { ...(visible ? { ...visible, status: 'preview' } : { weeks: [], updatedAt: null }), status: 'error', refreshing: false,
+      message: 'Die aktuelle Planbar-Prüfung konnte nicht abgeschlossen werden. Der angezeigte ältere Stand ist nur vorläufig. Bitte erneut prüfen.' };
+  }
+  const isActive = item => ['queued', 'running'].includes(item?.status) && Date.parse(item.expiresAt) > now();
+  const isFailed = item => ['failed', 'expired', 'canceled'].includes(item?.status);
   async function availability(formToken) {
     const token = verifyToken(formToken);
-    const snapshot = snapshotResult((await project())?.planbarCapacity);
+    pruneRefreshAttempts();
+    const rawSnapshot = (await project())?.planbarCapacity;
+    const snapshot = snapshotResult(rawSnapshot);
     const refreshes = await refreshStates();
-    const active = refreshes.find(item => ['queued', 'running'].includes(item.status) && Date.parse(item.expiresAt) > now());
-    if (active) return { ...(snapshot || { status: 'refreshing', weeks: [], updatedAt: null }), refreshing: true,
-      phase: active.status === 'queued' ? 'queued' : 'checking' };
-    const failed = refreshes.find(item => ['failed', 'expired', 'canceled'].includes(item.status)
+    const attempt = refreshAttempts.get(token.nonce);
+    if (attempt) {
+      if (hasNewSnapshot(rawSnapshot, attempt)) {
+        refreshAttempts.delete(token.nonce);
+        return { ...snapshot, refreshing: false, refreshState: 'completed' };
+      }
+      const own = refreshes.find(item => item.id === attempt.commandId);
+      if (isActive(own)) return previewResult(rawSnapshot, own.status === 'queued' ? 'queued' : 'checking');
+      if (isFailed(own) || own?.status === 'completed') {
+        refreshAttempts.delete(token.nonce);
+        return failedRefreshResult(rawSnapshot);
+      }
+      return previewResult(rawSnapshot, 'queued');
+    }
+    const active = refreshes.find(isActive);
+    if (active) return previewResult(rawSnapshot, active.status === 'queued' ? 'queued' : 'checking');
+    const failed = refreshes.find(item => isFailed(item)
       && Date.parse(item.createdAt) >= token.iat - 30_000);
-    if (failed) return { ...(snapshot || { status: 'unavailable', weeks: [], updatedAt: null }), refreshing: false,
-      message: 'Die aktuellen Montagewochen konnten noch nicht geprüft werden. Bitte starten Sie die Verfügbarkeitsprüfung erneut.' };
+    if (failed) return failedRefreshResult(rawSnapshot);
     if (snapshot) return snapshot;
     if (refreshes.some(item => item.status === 'completed' && Date.parse(item.createdAt) >= token.iat - 30_000)) {
-      return { status: 'unavailable', weeks: [], updatedAt: null,
-        message: 'Die aktuellen Montagewochen konnten noch nicht geprüft werden. Bitte starten Sie die Verfügbarkeitsprüfung erneut.' };
+      return failedRefreshResult(rawSnapshot);
     }
     return { status: 'refreshing', phase: 'checking', weeks: [], updatedAt: null };
   }
@@ -137,23 +183,27 @@ export function createPublicScheduling({
       const status = !run || ['queued', 'starting'].includes(run.status) ? 'queued'
         : run.status === 'running' ? 'running' : run.status === 'completed' ? 'completed' : 'failed';
       return { ...item, status };
-    });
+    }).sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')));
   }
   async function refresh(formToken, { force = false } = {}) {
-    verifyToken(formToken);
+    const token = verifyToken(formToken);
     return transaction(async () => {
       // Fast path: don't wait for the Mac, its queue or a new browser worker
       // when a fully checked, still-fresh snapshot already exists.
-      const snapshot = snapshotResult((await project())?.planbarCapacity);
+      const rawSnapshot = (await project())?.planbarCapacity;
+      const snapshot = snapshotResult(rawSnapshot);
       if (snapshot?.status === 'ready' && !force) return snapshot;
       await readyAgent();
-      const existing = (await refreshStates()).find(item => ['queued', 'running'].includes(item.status) && Date.parse(item.expiresAt) > now());
-      if (!existing) {
+      const existing = (await refreshStates()).find(isActive);
+      let command = existing;
+      if (!command) {
         rateLimit('refresh:global', 8, 60_000);
-        await enqueue({ action: 'codex.task.start', payload: buildPlanbarCapacityReadTask(), requestedBy: 'heat-hero-public-availability', requestText: 'Montagewochen für den Heat-Hero-Terminlink aktuell prüfen' });
+        command = await enqueue({ action: 'codex.task.start', payload: buildPlanbarCapacityReadTask(), requestedBy: 'heat-hero-public-availability', requestText: 'Montagewochen für den Heat-Hero-Terminlink aktuell prüfen' });
       }
-      return { ...(snapshot || { status: 'refreshing', weeks: [], updatedAt: null }), refreshing: true,
-        phase: existing?.status === 'running' ? 'checking' : 'queued' };
+      const baseline = snapshotTimes(rawSnapshot);
+      refreshAttempts.set(token.nonce, { startedAt: now(), baselineRefreshedAt: baseline.refreshedAt,
+        baselineUpdatedAt: baseline.updatedAt, commandId: command?.id });
+      return previewResult(rawSnapshot, command?.status === 'running' ? 'checking' : 'queued');
     });
   }
   async function submit(input, formToken, client = 'unknown') {
@@ -170,9 +220,10 @@ export function createPublicScheduling({
       }
       // This only accepts a non-binding request. The existing iMac workflow
       // MUST reload Planbar before reserving and prove that fresh source check.
-      // Do not force the visitor to wait for that operational check here.
+      // The public form may submit only while its verified proposal is fresh;
+      // the later reservation still performs its independent operational read.
       const proposal = snapshotResult(current?.planbarCapacity);
-      if (!proposal?.weeks.some(item => item.isoYear === data.isoYear && item.week === data.week)) {
+      if (proposal?.status !== 'ready' || !proposal.weeks.some(item => item.isoYear === data.isoYear && item.week === data.week)) {
         throw failure('Bitte die freien Kalenderwochen erneut prüfen und eine verfügbare Woche auswählen.', 409);
       }
       rateLimit(`submit:${crypto.createHash('sha256').update(client).digest('hex')}`, 12);

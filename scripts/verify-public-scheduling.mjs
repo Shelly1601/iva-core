@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import vm from 'node:vm';
 import express from 'express';
 
 const root = await mkdtemp(path.join(os.tmpdir(), 'iva-public-scheduling-test-'));
@@ -25,9 +26,13 @@ const availability = await service.availability(token);
 assert.equal(availability.status, 'ready');
 assert.equal(availability.weeks.length, 1);
 assert.equal(availability.weeks[0].week, 40);
+assert.deepEqual(availability.weeks[0], { isoYear: 2026, week: 40, startDate: '2026-09-28', endDate: '2026-10-02', availableBlocks: 1 });
 assert.equal(availability.expiresAt,new Date(time+5*60000).toISOString());
 assert.equal(JSON.stringify(availability).includes('customerName'), false);
 assert.equal(JSON.stringify(availability).includes('freeSlots'), false);
+for (const forbidden of ['resources','bookings','jobs','customerId','appointmentId','resourceName','excludedResources','countingRuleVersion','pageRefreshedAt']) {
+  assert.equal(JSON.stringify(availability).includes(forbidden),false,`Öffentliches DTO enthält kein internes Feld ${forbidden}`);
+}
 assert.equal(validatePublicSchedulingInput(payload, time).materialDeliverySpace, false, 'Nein ist eine gültige Pflichtantwort');
 for (const patch of [{firstName:''},{lastName:''},{objectLocation:''},{materialDeliverySpace:undefined},{theftWeatherProtected:'false'},{week:53,isoYear:2025},{week:1},{website:'spam'},{firstName:'a\ncommand'},{additionalInfo:'a'.repeat(2001)}]) {
   assert.throws(() => validatePublicSchedulingInput({...payload,...patch}, time));
@@ -59,7 +64,7 @@ assert.equal((await devices.listDeviceCommands()).length,before+1,'Deduplizierun
 const staleToken = service.issueToken();
 time += 6*60_000;
 assert.equal((await service.availability(staleToken)).status, 'preview','Ältere geprüfte Wochen bleiben ausdrücklich vorläufig sichtbar');
-assert.equal((await service.submit({...payload,lastName:'Anders'},staleToken)).accepted,true,'Eine Vorschau erlaubt nur die Anfrage, nicht die Buchung');
+await assert.rejects(service.submit({...payload,lastName:'Anders'},staleToken),/erneut prüfen/,'Ein vorläufiger Stand kann nicht abgesendet werden');
 await assert.rejects(service.submit({...payload,week:41,lastName:'Anders'},service.issueToken()), /erneut prüfen/);
 const tooOld=createPublicScheduling({now:()=>time+24*3600_000,project:current});
 await assert.rejects(tooOld.submit({...payload,lastName:'Abgelaufen'},tooOld.issueToken()),/erneut prüfen/,'Älter als 24 Stunden ist nicht als Wunschwochenauswahl zulässig');
@@ -79,7 +84,7 @@ coalesced[0].status='failed';
 coalesced[0].createdAt=new Date(time).toISOString();
 coalesced[0].error='private customer or infrastructure detail';
 const unavailable=await refreshing.availability(refreshing.issueToken());
-assert.equal(unavailable.status,'preview','Fehlgeschlagene Aktualisierung macht aus der Vorschau keine frische Verfügbarkeit');
+assert.equal(unavailable.status,'error','Fehlgeschlagene Aktualisierung wird als echter Fehler statt als Erfolg gemeldet');
 assert.equal(unavailable.refreshing,false,'Fehlgeschlagene Prüfung endet statt endlos zu warten');
 assert(!JSON.stringify(unavailable).includes('private customer'),'Interne Fehler bleiben privat');
 await refreshing.refresh(refreshing.issueToken());
@@ -102,6 +107,23 @@ assert.equal((await fastPath.refresh(fastPath.issueToken())).status,'ready','Fri
 await assert.rejects(fastPath.refresh(fastPath.issueToken(),{force:true}),/iMac darf/,'Explizites Aktualisieren überspringt den Cache');
 const oldAgent = createPublicScheduling({agentStatus:async()=>({online:true,dispatchReady:true,release:'imac-central-v5'})});
 await assert.rejects(oldAgent.refresh(oldAgent.issueToken()),/nicht erreichbar/);
+
+// A completed queue/job is not a result. The same visitor only succeeds after
+// the attested browser read has published a strictly newer verified snapshot.
+let proofCapacity={...capacity,pageRefreshedAt:new Date(time-60000).toISOString(),updatedAt:new Date(time-30000).toISOString()};
+const proofCommand={id:'proof-command',action:'codex.task.start',requestedBy:'heat-hero-public-availability',payload:{title:'Heat Hero: Planbar-Kapazität lesend prüfen'},status:'queued',createdAt:new Date(time).toISOString(),expiresAt:new Date(time+60000).toISOString()};
+const proofRuns=[];
+const proofService=createPublicScheduling({now:()=>time,project:async()=>({planbarCapacity:proofCapacity}),commands:async()=>[proofCommand],runs:async()=>proofRuns,
+  agentStatus:async()=>({online:true,dispatchReady:true,release:PUBLIC_SCHEDULING_RELEASE})});
+const proofToken=proofService.issueToken();
+assert.equal((await proofService.refresh(proofToken,{force:true})).status,'preview');
+proofCommand.status='completed';proofCommand.result={jobId:'proof-job'};proofRuns.push({jobId:'proof-job',status:'completed'});
+assert.equal((await proofService.availability(proofToken)).status,'error','Jobende ohne aktualisierten Snapshot ist kein Verfügbarkeitsergebnis');
+proofCommand.status='queued';proofCommand.result=undefined;proofRuns.length=0;
+const secondProofToken=proofService.issueToken();await proofService.refresh(secondProofToken,{force:true});
+proofCapacity={...capacity,pageRefreshedAt:new Date(time+1000).toISOString(),updatedAt:new Date(time+2000).toISOString(),weeks:[{isoYear:2026,week:40,freeSlots:3}]};
+const proven=await proofService.availability(secondProofToken);
+assert.equal(proven.status,'ready');assert.equal(proven.refreshState,'completed');assert.equal(proven.weeks[0].availableBlocks,3);
 time += 3*3600_000;
 assert.throws(()=>service.verifyToken(token),/abgelaufen/);
 
@@ -170,7 +192,12 @@ assert.equal((await tasks.getCodexTaskStatus(jobId)).planbarProgress.confirmatio
 
 // Isolated HTTP test: no business system, email, keychain or real iMac job.
 const app=express();app.use(express.json());
-const httpService=createPublicScheduling({now:()=>Date.parse('2026-08-28T09:00:00Z'),project:async()=>({planbarCapacity:capacity,customerSchedulingRequests:[]}),addRequest:async()=>({}),agentStatus:async()=>({online:true,dispatchReady:true,release:PUBLIC_SCHEDULING_RELEASE})});
+const httpNow=Date.parse('2026-08-28T09:00:00Z');
+let httpCapacity=structuredClone(capacity);const httpCommands=[];
+const httpService=createPublicScheduling({now:()=>httpNow,project:async()=>({planbarCapacity:httpCapacity,customerSchedulingRequests:[]}),addRequest:async()=>({}),
+  agentStatus:async()=>({online:true,dispatchReady:true,release:PUBLIC_SCHEDULING_RELEASE}),commands:async()=>httpCommands,runs:async()=>[],enqueue:async input=>{
+    const command={...input,id:'http-refresh',status:'queued',createdAt:new Date(httpNow).toISOString(),expiresAt:new Date(httpNow+60000).toISOString()};httpCommands.push(command);return command;
+  }});
 httpService.registerRoutes(app);
 const server=await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});
 try {
@@ -180,9 +207,13 @@ try {
   const session=await response.json();
   assert.equal(session.availability.status,'ready','Wochen kommen bereits mit der ersten Sitzung: ein HTTP-Roundtrip');
   assert.equal(session.availability.weeks.length,1);
+  assert.equal(session.availability.weeks[0].availableBlocks,1,'Öffentlich wird die tatsächliche Zahl freier 5-Tage-Blöcke geliefert');
   assert(!JSON.stringify(session).includes('freeSlots')&&!JSON.stringify(session).includes('customerName'),'Sofortantwort enthält keine internen Details');
+  response=await fetch(`${base}/availability`,{method:'POST',headers:{'Content-Type':'application/json','X-Form-Token':session.formToken},body:JSON.stringify({force:true})});
+  assert.equal(response.status,200);assert.equal((await response.json()).refreshing,true);assert.equal(httpCommands.length,1,'Auto-/Force-Refresh erzeugt einen echten Geräteauftrag');
+  httpCapacity={...capacity,pageRefreshedAt:new Date(httpNow+1000).toISOString(),updatedAt:new Date(httpNow+2000).toISOString(),weeks:[{isoYear:2026,week:40,freeSlots:2}]};
   response=await fetch(`${base}/availability`,{headers:{'X-Form-Token':session.formToken}});
-  assert.equal(response.status,200);assert.equal((await response.json()).weeks.length,1);
+  const refreshedHttp=await response.json();assert.equal(refreshedHttp.status,'ready');assert.equal(refreshedHttp.weeks[0].availableBlocks,2);
   response=await fetch(`${base}/requests`,{method:'POST',headers:{'Content-Type':'application/json','X-Form-Token':session.formToken},body:JSON.stringify(payload)});
   assert.equal(response.status,200);assert.equal((await response.json()).accepted,true);
   response=await fetch(`${base}/session`,{headers:{Origin:'https://attacker.invalid'}});assert.equal(response.status,403);
@@ -195,8 +226,71 @@ const thanks=await readFile(new URL('../public/heat-hero-termin-danke.html',impo
 assert.equal((html.match(/type="radio"[^>]*required/g)||[]).length,4);
 assert(!/localStorage|sessionStorage|iva_token/.test(js));
 assert(js.includes('pagehide')&&js.includes('pageshow')&&js.includes('form.reset()'));
-assert(js.includes("result.phase === 'queued'")&&js.includes('15 * 60_000'),'Warteschlange wird angezeigt und nicht nach zwei Minuten abgebrochen');
-assert(js.includes('session.availability')&&js.includes('requestExpiresAt')&&js.includes('availableUntil - 10_000'),'Sofortantwort und tatsächliches Ablaufdatum werden berücksichtigt');
-assert(js.includes('Vorläufige Auswahl')&&js.includes('Hintergrund')&&js.includes("$('week').value = selected"),'Vorschau ist ehrlich gekennzeichnet; Auswahl bleibt bei Aktualisierung erhalten');
+assert(html.includes('id="weekCards"')&&html.includes('role="radiogroup"')&&html.includes('aria-describedby="weekHint"'),'KW-Karten besitzen eine barrierearme Gruppierung');
+
+// Execute the real browser bundle with a deliberately small DOM. This proves
+// auto-refresh, force refresh, double-click protection, cards, pluralization,
+// selection retention/invalidation and the actual network error branch.
+class FakeClassList {
+  constructor(element){this.element=element;}
+  toggle(name,force){const names=new Set(this.element.className.split(/\s+/).filter(Boolean));if(force)names.add(name);else names.delete(name);this.element.className=[...names].join(' ');}
+}
+class FakeElement {
+  constructor(tag='div',id=''){this.tagName=tag.toUpperCase();this.id=id;this.children=[];this.listeners={};this.dataset={};this.attributes={};this.className='';this.classList=new FakeClassList(this);this.hidden=false;this.disabled=false;this.checked=false;this.value='';this.name='';this.type='';this.required=false;this._text='';}
+  set textContent(value){this._text=String(value);this.children=[];}
+  get textContent(){return this._text+this.children.map(child=>child.textContent).join('');}
+  append(...children){this.children.push(...children);}
+  replaceChildren(...children){this.children=[...children];}
+  setAttribute(name,value){this.attributes[name]=String(value);}
+  addEventListener(name,handler){(this.listeners[name] ||= []).push(handler);}
+  click(){if(this.disabled)return;for(const handler of this.listeners.click||[])handler({preventDefault(){}});}
+  reset(){for(const node of walk(this))if(node.type==='radio')node.checked=false;}
+  reportValidity(){return true;}
+}
+const walk=function* (node){yield node;for(const child of node.children||[])yield* walk(child);};
+const ids=Object.fromEntries(['requestForm','error','refreshWeeks','weekCards','availabilityStatus','submit'].map(id=>[id,new FakeElement(id==='requestForm'?'form':'div',id)]));
+const fakeDocument={getElementById:id=>ids[id],createElement:tag=>new FakeElement(tag),querySelector:selector=>selector==='input[name="week"]:checked'?[...walk(ids.weekCards)].find(node=>node.name==='week'&&node.checked)||null:null};
+const windowListeners={};const fakeWindow={addEventListener:(name,handler)=>(windowListeners[name] ||= []).push(handler)};
+let nextTimer=0;const fakeTimers=new Map();
+const fakeSetTimeout=handler=>{const id=++nextTimer;fakeTimers.set(id,handler);return id;};
+const fakeClearTimeout=id=>fakeTimers.delete(id);
+const flush=async()=>{await new Promise(resolve=>setImmediate(resolve));await new Promise(resolve=>setImmediate(resolve));};
+const runNextTimer=async()=>{const entry=fakeTimers.entries().next().value;assert(entry,'Polling-Timer fehlt');fakeTimers.delete(entry[0]);entry[1]();await flush();};
+const uiNow=Date.now();
+const publicWeek=(week,availableBlocks)=>({isoYear:2026,week,startDate:week===40?'2026-09-28':'2026-10-12',endDate:week===40?'2026-10-02':'2026-10-16',availableBlocks});
+const dto=(status,weeks,extra={})=>({status,weeks,updatedAt:new Date(uiNow).toISOString(),expiresAt:new Date(uiNow+300000).toISOString(),requestExpiresAt:new Date(uiNow+86400000).toISOString(),refreshing:false,...extra});
+const fetchCalls=[];const fetchResponses=[];
+const fakeFetch=async(url,options={})=>{fetchCalls.push({url,options});const response=fetchResponses.shift();assert(response,`Keine Browser-Fixture für ${url}`);return {ok:response.ok!==false,status:response.status||200,json:async()=>response.body};};
+fetchResponses.push(
+  {body:{formToken:'fixture-token',availability:dto('ready',[publicWeek(40,1),publicWeek(42,3)])}},
+  {body:dto('preview',[publicWeek(40,1),publicWeek(42,3)],{refreshing:true,phase:'queued'})},
+  {body:dto('ready',[publicWeek(40,1),publicWeek(42,2)],{refreshState:'completed'})},
+);
+vm.runInNewContext(js,{document:fakeDocument,window:fakeWindow,fetch:fakeFetch,setTimeout:fakeSetTimeout,clearTimeout:fakeClearTimeout,AbortSignal,Intl,Date,JSON,Promise,Error,FormData:class{},location:{replace(){throw new Error('Unerwartete Navigation');}}});
+windowListeners.pageshow[0]();await flush();
+assert.equal(fetchCalls[0].url,'/heat-hero-termin-api/session');
+assert.equal(fetchCalls[1].url,'/heat-hero-termin-api/availability');
+assert.equal(fetchCalls[1].options.method,'POST');assert.deepEqual(JSON.parse(fetchCalls[1].options.body),{force:true},'Jeder Seitenaufruf startet automatisch einen Force-Refresh');
+let radios=[...walk(ids.weekCards)].filter(node=>node.name==='week');
+assert.equal(radios.length,2);assert(ids.weekCards.textContent.includes('Noch 1 Termin frei'));assert(ids.weekCards.textContent.includes('Noch 3 Termine frei'));
+radios[0].checked=true;await runNextTimer();
+radios=[...walk(ids.weekCards)].filter(node=>node.name==='week');
+assert.equal(radios.find(node=>node.checked)?.value,'2026-40','Auswahl bleibt bei weiterhin freier Woche erhalten');
+assert(ids.weekCards.textContent.includes('Noch 2 Termine frei'));assert.equal(ids.refreshWeeks.dataset.state,'success');assert.equal(ids.submit.disabled,false);
+
+fetchResponses.push(
+  {body:dto('preview',[publicWeek(40,1),publicWeek(42,2)],{refreshing:true,phase:'checking'})},
+  {body:dto('ready',[publicWeek(42,1)],{refreshState:'completed'})},
+);
+const callsBeforeClick=fetchCalls.length;ids.refreshWeeks.click();ids.refreshWeeks.click();await flush();
+assert.equal(fetchCalls.length,callsBeforeClick+1,'Doppelklick startet keinen zweiten Force-Refresh');assert.equal(ids.refreshWeeks.dataset.state,'loading');
+await runNextTimer();radios=[...walk(ids.weekCards)].filter(node=>node.name==='week');
+assert.equal(radios.some(node=>node.checked),false,'Nicht mehr freie Auswahl wird gelöscht');
+assert.match(ids.error.textContent,/nicht mehr frei/);assert(ids.weekCards.textContent.includes('Noch 1 Termin frei'));
+
+fetchResponses.push({ok:false,status:503,body:{error:'Die Terminprüfung ist gerade nicht erreichbar. Bitte später erneut versuchen.'}});
+ids.refreshWeeks.click();await flush();
+assert.equal(ids.refreshWeeks.dataset.state,'error');assert.equal(ids.submit.disabled,true);assert.match(ids.availabilityStatus.textContent,/Aktualisierung fehlgeschlagen/);
+assert.match(ids.error.textContent,/nicht erreichbar/,'Der echte Fetch-Fehlerpfad wird sichtbar behandelt');
 assert(thanks.includes('Angaben ohne Gewähr')&&thanks.includes('innerhalb der nächsten Stunde')&&thanks.includes('noch keine verbindliche Terminbestätigung'));
-console.log('PASS öffentlicher Heat-Hero-Terminlink: Pflichtfelder, frische Kapazität, iMac-Übergabe, Doppelklick/Neustart-Deduplizierung, Kunden-/Phasengate, Reload-Nachweis, Mailnachweis, Datenschutz und HTTP-Schutz. Keine echten Kundentermine oder Nachrichten.');
+console.log('PASS öffentlicher Heat-Hero-Terminlink: Auto-/Force-Refresh bis zum neuen Snapshot, Kapazitätskarten, Auswahlzustände, echter Fehlerpfad, iMac-Übergabe, Datenschutz und HTTP-Schutz. Keine echten Kundentermine oder Nachrichten.');
