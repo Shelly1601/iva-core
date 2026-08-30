@@ -93,13 +93,17 @@ export function summarizeDewarmteLinkPdfJobs(commands = [], files = [], runs = [
       const agentRun = agentRuns.find(item => item?.projectId === 'dewarmte'
         && item?.workflowId === 'dewarmte-link-to-material-pdf'
         && item?.jobId === jobId) || null;
-      const file = files
-        .filter(item => item.jobId === jobId)
-        .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0] || null;
+      const jobFiles = files.filter(item => item.jobId === jobId);
+      const localizedFiles = ['de', 'en', 'nl'].map(language => jobFiles
+        .filter(item => (item.language || (language === 'de' ? 'de' : '')) === language)
+        .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0])
+        .filter(Boolean);
+      const file = localizedFiles.find(item => (item.language || 'de') === 'de') || localizedFiles[0] || null;
       const local = statusCommand?.result || {};
       const commandFallbackStatus = command.status === 'completed' ? (jobId ? 'running' : 'queued') : command.status;
       const reportedStatus = clean(agentRun?.status || run?.status || local.status || command.result?.status || commandFallbackStatus, 50) || 'queued';
-      const missingResult = reportedStatus === 'completed' && !file;
+      const requiresThreeLanguages = Array.isArray(command.payload?.languages) && command.payload.languages.length === 3;
+      const missingResult = reportedStatus === 'completed' && (requiresThreeLanguages ? localizedFiles.length < 3 : !file);
       const status = missingResult ? 'incomplete' : reportedStatus;
       const needsAttention = ['failed', 'blocked', 'timed_out', 'incomplete'].includes(status);
       const reportedDetail = clean(agentRun?.error || agentRun?.resultPreview || run?.error || run?.summary || local.resultPreview || local.detail || command.error, 700);
@@ -113,13 +117,14 @@ export function summarizeDewarmteLinkPdfJobs(commands = [], files = [], runs = [
         phase: workflowPhase(status, rawPhase, deliveryMode, Boolean(file)),
         active: !TERMINAL_STATUSES.has(status),
         detail: file
-          ? `PDF ist fertig und liegt in der DeWarmte-Projektakte.${needsAttention && reportedDetail ? ` Weitere Aktion nötig: ${reportedDetail}` : ''}`
-          : (missingResult ? 'Der Lauf meldet Abschluss, aber in der Projektakte fehlt die Ergebnis-PDF.' : (reportedDetail || 'Auftrag wartet auf den iMac.')),
+          ? `${localizedFiles.length === 3 ? 'Alle drei Sprach-PDFs sind fertig' : 'PDF ist fertig'} und ${localizedFiles.length === 3 ? 'liegen' : 'liegt'} in der DeWarmte-Projektakte.${needsAttention && reportedDetail ? ` Weitere Aktion nötig: ${reportedDetail}` : ''}`
+          : (missingResult ? 'Der Lauf meldet Abschluss, aber in der Projektakte fehlen Ergebnis-PDFs.' : (reportedDetail || 'Auftrag wartet auf den iMac.')),
         deliveryMode,
         recipientEmail: clean(command.payload?.recipientEmail, 320),
         createdAt: clean(command.createdAt, 80),
         updatedAt: clean(agentRun?.updatedAt || run?.completedAt || local.updatedAt || statusCommand?.completedAt || command.completedAt || command.startedAt || command.createdAt, 80),
         file: file ? { id: file.id, name: file.name, bytes: file.bytes, createdAt: file.createdAt } : null,
+        files: localizedFiles.map(item => ({ id: item.id, name: item.name, bytes: item.bytes, createdAt: item.createdAt, language: item.language || 'de' })),
       };
     })
     .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))

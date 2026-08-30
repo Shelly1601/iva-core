@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import os from 'node:os';
 import path from 'node:path';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { renderFundingMissingDocumentsEmail, withFundingSender } from './funding.mjs';
 import { createOutlookDraft, createOutlookForwardDraft, deleteOutlookDrafts, diagnoseOutlook, normalizeDraftPayload, sendVerifiedOutlookPdfMessage, updateOutlookDrafts } from './outlook.mjs';
 import {
@@ -133,12 +133,46 @@ async function main() {
   if (command === 'right-display-status') return console.log(JSON.stringify(await requireRightDisplayWorkspace(), null, 2));
   if (command === 'place-app-right') return console.log(JSON.stringify(await ensureAppWindowOnRightDisplay(filePath), null, 2));
   if (command === 'publish-dewarmte-pdf') {
-    if (extra !== '--commit') throw new Error('Die PDF wurde nicht in die DeWarmte-Projektakte hochgeladen. Zum Bestätigen --commit anhängen.');
-    return console.log(JSON.stringify(await publishDewarmtePdf({ filePath, jobId: confirmation }), null, 2));
+    const language = extra === '--commit' ? '' : extra;
+    if ((language ? final : extra) !== '--commit') throw new Error('Die PDF wurde nicht in die DeWarmte-Projektakte hochgeladen. Sprache de|en|nl und --commit anhängen.');
+    return console.log(JSON.stringify(await publishDewarmtePdf({ filePath, jobId: confirmation, language }), null, 2));
   }
   if (command === 'revise-dewarmte-pdf') {
-    if (extra !== '--commit') throw new Error('Die neue PDF-Fassung wurde nicht in die DeWarmte-Projektakte hochgeladen. Zum Bestätigen --commit anhängen.');
-    return console.log(JSON.stringify(await publishDewarmtePdf({ filePath, jobId: confirmation, revision: true }), null, 2));
+    const language = extra === '--commit' ? '' : extra;
+    if ((language ? final : extra) !== '--commit') throw new Error('Die neue PDF-Fassung wurde nicht in die DeWarmte-Projektakte hochgeladen. Sprache de|en|nl und --commit anhängen.');
+    return console.log(JSON.stringify(await publishDewarmtePdf({ filePath, jobId: confirmation, language, revision: true }), null, 2));
+  }
+  if (command === 'deliver-dewarmte-pdf-set') {
+    if (sixth !== '--commit') throw new Error('Die DeWarmte-Mail wurde nicht erstellt oder versandt. Zum Bestätigen --commit anhängen.');
+    const deliveryMode = String(confirmation || 'download');
+    if (!['download', 'email-draft', 'email-send'].includes(deliveryMode)) throw new Error('Unbekannte DeWarmte-Ausgabeart.');
+    if (deliveryMode === 'download') return console.log(JSON.stringify({ delivered: false, downloadOnly: true }, null, 2));
+    const recipientEmail = String(extra || '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) throw new Error('Für die DeWarmte-Mail fehlt eine gültige Empfängeradresse.');
+    const directory = path.resolve(filePath);
+    const names = (await readdir(directory)).filter(name => /_(?:DE|EN|NL)\.pdf$/i.test(name)).sort();
+    const byLanguage = language => names.find(name => new RegExp(`_${language}\\.pdf$`, 'i').test(name));
+    if (!['DE', 'EN', 'NL'].every(byLanguage) || names.length !== 3) throw new Error('Im Ausgabeordner müssen genau drei DeWarmte-PDFs mit den Endungen _DE, _EN und _NL liegen.');
+    const attachments = ['DE', 'EN', 'NL'].map(language => path.join(directory, byLanguage(language)));
+    const jobId = String(final || '').trim();
+    const subject = 'DeWarmte Materiallisten - Deutsch, English, Nederlands';
+    const mail = { from: 'n.sell@heat-hero.com', to: [recipientEmail], cc: [], bcc: [], subject,
+      body: 'Hallo,\n\nanbei erhalten Sie die aus dem bereitgestellten Installationsplan erstellte Materialliste auf Deutsch, Englisch und Niederländisch.\n\nViele Grüße\nNadine Sell', attachments };
+    await beginDewarmteDelivery({ jobId, deliveryMode, recipientEmail, fileName: attachments.join(';') });
+    try {
+      const result = deliveryMode === 'email-draft' ? await createOutlookDraft(mail) : await sendVerifiedOutlookPdfMessage(mail);
+      const status = deliveryMode === 'email-draft' ? 'draft-created' : result.sentFolderVerified ? 'sent-verified' : 'sent-unverified';
+      await finishDewarmteDelivery(jobId, { status, detail: result.sentFolderVerificationError || result.subject || subject });
+      if (deliveryMode === 'email-send' && result.sentFolderVerified !== true) {
+        const verificationError = new Error('Outlook hat den Versand angestoßen, aber die Nachricht konnte nicht eindeutig im Gesendet-Ordner bestätigt werden. Niemals erneut senden; ausschließlich den Gesendet-Ordner prüfen.');
+        verificationError.deliveryRecorded = true;
+        throw verificationError;
+      }
+      return console.log(JSON.stringify({ deliveryMode, attachmentCount: attachments.length, ...result }, null, 2));
+    } catch (error) {
+      if (!error?.deliveryRecorded) await finishDewarmteDelivery(jobId, { status: 'failed-or-unclear', detail: error.message }).catch(() => {});
+      throw error;
+    }
   }
   if (command === 'deliver-dewarmte-pdf') {
     if (sixth !== '--commit') throw new Error('Die DeWarmte-Mail wurde nicht erstellt oder versandt. Zum Bestätigen --commit anhängen.');
@@ -345,8 +379,9 @@ async function main() {
   node local-mac-helper/cli.mjs doctor
   node local-mac-helper/cli.mjs right-display-status
   node local-mac-helper/cli.mjs place-app-right <bundle-id>
-  node local-mac-helper/cli.mjs publish-dewarmte-pdf <pdf-pfad> <job-id> --commit
-  node local-mac-helper/cli.mjs revise-dewarmte-pdf <pdf-pfad> <job-id> --commit
+  node local-mac-helper/cli.mjs publish-dewarmte-pdf <pdf-pfad> <job-id> <de|en|nl> --commit
+  node local-mac-helper/cli.mjs revise-dewarmte-pdf <pdf-pfad> <job-id> <de|en|nl> --commit
+  node local-mac-helper/cli.mjs deliver-dewarmte-pdf-set <pdf-ordner> <email-draft|email-send> <empfaenger> <job-id> --commit
   node local-mac-helper/cli.mjs deliver-dewarmte-pdf <pdf-pfad> <email-draft|email-send> <empfaenger> <job-id> --commit
   node local-mac-helper/cli.mjs direct-sales-roster-status
   node local-mac-helper/cli.mjs sync-direct-sales-roster --commit

@@ -390,11 +390,12 @@ const DEWARMTE_PROJECT = {
   company: 'DeWarmte',
   category: 'Installationsplanung · Materiallisten',
   status: 'active',
-  description: 'Installationsplan-Link einfügen, deutsche Materiallisten-PDF erzeugen und direkt herunterladen oder kontrolliert per Outlook bereitstellen.',
-  objective: 'Ein einfacher, aktiv gestarteter Ablauf: Link rein, geprüfte PDF raus - ohne vorherige Suche im Mailpostfach.',
+  description: 'Installationsplan-Link einfügen, dieselbe Materialliste als deutsche, englische und niederländische PDF erzeugen und direkt herunterladen oder kontrolliert per Outlook bereitstellen.',
+  objective: 'Ein einfacher, aktiv gestarteter Ablauf: Link rein, drei geprüfte Sprach-PDFs raus - ohne vorherige Suche im Mailpostfach.',
   principles: [
     'Quelldokumente werden ausschließlich gelesen und niemals verändert oder gelöscht.',
     'Seite 1 des Originalplans bleibt als unveränderte Übersicht erhalten.',
+    'Jeder Lauf erzeugt drei vollständige Fassungen: Deutsch, Englisch und Niederländisch.',
     'Die Materialliste folgt dem festen Grundgerüst „DeWarmte Material“ und „HEAT|Hero Material“; Standardpositionen sind versioniert hinterlegt.',
     'Am PDF-Ende stehen zwei eigenständige Bestellseiten - zuerst HEAT|Hero, danach DeWarmte - die separat versandt werden können.',
     'Materialmengen werden nur aus belegten Angaben übernommen; offene Punkte bleiben sichtbar.',
@@ -403,29 +404,29 @@ const DEWARMTE_PROJECT = {
   ],
   areas: [
     {
-      id: 'installation-pdfs', name: 'Installationsplan → Materialliste', status: 'active', owner: 'IVA Operations', specVersion: 4,
-      summary: 'Öffentliche HTTPS-Links rein lesend auswerten, Seite 1 unverändert übernehmen und zwei separat versendbare Bestellseiten für HEAT|Hero und DeWarmte anhängen.',
+      id: 'installation-pdfs', name: 'Installationsplan → Materialliste', status: 'active', owner: 'IVA Operations', specVersion: 5,
+      summary: 'Öffentliche HTTPS-Links rein lesend auswerten, drei Sprach-PDFs mit unveränderter Seite 1 und lokalisierten Bestellseiten für HEAT|Hero und DeWarmte erzeugen.',
       nextStep: 'Link oben in der Projektakte einfügen und gewünschte Ausgabeart wählen.',
     },
   ],
   automations: [
     {
       id: 'dewarmte-link-to-material-pdf',
-      specVersion: 4,
-      name: 'Link → deutsche Materialliste-PDF',
+      specVersion: 5,
+      name: 'Link → Materialliste DE / EN / NL',
       status: 'active',
       enabled: true,
       schedule: 'Manuell · direkt aus der DeWarmte-Projektakte',
       execution: 'iMac · Chrome, lokale PDF-Prüfung und optional Outlook',
-      purpose: 'Einen eingefügten Installationsplan-Link ausschließlich lesen, Seite 1 unverändert als Deckblatt übernehmen, die Materialliste aufteilen und zwei eigenständige Bestellseiten für HEAT|Hero und DeWarmte mit sichtbarem Fortschritt bereitstellen.',
+      purpose: 'Einen eingefügten Installationsplan-Link ausschließlich lesen und drei vollständige Sprach-PDFs mit unveränderter Seite 1, aufgeteilter Materialliste und lokalisierten Bestellseiten für HEAT|Hero und DeWarmte bereitstellen.',
       safety: 'Quellen strikt nur lesen. Keine Änderung, Löschung oder Verschiebung. Zusatzdaten und lokale Arbeitsdaten nach drei Tagen automatisch löschen. Mail nur bei ausdrücklich gewähltem Entwurf oder Versand; Versand wird im Gesendet-Ordner verifiziert.',
       nextStep: 'Im Bereich „Link rein → PDF raus“ Link und Ausgabeart eintragen.',
     },
   ],
   phases: [
     { phase: 1, name: 'Link übernehmen', status: 'active', result: 'Eindeutiger HTTPS-Link ohne Postfachsuche.' },
-    { phase: 2, name: 'PDF erzeugen und prüfen', status: 'active', result: 'Unverändertes Deckblatt, Materialauswertung und zwei separat versendbare Bestellseiten.' },
-    { phase: 3, name: 'Download oder Mail', status: 'active', result: 'Datei in der Projektakte; optional Entwurf oder verifizierter Versand.' },
+    { phase: 2, name: 'Drei PDFs erzeugen und prüfen', status: 'active', result: 'Deutsch, Englisch und Niederländisch mit unverändertem Deckblatt und zwei separat versendbaren Bestellseiten.' },
+    { phase: 3, name: 'Download oder Mail', status: 'active', result: 'Drei Dateien in der Projektakte; optional gemeinsam als Entwurf oder verifizierter Versand.' },
   ],
   protocolPolicy: { enabled: false },
   runLog: [],
@@ -557,7 +558,7 @@ function normalizeFile(file = {}) {
     mime: clean(file.mime, 160) || 'application/octet-stream', bytes: Math.max(0, Number(file.bytes) || 0),
     sha256: clean(file.sha256, 128), folderId: clean(file.folderId, 100) || null,
     storageName: clean(file.storageName, 300), createdAt: iso(file.createdAt),
-    workflowId: clean(file.workflowId, 140), jobId: clean(file.jobId, 100),
+    workflowId: clean(file.workflowId, 140), jobId: clean(file.jobId, 100), language: clean(file.language, 10).toLowerCase(),
   };
 }
 
@@ -1003,21 +1004,23 @@ export async function deleteProjectLogo(id) {
   return result.project;
 }
 
-export async function storeProjectFile(id, { name, mime, folderId, buffer, workflowId = '', jobId = '', allowRevision = false }) {
+export async function storeProjectFile(id, { name, mime, folderId, buffer, workflowId = '', jobId = '', language = '', allowRevision = false }) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error('Die Datei ist leer.');
   if (buffer.length > MAX_FILE_BYTES) throw new Error('Die Datei ist größer als 25 MB.');
   const safeName = clean(name, 240) || 'Dokument';
   const requestedFolderId = clean(folderId, 100) || null;
   const safeWorkflowId = clean(workflowId, 140);
   const safeJobId = clean(jobId, 100);
+  const safeLanguage = clean(language, 10).toLowerCase();
+  if (safeLanguage && !['de', 'en', 'nl'].includes(safeLanguage)) throw new Error('Dokumentsprache muss de, en oder nl sein.');
   const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
   return mutate(async store => {
     const project = store.projects.find(item => item.id === clean(id, 100));
     if (!project) return null;
     if (requestedFolderId && !(project.folders || []).some(folder => folder.id === requestedFolderId)) throw new Error('Der Zielordner wurde nicht gefunden.');
-    const existing = safeJobId ? (project.files || []).find(file => file.jobId === safeJobId && file.workflowId === safeWorkflowId) : null;
+    const existing = safeJobId ? (project.files || []).find(file => file.jobId === safeJobId && file.workflowId === safeWorkflowId && (file.language || '') === safeLanguage) : null;
     if (existing) {
-      const identical = (project.files || []).find(file => file.jobId === safeJobId && file.workflowId === safeWorkflowId && file.sha256 === sha256);
+      const identical = (project.files || []).find(file => file.jobId === safeJobId && file.workflowId === safeWorkflowId && (file.language || '') === safeLanguage && file.sha256 === sha256);
       if (identical) return publicProject({ ...project, files: [identical] }).files[0];
       if (allowRevision !== true) throw new Error('Für diesen Workflow-Auftrag liegt bereits eine andere Datei in der Projektakte. Es wurde nichts überschrieben.');
     }
@@ -1026,7 +1029,7 @@ export async function storeProjectFile(id, { name, mime, folderId, buffer, workf
     const projectDir = projectFileDir(project.id);
     await fs.mkdir(projectDir, { recursive: true });
     await fs.writeFile(path.join(projectDir, storageName), buffer, { mode: 0o600 });
-    const file = normalizeFile({ name: safeName, mime, bytes: buffer.length, sha256, folderId: requestedFolderId, storageName, workflowId: safeWorkflowId, jobId: safeJobId });
+    const file = normalizeFile({ name: safeName, mime, bytes: buffer.length, sha256, folderId: requestedFolderId, storageName, workflowId: safeWorkflowId, jobId: safeJobId, language: safeLanguage });
     project.files = [...(project.files || []), file];
     return publicProject({ ...project, files: [file] }).files[0];
   });

@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEWARMTE_MATERIAL_STANDARD } from '../projects/dewarmte-material-standard.js';
+import { DEWARMTE_LANGUAGES, DEWARMTE_MATERIAL_STANDARD, localizedMaterialEntry } from '../projects/dewarmte-material-standard.js';
 
 const MODULE_PATH = fileURLToPath(import.meta.url);
 const REPO_ROOT = path.resolve(path.dirname(MODULE_PATH), '..');
@@ -12,6 +12,12 @@ const requireBase = process.env.IVA_NODE_MODULES_DIR
   ? path.join(path.resolve(process.env.IVA_NODE_MODULES_DIR), 'package.json')
   : import.meta.url;
 const { PDFDocument, StandardFonts, rgb } = createRequire(requireBase)('pdf-lib');
+
+const COPY = Object.freeze({
+  de: Object.freeze({ subtitle: 'Separat versendbare Bestellseite', project: 'Projekt', address: 'Objekt', installation: 'Montage', orderedBy: 'Bestellt durch', date: 'am', delivery: 'Liefertermin', headers: ['Menge', 'Material / Bauteil', 'Hinweis', 'OK'], title: section => `Materialbestellung ${section === 'heat-hero' ? 'HEAT|Hero' : 'DeWarmte'}`, warning: count => `! ${count} markierte ${count === 1 ? 'Position' : 'Positionen'} vor Bestellung fachlich oder mengenmäßig klären.`, detachable: 'Diese Seite kann einzeln aus der Gesamt-PDF entnommen und versandt werden.', page: 'Bestellseite', defaultReference: 'DeWarmte Materialliste', subject: 'zwei getrennte Bestellseiten für HEAT|Hero und DeWarmte', keywords: ['Materialliste', 'Bestellung'] }),
+  en: Object.freeze({ subtitle: 'Standalone order page', project: 'Project', address: 'Site', installation: 'Installation', orderedBy: 'Ordered by', date: 'date', delivery: 'Delivery date', headers: ['Quantity', 'Material / component', 'Note', 'OK'], title: section => `${section === 'heat-hero' ? 'HEAT|Hero' : 'DeWarmte'} material order`, warning: count => `! Clarify ${count} marked ${count === 1 ? 'item' : 'items'} technically or quantitatively before ordering.`, detachable: 'This page can be removed from the complete PDF and sent separately.', page: 'Order page', defaultReference: 'DeWarmte material list', subject: 'two separate order pages for HEAT|Hero and DeWarmte', keywords: ['material list', 'order'] }),
+  nl: Object.freeze({ subtitle: 'Afzonderlijk te versturen bestelpagina', project: 'Project', address: 'Object', installation: 'Montage', orderedBy: 'Besteld door', date: 'op', delivery: 'Leverdatum', headers: ['Aantal', 'Materiaal / onderdeel', 'Opmerking', 'OK'], title: section => `Materiaalbestelling ${section === 'heat-hero' ? 'HEAT|Hero' : 'DeWarmte'}`, warning: count => `! ${count} gemarkeerde ${count === 1 ? 'positie' : 'posities'} vóór bestelling technisch of qua hoeveelheid afstemmen.`, detachable: 'Deze pagina kan uit de volledige pdf worden gehaald en afzonderlijk worden verstuurd.', page: 'Bestelpagina', defaultReference: 'DeWarmte materiaallijst', subject: 'twee afzonderlijke bestelpagina’s voor HEAT|Hero en DeWarmte', keywords: ['materiaallijst', 'bestelling'] }),
+});
 
 function clean(value, max = 500) {
   return String(value || '').replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -45,7 +51,8 @@ function drawMetaLine(page, label, value, y, fonts) {
   page.drawText(clean(value, 240) || '-', { x: 116, y, font: fonts.regular, size: 9.4, color: rgb(0.08, 0.13, 0.20) });
 }
 
-function drawOrderPage(document, section, metadata, pageNumber, fonts) {
+function drawOrderPage(document, section, metadata, pageNumber, fonts, language) {
+  const copy = COPY[language];
   const page = document.addPage(A4);
   const [pageWidth, pageHeight] = A4;
   const navy = rgb(0.035, 0.10, 0.20);
@@ -59,24 +66,24 @@ function drawOrderPage(document, section, metadata, pageNumber, fonts) {
   page.drawRectangle({ x: 0, y: pageHeight - 112, width: pageWidth, height: 112, color: navy });
   page.drawRectangle({ x: 0, y: pageHeight - 116, width: pageWidth, height: 4, color: teal });
   page.drawText('IVA · DEWARMTE MATERIALWORKFLOW', { x: 42, y: pageHeight - 37, font: fonts.bold, size: 8.5, color: rgb(0.55, 0.94, 0.89) });
-  page.drawText(section.orderPageTitle, { x: 42, y: pageHeight - 72, font: fonts.bold, size: 24, color: rgb(1, 1, 1) });
-  page.drawText('Separat versendbare Bestellseite', { x: 42, y: pageHeight - 94, font: fonts.regular, size: 10.5, color: rgb(0.78, 0.85, 0.92) });
+  page.drawText(copy.title(section.id), { x: 42, y: pageHeight - 72, font: fonts.bold, size: 24, color: rgb(1, 1, 1) });
+  page.drawText(copy.subtitle, { x: 42, y: pageHeight - 94, font: fonts.regular, size: 10.5, color: rgb(0.78, 0.85, 0.92) });
 
   page.drawRectangle({ x: 40, y: 635, width: pageWidth - 80, height: 76, color: pale, borderColor: line, borderWidth: 0.7 });
-  drawMetaLine(page, 'Projekt', metadata.project, 690, fonts);
-  drawMetaLine(page, 'Objekt', metadata.address, 671, fonts);
-  drawMetaLine(page, 'Montage', metadata.installation, 652, fonts);
+  drawMetaLine(page, copy.project, metadata.project, 690, fonts);
+  drawMetaLine(page, copy.address, metadata.address, 671, fonts);
+  drawMetaLine(page, copy.installation, metadata.installation, 652, fonts);
 
-  page.drawText('Bestellt durch: ____________________', { x: 40, y: 613, font: fonts.regular, size: 8.8, color: muted });
-  page.drawText('am: ____________', { x: 255, y: 613, font: fonts.regular, size: 8.8, color: muted });
-  page.drawText('Liefertermin: ____________', { x: 385, y: 613, font: fonts.regular, size: 8.8, color: muted });
+  page.drawText(`${copy.orderedBy}: ____________________`, { x: 40, y: 613, font: fonts.regular, size: 8.8, color: muted });
+  page.drawText(`${copy.date}: ____________`, { x: 255, y: 613, font: fonts.regular, size: 8.8, color: muted });
+  page.drawText(`${copy.delivery}: ____________`, { x: 385, y: 613, font: fonts.regular, size: 8.8, color: muted });
 
   const x = 40;
   const widths = [62, 178, 233, 42];
   const tableWidth = widths.reduce((sum, value) => sum + value, 0);
   let y = 579;
   page.drawRectangle({ x, y: y - 25, width: tableWidth, height: 25, color: navy });
-  const headers = ['Menge', 'Material / Bauteil', 'Hinweis', 'OK'];
+  const headers = copy.headers;
   let cursor = x;
   headers.forEach((header, index) => {
     page.drawText(header, { x: cursor + 7, y: y - 17, font: fonts.bold, size: 8.2, color: rgb(1, 1, 1) });
@@ -84,13 +91,14 @@ function drawOrderPage(document, section, metadata, pageNumber, fonts) {
   });
   y -= 25;
 
-  for (const entry of section.items) {
+  for (const sourceEntry of section.items) {
+    const entry = localizedMaterialEntry(sourceEntry, language);
     const quantityLines = wrapText(entry.quantity, fonts.bold, 9, widths[0] - 13);
     const materialLines = wrapText(entry.material, fonts.bold, 9.2, widths[1] - 13);
     const noteLines = wrapText(entry.note, fonts.regular, 8.5, widths[2] - 13);
     const lines = Math.max(quantityLines.length, materialLines.length, noteLines.length);
     const rowHeight = Math.max(38, 16 + (lines * 10.8));
-    if (y - rowHeight < 82) throw new Error(`${section.orderPageTitle} passt nicht vollständig auf eine einzelne Seite.`);
+    if (y - rowHeight < 82) throw new Error(`${copy.title(section.id)} passt nicht vollständig auf eine einzelne Seite.`);
     page.drawRectangle({ x, y: y - rowHeight, width: tableWidth, height: rowHeight, color: entry.needsClarification ? warning : rgb(1, 1, 1), borderColor: line, borderWidth: 0.55 });
     let columnX = x;
     [quantityLines, materialLines, noteLines].forEach((linesForCell, index) => {
@@ -109,16 +117,17 @@ function drawOrderPage(document, section, metadata, pageNumber, fonts) {
   const warningCount = section.items.filter(entry => entry.needsClarification).length;
   if (warningCount) {
     page.drawRectangle({ x: 40, y: 53, width: pageWidth - 80, height: 22, color: warning });
-    page.drawText(`! ${warningCount} markierte ${warningCount === 1 ? 'Position' : 'Positionen'} vor Bestellung fachlich oder mengenmäßig klären.`, {
+    page.drawText(copy.warning(warningCount), {
       x: 48, y: 61, font: fonts.bold, size: 8.1, color: rgb(0.52, 0.31, 0.03),
     });
   }
-  page.drawText('Diese Seite kann einzeln aus der Gesamt-PDF entnommen und versandt werden.', { x: 40, y: 31, font: fonts.regular, size: 7.8, color: muted });
-  page.drawText(`${clean(metadata.reference, 120) || 'DeWarmte Materialliste'} · Bestellseite ${pageNumber}/2`, { x: pageWidth - 250, y: 31, font: fonts.regular, size: 7.8, color: muted });
+  page.drawText(copy.detachable, { x: 40, y: 31, font: fonts.regular, size: 7.8, color: muted });
+  page.drawText(`${clean(metadata.reference, 120) || copy.defaultReference} · ${copy.page} ${pageNumber}/2`, { x: pageWidth - 250, y: 31, font: fonts.regular, size: 7.8, color: muted });
   return page;
 }
 
-export async function appendDewarmteOrderPages({ inputPath, outputPath, metadata = {}, outputRoot = OUTPUT_ROOT } = {}) {
+export async function appendDewarmteOrderPages({ inputPath, outputPath, metadata = {}, outputRoot = OUTPUT_ROOT, language = 'de' } = {}) {
+  if (!DEWARMTE_LANGUAGES.includes(language)) throw new Error('Sprache muss de, en oder nl sein.');
   const source = path.resolve(clean(inputPath, 1400));
   const destination = path.resolve(clean(outputPath, 1400));
   if (path.extname(source).toLowerCase() !== '.pdf' || path.extname(destination).toLowerCase() !== '.pdf') throw new Error('Ein- und Ausgabedatei müssen PDFs sein.');
@@ -142,11 +151,11 @@ export async function appendDewarmteOrderPages({ inputPath, outputPath, metadata
       address: clean(metadata.address, 320) || 'nicht angegeben',
       installation: clean(metadata.installation, 220) || 'nicht angegeben',
       reference: clean(metadata.reference, 160) || path.basename(source, '.pdf'),
-    }, index + 1, fonts);
+    }, index + 1, fonts, language);
   });
   const previousSubject = clean(document.getSubject(), 500);
-  document.setSubject(`${previousSubject}${previousSubject ? '; ' : ''}zwei getrennte Bestellseiten für HEAT|Hero und DeWarmte`);
-  document.setKeywords(['DeWarmte', 'HEAT|Hero', 'Materialliste', 'Bestellung']);
+  document.setSubject(`${previousSubject}${previousSubject ? '; ' : ''}${COPY[language].subject}`);
+  document.setKeywords(['DeWarmte', 'HEAT|Hero', ...COPY[language].keywords]);
   document.setModificationDate(new Date());
   await mkdir(path.dirname(destination), { recursive: true });
   await writeFile(destination, await document.save({ useObjectStreams: false }));
@@ -155,12 +164,13 @@ export async function appendDewarmteOrderPages({ inputPath, outputPath, metadata
 
 function parseArgs(argv) {
   const [inputPath, outputPath, ...rest] = argv;
-  const values = { inputPath, outputPath, metadata: {} };
+  const values = { inputPath, outputPath, metadata: {}, language: 'de' };
   for (let index = 0; index < rest.length; index += 2) {
     const key = rest[index];
     const value = rest[index + 1];
-    if (!value || !['--project', '--address', '--installation', '--reference'].includes(key)) throw new Error(`Unbekanntes oder unvollständiges Argument: ${key || '(leer)'}`);
-    values.metadata[key.slice(2)] = value;
+    if (!value || !['--project', '--address', '--installation', '--reference', '--language'].includes(key)) throw new Error(`Unbekanntes oder unvollständiges Argument: ${key || '(leer)'}`);
+    if (key === '--language') values.language = value;
+    else values.metadata[key.slice(2)] = value;
   }
   return values;
 }

@@ -1337,7 +1337,8 @@ app.post('/device-agent/:deviceId/projects/:projectId/files', express.raw({ type
   try {
     const jobId = String(req.query?.jobId || '').trim();
     const name = String(req.query?.name || '').trim();
-    if (!/^[a-f0-9-]{36}$/i.test(jobId) || !/\.pdf$/i.test(name) || !Buffer.isBuffer(req.body) || req.body.subarray(0, 5).toString('ascii') !== '%PDF-') {
+    const language = String(req.query?.language || '').trim().toLowerCase();
+    if (!/^[a-f0-9-]{36}$/i.test(jobId) || !/\.pdf$/i.test(name) || !['de', 'en', 'nl'].includes(language) || !Buffer.isBuffer(req.body) || req.body.subarray(0, 5).toString('ascii') !== '%PDF-') {
       return res.status(400).json({ error: 'Ungültige DeWarmte-PDF oder Job-Zuordnung.' });
     }
     const commands = await listDeviceCommands({ deviceId: IVA_IMAC_DEVICE_ID, limit: 500 });
@@ -1352,6 +1353,7 @@ app.post('/device-agent/:deviceId/projects/:projectId/files', express.raw({ type
       buffer: req.body,
       workflowId: 'dewarmte-link-to-material-pdf',
       jobId,
+      language,
       allowRevision: req.query?.revision === 'append',
     });
     res.status(file ? 201 : 404).json(file || { error: 'DeWarmte-Projekt nicht gefunden.' });
@@ -1784,6 +1786,7 @@ app.post('/api/projects/dewarmte/link-pdf-jobs', async (req, res) => {
         displayName: 'DeWarmte: Link → Materiallisten-PDF',
         requestId,
         runMode: 'manual',
+        languages: ['de', 'en', 'nl'],
         ...input,
       },
       requestedBy: 'projects-dewarmte-link-pdf',

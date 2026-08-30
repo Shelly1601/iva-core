@@ -38,7 +38,10 @@ try {
   assert.match(validated.supplementaryText, /Pressen statt Klemmen/);
   assert.equal(validated.supplementaryPdfName, 'Startvoorraad.pdf');
 
-  const { DEWARMTE_MATERIAL_STANDARD } = await import('../projects/dewarmte-material-standard.js');
+  const { DEWARMTE_LANGUAGES, DEWARMTE_MATERIAL_STANDARD, localizedMaterialEntry } = await import('../projects/dewarmte-material-standard.js');
+  assert.deepEqual(DEWARMTE_LANGUAGES, ['de', 'en', 'nl']);
+  assert.equal(localizedMaterialEntry(DEWARMTE_MATERIAL_STANDARD.sections[0].items[0], 'en').material, 'Pomp MP monobloc heat pump');
+  assert.equal(localizedMaterialEntry(DEWARMTE_MATERIAL_STANDARD.sections[0].items[0], 'nl').material, 'Monoblock-warmtepomp Pomp MP');
   assert.deepEqual(DEWARMTE_MATERIAL_STANDARD.cover, {
     source: 'installation-planning', sourcePage: 1, resultPage: 1, preserveUnchanged: true,
     title: 'Deckblatt aus der Installationsplanung',
@@ -84,6 +87,14 @@ try {
   const reopenedOrderPdf = await PDFDocument.load(await readFile(orderPdfPath));
   assert.equal(reopenedOrderPdf.getPageCount(), 3);
   assert.match(reopenedOrderPdf.getSubject(), /getrennte Bestellseiten/);
+  for (const language of ['en', 'nl']) {
+    const localizedPath = path.join(dataDir, 'output', `Materialliste_${language}.pdf`);
+    await appendDewarmteOrderPages({ inputPath: basePdfPath, outputPath: localizedPath, outputRoot: path.join(dataDir, 'output'), language,
+      metadata: { project: 'Test', address: 'Test', installation: 'Test', reference: language } });
+    const localized = await PDFDocument.load(await readFile(localizedPath));
+    assert.equal(localized.getPageCount(), 3);
+    assert.ok(localized.getSubject());
+  }
 
   const runningJob = summarizeDewarmteLinkPdfJobs([{
     id: 'command-progress', action: 'project.workflow.run', status: 'completed', createdAt: '2026-08-30T08:00:00Z',
@@ -144,7 +155,7 @@ try {
   assert.match(deviceAgent, /fetchDewarmteSupplementPdf/);
   assert.match(deviceAgent, /cleanupExpiredDewarmteLocalData/);
   const workflow = await readFile(new URL('../DEWARMTE_LINK_PDF_WORKFLOW.md', import.meta.url), 'utf8');
-  assert.match(workflow, /Link rein, Materiallisten-PDF raus/);
+  assert.match(workflow, /Link rein, drei Materiallisten-PDFs raus/);
   assert.match(workflow, /ausschließlich.*gelesen/);
   assert.match(workflow, /Gesendet/);
   assert.match(workflow, /spätestens drei Tage/);
@@ -152,7 +163,9 @@ try {
   assert.match(workflow, /HEAT\|Hero Material/);
   assert.match(workflow, /Materialbestellung HEAT\|Hero/);
   assert.match(workflow, /Materialbestellung DeWarmte/);
-  console.log('PASS DeWarmte: Fortschritt, getrennte Bestellseiten, Zusatzdaten-Löschung und Mail-Dublettenschutz.');
+  assert.match(workflow, /Deutsch, Englisch und Niederländisch/);
+  assert.match(workflow, /_DE\.pdf/);
+  console.log('PASS DeWarmte: drei Sprach-PDFs, Fortschritt, Bestellseiten, Datenlöschung und Mail-Dublettenschutz.');
 } finally {
   await rm(dataDir, { recursive: true, force: true });
 }

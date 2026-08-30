@@ -134,10 +134,12 @@ async function request(pathname, { method = 'GET', body } = {}) {
   return payload;
 }
 
-export async function publishDewarmtePdf({ filePath, jobId, revision = false }) {
+export async function publishDewarmtePdf({ filePath, jobId, language = '', revision = false }) {
   const absolutePath = path.resolve(String(filePath || ''));
   const safeJobId = String(jobId || '').trim();
+  const safeLanguage = String(language || '').trim().toLowerCase();
   if (!path.isAbsolute(absolutePath) || !/^[a-f0-9-]{36}$/i.test(safeJobId)) throw new Error('PDF-Pfad oder DeWarmte-Job-Schlüssel ist ungültig.');
+  if (safeLanguage && !['de', 'en', 'nl'].includes(safeLanguage)) throw new Error('DeWarmte-PDF-Sprache muss de, en oder nl sein.');
   const info = await stat(absolutePath);
   if (!info.isFile() || info.size < 5 || info.size > 25 * 1024 * 1024 || path.extname(absolutePath).toLowerCase() !== '.pdf') {
     throw new Error('Für die DeWarmte-Projektakte ist genau eine PDF-Datei bis 25 MB erforderlich.');
@@ -147,7 +149,7 @@ export async function publishDewarmtePdf({ filePath, jobId, revision = false }) 
   const server = cleanServerUrl(process.env.IVA_DEVICE_SERVER_URL);
   const token = await readImacDeviceToken();
   const agent = imacDeviceAgentMetadata();
-  const query = new URLSearchParams({ name: path.basename(absolutePath), jobId: safeJobId, ...(revision ? { revision: 'append' } : {}) });
+  const query = new URLSearchParams({ name: path.basename(absolutePath), jobId: safeJobId, ...(safeLanguage ? { language: safeLanguage } : {}), ...(revision ? { revision: 'append' } : {}) });
   const response = await fetch(`${server}/device-agent/${IMAC_DEVICE_ID}/projects/dewarmte/files?${query}`, {
     method: 'POST',
     headers: {
