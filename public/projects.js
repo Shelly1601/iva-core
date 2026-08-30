@@ -89,7 +89,7 @@ function dewarmteLinkPdfSection(project) {
     const deliveryText = ({ download: 'Download', 'email-draft': 'Mailentwurf', 'email-send': 'Mailversand' })[job.deliveryMode] || 'Download';
     return `<article class="dewarmte-job"><div><b>${esc(job.file?.name || 'Materiallisten-PDF')}</b><small>${esc(formatDate(job.createdAt))} · ${esc(deliveryText)}${job.recipientEmail ? ` an ${esc(job.recipientEmail)}` : ''}</small><small>${esc(job.detail)}</small></div><span class="badge ${esc(job.status)}">${esc(statusText)}</span>${job.file ? `<button class="btn" type="button" data-download-file="${esc(job.file.id)}" data-download-name="${esc(job.file.name)}">PDF herunterladen</button>` : ''}</article>`;
   }).join('') : '<div class="planbar-search-empty">Noch keine PDF über einen Link erzeugt.</div>';
-  return `<section class="workflow-launcher dewarmte-launcher" id="dewarmteLinkWorkflow"><div class="workflow-launcher-head"><div><div class="eyebrow">DeWarmte Schnellworkflow</div><h2>Link rein → PDF raus</h2><div class="muted">Installationsplan-Link einfügen. IVA übernimmt Seite 1 unverändert und erstellt danach die einfache deutsche Materialliste.</div></div><span class="workflow-tag">Nur lesend</span></div><form class="dewarmte-form" id="dewarmtePdfForm"><label class="dewarmte-link-field"><span>Link zum Installationsplan</span><input id="dewarmteSourceUrl" type="url" inputmode="url" required maxlength="2000" autocomplete="off" placeholder="https://…"></label><label><span>Ausgabe</span><select id="dewarmteDeliveryMode"><option value="download">PDF zum Download</option><option value="email-draft">PDF + Mailentwurf</option><option value="email-send">PDF direkt per Mail senden</option></select></label><label id="dewarmteRecipientRow" class="hidden"><span>Empfänger</span><input id="dewarmteRecipientEmail" type="email" maxlength="320" autocomplete="email" placeholder="name@firma.de"></label><button class="btn primary" type="submit">PDF erzeugen</button></form><div class="dewarmte-hint">Die fertige PDF wird immer zuerst in dieser Projektakte gespeichert. Versand ist nur bei ausdrücklich gewähltem „direkt per Mail senden“ erlaubt.</div><div class="dewarmte-jobs-head"><h3>Letzte Aufträge</h3><button class="btn" id="refreshDewarmteJobs" type="button">↻ Status aktualisieren</button></div><div class="dewarmte-jobs">${jobRows}</div></section>`;
+  return `<section class="workflow-launcher dewarmte-launcher" id="dewarmteLinkWorkflow"><div class="workflow-launcher-head"><div><div class="eyebrow">DeWarmte Schnellworkflow</div><h2>Link rein → PDF raus</h2><div class="muted">Installationsplan-Link einfügen. IVA übernimmt Seite 1 unverändert und erstellt danach die einfache deutsche Materialliste.</div></div><span class="workflow-tag">Nur lesend</span></div><form class="dewarmte-form" id="dewarmtePdfForm"><label class="dewarmte-link-field"><span>Link zum Installationsplan</span><input id="dewarmteSourceUrl" type="url" inputmode="url" required maxlength="2000" autocomplete="off" placeholder="https://…"></label><label><span>Ausgabe</span><select id="dewarmteDeliveryMode"><option value="download">PDF zum Download</option><option value="email-draft">PDF + Mailentwurf</option><option value="email-send">PDF direkt per Mail senden</option></select></label><label id="dewarmteRecipientRow" class="hidden"><span>Empfänger</span><input id="dewarmteRecipientEmail" type="email" maxlength="320" autocomplete="email" placeholder="name@firma.de"></label><button class="btn primary" type="submit">PDF erzeugen</button><label class="dewarmte-supplement-text"><span>Zusätzlicher Text · optional</span><textarea id="dewarmteSupplementaryText" maxlength="8000" placeholder="Zum Beispiel Hinweise von Daan, Materialpräferenzen oder Punkte für den Abgleich …"></textarea></label><label class="dewarmte-supplement-file"><span>Zusätzliche PDF · optional</span><input id="dewarmteSupplementaryPdf" type="file" accept="application/pdf,.pdf"><small class="dewarmte-file-help">Maximal 15 MB · wird nur als Vergleichskontext gelesen</small></label></form><div class="dewarmte-hint">Die fertige PDF wird immer zuerst in dieser Projektakte gespeichert. Zusatztext, Zusatz-PDF und lokale Arbeitsdaten werden nach drei Tagen automatisch gelöscht; die fertige PDF bleibt in der Projektakte. Versand ist nur bei ausdrücklich gewähltem „direkt per Mail senden“ erlaubt.</div><div class="dewarmte-jobs-head"><h3>Letzte Aufträge</h3><button class="btn" id="refreshDewarmteJobs" type="button">↻ Status aktualisieren</button></div><div class="dewarmte-jobs">${jobRows}</div></section>`;
 }
 
 function forgetProjectLogo(projectId) {
@@ -569,12 +569,38 @@ async function requestDewarmtePdf(event) {
   const sourceUrl = $('dewarmteSourceUrl').value.trim();
   const deliveryMode = $('dewarmteDeliveryMode').value;
   const recipientEmail = $('dewarmteRecipientEmail').value.trim();
+  const supplementaryText = $('dewarmteSupplementaryText').value.trim();
+  const supplementaryPdf = $('dewarmteSupplementaryPdf').files?.[0] || null;
+  if (supplementaryPdf && (!/\.pdf$/i.test(supplementaryPdf.name) || (supplementaryPdf.type && supplementaryPdf.type !== 'application/pdf'))) {
+    showToast('Als Zusatzdatei ist nur eine PDF erlaubt.', true);
+    return;
+  }
+  if (supplementaryPdf?.size > 15 * 1024 * 1024) {
+    showToast('Die zusätzliche PDF ist größer als 15 MB.', true);
+    return;
+  }
   if (deliveryMode === 'email-send' && !window.confirm(`Die fertige PDF nach der Prüfung direkt an ${recipientEmail} senden?`)) return;
   const submit = event.submitter;
   if (submit) { submit.disabled = true; submit.textContent = 'Wird an IVA übergeben …'; }
   try {
-    const result = await api('/api/projects/dewarmte/link-pdf-jobs', { method: 'POST', body: { sourceUrl, deliveryMode, recipientEmail } });
+    let uploaded = null;
+    if (supplementaryPdf) {
+      const response = await fetch(`/api/projects/dewarmte/supplement-pdfs?name=${encodeURIComponent(supplementaryPdf.name)}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/pdf' },
+        body: supplementaryPdf,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Die zusätzliche PDF konnte nicht hochgeladen werden.');
+      uploaded = payload;
+    }
+    const result = await api('/api/projects/dewarmte/link-pdf-jobs', { method: 'POST', body: {
+      sourceUrl, deliveryMode, recipientEmail, supplementaryText,
+      supplementaryPdfId: uploaded?.id || '', supplementaryPdfName: uploaded?.name || '',
+    } });
     $('dewarmteSourceUrl').value = '';
+    $('dewarmteSupplementaryText').value = '';
+    $('dewarmteSupplementaryPdf').value = '';
     showToast(result.message || 'DeWarmte-PDF wird erzeugt.');
     await refreshDewarmteJobs({ rerender: true });
   } catch (error) { showToast(error.message, true); }

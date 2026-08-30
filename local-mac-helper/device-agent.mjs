@@ -7,6 +7,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { access, readFile, stat } from 'node:fs/promises';
+import { cleanupExpiredDewarmteLocalData, storeDewarmteLocalSupplement } from './dewarmte-local-retention.mjs';
 
 const execFileAsync = promisify(execFile);
 export const IMAC_DEVICE_ID = 'imac-nadine';
@@ -164,6 +165,31 @@ export async function publishDewarmtePdf({ filePath, jobId }) {
   try { payload = text ? JSON.parse(text) : null; } catch {}
   if (!response.ok) throw new Error(`DeWarmte-PDF-Upload HTTP ${response.status}: ${String(payload?.error || text || response.statusText).slice(0, 400)}`);
   return payload;
+}
+
+export async function fetchDewarmteSupplementPdf({ inputId, name, jobId }) {
+  const safeInputId = String(inputId || '').trim();
+  if (!/^[a-f0-9-]{36}$/i.test(safeInputId)) throw new Error('Ungültige DeWarmte-Zusatzdatei.');
+  const server = cleanServerUrl(process.env.IVA_DEVICE_SERVER_URL);
+  const token = await readImacDeviceToken();
+  const agent = imacDeviceAgentMetadata();
+  const response = await fetch(`${server}/device-agent/${IMAC_DEVICE_ID}/dewarmte-inputs/${safeInputId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'X-IVA-Agent-Host': agent.hostname,
+      'X-IVA-Agent-Ui-Busy': agent.uiBusy ? 'true' : 'false',
+      'X-IVA-Agent-Protocol': String(agent.protocolVersion),
+      'X-IVA-Agent-Release': agent.release,
+      'X-IVA-Agent-Revision': agent.runtimeRevision,
+      'X-IVA-Agent-Workspace': agent.workspace,
+      'X-IVA-Agent-ICloud': agent.iCloudAuthoritative ? 'true' : 'false',
+    },
+    signal: AbortSignal.timeout(60000),
+  });
+  if (!response.ok) throw new Error(`DeWarmte-Zusatz-PDF HTTP ${response.status}: ${String(await response.text()).slice(0, 400)}`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length > 15 * 1024 * 1024) throw new Error('DeWarmte-Zusatz-PDF überschreitet 15 MB.');
+  return storeDewarmteLocalSupplement({ jobId, name, buffer });
 }
 
 // Called by the fixed, read-only browser capacity worker only after its
@@ -381,13 +407,24 @@ async function executeDeviceCommand(command) {
     return getCodexTaskStatus(command.payload?.jobId);
   }
   if (command.action === 'project.workflow.run') {
-    const { startProjectWorkflowTask } = await import('./codex-tasks.mjs');
+    const { codexJobIdForRequest, startProjectWorkflowTask } = await import('./codex-tasks.mjs');
+    const requestId = command.payload?.requestId || command.id;
+    let workflowInput = command.payload;
+    if (command.payload?.projectId === 'dewarmte' && command.payload?.supplementaryPdfId) {
+      const jobId = codexJobIdForRequest(requestId);
+      const supplementaryPdfPath = await fetchDewarmteSupplementPdf({
+        inputId: command.payload.supplementaryPdfId,
+        name: command.payload.supplementaryPdfName,
+        jobId,
+      });
+      workflowInput = { ...command.payload, supplementaryPdfPath };
+    }
     return startProjectWorkflowTask({
       workflowId: command.payload?.workflowId,
-      requestId: command.payload?.requestId || command.id,
+      requestId,
       runMode: command.payload?.runMode,
       automationSlotKey: command.payload?.automationSlotKey,
-      workflowInput: command.payload,
+      workflowInput,
     });
   }
   if (command.action === 'app.open') return openApplication(command.payload?.app);
@@ -399,6 +436,7 @@ export async function runImacDeviceAgentOnce() {
   if (!isAuthoritativeIcloudWorkspace()) {
     throw new Error(`Der iMac-Geräteagent läuft nicht aus dem verbindlichen iCloud-Workspace (${AGENT_WORKSPACE}).`);
   }
+  await cleanupExpiredDewarmteLocalData().catch(error => console.error(`DeWarmte-Lokalbereinigung: ${error.message}`));
   await reportImacDeviceAgentHeartbeat().catch(error => {
     // Während der einmaligen Railway-Migration darf ein noch nicht deployter
     // Heartbeat-Endpunkt den bisherigen Agentenabruf nicht unterbrechen.

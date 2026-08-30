@@ -100,6 +100,12 @@ import {
 } from './projects/store.js';
 import { summarizeDewarmteLinkPdfJobs, validateDewarmteLinkPdfInput } from './projects/dewarmte.js';
 import {
+  cleanupExpiredDewarmteSupplementPdfs,
+  getDewarmteSupplementPdfMeta,
+  readDewarmteSupplementPdf,
+  storeDewarmteSupplementPdf,
+} from './projects/dewarmte-inputs.js';
+import {
   getPlanbarSearchIndex,
   replacePlanbarSearchIndex,
   searchPlanbarAppointments,
@@ -293,6 +299,7 @@ import {
   IVA_IMAC_DEVICE_ID,
   cancelDeviceCommand,
   claimNextDeviceCommand,
+  cleanupExpiredDewarmteCommandInputs,
   completeDeviceCommand,
   deviceAgentStatus,
   deviceCommandStatus,
@@ -1301,6 +1308,24 @@ app.post('/booking-api/:slug', async (req, res) => {
   } catch (error) { res.status(400).json({ error: error.message }); }
 });
 
+app.get('/device-agent/:deviceId/dewarmte-inputs/:inputId', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try {
+    const commands = await listDeviceCommands({ deviceId: IVA_IMAC_DEVICE_ID, limit: 500 });
+    const assigned = commands.some(command => command.action === 'project.workflow.run'
+      && command.payload?.projectId === 'dewarmte'
+      && command.payload?.supplementaryPdfId === req.params.inputId);
+    if (!assigned) return res.status(404).json({ error: 'Zusatz-PDF ist keinem DeWarmte-Auftrag zugeordnet.' });
+    const input = await readDewarmteSupplementPdf(req.params.inputId);
+    if (!input) return res.status(410).json({ error: 'Zusatz-PDF wurde nach der Aufbewahrungsfrist gelöscht.' });
+    res.set('Content-Type', 'application/pdf');
+    res.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(input.meta.name)}`);
+    res.send(input.buffer);
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+
 // Der iMac meldet fertige DeWarmte-PDFs über denselben attestierten Gerätekanal.
 // Der Endpunkt akzeptiert ausschließlich eine PDF für einen tatsächlich gestarteten
 // DeWarmte-Job und kann keine anderen Projektfelder verändern.
@@ -1710,6 +1735,14 @@ app.get('/api/projects/:id', async (req, res) => {
   const project = await getProject(req.params.id);
   res.status(project ? 200 : 404).json(project || { error: 'not found' });
 });
+app.post('/api/projects/dewarmte/supplement-pdfs', express.raw({ type: 'application/pdf', limit: '15mb' }), async (req, res) => {
+  try {
+    const stored = await storeDewarmteSupplementPdf({ name: req.query?.name, buffer: req.body });
+    res.status(201).json(stored);
+  } catch (error) {
+    res.status(error?.type === 'entity.too.large' ? 413 : 400).json({ error: error.message });
+  }
+});
 app.get('/api/projects/dewarmte/link-pdf-jobs', async (_req, res) => {
   try {
     const [project, commands, runs] = await Promise.all([
@@ -1728,6 +1761,12 @@ app.post('/api/projects/dewarmte/link-pdf-jobs', async (req, res) => {
     if (!project || !workflow) return res.status(404).json({ error: 'DeWarmte-Linkworkflow nicht gefunden.' });
     if (workflow.status !== 'active' || workflow.enabled !== true) return res.status(409).json({ error: 'Der DeWarmte-Linkworkflow ist ausgeschaltet.' });
     const input = validateDewarmteLinkPdfInput(req.body || {});
+    if (input.supplementaryPdfId) {
+      const supplement = await getDewarmteSupplementPdfMeta(input.supplementaryPdfId);
+      if (!supplement || supplement.name !== input.supplementaryPdfName) {
+        return res.status(410).json({ error: 'Die zusätzliche PDF fehlt oder ihre dreitägige Aufbewahrungsfrist ist abgelaufen.' });
+      }
+    }
     const requestId = `dewarmte-link-pdf:${crypto.randomUUID()}`;
     const command = await enqueueDeviceCommand({
       deviceId: IVA_IMAC_DEVICE_ID,
@@ -3316,6 +3355,14 @@ const reconcileSchedulingDispatch = () => dispatchPendingCustomerSchedulingReque
 void reconcileSchedulingDispatch();
 const schedulingDispatchInterval = setInterval(reconcileSchedulingDispatch, 15_000);
 schedulingDispatchInterval.unref();
+
+const cleanupDewarmteInputs = () => Promise.all([
+  cleanupExpiredDewarmteSupplementPdfs(),
+  cleanupExpiredDewarmteCommandInputs(),
+]).catch(error => console.error('DeWarmte-Eingabedaten konnten nicht bereinigt werden:', error.message));
+void cleanupDewarmteInputs();
+const dewarmteInputCleanupInterval = setInterval(cleanupDewarmteInputs, 60 * 60_000);
+dewarmteInputCleanupInterval.unref?.();
 
 let lastFundingRuntimeReconcileStatus = '';
 async function runFundingRuntimeReconcile() {

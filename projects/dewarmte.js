@@ -27,10 +27,19 @@ export function validateDewarmteLinkPdfInput(input = {}) {
     throw new Error('Für Mailentwurf oder Versand wird eine gültige Empfängeradresse benötigt.');
   }
   parsed.hash = '';
+  const supplementaryText = clean(input.supplementaryText, 8000);
+  const supplementaryPdfId = clean(input.supplementaryPdfId, 100);
+  const supplementaryPdfName = clean(input.supplementaryPdfName, 240);
+  if (supplementaryPdfId && !/^[a-f0-9-]{36}$/i.test(supplementaryPdfId)) {
+    throw new Error('Die zusätzliche PDF konnte dem Auftrag nicht sicher zugeordnet werden.');
+  }
   return {
     sourceUrl: parsed.toString(),
     deliveryMode,
     recipientEmail: deliveryMode === 'download' ? '' : recipientEmail,
+    supplementaryText,
+    supplementaryPdfId,
+    supplementaryPdfName: supplementaryPdfId ? (supplementaryPdfName || 'Zusatzinformation.pdf') : '',
   };
 }
 

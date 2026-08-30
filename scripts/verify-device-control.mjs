@@ -173,6 +173,7 @@ try {
   });
   assert.equal(dewarmteCommand.payload.sourceUrl, 'https://docs.google.com/document/d/test/edit');
   assert.equal(dewarmteCommand.payload.deliveryMode, 'email-draft');
+  assert.equal(dewarmteCommand.payload.supplementaryText || '', '');
   await assert.rejects(enqueueDeviceCommand({
     action: 'project.workflow.run', payload: { projectId: 'dewarmte', workflowId: 'dewarmte-link-to-material-pdf', sourceUrl: 'https://localhost/plan.pdf' },
   }), /öffentlichen HTTPS-Link/);
@@ -327,6 +328,22 @@ try {
   assert.match(directDewarmte.prompt, /publish-dewarmte-pdf/);
   assert.match(directDewarmte.prompt, /deliver-dewarmte-pdf/);
   assert.doesNotMatch(directDewarmte.prompt, /Postfachsuche durchführen/);
+  const dewarmteSupplementRequest = 'dewarmte-link-pdf:supplement-test';
+  const dewarmteSupplementJobId = codexJobIdForRequest(dewarmteSupplementRequest);
+  const directDewarmteSupplement = await startProjectWorkflowTask({
+    workflowId: 'dewarmte-link-to-material-pdf', requestId: dewarmteSupplementRequest,
+    workflowInput: {
+      sourceUrl: 'https://example.com/installation.pdf', deliveryMode: 'download',
+      supplementaryText: 'Stahl/Kupfer und Pressfittings bevorzugen.',
+      supplementaryPdfId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', supplementaryPdfName: 'Startvoorraad.pdf',
+      supplementaryPdfPath: path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper', 'dewarmte-inputs', dewarmteSupplementJobId, 'Startvoorraad.pdf'),
+    },
+    startTask: async request => ({ prompt: request.prompt, acceptanceCriteria: request.acceptanceCriteria }),
+  });
+  assert.match(directDewarmteSupplement.prompt, /Stahl\/Kupfer und Pressfittings/);
+  assert.match(directDewarmteSupplement.prompt, /Startvoorraad\.pdf/);
+  assert.match(directDewarmteSupplement.prompt, /spätestens drei Tage/);
+  assert.equal(directDewarmteSupplement.acceptanceCriteria.some(item => /Vergleichskontext/.test(item)), true);
   const bootstrapSource = await readFile(new URL('../IVA-iMac-einmalig-verbinden.command', import.meta.url), 'utf8');
   assert.match(bootstrapSource, /nodejs\.org\/dist\/\$\{node_version\}/);
   assert.match(bootstrapSource, /shasum -a 256/);

@@ -10,6 +10,7 @@ const DEFAULT_TTL_MS = 15 * 60_000;
 const DEFERRED_IMAC_COMMAND_TTL_MS = 24 * 60 * 60_000;
 const LEASE_MS = 5 * 60_000;
 const AGENT_ONLINE_MS = 60_000;
+const DEWARMTE_INPUT_RETENTION_MS = 3 * 24 * 60 * 60_000;
 
 // Serialize the complete read/modify/write transaction, not just rename.
 let storeTransaction = Promise.resolve();
@@ -427,6 +428,26 @@ export async function listDeviceCommands({ deviceId = IVA_IMAC_DEVICE_ID, limit 
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
     .slice(0, Math.max(1, Math.min(MAX_COMMANDS, Number(limit) || 50)))
     .map(({ leaseToken, ...command }) => command);
+}
+
+export async function cleanupExpiredDewarmteCommandInputs({ now = Date.now() } = {}) {
+  return transaction(async () => {
+    const store = await loadStore();
+    let redacted = 0;
+    for (const command of store.commands) {
+      if (command?.action !== 'project.workflow.run' || command.payload?.projectId !== 'dewarmte'
+        || now - Date.parse(command.createdAt) < DEWARMTE_INPUT_RETENTION_MS || command.inputPurgedAt) continue;
+      delete command.payload.sourceUrl;
+      delete command.payload.supplementaryText;
+      delete command.payload.supplementaryPdfId;
+      delete command.payload.supplementaryPdfName;
+      delete command.payload.recipientEmail;
+      command.inputPurgedAt = new Date(now).toISOString();
+      redacted += 1;
+    }
+    if (redacted) await saveStore(store);
+    return { redacted, retentionDays: 3 };
+  });
 }
 
 export async function deviceCommandStatus(commandId) {
