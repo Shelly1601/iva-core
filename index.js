@@ -1427,7 +1427,7 @@ app.post('/device-agent/:deviceId/planbar-search-index', async (req, res) => {
 app.get('/public-api/projects/heat-hero/automation-flags', async (_req, res) => {
   try {
     const project = await getProject('heat-hero');
-    const allowedIds = new Set(['funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning', 'montage-required-fields-morning', 'planbar-completion-morning']);
+    const allowedIds = new Set(['funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning', 'montage-required-fields-morning', 'planbar-completion-morning', 'manufacturer-leads-wattfox']);
     const automations = Object.fromEntries((project?.automations || [])
       .filter(item => allowedIds.has(item.id))
       .map(item => [item.id, { enabled: item.enabled === true, status: item.status }]));

@@ -144,8 +144,10 @@ check('Gelöschtes Standardprojekt wird nicht neu erzeugt', !(await listProjects
 
 const html = await fs.readFile(new URL('../public/projects.html', import.meta.url), 'utf8');
 const js = await fs.readFile(new URL('../public/projects.js', import.meta.url), 'utf8');
+const indexSource = await fs.readFile(new URL('../index.js', import.meta.url), 'utf8');
 check('Plus für neue Projektakten vorhanden', html.includes('＋ Neues Projekt') && js.includes("api('/api/projects'"));
 check('Projektseite bietet manuellen Herstellerlauf und verständlichen letzten Status', js.includes("'manufacturer-leads-wattfox'") && js.includes('Letzter Lauf:') && js.includes('/workflow-runs?limit=100'));
+check('Öffentlicher iMac-Schalterstatus enthält den Herstellerlauf', /allowedIds = new Set\([^\n]*manufacturer-leads-wattfox/.test(indexSource));
 check('Notizen stehen in der Projektakte bereit', js.includes('Notizen, Ideen & Absprachen') && js.includes('/notes'));
 check('Ordner, Unterordner und Mehrfachupload vorhanden', html.includes('multiple') && js.includes('/folders') && js.includes('parentId'));
 check('Papierkorb löscht nur die Projektakte', js.includes('Projektdateien werden entfernt') && js.includes("method: 'DELETE'"));
