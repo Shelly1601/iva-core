@@ -69,6 +69,7 @@ import {
   applyPipedriveFundingFieldUpdates,
   assertPipedriveFileActionAllowed,
   buildTemporaryPipedriveDealTabsAppleScript,
+  isRetryablePipedriveDownloadError,
   renderPipedriveFundingInformationNote,
   resolvePipedriveFundingStageTransition,
 } from '../local-mac-helper/chrome-pipedrive.mjs';
@@ -87,6 +88,9 @@ assert.equal(FUNDING_SUPERVISORS.ekd.email, 'f.bolz@heat-hero.com');
 assert.equal(FUNDING_SUPERVISORS.direct_sales.email, 'n.zielinski@heat-hero.com');
 assert.equal(FUNDING_SIGNATURE.email, 'n.sell@heat-hero.com');
 assert.equal(FUNDING_SIGNATURE.website, 'https://www.heat-hero.com');
+assert.equal(isRetryablePipedriveDownloadError(new Error('Pipedrive-Deal 3788 wurde nicht rechtzeitig vollständig geladen.')), true);
+assert.equal(isRetryablePipedriveDownloadError(new Error('signierte Pipedrive-Downloadadresse erschien nicht')), true);
+assert.equal(isRetryablePipedriveDownloadError(new Error('Datei gehört nicht zu diesem Deal')), false);
 assert.equal(FUNDING_ESCALATION_DELAY_DAYS, 7);
 assert.equal(FUNDING_ESCALATION_RECIPIENTS.ekd.email, 'k.bolz@heat-hero.com');
 const dewarmtePdfMail = { from: 'n.sell@heat-hero.com', to: ['kunde@example.com'], subject: 'DeWarmte Materialliste', body: 'Anbei die Materialliste.', attachments: ['/tmp/DeWarmte_Materialliste.pdf'] };

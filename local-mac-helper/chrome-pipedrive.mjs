@@ -1708,8 +1708,27 @@ async function downloadPipedriveDealFilesUnlocked({ dealId, fileIds = [] } = {})
   }
 }
 
+export function isRetryablePipedriveDownloadError(error) {
+  return /zeitlimit|nicht rechtzeitig vollständig geladen|signierte pipedrive-downloadadresse erschien nicht|chrome-diagnose/i
+    .test(String(error?.message || error));
+}
+
 export async function downloadPipedriveDealFiles(options = {}) {
-  return withPipedriveBrowserLock(() => downloadPipedriveDealFilesUnlocked(options));
+  return withPipedriveBrowserLock(async () => {
+    let lastError;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        return await downloadPipedriveDealFilesUnlocked(options);
+      } catch (error) {
+        lastError = error;
+        if (attempt === 2 || !isRetryablePipedriveDownloadError(error)) throw error;
+        // The failed attempt already closed only its own temporary tabs. Give
+        // Chrome a short settling period, then reopen a fresh right-side tab.
+        await wait(1500);
+      }
+    }
+    throw lastError;
+  });
 }
 
 const WRITABLE_FUNDING_FIELDS = new Set(['Auftragsnummer', 'Kundennummer', 'Telefonnummer', 'E-Mail', 'Anlage']);
