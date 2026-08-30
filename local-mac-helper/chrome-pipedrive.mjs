@@ -1735,15 +1735,38 @@ async function downloadPipedriveDealFilesUnlocked({ dealId, fileIds = [] } = {})
     await mkdir(PIPEDRIVE_DOWNLOAD_ROOT, { recursive: true, mode: 0o700 });
     directory = await mkdtemp(path.join(PIPEDRIVE_DOWNLOAD_ROOT, `${id}-`));
     const files = [];
-    for (const file of selected) {
-      const downloaded = await downloadPipedriveFileViaSignedInSession({ dealId: id, file });
-      const fileName = safePipedriveDownloadName(file.name, file.id);
-      const filePath = path.join(directory, fileName);
-      await writeFile(filePath, downloaded.data, { mode: 0o600, flag: 'wx' });
-      files.push({ id: file.id, originalName: file.name, fileName, filePath, size: downloaded.data.length, contentType: downloaded.contentType || file.mimeType || '' });
-      if (files.length < selected.length) await waitForPipedriveDealTab(id, { timeoutMs: 20_000 });
+    const failedFiles = [];
+    for (const [index, file] of selected.entries()) {
+      try {
+        const downloaded = await downloadPipedriveFileViaSignedInSession({ dealId: id, file });
+        const fileName = safePipedriveDownloadName(file.name, file.id);
+        const filePath = path.join(directory, fileName);
+        await writeFile(filePath, downloaded.data, { mode: 0o600, flag: 'wx' });
+        files.push({ id: file.id, originalName: file.name, fileName, filePath, size: downloaded.data.length, contentType: downloaded.contentType || file.mimeType || '' });
+      } catch (error) {
+        failedFiles.push({
+          id: file.id,
+          originalName: file.name,
+          error: String(error?.message || error).replace(/session_token=[^&\s]+/ig, 'session_token=[ausgeblendet]').slice(0, 300),
+        });
+      }
+      if (index + 1 < selected.length) await waitForPipedriveDealTab(id, { timeoutMs: 20_000 }).catch(() => {});
     }
-    return { dealId: id, directory, files, downloadedCount: files.length, readOnlySource: true, deletedFromPipedrive: false };
+    if (!files.length && failedFiles.length) {
+      await rm(directory, { recursive: true, force: true });
+      directory = '';
+    }
+    return {
+      dealId: id,
+      directory: directory || null,
+      files,
+      failedFiles,
+      downloadedCount: files.length,
+      failedCount: failedFiles.length,
+      complete: failedFiles.length === 0,
+      readOnlySource: true,
+      deletedFromPipedrive: false,
+    };
   } catch (error) {
     if (directory) await rm(directory, { recursive: true, force: true }).catch(() => {});
     throw error;

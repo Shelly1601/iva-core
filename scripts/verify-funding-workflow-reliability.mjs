@@ -73,6 +73,9 @@ try {
   assert.match(fundingReadSource, /Promise\.all\(\[/);
   assert.doesNotMatch(fundingReadSource, /xhr\.open\([^\n]+,\s*false\)/,
     'der Förder-Vollscan darf den rechten Pipedrive-Tab nicht mit synchronen XHR blockieren');
+  assert.match(pipedriveSource, /failedFiles\.push/,
+    'eine einzelne nicht ladbare Pipedrive-Datei darf nicht mehr den ganzen Deal-Download verwerfen');
+  assert.match(pipedriveSource, /failedCount: failedFiles\.length/);
   assert.match(macUiSource, /for \(let attempt = 1; attempt <= 3; attempt \+= 1\)/);
   assert.match(macBridgeSource, /sidebarNodesEnsuringFolder/);
   assert.match(macBridgeSource, /AXPress erfolgreich quittieren/);
