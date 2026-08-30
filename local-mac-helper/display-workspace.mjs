@@ -1,4 +1,8 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { runMacUiBridge } from './macos-ui.mjs';
+
+const execFileAsync = promisify(execFile);
 
 export const IVA_UI_DISPLAY_POLICY = 'rightmost-external-display';
 
@@ -55,21 +59,28 @@ export function windowBoundsInsideRightDisplay(bounds = [], workspace) {
     && right > left && bottom > top;
 }
 
+async function wakeDisplaysForVerification() {
+  if (process.platform !== 'darwin') return;
+  await execFileAsync('/usr/bin/caffeinate', ['-u', '-t', '1'], { timeout: 3000, maxBuffer: 16 * 1024 });
+}
+
 export async function requireRightDisplayWorkspace({
-  attempts = 6,
-  retryDelayMs = 500,
+  attempts = 10,
+  retryDelayMs = 1500,
   run = runMacUiBridge,
   waitFn = delay => new Promise(resolve => setTimeout(resolve, delay)),
+  wakeFn = wakeDisplaysForVerification,
 } = {}) {
-  const maximumAttempts = Math.max(1, Math.min(10, Number(attempts) || 6));
+  const maximumAttempts = Math.max(1, Math.min(10, Number(attempts) || 10));
   let lastError;
   for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
     try {
-      const status = await run(['display-status'], { timeoutMs: 15000 });
+      await wakeFn();
+      const status = await run(['display-status'], { timeoutMs: 5000 });
       return resolveRightDisplayWorkspace(status);
     } catch (error) {
       lastError = error;
-      if (attempt < maximumAttempts) await waitFn(Math.max(100, Math.min(2000, Number(retryDelayMs) || 500)));
+      if (attempt < maximumAttempts) await waitFn(Math.max(100, Math.min(2000, Number(retryDelayMs) || 1500)));
     }
   }
   throw lastError;

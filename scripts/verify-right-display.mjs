@@ -25,6 +25,7 @@ const recoveredWorkspace = await requireRightDisplayWorkspace({
   attempts: 3,
   retryDelayMs: 100,
   waitFn: async () => {},
+  wakeFn: async () => {},
   run: async () => {
     transientAttempts += 1;
     if (transientAttempts < 3) return { displays: [{ id: '1', main: true, x: 0, y: 0, width: 2240, height: 1260 }] };
@@ -42,6 +43,7 @@ await assert.rejects(requireRightDisplayWorkspace({
   attempts: 4,
   retryDelayMs: 100,
   waitFn: async () => {},
+  wakeFn: async () => {},
   run: async () => {
     persistentAttempts += 1;
     return { displays: [{ id: '1', main: true, x: 0, y: 0, width: 2240, height: 1260 }] };
@@ -49,13 +51,14 @@ await assert.rejects(requireRightDisplayWorkspace({
 }), /rechte Arbeitsdisplay ist nicht angeschlossen/);
 assert.equal(persistentAttempts, 4);
 
-const [pipedriveSource, codexSource, planbarSource, whatsappSource, macUiSource, macBridgeSource] = await Promise.all([
+const [pipedriveSource, codexSource, planbarSource, whatsappSource, macUiSource, macBridgeSource, displayCheckSource] = await Promise.all([
   readFile(new URL('../local-mac-helper/chrome-pipedrive.mjs', import.meta.url), 'utf8'),
   readFile(new URL('../local-mac-helper/codex-tasks.mjs', import.meta.url), 'utf8'),
   readFile(new URL('../local-mac-helper/planbar.mjs', import.meta.url), 'utf8'),
   readFile(new URL('../local-mac-helper/whatsapp-mac.mjs', import.meta.url), 'utf8'),
   readFile(new URL('../local-mac-helper/macos-ui.mjs', import.meta.url), 'utf8'),
   readFile(new URL('../local-mac-helper/macos/iva-ax.swift', import.meta.url), 'utf8'),
+  readFile(new URL('../local-mac-helper/right-display-check.mjs', import.meta.url), 'utf8'),
 ]);
 assert.match(pipedriveSource, /set ivaWindow to make new window/);
 assert.match(pipedriveSource, /set URL of active tab of ivaWindow/);
@@ -77,5 +80,7 @@ assert.match(macBridgeSource, /command == "display-status"/);
 assert.match(macBridgeSource, /command == "display-layout"/);
 assert.match(macBridgeSource, /command == "frontmost-window-display"/);
 assert.match(macBridgeSource, /command == "ensure-app-window-right"/);
+assert.match(displayCheckSource, /--require-second-display/);
+assert.match(displayCheckSource, /--frontmost-window-must-be-right/);
 
 console.log('Right-display workflow policy checks passed.');
