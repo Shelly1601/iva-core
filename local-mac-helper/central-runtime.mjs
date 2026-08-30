@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 
 const execAsync = promisify(execFile);
 export const CENTRAL_RUNTIME_VERSION = 'imac-central-v5';
@@ -65,8 +65,15 @@ export async function prepareCentralRuntime(bundle, { root = centralRuntimeRoot(
     const packageBytes = await readFile(path.join(staging, 'local-mac-helper/runtime-package.json'));
     await writeFile(path.join(staging, 'package.json'), packageBytes);
     const previousPackage = dependencyRoot && await readFile(path.join(dependencyRoot, 'package.json')).catch(() => null);
-    if (previousPackage?.equals(packageBytes)) {
-      await symlink(path.join(dependencyRoot, 'node_modules'), path.join(staging, 'node_modules'));
+    // Resolve the dependency directory before linking it into the immutable
+    // release. `dependencyRoot` may be the moving `current` symlink; keeping
+    // that unresolved would turn node_modules into a self-referential loop as
+    // soon as the new release becomes current.
+    const reusableNodeModules = previousPackage?.equals(packageBytes)
+      ? await realpath(path.join(dependencyRoot, 'node_modules')).catch(() => null)
+      : null;
+    if (reusableNodeModules) {
+      await symlink(reusableNodeModules, path.join(staging, 'node_modules'));
     } else {
       await exec(path.join(path.dirname(process.execPath), 'npm'), ['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: staging, timeout: 180_000, maxBuffer: 1024 * 1024 });
     }

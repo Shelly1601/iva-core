@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readlink, realpath, symlink, writeFile, rm } from 'node:fs/promises';
 
 const root = await mkdtemp(path.join(os.tmpdir(), 'iva-device-control-'));
 process.env.DATA_DIR = root;
@@ -479,6 +479,16 @@ try {
   const target = await prepareCentralRuntime(bundle, { root: runtimeRoot, exec: async () => ({ stdout: '' }) });
   await activateCentralRuntime(target, { root: runtimeRoot });
   assert.equal(JSON.parse(await readFile(path.join(runtimeRoot, 'current/release.json'), 'utf8')).revision, bundle.revision);
+
+  const dependencySource = path.join(root, 'dependency-source');
+  const dependencyAlias = path.join(root, 'dependency-current');
+  const reuseRoot = path.join(root, 'runtime-reuse-test');
+  await mkdir(path.join(dependencySource, 'node_modules'), { recursive: true });
+  await writeFile(path.join(dependencySource, 'package.json'), await readFile(path.join(target, 'package.json')));
+  await symlink(dependencySource, dependencyAlias);
+  const reusedTarget = await prepareCentralRuntime(bundle, { root: reuseRoot, dependencyRoot: dependencyAlias, exec: async () => ({ stdout: '' }) });
+  assert.equal(await readlink(path.join(reusedTarget, 'node_modules')), await realpath(path.join(dependencySource, 'node_modules')),
+    'ein Release darf nie über den beweglichen current-Link auf seine Abhängigkeiten zeigen');
   await assert.rejects(prepareCentralRuntime(corrupt, { root: runtimeRoot, exec: async () => ({}) }), /Inhaltsprüfung/);
   assert.equal(JSON.parse(await readFile(path.join(runtimeRoot, 'current/release.json'), 'utf8')).revision, bundle.revision, 'fehlerhaftes Update lässt den aktiven Stand stehen');
   const { withImacExecutionLock } = await import('../local-mac-helper/ui-execution-lock.mjs');
