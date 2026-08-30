@@ -1,8 +1,5 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import { runMacUiBridge } from './macos-ui.mjs';
-
-const execFileAsync = promisify(execFile);
 
 export const IVA_UI_DISPLAY_POLICY = 'rightmost-external-display';
 
@@ -61,7 +58,15 @@ export function windowBoundsInsideRightDisplay(bounds = [], workspace) {
 
 async function wakeDisplaysForVerification() {
   if (process.platform !== 'darwin') return;
-  await execFileAsync('/usr/bin/caffeinate', ['-u', '-t', '1'], { timeout: 3000, maxBuffer: 16 * 1024 });
+  // Keep the synthetic user-activity assertion alive while CoreGraphics reads
+  // the display list. Waiting for caffeinate to exit first lets a sleeping
+  // external display detach again in the small gap before `display-status`.
+  const wakeLock = spawn('/usr/bin/caffeinate', ['-u', '-t', '5'], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  wakeLock.unref();
+  await new Promise(resolve => setTimeout(resolve, 500));
 }
 
 export async function requireRightDisplayWorkspace({
