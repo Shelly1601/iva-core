@@ -7,6 +7,7 @@ import { classifyFundingDocumentName } from './funding-document-extractor.mjs';
 import { resolveFundingSupervisor } from './funding.mjs';
 import { resolveFundingStage } from './pipedrive-funding.mjs';
 import { chromeBoundsAppleScript, requireRightDisplayWorkspace } from './display-workspace.mjs';
+import { withPipedriveBrowserLock } from './pipedrive-browser-lock.mjs';
 
 const PIPEDRIVE_HOST = 'simplegategmbh.pipedrive.com';
 const MAX_OUTPUT_BYTES = 256 * 1024;
@@ -1673,7 +1674,7 @@ end tell`, { timeoutMs: 10000 }).catch(() => {});
   }
 }
 
-export async function downloadPipedriveDealFiles({ dealId, fileIds = [] } = {}) {
+async function downloadPipedriveDealFilesUnlocked({ dealId, fileIds = [] } = {}) {
   const id = String(dealId || '').replace(/\D/g, '');
   if (!id) throw new Error('Für den Pipedrive-Dateidownload fehlt eine gültige Deal-ID.');
   const requestedIds = new Set((Array.isArray(fileIds) ? fileIds : []).map(value => String(value).replace(/\D/g, '')).filter(Boolean));
@@ -1705,6 +1706,10 @@ export async function downloadPipedriveDealFiles({ dealId, fileIds = [] } = {}) 
   } finally {
     await closeTemporaryPipedriveDealTabs(createdIds).catch(() => {});
   }
+}
+
+export async function downloadPipedriveDealFiles(options = {}) {
+  return withPipedriveBrowserLock(() => downloadPipedriveDealFilesUnlocked(options));
 }
 
 const WRITABLE_FUNDING_FIELDS = new Set(['Auftragsnummer', 'Kundennummer', 'Telefonnummer', 'E-Mail', 'Anlage']);

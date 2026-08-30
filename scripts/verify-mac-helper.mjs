@@ -72,6 +72,7 @@ import {
   renderPipedriveFundingInformationNote,
   resolvePipedriveFundingStageTransition,
 } from '../local-mac-helper/chrome-pipedrive.mjs';
+import { withPipedriveBrowserLock } from '../local-mac-helper/pipedrive-browser-lock.mjs';
 import { cleanupFundingWorkingCopy, stageFundingWorkingCopy } from '../local-mac-helper/local-working-files.mjs';
 import { fundingMessageFingerprint, normalizeFundingMonitorState } from '../local-mac-helper/funding-monitor-state.mjs';
 import { assessRegistrationCertificateDate, fundingDocumentPipelinePolicy } from '../local-mac-helper/funding-document-pipeline.mjs';
@@ -634,6 +635,25 @@ try {
   if (previousDataRoot == null) delete process.env.IVA_MAC_HELPER_DATA_DIR;
   else process.env.IVA_MAC_HELPER_DATA_DIR = previousDataRoot;
   await rm(cleanupTestRoot, { recursive: true, force: true });
+}
+
+const pipedriveLockTestRoot = await mkdtemp(path.join(os.tmpdir(), 'iva-pipedrive-browser-lock-'));
+const pipedriveLockEvents = [];
+try {
+  const first = withPipedriveBrowserLock(async () => {
+    pipedriveLockEvents.push('first:start');
+    await new Promise(resolve => setTimeout(resolve, 120));
+    pipedriveLockEvents.push('first:end');
+  }, { root: path.join(pipedriveLockTestRoot, 'lock'), timeoutMs: 2000, pollMs: 10 });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const second = withPipedriveBrowserLock(async () => {
+    pipedriveLockEvents.push('second:start');
+    pipedriveLockEvents.push('second:end');
+  }, { root: path.join(pipedriveLockTestRoot, 'lock'), timeoutMs: 2000, pollMs: 10 });
+  await Promise.all([first, second]);
+  assert.deepEqual(pipedriveLockEvents, ['first:start', 'first:end', 'second:start', 'second:end']);
+} finally {
+  await rm(pipedriveLockTestRoot, { recursive: true, force: true });
 }
 
 const workflowWindowSource = await readFile(new URL('../local-mac-helper/workflow-window.mjs', import.meta.url), 'utf8');
