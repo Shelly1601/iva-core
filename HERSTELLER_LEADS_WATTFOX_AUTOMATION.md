@@ -1,11 +1,11 @@
-# Hersteller-Leads und Wattfox – vorbereiteter Ablauf
+# Bosch-Herstellerleads und Wattfox – ausführbarer iMac-Ablauf
 
-Status: **vorbereitet, nicht scharfgestellt**.
+Status: **technisch aktiv**. Railway startet den überwachten iMac-Lauf täglich um 21:00 Uhr; der Schalter und der manuelle Start liegen in `/projects`. Solange ein Sicherheits-Gate fehlt, läuft er ausschließlich beobachtend und protokolliert den konkreten Blocker.
 
 ## Hersteller-Leads um 21:00 Uhr
 
 1. Exaktes Outlook-Konto `n.sell@heat-hero.com` prüfen.
-2. Neue Panasonic-ProMatch- und Bosch-Hersteller-Leads erfassen.
+2. Neue Bosch-Hersteller-Leads erfassen. Panasonic wird in diesem Lauf niemals geöffnet oder bearbeitet; dafür gilt ausschließlich der getrennte aktive Ablauf `PANASONIC_PROMATCH_LEAD_WORKFLOW.md`.
 3. Adresse vor jeder Portalaktion gegen die freigegebenen PLZ/Orte prüfen.
 4. Bei eindeutig passendem Gebiet annehmen. Außerhalb nur dann automatisch ablehnen, wenn `outsideAreaAction` nach Test ausdrücklich auf `reject` gestellt wurde. Unvollständige oder mehrdeutige Adressen gehen immer in die manuelle Prüfliste.
 5. Bereits protokollierte Leads überspringen. Zusätzlich vor der CRM-Anlage nach einem vorhandenen Lead suchen, soweit die Oberfläche dies eindeutig erlaubt.
@@ -13,13 +13,12 @@ Status: **vorbereitet, nicht scharfgestellt**.
 7. Im HeatHero CRM unter „Alle Leads“ über „Neuer Lead“ und „Text einfügen“ anlegen.
 8. Anlage und Vertriebszuordnung danach sichtbar verifizieren. Fehlende Zuordnungen werden gemeldet, aber nicht eigenmächtig ergänzt.
 
-## Panasonic und Ente Auth
+## Getrennter Panasonic-Weg und Ente Auth
 
-- Ausschließlich Ente-Eintrag `ProMatch` mit Konto `n.sell@heat-hero.com` verwenden.
-- Einen ähnlich benannten Eintrag mit `A.Lausig` niemals verwenden.
+- Panasonic läuft getrennt um 10:00 Uhr über `panasonic-promatch-lead-import`. Der 21-Uhr-Sammellauf darf keine Panasonic-Mail und kein Panasonic-Portal öffnen.
+- Im getrennten Panasonic-Lauf ausschließlich Ente Auth `phvaceu-prod / Panasonic` mit Konto `n.sell@heat-hero.com` verwenden; den A.-Lausig-Eintrag niemals verwenden.
 - Einmalcode nur direkt in die echte Panasonic-Domain eingeben; nie speichern, protokollieren oder in einen Bericht kopieren.
 - Bei gesperrter App, unklarem Eintrag, abweichender Domain oder uneindeutigem Login abbrechen und melden.
-- Die in Chat-Bildern sichtbaren alten Passwörter werden nicht verwendet. Vor Aktivierung müssen beide Passwörter geändert und anschließend ausschließlich im Browser-Passwortmanager hinterlegt werden.
 
 ## Wattfox
 
@@ -53,12 +52,11 @@ Zielbild: Das HeatHero CRM ist die führende Arbeitsquelle. Vertriebspartner pfl
 - Keine OTPs oder Passwörter in Bericht, Zwischenablage oder Statusdatei.
 - Bei veränderter Oberfläche, unbekannter Schaltfläche oder fehlender Bestätigung keine weitere Schreibaktion ausführen.
 
-## Vor der Aktivierung erforderlich
+## Vor Bosch-Schreibaktionen erforderlich
 
 - beide in den Bildern offengelegten Passwörter ändern;
 - richtige PLZ/Orte und Regel für außerhalb liegende Leads eintragen;
-- Ente Auth auf dem tatsächlichen iMac einrichten und exakten Eintrag prüfen;
-- Outlook, Panasonic, Bosch und HeatHero CRM auf diesem iMac vorbereiten;
+- Outlook, Bosch und HeatHero CRM auf diesem iMac vorbereiten;
 - einmaligen Beobachtungs- und Trockenlauf prüfen;
-- reale Panasonic-/Bosch-Statuslisten aufnehmen, CRM-Felder prüfen und Mapping gemeinsam freigeben;
-- erst danach Konfiguration und geplante Aufgabe aktivieren.
+- reale Bosch-Statusliste aufnehmen, CRM-Felder prüfen und Mapping fachlich freigeben;
+- erst danach `mode` auf `live` stellen. Der Zeitplan selbst darf bereits im Beobachtungsmodus laufen; das Sicherheits-Gate im lokalen Recorder weist behauptete Portal-/CRM-Schreibergebnisse bis dahin ab.

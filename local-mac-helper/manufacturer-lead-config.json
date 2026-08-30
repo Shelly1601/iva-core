@@ -1,7 +1,12 @@
 {
   "version": 1,
-  "enabled": false,
+  "enabled": true,
   "mode": "observe-only",
+  "scope": {
+    "manufacturerLeads": ["bosch"],
+    "wattfox": true,
+    "panasonicWorkflowId": "panasonic-promatch-lead-import"
+  },
   "activation": {
     "passwordsRotated": false,
     "correctIMacConfirmed": false,

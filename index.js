@@ -1958,7 +1958,7 @@ app.patch('/api/projects/:id/automations/:automationId', async (req, res) => {
           setAutomationEnabled('project-protocol-cleanup', req.body?.enabled === true),
         ]);
       }
-      if (['planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning'].includes(req.params.automationId)) {
+      if (['planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning', 'manufacturer-leads-wattfox'].includes(req.params.automationId)) {
         await setAutomationEnabled(req.params.automationId, req.body?.enabled === true);
       }
       project = await setProjectAutomationEnabled(req.params.id, req.params.automationId, req.body?.enabled === true);
@@ -2003,6 +2003,11 @@ app.post('/api/projects/:id/workflow-runs', async (req, res) => {
   if (!project) return res.status(404).json({ error: 'not found' });
   try { res.status(201).json(await recordProjectWorkflowResult(project.id, req.body || {})); }
   catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.get('/api/projects/:id/workflow-runs', async (req, res) => {
+  const project = await getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: 'not found' });
+  res.json(await listProjectWorkflowRuns(project.id, { limit: req.query?.limit }));
 });
 app.get('/api/leads', async (_req, res) => res.json(await fetchAllLeads()));
 app.post('/api/crm/panasonic-leads/import', async (req, res) => {
@@ -3199,6 +3204,17 @@ const automationRunner = createAutomationOrchestrator({
     deviceCommandStatus,
     deviceId: IVA_IMAC_DEVICE_ID,
   }),
+  'manufacturer-leads-wattfox': createProjectWorkflowAutomationHandler({
+    projectId: 'heat-hero',
+    workflowId: 'manufacturer-leads-wattfox',
+    displayName: 'Bosch-Herstellerleads und Wattfox',
+    requiredAllowedActions: ['project.workflow.run', 'codex.task.status'],
+    getProject,
+    deviceAgentStatus,
+    enqueueDeviceCommand,
+    deviceCommandStatus,
+    deviceId: IVA_IMAC_DEVICE_ID,
+  }),
   'daily-briefing': async () => sendBriefing(),
   'marketing-morning-report': async () => sendMarketingMorningReport(),
   'heat-hero-too-often-replies': async () => runHeatHeroTooOftenReplies(),
@@ -3241,6 +3257,7 @@ const IMAC_MANUAL_PROJECT_WORKFLOWS = new Set([
   'planbar-weekly-export',
   'planbar-completion-morning',
   'montage-required-fields-morning',
+  'manufacturer-leads-wattfox',
   'installation-plan-material-list',
 ]);
 

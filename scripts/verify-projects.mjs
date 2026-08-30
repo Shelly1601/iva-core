@@ -67,7 +67,10 @@ const withoutAdditionalInfo = await addCustomerSchedulingRequest('heat-hero', { 
 check('Leere Zusatzinfo wird nicht an Planbar übergeben', !withoutAdditionalInfo.customerSchedulingRequests[0]?.planbarDescriptionExtras.some(line => line.startsWith('Zusatzinfo:')));
 const invalidSchedulingWeek = await addCustomerSchedulingRequest('heat-hero', { customerName: 'Stefanie Schneider', isoYear: 2026, week: 54, materialDeliverySpace: true, theftWeatherProtected: true }).then(() => false).catch(error => /Kalenderwoche/.test(error.message));
 check('Ungültige Kalenderwoche wird abgewiesen', invalidSchedulingWeek);
-check('Herstellerlauf pausiert', heat.automations.some(item => item.id === 'manufacturer-leads-wattfox' && item.status === 'paused' && !item.enabled));
+check('Bosch-/Wattfox-Lauf ist ausführbar, schaltbar und terminiert', heat.automations.some(item => item.id === 'manufacturer-leads-wattfox'
+  && item.status === 'active' && item.enabled && item.toggleAvailable && /21:00/.test(item.schedule)
+  && /Panasonic bleibt im getrennten/.test(item.purpose)));
+check('Bosch-/Wattfox-Lauf wird im Tagesprotokoll erwartet', heat.protocolPolicy.expectedWorkflows.some(item => item.workflowId === 'manufacturer-leads-wattfox' && item.cadence === 'daily'));
 const disabledKfw = await setProjectAutomationEnabled('heat-hero', 'kfw-approval-morning', false);
 check('Förderung 3 lässt sich kontrolliert ausschalten', disabledKfw.automations.some(item => item.id === 'kfw-approval-morning' && item.status === 'paused' && !item.enabled));
 const enabledKfw = await setProjectAutomationEnabled('heat-hero', 'kfw-approval-morning', true);
@@ -76,6 +79,10 @@ const disabledHeat = await setProjectAutomationEnabled('heat-hero', 'planbar-wee
 check('Projektworkflow lässt sich ausschalten', disabledHeat.automations.some(item => item.id === 'planbar-weekly-export' && item.status === 'paused' && !item.enabled));
 const enabledHeat = await setProjectAutomationEnabled('heat-hero', 'planbar-weekly-export', true);
 check('Projektworkflow lässt sich wieder einschalten', enabledHeat.automations.some(item => item.id === 'planbar-weekly-export' && item.status === 'active' && item.enabled));
+const disabledManufacturer = await setProjectAutomationEnabled('heat-hero', 'manufacturer-leads-wattfox', false);
+check('Bosch-/Wattfox-Workflow lässt sich ausschalten', disabledManufacturer.automations.some(item => item.id === 'manufacturer-leads-wattfox' && item.status === 'paused' && !item.enabled));
+const enabledManufacturer = await setProjectAutomationEnabled('heat-hero', 'manufacturer-leads-wattfox', true);
+check('Bosch-/Wattfox-Workflow lässt sich wieder einschalten', enabledManufacturer.automations.some(item => item.id === 'manufacturer-leads-wattfox' && item.status === 'active' && item.enabled));
 const disabledPlanbarCompletion = await setProjectAutomationEnabled('heat-hero', 'planbar-completion-morning', false);
 check('Planbar-Vervollständigung lässt sich ausschalten', disabledPlanbarCompletion.automations.some(item => item.id === 'planbar-completion-morning' && item.status === 'paused' && !item.enabled));
 const enabledPlanbarCompletion = await setProjectAutomationEnabled('heat-hero', 'planbar-completion-morning', true);
@@ -138,6 +145,7 @@ check('Gelöschtes Standardprojekt wird nicht neu erzeugt', !(await listProjects
 const html = await fs.readFile(new URL('../public/projects.html', import.meta.url), 'utf8');
 const js = await fs.readFile(new URL('../public/projects.js', import.meta.url), 'utf8');
 check('Plus für neue Projektakten vorhanden', html.includes('＋ Neues Projekt') && js.includes("api('/api/projects'"));
+check('Projektseite bietet manuellen Herstellerlauf und verständlichen letzten Status', js.includes("'manufacturer-leads-wattfox'") && js.includes('Letzter Lauf:') && js.includes('/workflow-runs?limit=100'));
 check('Notizen stehen in der Projektakte bereit', js.includes('Notizen, Ideen & Absprachen') && js.includes('/notes'));
 check('Ordner, Unterordner und Mehrfachupload vorhanden', html.includes('multiple') && js.includes('/folders') && js.includes('parentId'));
 check('Papierkorb löscht nur die Projektakte', js.includes('Projektdateien werden entfernt') && js.includes("method: 'DELETE'"));

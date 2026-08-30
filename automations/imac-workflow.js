@@ -149,7 +149,14 @@ export function createProjectWorkflowAutomationHandler({
       const command = await enqueueDeviceCommand({
         deviceId,
         action: 'project.workflow.run',
-        payload: { projectId, workflowId, displayName, requestId: `${slotKey}:attempt:${attempt}` },
+        payload: {
+          projectId,
+          workflowId,
+          displayName,
+          requestId: slotKey,
+          runMode: 'automatic',
+          automationSlotKey: slotKey,
+        },
         requestedBy: `automation-${workflowId}`,
         requestText: `${displayName} zuverlässig ausführen (${slotKey})`,
       });

@@ -118,7 +118,8 @@ async function main() {
   }
   if (command === 'manufacturer-operation-record') {
     if (confirmation !== '--commit') throw new Error('Hersteller-/Wattfox-Ergebnis wurde nicht gespeichert. Zum Bestätigen --commit anhängen.');
-    return console.log(JSON.stringify(await recordManufacturerOperation(await readJson(filePath)), null, 2));
+    const config = await loadManufacturerLeadConfig();
+    return console.log(JSON.stringify(await recordManufacturerOperation(await readJson(filePath), { config }), null, 2));
   }
   if (command === 'manufacturer-operations-report') {
     const state = await loadManufacturerLeadState();

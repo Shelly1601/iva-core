@@ -35,6 +35,7 @@ check('Alle angesetzten täglichen iMac-Projektworkflows sind zentral terminiert
   ['funding-daily-sequence', '0 5 * * *'],
   ['montage-required-fields-morning', '0 7 * * *'],
   ['planbar-completion-morning', '0 8 * * *'],
+  ['manufacturer-leads-wattfox', '0 21 * * *'],
 ].every(([id, cron]) => initial.find(item => item.id === id)?.enabled === true && initial.find(item => item.id === id)?.cron === cron));
 await store.setAutomationEnabled('crm-qonekto-sync', true);
 check('Schalter wird persistent gespeichert', (await store.getAutomation('crm-qonekto-sync')).enabled === true);

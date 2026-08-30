@@ -1,7 +1,7 @@
 const $ = id => document.getElementById(id);
 const TOKEN_KEY = 'iva_token';
-const state = { projects: [], current: null, activeFolderId: 'all', capacityOffset: 0, uploading: false, planbarRefreshing: false, planbarRefreshError: '', dewarmteJobs: [], dewarmteStandard: null, dewarmteRefreshAfterMs: 4000, dewarmtePollTimer: null, dewarmteRefreshInFlight: false, logoUrls: new Map() };
-const MANUAL_WORKFLOW_IDS = new Set(['workflow-protocol-summaries', 'funding-daily-sequence', 'funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning', 'planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning', 'installation-plan-material-list', 'dewarmte-link-to-material-pdf']);
+const state = { projects: [], current: null, activeFolderId: 'all', capacityOffset: 0, uploading: false, planbarRefreshing: false, planbarRefreshError: '', dewarmteJobs: [], dewarmteStandard: null, dewarmteRefreshAfterMs: 4000, dewarmtePollTimer: null, dewarmteRefreshInFlight: false, logoUrls: new Map(), workflowRuns: [] };
+const MANUAL_WORKFLOW_IDS = new Set(['workflow-protocol-summaries', 'funding-daily-sequence', 'funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning', 'planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning', 'manufacturer-leads-wattfox', 'installation-plan-material-list', 'dewarmte-link-to-material-pdf']);
 
 function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
 function esc(value) { return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
@@ -205,13 +205,14 @@ function operationalSections(project) {
   const phases = project.phases || [];
   const areas = project.areas || [];
   const workflowCards = automations.map(item => {
+    const latestRun = state.workflowRuns.find(run => run.workflowId === item.id);
     const canRunNow = ['active', 'paused'].includes(item.status) && MANUAL_WORKFLOW_IDS.has(item.id);
     const action = canRunNow ? 'run' : 'prepare';
     const actionLabel = canRunNow ? '▶ Jetzt auslösen' : '✦ Mit IVA fertig bauen';
     const actionHint = canRunNow
       ? 'Diesen Workflow jetzt einmal außerplanmäßig starten'
       : 'IVA/Codex beauftragen, den fehlenden Ausführungsweg vollständig zu bauen, zu testen und live auszuliefern';
-    return `<article class="automation"><div class="automation-top"><label class="automation-name"><span>Name</span><input value="${esc(item.name)}" maxlength="220" data-workflow-name="${esc(item.id)}" aria-label="Workflow-Name bearbeiten"></label><label class="switch" title="${esc(item.toggleAvailable ? 'Workflow an- oder ausschalten' : 'Noch nicht ausführbar')}"><input type="checkbox" data-project-automation="${esc(item.id)}" ${item.enabled ? 'checked' : ''} ${item.toggleAvailable ? '' : 'disabled'}><span class="slider"></span></label></div><div class="automation-state"><span class="badge ${esc(item.status)}">${esc(item.enabled ? 'An' : item.toggleAvailable ? 'Aus' : label(item.status))}</span></div><div class="automation-actions"><button class="btn" type="button" data-workflow-save="${esc(item.id)}">Name speichern</button><button class="btn ${canRunNow ? 'primary' : 'finish'}" type="button" data-workflow-action="${action}" data-workflow-id="${esc(item.id)}" title="${esc(actionHint)}">${actionLabel}</button></div><details class="automation-details"><summary>Details anzeigen</summary><p>${esc(item.purpose)}</p><div class="meta"><div><span>Zeitplan</span><b>${esc(item.schedule)}</b></div><div><span>Ausführung</span><b>${esc(item.execution)}</b></div></div><div class="rule"><b>Sicherheitsregel:</b> ${esc(item.safety)}</div><div class="next"><b>Nächster Schritt:</b> ${esc(item.nextStep)}</div></details></article>`;
+    return `<article class="automation"><div class="automation-top"><label class="automation-name"><span>Name</span><input value="${esc(item.name)}" maxlength="220" data-workflow-name="${esc(item.id)}" aria-label="Workflow-Name bearbeiten"></label><label class="switch" title="${esc(item.toggleAvailable ? 'Workflow an- oder ausschalten' : 'Noch nicht ausführbar')}"><input type="checkbox" data-project-automation="${esc(item.id)}" ${item.enabled ? 'checked' : ''} ${item.toggleAvailable ? '' : 'disabled'}><span class="slider"></span></label></div><div class="automation-state"><span class="badge ${esc(item.status)}">${esc(item.enabled ? 'An' : item.toggleAvailable ? 'Aus' : label(item.status))}</span></div>${latestRun ? `<div class="next"><b>Letzter Lauf:</b> ${esc(formatDate(latestRun.completedAt || latestRun.startedAt))} · ${esc(label(latestRun.status))}<br>${esc(latestRun.summary || latestRun.error || 'Ergebnis protokolliert.')}</div>` : '<div class="next"><b>Letzter Lauf:</b> Noch kein Ergebnis protokolliert.</div>'}<div class="automation-actions"><button class="btn" type="button" data-workflow-save="${esc(item.id)}">Name speichern</button><button class="btn ${canRunNow ? 'primary' : 'finish'}" type="button" data-workflow-action="${action}" data-workflow-id="${esc(item.id)}" title="${esc(actionHint)}">${actionLabel}</button></div><details class="automation-details"><summary>Details anzeigen</summary><p>${esc(item.purpose)}</p><div class="meta"><div><span>Zeitplan</span><b>${esc(item.schedule)}</b></div><div><span>Ausführung</span><b>${esc(item.execution)}</b></div></div><div class="rule"><b>Sicherheitsregel:</b> ${esc(item.safety)}</div><div class="next"><b>Nächster Schritt:</b> ${esc(item.nextStep)}</div></details></article>`;
   }).join('');
   return `${automations.length ? `<section class="card"><h2>Automationen und Workflows</h2><div class="muted">Namen direkt anpassen und speichern. Laufende Workflows kannst du sofort manuell auslösen; geplante oder blockierte Abläufe gibst du mit „Mit IVA fertig bauen“ als vollständigen Umsetzungsauftrag zurück.</div><div class="metrics"><div class="metric"><b>${automations.filter(item => item.enabled).length}</b><small>eingeschaltet</small></div><div class="metric"><b>${automations.filter(item => item.toggleAvailable && !item.enabled).length}</b><small>ausgeschaltet</small></div><div class="metric"><b>${automations.filter(item => item.status === 'prepared').length}</b><small>vorbereitet</small></div><div class="metric"><b>${automations.filter(item => ['planned', 'blocked'].includes(item.status)).length}</b><small>noch fertigzubauen</small></div></div><div class="automation-grid">${workflowCards}</div></section>` : ''}${phases.length ? `<section class="card"><h2>Projektphasen</h2><div class="muted">Roadmap und aktueller Stand.</div>${phases.map(item => `<div class="road"><strong>${esc(item.phase)}</strong><div><b>${esc(item.name)}</b><small>${esc(item.result)}</small></div><span class="badge ${esc(item.status)}">${esc(label(item.status))}</span></div>`).join('')}</section>` : ''}${areas.length ? `<section class="card"><h2>Unterbereiche</h2><div class="muted">Arbeitsbereiche, Verantwortung und nächste Schritte.</div><div class="item-grid">${areas.map(item => `<article class="item"><div class="head"><h3>${esc(item.name)}</h3><span class="badge ${esc(item.status)}">${esc(label(item.status))}</span></div><p>${esc(item.summary)}</p><div class="next"><b>Nächster Schritt:</b> ${esc(item.nextStep)}</div></article>`).join('')}</div></section>` : ''}`;
 }
@@ -545,6 +546,11 @@ async function runOrPrepareWorkflow(button) {
   button.textContent = action === 'run' ? 'Wird gestartet …' : 'Wird an IVA übergeben …';
   try {
     const result = await api(`/api/projects/${encodeURIComponent(state.current.id)}/automations/${encodeURIComponent(workflowId)}/${action}`, { method: 'POST' });
+    if (action === 'run') {
+      state.workflowRuns = [{ workflowId, status: 'running', startedAt: new Date().toISOString(), summary: result.message || 'An den iMac übergeben.' }, ...state.workflowRuns.filter(run => run.workflowId !== workflowId)];
+      render();
+      setTimeout(() => { void refreshWorkflowRuns(); }, 8000);
+    }
     showToast(result.message || (action === 'run' ? 'Workflow wurde gestartet.' : 'Fertigstellungsauftrag wurde an IVA übergeben.'));
   } catch (error) { showToast(error.message, true); }
   finally {
@@ -558,8 +564,23 @@ function selectProject(id) {
   state.capacityOffset = 0;
   if (state.current) history.replaceState({}, '', `/projects?id=${encodeURIComponent(state.current.id)}`);
   else history.replaceState({}, '', '/projects');
+  state.workflowRuns = [];
   render();
+  void refreshWorkflowRuns();
   if (state.current?.id === 'dewarmte') void refreshDewarmteJobs({ rerender: true });
+}
+
+async function refreshWorkflowRuns() {
+  if (!state.current) return;
+  const projectId = state.current.id;
+  try {
+    const runs = await api(`/api/projects/${encodeURIComponent(projectId)}/workflow-runs?limit=100`);
+    if (state.current?.id !== projectId) return;
+    state.workflowRuns = runs;
+    render();
+  } catch (error) {
+    showToast(`Workflow-Status konnte nicht geladen werden: ${error.message}`, true);
+  }
 }
 
 async function load() {
@@ -568,6 +589,7 @@ async function load() {
     await Promise.all(state.projects.map(project => refreshProjectLogo(project)));
     const id = new URLSearchParams(location.search).get('id');
     state.current = state.projects.find(project => project.id === id) || state.projects[0] || null;
+    if (state.current) state.workflowRuns = await api(`/api/projects/${encodeURIComponent(state.current.id)}/workflow-runs?limit=100`).catch(() => []);
     render();
     if (state.current?.id === 'dewarmte') await refreshDewarmteJobs({ rerender: true });
     $('status').className = 'status on';

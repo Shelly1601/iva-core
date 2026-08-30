@@ -21,6 +21,7 @@ const ACTIVATION_CHECKS = [
   'enteAuthPrepared',
   'dryRunApproved',
 ];
+let stateWriteQueue = Promise.resolve();
 
 function compact(value) {
   return String(value || '').trim();
@@ -49,6 +50,13 @@ export function validateManufacturerLeadConfig(config) {
   if (config.version !== 1) throw new Error('Unbekannte Hersteller-Lead-Konfigurationsversion.');
   if (!MODES.has(config.mode)) throw new Error('Modus muss observe-only, dry-run oder live sein.');
   if (!OUTSIDE_ACTIONS.has(config.territories?.outsideAreaAction)) throw new Error('outsideAreaAction muss manual oder reject sein.');
+  const manufacturerScope = uniqueStrings(config.scope?.manufacturerLeads).map(normalize);
+  if (manufacturerScope.length !== 1 || manufacturerScope[0] !== 'bosch' || config.scope?.wattfox !== true) {
+    throw new Error('Der Sammelworkflow darf ausschließlich Bosch-Leads und Wattfox verarbeiten.');
+  }
+  if (compact(config.scope?.panasonicWorkflowId) !== 'panasonic-promatch-lead-import') {
+    throw new Error('Der getrennte Panasonic-Workflow muss eindeutig hinterlegt sein.');
+  }
   if (compact(config.accounts?.heatHeroEmail).toLowerCase() !== 'n.sell@heat-hero.com') {
     throw new Error('Das HeatHero-Konto muss exakt n.sell@heat-hero.com sein.');
   }
@@ -170,10 +178,21 @@ async function saveState(state, statePath) {
   await rename(tempPath, statePath);
 }
 
-export async function recordManufacturerOperation(input, options = {}) {
+async function recordManufacturerOperationCore(input, options = {}) {
   const statePath = options.statePath || DEFAULT_MANUFACTURER_LEAD_STATE_PATH;
   const type = compact(input?.type);
   if (!['manufacturerLead', 'wattfoxMessage'].includes(type)) throw new Error('Ergebnistyp muss manufacturerLead oder wattfoxMessage sein.');
+  if (type === 'manufacturerLead') {
+    const writeClaimed = ['accepted', 'rejected'].includes(normalize(input.portalAction))
+      || ['created', 'updated'].includes(normalize(input.crmStatus));
+    if (writeClaimed) {
+      const config = options.config || await loadManufacturerLeadConfig(options.configPath);
+      const readiness = getManufacturerLeadReadiness(config);
+      if (!readiness.ready) {
+        throw new Error(`Hersteller-Schreibergebnis abgelehnt: Sicherheits-Readiness fehlt (${readiness.blockers.join(' ')})`);
+      }
+    }
+  }
   const state = await loadManufacturerLeadState(statePath);
   const now = compact(input.timestamp) || new Date().toISOString();
 
@@ -226,6 +245,16 @@ export async function recordManufacturerOperation(input, options = {}) {
   state.wattfoxMessages = state.wattfoxMessages.slice(-10000);
   await saveState(state, statePath);
   return { recorded: true, duplicate: false, fingerprint };
+}
+
+export async function recordManufacturerOperation(input, options = {}) {
+  let result;
+  const operation = stateWriteQueue.catch(() => {}).then(async () => {
+    result = await recordManufacturerOperationCore(input, options);
+  });
+  stateWriteQueue = operation.catch(() => {});
+  await operation;
+  return result;
 }
 
 function berlinDate(value = new Date()) {
