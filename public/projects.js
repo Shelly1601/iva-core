@@ -1,7 +1,7 @@
 const $ = id => document.getElementById(id);
 const TOKEN_KEY = 'iva_token';
 const state = { projects: [], current: null, activeFolderId: 'all', capacityOffset: 0, uploading: false, planbarRefreshing: false, planbarRefreshError: '', logoUrls: new Map() };
-const MANUAL_WORKFLOW_IDS = new Set(['workflow-protocol-summaries', 'funding-monitor', 'planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning']);
+const MANUAL_WORKFLOW_IDS = new Set(['workflow-protocol-summaries', 'funding-monitor', 'planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning', 'installation-plan-material-list']);
 
 function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
 function esc(value) { return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
