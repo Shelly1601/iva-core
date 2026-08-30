@@ -146,6 +146,7 @@ check('Projektworkflows haben echte Ein-Aus-Schalter', html.includes('.switch{')
 check('Workflow-Namen sind bearbeitbar und speicherbar', js.includes('data-workflow-name') && js.includes('data-workflow-save') && js.includes('saveWorkflowName'));
 check('Jeder Workflow hat manuellen Start oder IVA-Fertigstellungsauftrag', js.includes('▶ Jetzt auslösen') && js.includes('✦ Mit IVA fertig bauen') && js.includes('/${action}') && js.includes('runOrPrepareWorkflow'));
 check('Installationsplan-Materialliste besitzt den echten manuellen Start', js.includes("'installation-plan-material-list'") && js.includes('MANUAL_WORKFLOW_IDS'));
+check('Alle drei Förderungsläufe und der geordnete Gesamtlauf besitzen den echten manuellen Start', ['funding-daily-sequence', 'funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning'].every(id => js.includes(`'${id}'`)) && js.includes('MANUAL_WORKFLOW_IDS'));
 check('DeWarmte zeigt Link-rein-PDF-raus direkt in der Projektakte', js.includes('Link rein → PDF raus') && js.includes('dewarmtePdfForm') && js.includes('/api/projects/dewarmte/link-pdf-jobs'));
 check('DeWarmte zeigt festen Deckblatt- und Materialaufbau', js.includes('Immer unverändert aus Seite 1 der Installationsplanung') && js.includes('DeWarmte Material') && js.includes('HEAT|Hero Material'));
 check('DeWarmte zeigt echten Fortschrittsbalken und aktualisiert laufende Aufträge automatisch', html.includes('.dewarmte-progress') && js.includes('role="progressbar"') && js.includes('scheduleDewarmtePolling') && js.includes('refreshAfterMs'));
