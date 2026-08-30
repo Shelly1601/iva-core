@@ -43,7 +43,37 @@ export function validateDewarmteLinkPdfInput(input = {}) {
   };
 }
 
-export function summarizeDewarmteLinkPdfJobs(commands = [], files = [], runs = []) {
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'blocked', 'timed_out', 'incomplete']);
+
+function workflowPhase(status, phase, deliveryMode, hasFile) {
+  if (status === 'completed') return deliveryMode === 'email-send' ? 'PDF gespeichert und Versand verifiziert' : 'PDF ist zum Download bereit';
+  if (status === 'failed') return 'Auftrag fehlgeschlagen';
+  if (status === 'blocked' || status === 'incomplete') return 'Prüfung oder Eingabe erforderlich';
+  if (status === 'timed_out') return 'Zeitüberschreitung – Prüfung erforderlich';
+  if (hasFile) return deliveryMode === 'email-send' ? 'PDF gespeichert · Mailstatus wird geprüft' : 'PDF ist in der Projektakte gespeichert';
+  return ({
+    queued: 'Auftrag angenommen · wartet auf den iMac',
+    running: 'Installationsplan wird lesend geöffnet',
+    planning: 'Quelle und Auftragsdaten werden geprüft',
+    implementing: 'Material wird zugeordnet und PDF erstellt',
+    testing: 'PDF wird gerendert und visuell geprüft',
+    committing: 'Ergebnis wird für die Ablage vorbereitet',
+    pushing: 'Ergebnis wird an IVA übergeben',
+    deploying: 'PDF wird in der Projektakte gespeichert',
+    live_verification: deliveryMode === 'email-send' ? 'Ablage und Mailversand werden geprüft' : 'Ablage und Download werden geprüft',
+  })[phase] || 'Auftrag wird bearbeitet';
+}
+
+function workflowProgress(status, phase, reportedProgress, hasFile) {
+  if (status === 'completed') return 100;
+  const numeric = Number(reportedProgress);
+  if (Number.isFinite(numeric) && numeric > 0) return Math.max(1, Math.min(99, Math.round(numeric)));
+  if (hasFile) return 94;
+  if (TERMINAL_STATUSES.has(status)) return 5;
+  return ({ queued: 5, running: 12, planning: 18, implementing: 42, testing: 68, committing: 76, pushing: 82, deploying: 90, live_verification: 96 })[phase] || 8;
+}
+
+export function summarizeDewarmteLinkPdfJobs(commands = [], files = [], runs = [], agentRuns = []) {
   const statusByJobId = new Map();
   for (const command of commands) {
     if (command?.action !== 'codex.task.status' || !command.payload?.jobId || command.status !== 'completed') continue;
@@ -60,22 +90,33 @@ export function summarizeDewarmteLinkPdfJobs(commands = [], files = [], runs = [
       const jobId = clean(command.result?.jobId, 100);
       const statusCommand = statusByJobId.get(jobId);
       const run = runs.find(item => item?.workflowId === 'dewarmte-link-to-material-pdf' && item?.metrics?.jobId === jobId) || null;
+      const agentRun = agentRuns.find(item => item?.projectId === 'dewarmte'
+        && item?.workflowId === 'dewarmte-link-to-material-pdf'
+        && item?.jobId === jobId) || null;
       const file = files.find(item => item.jobId === jobId) || null;
       const local = statusCommand?.result || {};
-      const reportedStatus = clean(run?.status || local.status || command.result?.status || command.status, 50) || 'queued';
-      const needsAttention = ['failed', 'blocked', 'timed_out', 'incomplete'].includes(reportedStatus);
-      const reportedDetail = clean(run?.error || run?.summary || local.resultPreview || local.detail || command.error, 700);
+      const commandFallbackStatus = command.status === 'completed' ? (jobId ? 'running' : 'queued') : command.status;
+      const reportedStatus = clean(agentRun?.status || run?.status || local.status || command.result?.status || commandFallbackStatus, 50) || 'queued';
+      const missingResult = reportedStatus === 'completed' && !file;
+      const status = missingResult ? 'incomplete' : reportedStatus;
+      const needsAttention = ['failed', 'blocked', 'timed_out', 'incomplete'].includes(status);
+      const reportedDetail = clean(agentRun?.error || agentRun?.resultPreview || run?.error || run?.summary || local.resultPreview || local.detail || command.error, 700);
+      const rawPhase = clean(agentRun?.phase || run?.metrics?.phase || local.phase || reportedStatus, 80) || 'queued';
+      const deliveryMode = clean(command.payload?.deliveryMode, 30) || 'download';
       return {
         id: command.id,
         jobId,
-        status: file && !needsAttention ? 'completed' : reportedStatus,
+        status,
+        progress: workflowProgress(status, rawPhase, agentRun?.progress ?? run?.metrics?.progress ?? local.progress, Boolean(file)),
+        phase: workflowPhase(status, rawPhase, deliveryMode, Boolean(file)),
+        active: !TERMINAL_STATUSES.has(status),
         detail: file
           ? `PDF ist fertig und liegt in der DeWarmte-Projektakte.${needsAttention && reportedDetail ? ` Weitere Aktion nötig: ${reportedDetail}` : ''}`
-          : (reportedDetail || 'Auftrag wartet auf den iMac.'),
-        deliveryMode: clean(command.payload?.deliveryMode, 30) || 'download',
+          : (missingResult ? 'Der Lauf meldet Abschluss, aber in der Projektakte fehlt die Ergebnis-PDF.' : (reportedDetail || 'Auftrag wartet auf den iMac.')),
+        deliveryMode,
         recipientEmail: clean(command.payload?.recipientEmail, 320),
         createdAt: clean(command.createdAt, 80),
-        updatedAt: clean(local.updatedAt || statusCommand?.completedAt || command.completedAt || command.startedAt || command.createdAt, 80),
+        updatedAt: clean(agentRun?.updatedAt || run?.completedAt || local.updatedAt || statusCommand?.completedAt || command.completedAt || command.startedAt || command.createdAt, 80),
         file: file ? { id: file.id, name: file.name, bytes: file.bytes, createdAt: file.createdAt } : null,
       };
     })

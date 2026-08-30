@@ -99,6 +99,7 @@ import {
   updateProject,
 } from './projects/store.js';
 import { summarizeDewarmteLinkPdfJobs, validateDewarmteLinkPdfInput } from './projects/dewarmte.js';
+import { dewarmteMaterialStandardSummary } from './projects/dewarmte-material-standard.js';
 import {
   cleanupExpiredDewarmteSupplementPdfs,
   getDewarmteSupplementPdfMeta,
@@ -1745,13 +1746,18 @@ app.post('/api/projects/dewarmte/supplement-pdfs', express.raw({ type: 'applicat
 });
 app.get('/api/projects/dewarmte/link-pdf-jobs', async (_req, res) => {
   try {
-    const [project, commands, runs] = await Promise.all([
+    const [project, commands, runs, agentRuns] = await Promise.all([
       getProject('dewarmte'),
       listDeviceCommands({ deviceId: IVA_IMAC_DEVICE_ID, limit: 500 }),
       listProjectWorkflowRuns('dewarmte', { limit: 200 }),
+      listAgentRuns({ limit: 500 }),
     ]);
     if (!project) return res.status(404).json({ error: 'DeWarmte-Projekt nicht gefunden.' });
-    res.json({ jobs: summarizeDewarmteLinkPdfJobs(commands, project.files || [], runs) });
+    res.json({
+      jobs: summarizeDewarmteLinkPdfJobs(commands, project.files || [], runs, agentRuns),
+      standard: dewarmteMaterialStandardSummary(),
+      refreshAfterMs: 4000,
+    });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 app.post('/api/projects/dewarmte/link-pdf-jobs', async (req, res) => {

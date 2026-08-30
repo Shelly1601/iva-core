@@ -147,6 +147,8 @@ check('Workflow-Namen sind bearbeitbar und speicherbar', js.includes('data-workf
 check('Jeder Workflow hat manuellen Start oder IVA-Fertigstellungsauftrag', js.includes('▶ Jetzt auslösen') && js.includes('✦ Mit IVA fertig bauen') && js.includes('/${action}') && js.includes('runOrPrepareWorkflow'));
 check('Installationsplan-Materialliste besitzt den echten manuellen Start', js.includes("'installation-plan-material-list'") && js.includes('MANUAL_WORKFLOW_IDS'));
 check('DeWarmte zeigt Link-rein-PDF-raus direkt in der Projektakte', js.includes('Link rein → PDF raus') && js.includes('dewarmtePdfForm') && js.includes('/api/projects/dewarmte/link-pdf-jobs'));
+check('DeWarmte zeigt festen Deckblatt- und Materialaufbau', js.includes('Immer unverändert aus Seite 1 der Installationsplanung') && js.includes('DeWarmte Material') && js.includes('HEAT|Hero Material'));
+check('DeWarmte zeigt echten Fortschrittsbalken und aktualisiert laufende Aufträge automatisch', html.includes('.dewarmte-progress') && js.includes('role="progressbar"') && js.includes('scheduleDewarmtePolling') && js.includes('refreshAfterMs'));
 check('DeWarmte bietet Download, Mailentwurf und bestätigten Direktversand', js.includes('email-draft') && js.includes('email-send') && js.includes('direkt an ${recipientEmail} senden'));
 check('DeWarmte akzeptiert optionalen Freitext und eine zusätzliche PDF', js.includes('dewarmteSupplementaryText') && js.includes('dewarmteSupplementaryPdf') && js.includes('/api/projects/dewarmte/supplement-pdfs'));
 check('DeWarmte weist die dreitägige Löschung der Zusatzdaten aus', js.includes('nach drei Tagen automatisch gelöscht') && dewarmte?.automations.some(item => item.id === 'dewarmte-link-to-material-pdf' && /drei Tagen/.test(item.safety)));
@@ -171,8 +173,19 @@ check('Wiederholter DeWarmte-Upload erzeugt keine PDF-Dublette', duplicateDewarm
 const dewarmteJobs = summarizeDewarmteLinkPdfJobs([{
   id: 'command-test', action: 'project.workflow.run', status: 'completed', createdAt: '2026-08-30T07:00:00Z', result: { jobId: dewarmteJobId },
   payload: { projectId: 'dewarmte', workflowId: 'dewarmte-link-to-material-pdf', deliveryMode: 'download' },
-}], [dewarmteFile]);
+}], [dewarmteFile], [], [{
+  projectId: 'dewarmte', workflowId: 'dewarmte-link-to-material-pdf', jobId: dewarmteJobId,
+  status: 'completed', phase: 'live_verification', progress: 100, updatedAt: '2026-08-30T07:04:00Z',
+}]);
 check('DeWarmte-Job wird nach PDF-Upload als fertig und downloadbar angezeigt', dewarmteJobs[0]?.status === 'completed' && dewarmteJobs[0]?.file?.id === dewarmteFile.id);
+const dewarmteMailStillRunning = summarizeDewarmteLinkPdfJobs([{
+  id: 'command-mail-running', action: 'project.workflow.run', status: 'completed', createdAt: '2026-08-30T07:00:00Z', result: { jobId: dewarmteJobId },
+  payload: { projectId: 'dewarmte', workflowId: 'dewarmte-link-to-material-pdf', deliveryMode: 'email-send', recipientEmail: 'kunde@example.com' },
+}], [dewarmteFile], [], [{
+  projectId: 'dewarmte', workflowId: 'dewarmte-link-to-material-pdf', jobId: dewarmteJobId,
+  status: 'running', phase: 'live_verification', progress: 96, updatedAt: '2026-08-30T07:03:00Z',
+}]);
+check('PDF-Upload allein meldet Mailversand noch nicht als fertig', dewarmteMailStillRunning[0]?.status === 'running' && dewarmteMailStillRunning[0]?.progress === 96);
 const dewarmteUnverifiedMail = summarizeDewarmteLinkPdfJobs([{
   id: 'command-mail-test', action: 'project.workflow.run', status: 'completed', createdAt: '2026-08-30T07:00:00Z', result: { jobId: dewarmteJobId },
   payload: { projectId: 'dewarmte', workflowId: 'dewarmte-link-to-material-pdf', deliveryMode: 'email-send', recipientEmail: 'kunde@example.com' },
@@ -180,6 +193,14 @@ const dewarmteUnverifiedMail = summarizeDewarmteLinkPdfJobs([{
   workflowId: 'dewarmte-link-to-material-pdf', status: 'blocked', summary: 'Versandstatus muss im Gesendet-Ordner geprüft werden.', metrics: { jobId: dewarmteJobId },
 }]);
 check('Unklarer Mailversand bleibt trotz fertiger PDF sichtbar prüfbedürftig', dewarmteUnverifiedMail[0]?.status === 'blocked' && /Weitere Aktion nötig/.test(dewarmteUnverifiedMail[0]?.detail));
+const dewarmteRunning = summarizeDewarmteLinkPdfJobs([{
+  id: 'command-running-test', action: 'project.workflow.run', status: 'completed', createdAt: '2026-08-30T07:00:00Z', result: { jobId: dewarmteJobId },
+  payload: { projectId: 'dewarmte', workflowId: 'dewarmte-link-to-material-pdf', deliveryMode: 'download' },
+}], [], [], [{
+  projectId: 'dewarmte', workflowId: 'dewarmte-link-to-material-pdf', jobId: dewarmteJobId,
+  status: 'running', phase: 'implementing', progress: 30, updatedAt: '2026-08-30T07:02:00Z', resultPreview: 'PDF wird erstellt.',
+}]);
+check('DeWarmte übernimmt den gemeldeten iMac-Livefortschritt', dewarmteRunning[0]?.progress === 30 && dewarmteRunning[0]?.active === true && /Material wird zugeordnet/.test(dewarmteRunning[0]?.phase));
 
 console.log(failures ? `${failures} Fehler` : 'Projektakten erfolgreich verifiziert.');
 process.exit(failures ? 1 : 0);

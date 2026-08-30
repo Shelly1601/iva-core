@@ -21,9 +21,9 @@ Für jeden Lauf müssen mindestens Absender oder Betreff sowie das Empfängerpos
 1. Vor jeder sichtbaren Aktion den zweiten, physisch rechten Bildschirm mit `node local-mac-helper/right-display-check.mjs --require-second-display` prüfen. Outlook und das eigene Chrome-Fenster müssen nachweislich rechts liegen.
 2. In Outlook die eindeutige Mail öffnen und Absender, Empfänger, Betreff, Datum, Kunde, Auftragsnummer und Installationszeitraum erfassen.
 3. Den Link in einem eigenen Chrome-Tab auf dem rechten Display öffnen. Nur lesend navigieren; keine Bearbeitungsaktionen auslösen.
-4. Den Plan als lokale PDF-Arbeitskopie exportieren oder herunterladen. PDF-Integrität, Seitenzahl und lesbaren Text prüfen.
-5. Seite 1 der Quell-PDF unverändert als erste Seite der Ergebnis-PDF übernehmen.
-6. Aus Mail und Plan eine einfache deutsche Materialliste erstellen. Jede Position enthält Menge, Material/Bauteil, kurze Spezifikation und Belegstelle. Fehlende Mengen werden nicht erfunden, sondern mit „nach Weg“, „vor Ort prüfen“ oder einem offenen Punkt kenntlich gemacht.
+4. Den Plan als lokale PDF-Arbeitskopie exportieren oder herunterladen. PDF-Integrität, Seitenzahl und lesbaren Text prüfen. Die versionierte Standarddefinition `projects/dewarmte-material-standard.js` vollständig lesen.
+5. Seite 1 der Quell-PDF immer unverändert als erste Seite und Deckblatt der Ergebnis-PDF übernehmen. Kein eigenes Deckblatt davor setzen.
+6. Aus Mail und Plan eine einfache deutsche Materialliste erstellen. Ab Seite 2 folgen in dieser Reihenfolge die Bereiche „DeWarmte Material“ und „HEAT|Hero Material“ gemäß der Standarddefinition. Jede Position enthält Menge, Material/Bauteil, kurze Spezifikation und Belegstelle. Fehlende Mengen werden nicht erfunden, sondern mit „nach Weg“, „vor Ort prüfen“ oder einem offenen Punkt kenntlich gemacht.
 7. Widersprüche oder nicht belastbar bezifferte Angaben separat unter „Vor finaler Bestellung klären“ aufführen.
 8. Ergebnis als A4-PDF unter `output/pdf/Materialliste_Installation_<Auftragsnummer>_<Kunde>.pdf` speichern. Alle Seiten rendern und visuell auf abgeschnittenen Text, Überlagerungen, fehlerhafte Zeichen und unschöne Seitenumbrüche prüfen.
 9. Die fertige PDF in der Abschlussnachricht als Datei an Nadine ausliefern. Dabei kurz bestätigen, dass das Quelldokument ausschließlich gelesen und nicht verändert oder gelöscht wurde.
@@ -31,6 +31,7 @@ Für jeden Lauf müssen mindestens Absender oder Betreff sowie das Empfängerpos
 ## Qualitätskriterien
 
 - Seite 1 stimmt sichtbar mit Seite 1 des bereitgestellten Originalplans überein.
+- Die Materialliste ist in „DeWarmte Material“ und „HEAT|Hero Material“ aufgeteilt und verwendet die versionierte Standardzuordnung.
 - Die Materialliste ist deutsch, einfach, belegbasiert und enthält keine erfundenen Stückzahlen.
 - Mailangaben und Planangaben werden gemeinsam berücksichtigt.
 - Widersprüche bleiben sichtbar statt still aufgelöst zu werden.

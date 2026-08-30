@@ -23,7 +23,7 @@ try {
   assert.equal(finished.status, 'sent-verified');
   assert.equal((await readDewarmteDelivery(jobId)).status, 'sent-verified');
 
-  const { validateDewarmteLinkPdfInput } = await import('../projects/dewarmte.js');
+  const { summarizeDewarmteLinkPdfJobs, validateDewarmteLinkPdfInput } = await import('../projects/dewarmte.js');
   const validated = validateDewarmteLinkPdfInput({
     sourceUrl: 'https://example.com/installation.pdf', deliveryMode: 'download',
     supplementaryText: 'Stahl/Kupfer bevorzugen.\nPressen statt Klemmen.',
@@ -31,6 +31,35 @@ try {
   });
   assert.match(validated.supplementaryText, /Pressen statt Klemmen/);
   assert.equal(validated.supplementaryPdfName, 'Startvoorraad.pdf');
+
+  const { DEWARMTE_MATERIAL_STANDARD } = await import('../projects/dewarmte-material-standard.js');
+  assert.deepEqual(DEWARMTE_MATERIAL_STANDARD.cover, {
+    source: 'installation-planning', sourcePage: 1, resultPage: 1, preserveUnchanged: true,
+    title: 'Deckblatt aus der Installationsplanung',
+  });
+  assert.deepEqual(DEWARMTE_MATERIAL_STANDARD.sections.map(section => section.title), ['DeWarmte Material', 'HEAT|Hero Material']);
+  assert.deepEqual(DEWARMTE_MATERIAL_STANDARD.sections[1].items, [
+    'Erdleitung / Schutzrohr',
+    'Heizungsrohrleitung Pomp MP',
+    'Adapter und Fittings Pomp MP',
+    'Pufferspeicher 20 Liter mit Bypass',
+    'Magnetfilter',
+    'Warmwasserrohr Pomp T',
+    'Heizungs-/Quellrohr Pomp T',
+    'Anschlussmaterial Warmwasser-Zirkulation',
+    'Elektroanschluss Pomp MP',
+  ]);
+
+  const runningJob = summarizeDewarmteLinkPdfJobs([{
+    id: 'command-progress', action: 'project.workflow.run', status: 'completed', createdAt: '2026-08-30T08:00:00Z',
+    result: { jobId }, payload: { projectId: 'dewarmte', workflowId: 'dewarmte-link-to-material-pdf', deliveryMode: 'download' },
+  }], [], [], [{
+    projectId: 'dewarmte', workflowId: 'dewarmte-link-to-material-pdf', jobId,
+    status: 'running', phase: 'testing', progress: 50, updatedAt: '2026-08-30T08:03:00Z', resultPreview: 'PDF wird geprüft.',
+  }])[0];
+  assert.equal(runningJob.progress, 50);
+  assert.equal(runningJob.phase, 'PDF wird gerendert und visuell geprüft');
+  assert.equal(runningJob.active, true);
 
   const { cleanupExpiredDewarmteSupplementPdfs, readDewarmteSupplementPdf, storeDewarmteSupplementPdf } = await import('../projects/dewarmte-inputs.js');
   const serverInput = await storeDewarmteSupplementPdf({ name: 'Startvoorraad.pdf', buffer: Buffer.from('%PDF-test') });
@@ -83,7 +112,9 @@ try {
   assert.match(workflow, /ausschließlich.*gelesen/);
   assert.match(workflow, /Gesendet/);
   assert.match(workflow, /spätestens drei Tage/);
-  console.log('PASS DeWarmte: Zusatztext, Zusatz-PDF, Drei-Tage-Löschung und Mail-Dublettenschutz.');
+  assert.match(workflow, /DeWarmte Material/);
+  assert.match(workflow, /HEAT\|Hero Material/);
+  console.log('PASS DeWarmte: Fortschritt, festes Grundgerüst, Zusatzdaten-Löschung und Mail-Dublettenschutz.');
 } finally {
   await rm(dataDir, { recursive: true, force: true });
 }

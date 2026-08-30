@@ -317,6 +317,7 @@ try {
   });
   assert.equal(directInstallationPlan.workflowId, 'installation-plan-material-list');
   assert.match(directInstallationPlan.prompt, /ausschließlich lesend/);
+  assert.match(directInstallationPlan.prompt, /HEAT\|Hero Material/);
   assert.equal(directInstallationPlan.acceptanceCriteria.some(item => /nichts.*gelöscht/.test(item)), true);
   const directDewarmte = await startProjectWorkflowTask({
     workflowId: 'dewarmte-link-to-material-pdf',
@@ -327,6 +328,11 @@ try {
   assert.equal(directDewarmte.projectId, 'dewarmte');
   assert.match(directDewarmte.prompt, /publish-dewarmte-pdf/);
   assert.match(directDewarmte.prompt, /deliver-dewarmte-pdf/);
+  assert.match(directDewarmte.prompt, /unveränderte erste Seite der Installationsplanung/);
+  assert.match(directDewarmte.prompt, /DeWarmte Material/);
+  assert.match(directDewarmte.prompt, /HEAT\|Hero Material/);
+  assert.match(directDewarmte.prompt, /progress .* implementing/);
+  assert.match(directDewarmte.prompt, /progress .* testing/);
   assert.doesNotMatch(directDewarmte.prompt, /Postfachsuche durchführen/);
   const dewarmteSupplementRequest = 'dewarmte-link-pdf:supplement-test';
   const dewarmteSupplementJobId = codexJobIdForRequest(dewarmteSupplementRequest);
