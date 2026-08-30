@@ -12,24 +12,44 @@ const BINARY_DIGEST = `${BINARY}.sha256`;
 const COMPILE_LOCK = `${BINARY}.compile-lock`;
 const TEMP_DIR = path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper', 'tmp');
 const MAX_OUTPUT_BYTES = 1024 * 1024;
+const SWIFT_COMPILE_TIMEOUT_MS = 240_000;
 const OUTLOOK_ACCOUNT_LABELS = Object.freeze({
   'foerderung@heat-hero.com': 'Förderung | HEAT HERO',
 });
 
-function run(command, args, { timeoutMs = 15000 } = {}) {
+function run(command, args, { timeoutMs = 15000, terminateProcessGroup = false } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command, args, {
+      detached: terminateProcessGroup,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
+    let forceTimer = null;
+    const stopChild = signal => {
+      try {
+        if (terminateProcessGroup && child.pid) process.kill(-child.pid, signal);
+        else child.kill(signal);
+      } catch { /* The process may already have exited. */ }
+    };
     const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error(`macOS-Oberflächenautomation hat nach ${timeoutMs} ms abgebrochen.`));
+      timedOut = true;
+      stopChild('SIGTERM');
+      forceTimer = setTimeout(() => stopChild('SIGKILL'), 5000);
+      forceTimer.unref?.();
     }, timeoutMs);
     child.stdout.on('data', chunk => { if (stdout.length < MAX_OUTPUT_BYTES) stdout += chunk; });
     child.stderr.on('data', chunk => { if (stderr.length < MAX_OUTPUT_BYTES) stderr += chunk; });
-    child.on('error', error => { clearTimeout(timer); reject(error); });
+    child.on('error', error => {
+      clearTimeout(timer);
+      if (forceTimer) clearTimeout(forceTimer);
+      reject(error);
+    });
     child.on('close', code => {
       clearTimeout(timer);
+      if (forceTimer) clearTimeout(forceTimer);
+      if (timedOut) return reject(new Error(`macOS-Oberflächenautomation hat nach ${timeoutMs} ms abgebrochen.`));
       if (code === 0) return resolve(stdout.trim());
       reject(new Error((stderr || stdout || `${command} beendet mit Code ${code}`).trim()));
     });
@@ -67,7 +87,10 @@ export async function ensureMacUiBridge() {
   const temporaryDigest = `${BINARY_DIGEST}.${randomUUID()}.tmp`;
   try {
     if (await isCurrent()) return BINARY;
-    await run('/usr/bin/swiftc', [SOURCE, '-o', temporaryBinary], { timeoutMs: 60000 });
+    await run('/usr/bin/swiftc', [SOURCE, '-o', temporaryBinary], {
+      timeoutMs: SWIFT_COMPILE_TIMEOUT_MS,
+      terminateProcessGroup: true,
+    });
     const compiledBinary = await readFile(temporaryBinary);
     const binaryDigest = createHash('sha256').update(compiledBinary).digest('hex');
     await rename(temporaryBinary, BINARY);
