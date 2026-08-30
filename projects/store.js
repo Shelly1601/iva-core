@@ -386,6 +386,7 @@ const HEAT_HERO_PROJECT = {
 
 const DEWARMTE_PROJECT = {
   id: 'dewarmte',
+  specVersion: 5,
   name: 'DeWarmte',
   company: 'DeWarmte',
   category: 'Installationsplanung · Materiallisten',
@@ -619,6 +620,7 @@ function normalizeRunLogEntry(entry = {}, fallback = {}) {
 }
 
 function normalizeProject(input = {}, fallback = {}) {
+  const useFallbackSpec = Number(fallback.specVersion || 0) > Number(input.specVersion || 0);
   const areas = Array.isArray(input.areas) ? input.areas : (fallback.areas || []);
   const inputAutomations = Array.isArray(input.automations) ? input.automations : [];
   const fallbackAutomations = Array.isArray(fallback.automations) ? fallback.automations : [];
@@ -655,6 +657,7 @@ function normalizeProject(input = {}, fallback = {}) {
   const files = Array.isArray(input.files) ? input.files : (fallback.files || []);
   return {
     ...clone(fallback),
+    specVersion: Math.max(0, Number(useFallbackSpec ? fallback.specVersion : input.specVersion || fallback.specVersion) || 0),
     id: clean(input.id || fallback.id, 100) || crypto.randomUUID(),
     name: clean(input.name || fallback.name, 180) || 'Neues Projekt',
     company: clean(input.company || fallback.company, 180),
@@ -663,13 +666,13 @@ function normalizeProject(input = {}, fallback = {}) {
     instagramUrl: normalizeInstagramUrl(input.instagramUrl ?? fallback.instagramUrl),
     logo: normalizeLogo(input.logo ?? fallback.logo),
     status: PROJECT_STATUSES.has(input.status) ? input.status : (PROJECT_STATUSES.has(fallback.status) ? fallback.status : 'planned'),
-    description: clean(input.description || fallback.description, 5000),
-    objective: clean(input.objective || fallback.objective, 5000),
-    principles: (Array.isArray(input.principles) ? input.principles : (fallback.principles || [])).map(item => clean(item, 2000)).filter(Boolean).slice(0, 100),
+    description: clean((useFallbackSpec ? fallback.description : input.description) || fallback.description, 5000),
+    objective: clean((useFallbackSpec ? fallback.objective : input.objective) || fallback.objective, 5000),
+    principles: (useFallbackSpec ? (fallback.principles || []) : (Array.isArray(input.principles) ? input.principles : (fallback.principles || []))).map(item => clean(item, 2000)).filter(Boolean).slice(0, 100),
     areas: areas.map(area => normalizeArea(area, (fallback.areas || []).find(item => item.id === area?.id) || {})).slice(0, 100),
     process: clone(Array.isArray(input.process) ? input.process : (fallback.process || [])),
     qualityGates: clone(Array.isArray(input.qualityGates) ? input.qualityGates : (fallback.qualityGates || [])),
-    phases: clone(Array.isArray(input.phases)
+    phases: clone(!useFallbackSpec && Array.isArray(input.phases)
       ? input.phases
       : (fallback.phases || input.roadmap || fallback.roadmap || [])),
     automations,
