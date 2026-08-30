@@ -1098,11 +1098,7 @@ export async function createPipedriveFundingRequestNote({ dealId, missingDocumen
   const recipientText = fundingRequestRecipientText({ vpName, vpEmail, ...routingInput }).text;
   const content = `<p><strong>Fehlende Unterlagen:</strong></p><ul>${labels.map(label => `<li>${escapePipedriveNoteHtml(label)}</li>`).join('')}</ul><p>${escapePipedriveNoteHtml(recipientText)}</p><p>${IVA_PIPEDRIVE_NOTE_SIGNATURE}</p>`;
 
-  const createdIds = await openTemporaryPipedriveDealTabs([id]);
-  try {
-    await activatePipedriveDealTab(id);
-    await waitForPipedriveDealTab(id);
-    const result = JSON.parse(await executePipedriveJavaScript(String.raw`(() => {
+  const result = JSON.parse(await executePipedriveJavaScript(String.raw`(() => {
       const dealId = ${JSON.stringify(id)};
       const marker = ${JSON.stringify(marker)};
       const content = ${JSON.stringify(content)};
@@ -1142,12 +1138,9 @@ export async function createPipedriveFundingRequestNote({ dealId, missingDocumen
       } catch (error) {
         return JSON.stringify({ error: String(error?.message || error) });
       }
-    })()`, { dealId: id, timeoutMs: 30000 }));
-    if (result.error) throw new Error(`Pipedrive-Notiz fuer Deal ${id}: ${result.error}`);
-    return { dealId: id, ...result, mutated: result.created === true, deletedFromPipedrive: false };
-  } finally {
-    await closeTemporaryPipedriveDealTabs(createdIds).catch(() => {});
-  }
+    })()`, { timeoutMs: 30000 }));
+  if (result.error) throw new Error(`Pipedrive-Notiz fuer Deal ${id}: ${result.error}`);
+  return { dealId: id, ...result, mutated: result.created === true, deletedFromPipedrive: false };
 }
 
 function preparePipedriveFundingRequestNote({ dealId, missingDocumentLabels, vpName, vpEmail, ...routingInput } = {}) {
@@ -1204,11 +1197,7 @@ export async function createPipedriveFundingInformationNote({ dealId, heading, d
   const id = String(dealId || '').replace(/\D/g, '');
   if (!id) throw new Error('Für die Pipedrive-Information fehlt eine gültige Deal-ID.');
   const rendered = renderPipedriveFundingInformationNote({ heading, details });
-  const createdIds = await openTemporaryPipedriveDealTabs([id]);
-  try {
-    await activatePipedriveDealTab(id);
-    await waitForPipedriveDealTab(id);
-    const result = JSON.parse(await executePipedriveJavaScript(String.raw`(() => {
+  const result = JSON.parse(await executePipedriveJavaScript(String.raw`(() => {
       const dealId = ${JSON.stringify(id)};
       const content = ${JSON.stringify(rendered.content)};
       const ivaNoteSignature = ${JSON.stringify('(Notiz von Nadine via KI)')};
@@ -1245,12 +1234,9 @@ export async function createPipedriveFundingInformationNote({ dealId, heading, d
       } catch (error) {
         return JSON.stringify({ error: String(error?.message || error) });
       }
-    })()`, { dealId: id, timeoutMs: 30000 }));
-    if (result.error) throw new Error(`Pipedrive-Information für Deal ${id}: ${result.error}`);
-    return { dealId: id, heading: rendered.heading, ...result, mutated: result.created === true, deletedFromPipedrive: false };
-  } finally {
-    await closeTemporaryPipedriveDealTabs(createdIds).catch(() => {});
-  }
+    })()`, { timeoutMs: 30000 }));
+  if (result.error) throw new Error(`Pipedrive-Information für Deal ${id}: ${result.error}`);
+  return { dealId: id, heading: rendered.heading, ...result, mutated: result.created === true, deletedFromPipedrive: false };
 }
 
 export async function updatePipedriveFundingRequestNotes({ items } = {}) {
@@ -1259,12 +1245,7 @@ export async function updatePipedriveFundingRequestNotes({ items } = {}) {
   if (prepared.length > 100) throw new Error('In einem Lauf dürfen höchstens 100 IVA-Pipedrive-Notizen aktualisiert werden.');
   if (new Set(prepared.map(item => item.noteId)).size !== prepared.length) throw new Error('Eine Pipedrive-Notiz ist im Aktualisierungslauf mehrfach enthalten.');
 
-  const sourceDealId = prepared.find(item => item.dealId === '8153')?.dealId || prepared[0].dealId;
-  const createdIds = await openTemporaryPipedriveDealTabs([sourceDealId]);
-  try {
-    await activatePipedriveDealTab(sourceDealId);
-    await waitForPipedriveDealTab(sourceDealId);
-    const result = JSON.parse(await executePipedriveJavaScript(String.raw`(() => {
+  const result = JSON.parse(await executePipedriveJavaScript(String.raw`(() => {
       const items = ${JSON.stringify(prepared)};
       const ivaNoteSignature = ${JSON.stringify('(Notiz von Nadine via KI)')};
       const resource = performance.getEntriesByType('resource').map(entry => entry.name).find(name => name.includes('session_token='));
@@ -1318,21 +1299,18 @@ export async function updatePipedriveFundingRequestNotes({ items } = {}) {
         }
       }
       return JSON.stringify({ results });
-    })()`, { dealId: sourceDealId, timeoutMs: 180000 }));
-    if (result.fatal) throw new Error('Der angemeldete Pipedrive-Notizzugriff ist nicht verfügbar.');
-    const results = result.results || [];
-    return {
-      requested: prepared.length,
-      updated: results.filter(item => item.updated).length,
-      unchanged: results.filter(item => item.unchanged).length,
-      failed: results.filter(item => !item.verified).length,
-      results,
-      mutated: results.some(item => item.updated),
-      deletedFromPipedrive: false,
-    };
-  } finally {
-    await closeTemporaryPipedriveDealTabs(createdIds).catch(() => {});
-  }
+    })()`, { timeoutMs: 180000 }));
+  if (result.fatal) throw new Error('Der angemeldete Pipedrive-Notizzugriff ist nicht verfügbar.');
+  const results = result.results || [];
+  return {
+    requested: prepared.length,
+    updated: results.filter(item => item.updated).length,
+    unchanged: results.filter(item => item.unchanged).length,
+    failed: results.filter(item => !item.verified).length,
+    results,
+    mutated: results.some(item => item.updated),
+    deletedFromPipedrive: false,
+  };
 }
 
 export async function createPipedriveFundingRequestNotes({ items } = {}) {
@@ -1341,12 +1319,7 @@ export async function createPipedriveFundingRequestNotes({ items } = {}) {
   if (prepared.length > 100) throw new Error('In einem Lauf duerfen hoechstens 100 Pipedrive-Notizen erzeugt werden.');
   if (new Set(prepared.map(item => item.dealId)).size !== prepared.length) throw new Error('Ein Pipedrive-Deal ist im Notizlauf mehrfach enthalten.');
 
-  const sourceDealId = prepared.find(item => item.dealId === '8153')?.dealId || prepared[0].dealId;
-  const createdIds = await openTemporaryPipedriveDealTabs([sourceDealId]);
-  try {
-    await activatePipedriveDealTab(sourceDealId);
-    await waitForPipedriveDealTab(sourceDealId);
-    const result = JSON.parse(await executePipedriveJavaScript(String.raw`(() => {
+  const result = JSON.parse(await executePipedriveJavaScript(String.raw`(() => {
       const items = ${JSON.stringify(prepared)};
       const ivaNoteSignature = ${JSON.stringify('(Notiz von Nadine via KI)')};
       const resource = performance.getEntriesByType('resource').map(entry => entry.name).find(name => name.includes('session_token='));
@@ -1392,21 +1365,18 @@ export async function createPipedriveFundingRequestNotes({ items } = {}) {
         }
       }
       return JSON.stringify({ results });
-    })()`, { dealId: sourceDealId, timeoutMs: 180000 }));
-    if (result.fatal) throw new Error('Der angemeldete Pipedrive-Notizzugriff ist nicht verfuegbar.');
-    const results = result.results || [];
-    return {
-      requested: prepared.length,
-      created: results.filter(item => item.created).length,
-      alreadyPresent: results.filter(item => item.alreadyPresent).length,
-      failed: results.filter(item => !item.verified).length,
-      results,
-      mutated: results.some(item => item.created),
-      deletedFromPipedrive: false,
-    };
-  } finally {
-    await closeTemporaryPipedriveDealTabs(createdIds).catch(() => {});
-  }
+    })()`, { timeoutMs: 180000 }));
+  if (result.fatal) throw new Error('Der angemeldete Pipedrive-Notizzugriff ist nicht verfuegbar.');
+  const results = result.results || [];
+  return {
+    requested: prepared.length,
+    created: results.filter(item => item.created).length,
+    alreadyPresent: results.filter(item => item.alreadyPresent).length,
+    failed: results.filter(item => !item.verified).length,
+    results,
+    mutated: results.some(item => item.created),
+    deletedFromPipedrive: false,
+  };
 }
 
 async function readPipedriveApiBatchAsync(batch, sourceDealId) {
@@ -1972,11 +1942,7 @@ export async function transitionPipedriveFundingStage({ dealId, fromStage, toSta
   if (!id) throw new Error('Für den Förder-Phasenwechsel fehlt eine gültige Deal-ID.');
   if (confirmApply !== true) throw new Error('Pipedrive-Phase wurde nicht geändert: confirmApply=true fehlt.');
   const transition = resolvePipedriveFundingStageTransition({ fromStage, toStage });
-  const createdIds = await openTemporaryPipedriveDealTabs([id]);
-  try {
-    await activatePipedriveDealTab(id);
-    await waitForPipedriveDealTab(id);
-    const raw = await executePipedriveJavaScript(String.raw`(() => {
+  const raw = await executePipedriveJavaScript(String.raw`(() => {
       const dealId = ${JSON.stringify(id)};
       const expectedFromAliases = ${JSON.stringify(transition.fromAliases)};
       const expectedToAliases = ${JSON.stringify(transition.toAliases)};
@@ -2011,13 +1977,43 @@ export async function transitionPipedriveFundingStage({ dealId, fromStage, toSta
         if (!matchesAny(verifiedName, expectedToAliases)) throw new Error('stage_change_not_verified:' + verifiedName);
         return JSON.stringify({ changed: true, alreadyPresent: false, verified: true, fromStage: currentName, toStage: verifiedName });
       } catch (error) { return JSON.stringify({ error: String(error?.message || error) }); }
-    })()`, { dealId: id, timeoutMs: 30000 });
-    const result = JSON.parse(raw);
-    if (result.error) throw new Error(`Pipedrive-Phasenwechsel für Deal ${id}: ${result.error}`);
-    return { dealId: id, ...result, mutated: result.changed === true, deletedFromPipedrive: false };
-  } finally {
-    await closeTemporaryPipedriveDealTabs(createdIds).catch(() => {});
-  }
+    })()`, { timeoutMs: 30000 });
+  const result = JSON.parse(raw);
+  if (result.error) throw new Error(`Pipedrive-Phasenwechsel für Deal ${id}: ${result.error}`);
+  return { dealId: id, ...result, mutated: result.changed === true, deletedFromPipedrive: false };
+}
+
+async function readPipedriveFundingDealGuardViaPipeline(dealId) {
+  const raw = await executePipedriveJavaScript(String.raw`(() => {
+    const dealId = ${JSON.stringify(String(dealId))};
+    const resource = performance.getEntriesByType('resource').map(entry => entry.name).find(name => name.includes('session_token='));
+    const sessionToken = resource ? new URL(resource).searchParams.get('session_token') : '';
+    if (!sessionToken) return JSON.stringify({ error: 'missing_session_token' });
+    const request = path => {
+      const separator = path.includes('?') ? '&' : '?';
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', path + separator + 'strict_mode=true&session_token=' + encodeURIComponent(sessionToken), false);
+      xhr.send();
+      let payload = null;
+      try { payload = JSON.parse(xhr.responseText); } catch {}
+      if (xhr.status < 200 || xhr.status >= 300 || payload?.success === false) throw new Error('HTTP ' + xhr.status + ': ' + String(payload?.error || xhr.responseText || 'request_failed').slice(0, 240));
+      return payload?.data;
+    };
+    try {
+      const stages = request('/api/v1/stages?pipeline_id=1&start=0&limit=500') || [];
+      const byId = new Map(stages.map(stage => [String(stage.id), String(stage.name || '')]));
+      const deal = request('/api/v1/deals/' + dealId + '?get_activity_summary=false&get_updated_deal_stage_averages=false') || {};
+      const files = request('/api/v1/deals/' + dealId + '/files?start=0&limit=500') || [];
+      return JSON.stringify({
+        dealId: String(deal.id || dealId),
+        stage: byId.get(String(deal.stage_id)) || '',
+        files: files.map(file => String(file.name || file.file_name || '')).filter(Boolean),
+      });
+    } catch (error) { return JSON.stringify({ error: String(error?.message || error) }); }
+  })()`, { timeoutMs: 30000 });
+  const result = JSON.parse(raw);
+  if (result.error) throw new Error(`Pipedrive-Prüfung für Deal ${dealId}: ${result.error}`);
+  return result;
 }
 
 export async function markPipedriveFundingDealWon({ dealId, approvalFileName, confirmApply = false } = {}) {
@@ -2028,8 +2024,7 @@ export async function markPipedriveFundingDealWon({ dealId, approvalFileName, co
   if (!/\.pdf$/i.test(fileName) || !/(?:kfw.{0,40}zusage|zusage.{0,40}kfw|zuschuss.{0,20}(?:zusage|bescheid))/i.test(fileName)) {
     throw new Error('„Gewonnen“ ist nur mit einem eindeutig bezeichneten KfW-Zusageschreiben als PDF zulässig.');
   }
-  const snapshot = await readPipedriveFundingDealsViaApi({ dealIds: [id], batchSize: 1 });
-  const deal = snapshot.snapshots[0];
+  const deal = await readPipedriveFundingDealGuardViaPipeline(id);
   let stageKey = '';
   try { stageKey = deal ? resolveFundingStage(deal.stage).key : ''; } catch {}
   if (!deal || stageKey !== 'fundingRequested') {
@@ -2037,11 +2032,7 @@ export async function markPipedriveFundingDealWon({ dealId, approvalFileName, co
   }
   const exactMatches = (deal.files || []).filter(item => path.basename(String(item)) === fileName);
   if (exactMatches.length !== 1) throw new Error(`Das KfW-Zusageschreiben „${fileName}“ ist im Deal nicht genau einmal vorhanden.`);
-  const createdIds = await openTemporaryPipedriveDealTabs([id]);
-  try {
-    await activatePipedriveDealTab(id);
-    await waitForPipedriveDealTab(id);
-    const raw = await executePipedriveJavaScript(String.raw`(() => {
+  const raw = await executePipedriveJavaScript(String.raw`(() => {
       const dealId = ${JSON.stringify(id)};
       const resource = performance.getEntriesByType('resource').map(entry => entry.name).find(name => name.includes('session_token='));
       const sessionToken = resource ? new URL(resource).searchParams.get('session_token') : '';
@@ -2064,7 +2055,7 @@ export async function markPipedriveFundingDealWon({ dealId, approvalFileName, co
         if (String(after.status || '').toLowerCase() !== 'won') throw new Error('won_status_not_verified');
         return JSON.stringify({ changed: String(before.status || '').toLowerCase() !== 'won', alreadyPresent: String(before.status || '').toLowerCase() === 'won', verified: true, status: after.status, stageId: String(after.stage_id || '') });
       } catch (error) { return JSON.stringify({ error: String(error?.message || error) }); }
-    })()`, { dealId: id, timeoutMs: 30000 });
+    })()`, { timeoutMs: 30000 });
     const result = JSON.parse(raw);
     if (result.error) throw new Error(`Pipedrive „Gewonnen“ für Deal ${id}: ${result.error}`);
     let followUp = null;
@@ -2096,12 +2087,12 @@ export async function markPipedriveFundingDealWon({ dealId, approvalFileName, co
         const followUpStageVerified = targetAliases.some(alias => normalize(alias) === normalize(stageName));
         return JSON.stringify({ status: String(deal.status || ''), statusVerified, stageId: String(deal.stage_id || ''), stageName, followUpStageVerified });
       } catch (error) { return JSON.stringify({ error: String(error?.message || error) }); }
-      })()`, { dealId: id, timeoutMs: 30000 });
+      })()`, { timeoutMs: 30000 });
       followUp = JSON.parse(followUpRaw);
       if (followUp.error) throw new Error(`Pipedrive Folgephase für Deal ${id} konnte nach „Gewonnen“ nicht gelesen werden: ${followUp.error}. Status nicht erneut setzen.`);
       if (followUp.statusVerified === true && followUp.followUpStageVerified === true) break;
     }
-    return {
+  return {
       dealId: id,
       approvalFileName: fileName,
       ...result,
@@ -2111,10 +2102,7 @@ export async function markPipedriveFundingDealWon({ dealId, approvalFileName, co
       requiresManualReview: followUp.followUpStageVerified !== true,
       mutated: result.changed === true,
       deletedFromPipedrive: false,
-    };
-  } finally {
-    await closeTemporaryPipedriveDealTabs(createdIds).catch(() => {});
-  }
+  };
 }
 
 export async function diagnosePipedriveChrome() {

@@ -84,6 +84,24 @@ try {
   assert.match(downloadSource, /executionDealId: ''/);
   assert.doesNotMatch(downloadSource, /openTemporaryPipedriveDealTabs/,
     'Dateidownloads sollen die stabile rechte Pipeline-Sitzung statt schwerer Deal-Seiten verwenden');
+  const fundingNoteSource = pipedriveSource.slice(
+    pipedriveSource.indexOf('export async function createPipedriveFundingRequestNote'),
+    pipedriveSource.indexOf('async function readPipedriveApiBatchAsync'),
+  );
+  assert.match(fundingNoteSource, /executePipedriveJavaScript/);
+  assert.doesNotMatch(fundingNoteSource, /openTemporaryPipedriveDealTabs/,
+    'Fördernotizen sollen die stabile rechte Pipeline-Sitzung statt schwerer Deal-Seiten verwenden');
+  assert.doesNotMatch(fundingNoteSource, /activatePipedriveDealTab/,
+    'Fördernotizen dürfen nicht vom vollständigen Laden einer einzelnen Deal-Seite abhängen');
+  const fundingMutationSource = pipedriveSource.slice(
+    pipedriveSource.indexOf('export async function transitionPipedriveFundingStage'),
+    pipedriveSource.indexOf('export async function diagnosePipedriveChrome'),
+  );
+  assert.match(fundingMutationSource, /readPipedriveFundingDealGuardViaPipeline/);
+  assert.doesNotMatch(fundingMutationSource, /openTemporaryPipedriveDealTabs/,
+    'Förder-Phasenwechsel sollen die stabile rechte Pipeline-Sitzung verwenden');
+  assert.doesNotMatch(fundingMutationSource, /activatePipedriveDealTab/,
+    'Förder-Phasenwechsel dürfen nicht vom vollständigen Laden einer Deal-Seite abhängen');
   assert.match(macUiSource, /for \(let attempt = 1; attempt <= 3; attempt \+= 1\)/);
   assert.match(macBridgeSource, /sidebarNodesEnsuringFolder/);
   assert.match(macBridgeSource, /AXPress erfolgreich quittieren/);
