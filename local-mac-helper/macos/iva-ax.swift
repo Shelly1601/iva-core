@@ -150,6 +150,199 @@ func writeJSON(_ value: Any) throws {
     FileHandle.standardOutput.write(Data("\n".utf8))
 }
 
+func screenId(_ screen: NSScreen) -> String {
+    let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+    return number?.stringValue ?? ""
+}
+
+func screenPayload(_ screen: NSScreen) -> [String: Any] {
+    let frame = screen.frame
+    let visibleFrame = screen.visibleFrame
+    return [
+        "id": screenId(screen),
+        "name": screen.localizedName,
+        "isPrimary": frame.origin.x == 0 && frame.origin.y == 0,
+        "frame": ["x": frame.origin.x, "y": frame.origin.y, "width": frame.size.width, "height": frame.size.height],
+        "visibleFrame": ["x": visibleFrame.origin.x, "y": visibleFrame.origin.y, "width": visibleFrame.size.width, "height": visibleFrame.size.height],
+    ]
+}
+
+func rightmostScreenSelection() -> (screens: [NSScreen], rightmost: NSScreen?, ambiguous: Bool) {
+    let screens = NSScreen.screens.sorted { left, right in
+        if left.frame.origin.x == right.frame.origin.x { return left.frame.origin.y < right.frame.origin.y }
+        return left.frame.origin.x < right.frame.origin.x
+    }
+    guard let maxOriginX = screens.map({ $0.frame.origin.x }).max() else { return (screens, nil, true) }
+    let candidates = screens.filter { abs($0.frame.origin.x - maxOriginX) < 0.5 }
+    return (screens, candidates.count == 1 ? candidates[0] : nil, candidates.count != 1)
+}
+
+func displayLayoutPayload() -> [String: Any] {
+    let selection = rightmostScreenSelection()
+    return [
+        "count": selection.screens.count,
+        "hasMultipleDisplays": selection.screens.count >= 2,
+        "ambiguousRightmost": selection.ambiguous,
+        "screens": selection.screens.map(screenPayload),
+        "rightmostScreen": selection.rightmost.map(screenPayload) ?? NSNull(),
+    ]
+}
+
+func frontmostApplication() throws -> (NSRunningApplication, AXUIElement) {
+    guard AXIsProcessTrusted() else {
+        throw HelperError.message("macOS-Bedienungshilfe ist für den aufrufenden Helper nicht freigegeben.")
+    }
+    guard let app = NSWorkspace.shared.frontmostApplication else {
+        throw HelperError.message("Keine aktive Vordergrund-App gefunden.")
+    }
+    return (app, AXUIElementCreateApplication(app.processIdentifier))
+}
+
+func rectIntersectionArea(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
+    let intersection = lhs.intersection(rhs)
+    if intersection.isNull || intersection.isEmpty { return 0 }
+    return intersection.width * intersection.height
+}
+
+func screenForWindowFrame(_ frame: CGRect) -> NSScreen? {
+    let center = CGPoint(x: frame.midX, y: frame.midY)
+    if let exact = NSScreen.screens.first(where: { $0.frame.contains(center) }) { return exact }
+    return NSScreen.screens.max(by: { rectIntersectionArea($0.frame, frame) < rectIntersectionArea($1.frame, frame) })
+}
+
+func frontmostWindowDisplayPayload() throws -> [String: Any] {
+    let selection = rightmostScreenSelection()
+    let (app, appElement) = try frontmostApplication()
+    guard let windowValue = attribute(appElement, kAXFocusedWindowAttribute),
+          CFGetTypeID(windowValue) == AXUIElementGetTypeID() else {
+        throw HelperError.message("Die Vordergrund-App hat kein fokussiertes Fenster.")
+    }
+    let window = unsafeBitCast(windowValue, to: AXUIElement.self)
+    guard let frame = elementFrame(window) else { throw HelperError.message("Das fokussierte Fenster hat keine lesbare Position.") }
+    let currentScreen = screenForWindowFrame(frame)
+    let rightmost = selection.rightmost
+    return [
+        "applicationName": app.localizedName ?? "",
+        "bundleIdentifier": app.bundleIdentifier ?? "",
+        "windowTitle": textAttribute(window, kAXTitleAttribute),
+        "windowFrame": ["x": frame.origin.x, "y": frame.origin.y, "width": frame.size.width, "height": frame.size.height],
+        "currentScreen": currentScreen.map(screenPayload) ?? NSNull(),
+        "rightmostScreen": rightmost.map(screenPayload) ?? NSNull(),
+        "hasMultipleDisplays": selection.screens.count >= 2,
+        "ambiguousRightmost": selection.ambiguous,
+        "isOnRightmostScreen": {
+            guard let currentScreen, let rightmost else { return false }
+            return screenId(currentScreen) == screenId(rightmost)
+        }(),
+    ]
+}
+
+func activeDisplayRecords() -> [[String: Any]] {
+    var displayIds = [CGDirectDisplayID](repeating: 0, count: 16)
+    var displayCount: UInt32 = 0
+    guard CGGetActiveDisplayList(UInt32(displayIds.count), &displayIds, &displayCount) == .success else { return [] }
+    let main = CGMainDisplayID()
+    return displayIds.prefix(Int(displayCount)).map { displayId in
+        let frame = CGDisplayBounds(displayId)
+        return [
+            "id": String(displayId),
+            "main": displayId == main,
+            "x": frame.origin.x,
+            "y": frame.origin.y,
+            "width": frame.size.width,
+            "height": frame.size.height,
+        ]
+    }
+}
+
+func rightDisplayFrame() throws -> CGRect {
+    let records = activeDisplayRecords()
+    guard records.count >= 2 else {
+        throw HelperError.message("IVA-Displayregel blockiert: Das rechte Arbeitsdisplay ist nicht angeschlossen.")
+    }
+    let frames = records.compactMap { record -> CGRect? in
+        guard let x = record["x"] as? CGFloat, let y = record["y"] as? CGFloat,
+              let width = record["width"] as? CGFloat, let height = record["height"] as? CGFloat else { return nil }
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+    guard let target = frames.max(by: { $0.maxX == $1.maxX ? $0.minX < $1.minX : $0.maxX < $1.maxX }),
+          frames.contains(where: { $0 != target && target.minX >= $0.maxX }) else {
+        throw HelperError.message("IVA-Displayregel blockiert: Die Displays sind nicht eindeutig links/rechts angeordnet.")
+    }
+    return target
+}
+
+func frameIsInside(_ frame: CGRect, display: CGRect) -> Bool {
+    return frame.width > 0 && frame.height > 0
+        && frame.minX >= display.minX && frame.minY >= display.minY
+        && frame.maxX <= display.maxX && frame.maxY <= display.maxY
+}
+
+func positionWindowOnRightDisplay(_ window: AXUIElement) throws -> CGRect {
+    let display = try rightDisplayFrame()
+    let insetX = min(36, max(18, round(display.width * 0.008)))
+    let insetY = min(36, max(18, round(display.height * 0.015)))
+    let desired = CGRect(
+        x: display.minX + insetX,
+        y: display.minY + insetY,
+        width: display.width - insetX * 2,
+        height: display.height - insetY * 2
+    )
+    var position = desired.origin
+    var size = desired.size
+    guard let positionValue = AXValueCreate(.cgPoint, &position),
+          let sizeValue = AXValueCreate(.cgSize, &size) else {
+        throw HelperError.message("IVA-Displayregel konnte keine Fenstergeometrie erzeugen.")
+    }
+    let positionResult = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, positionValue)
+    let sizeResult = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue)
+    guard positionResult == .success && sizeResult == .success else {
+        throw HelperError.message("IVA-Displayregel konnte das App-Fenster nicht auf das rechte Display verschieben.")
+    }
+    usleep(250_000)
+    guard let verified = elementFrame(window), frameIsInside(verified, display: display) else {
+        throw HelperError.message("IVA-Displayregel konnte das App-Fenster rechts nicht verifizieren.")
+    }
+    return verified
+}
+
+func ensureApplicationWindowOnRight(bundleIdentifier: String) throws -> [String: Any] {
+    guard AXIsProcessTrusted() else {
+        throw HelperError.message("macOS-Bedienungshilfe ist für die IVA-Displayregel nicht freigegeben.")
+    }
+    guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).first else {
+        throw HelperError.message("Die angeforderte App läuft nicht.")
+    }
+    let appElement = AXUIElementCreateApplication(app.processIdentifier)
+    let display = try rightDisplayFrame()
+    let windows = ((attribute(appElement, kAXWindowsAttribute) as? [AXUIElement]) ?? []).filter { window in
+        guard let frame = elementFrame(window) else { return false }
+        return frame.width >= 180 && frame.height >= 120
+    }
+    guard !windows.isEmpty else { throw HelperError.message("Die App besitzt kein nutzbares Fenster.") }
+    let existing = windows.first { window in
+        guard let frame = elementFrame(window) else { return false }
+        return frameIsInside(frame, display: display)
+    }
+    let selected = existing ?? windows[0]
+    let frame: CGRect
+    if existing != nil, let currentFrame = elementFrame(selected) {
+        frame = currentFrame
+    } else {
+        frame = try positionWindowOnRightDisplay(selected)
+    }
+    activateApplication(app)
+    _ = AXUIElementSetAttributeValue(selected, kAXMainAttribute as CFString, kCFBooleanTrue)
+    _ = AXUIElementSetAttributeValue(selected, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    return [
+        "bundleIdentifier": bundleIdentifier,
+        "usedExistingRightWindow": existing != nil,
+        "onRightDisplay": frameIsInside(frame, display: display),
+        "frame": ["x": frame.origin.x, "y": frame.origin.y, "width": frame.width, "height": frame.height],
+        "display": ["x": display.origin.x, "y": display.origin.y, "width": display.width, "height": display.height],
+    ]
+}
+
 func matches(_ node: AXNode, role: String, description: String) -> Bool {
     guard node.role == role else { return false }
     return description.isEmpty || node.description == description || node.title == description || node.identifier == description
@@ -548,6 +741,33 @@ do {
         exit(0)
     }
 
+    if command == "display-status" {
+        let records = activeDisplayRecords()
+        let target = try rightDisplayFrame()
+        try writeJSON([
+            "policy": "rightmost-external-display",
+            "displays": records,
+            "target": ["x": target.origin.x, "y": target.origin.y, "width": target.width, "height": target.height],
+        ])
+        exit(0)
+    }
+
+    if command == "display-layout" {
+        try writeJSON(displayLayoutPayload())
+        exit(0)
+    }
+
+    if command == "frontmost-window-display" {
+        try writeJSON(frontmostWindowDisplayPayload())
+        exit(0)
+    }
+
+    if command == "ensure-app-window-right" {
+        guard arguments.count >= 2 else { throw HelperError.message("ensure-app-window-right benötigt eine App-ID.") }
+        try writeJSON(ensureApplicationWindowOnRight(bundleIdentifier: arguments[1]))
+        exit(0)
+    }
+
     let (app, appElement) = try outlookApplication()
 
     if command == "doctor" {
@@ -562,8 +782,8 @@ do {
     }
 
     if command == "activate" {
-        activateApplication(app)
-        try writeJSON(["activated": true, "focusedWindowTitle": focusedWindowTitle(appElement)])
+        let placement = try ensureApplicationWindowOnRight(bundleIdentifier: "com.microsoft.Outlook")
+        try writeJSON(["activated": true, "focusedWindowTitle": focusedWindowTitle(appElement), "displayPlacement": placement])
         exit(0)
     }
 
@@ -967,9 +1187,11 @@ do {
     }
 
     if command == "new-message" {
-        activateApplication(app)
+        _ = try ensureApplicationWindowOnRight(bundleIdentifier: "com.microsoft.Outlook")
         try commandShortcut(45) // Befehl+N
         usleep(700_000)
+        let composeWindow = try focusedWindow(appElement)
+        _ = try positionWindowOnRightDisplay(composeWindow)
         let composeNodes = collect(focusedRoot(appElement))
         let accountPickers = composeNodes.filter { matches($0, role: "AXPopUpButton", description: "accountPicker") }
         let subjectFields = composeNodes.filter { matches($0, role: "AXTextField", description: "subjectTextField") }
@@ -1473,6 +1695,9 @@ do {
         }
         let selectedWindow = matchingWindows[0]
         activateApplication(app)
+        if let selectedFrame = elementFrame(selectedWindow.window), !frameIsInside(selectedFrame, display: try rightDisplayFrame()) {
+            _ = try positionWindowOnRightDisplay(selectedWindow.window)
+        }
         _ = AXUIElementSetAttributeValue(selectedWindow.window, kAXMainAttribute as CFString, kCFBooleanTrue)
         _ = AXUIElementSetAttributeValue(selectedWindow.window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         usleep(250_000)

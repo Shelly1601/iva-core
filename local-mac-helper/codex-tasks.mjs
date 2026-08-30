@@ -246,6 +246,7 @@ function workflowResultInstructions(request) {
   return `Verbindliches maschinenlesbares Ergebnisprotokoll (Pflicht):
 - Lies zu Beginn den gespeicherten Stand mit: ${command('workflow-status', request.jobId)}
 - Bereits als completed gespeicherte Teilschritte nicht erneut ausführen; beim ersten offenen Teilschritt fortsetzen.
+- Ein mit partial abgeschlossenes Teilprotokoll beendet diesen Teilschritt ebenfalls: Fahre mit den anderen eindeutig prüfbaren Fällen im nächsten Teilschritt fort. Nur blocked stoppt die Reihenfolge vollständig.
 ${stepLines.join('\n')}
 - Ganz am Ende genau einmal: ${command('workflow-result', request.jobId, '<completed|no_changes|partial|blocked|failed>', '"kurze Gesamtzusammenfassung"')}
 completed/no_changes ist nur erlaubt, wenn jeder Pflicht-Teilschritt protokolliert und nicht partial/blockiert ist. Ein normal beendeter Codex-Prozess ohne dieses Ergebnisprotokoll gilt ausdrücklich nicht als Erfolg.`;
@@ -256,10 +257,11 @@ export function buildCodexPrompt(request) {
     ? `\n\nDies ist der automatische Wiederanlauf ${Number(request.recoveryAttempt)} nach einem unterbrochenen lokalen Worker. Prüfe vor jeder Schreib- oder Sendeaktion zuerst vorhandene lokale Belege, den sichtbaren Zielzustand und bereits erzeugte Ergebnisse. Setze beim ersten noch nicht verifizierten Schritt fort. Wiederhole niemals eine bereits sichtbare, gespeicherte oder anderweitig belegte Aktion. Der Wiederanlauf ist eine Fortsetzung desselben Auftrags, kein neuer Auftrag.`
     : '';
   const runtimeInstruction = `Die verbindlichen Projektanweisungen stehen in ${path.join(REPO_ROOT, '..', 'AGENTS.md')}; lies diese Datei, auch wenn im Unterordner iva-core keine eigene AGENTS.md liegt. Bestehende lokale IVA-Helfer startest du mit absolutem Pfad aus ${path.dirname(MODULE_PATH)}. Dieser geprüfte Laufzeitstand kommt vom zentralen IVA-Core. Projektquellen und Dokumente bleiben im gesetzten iCloud-Workspace. Keine zweite lokale Kopie als laufenden Agenten starten.`;
+  const displayInstruction = `Verbindliche Displayregel: Bediene ausschließlich das physisch rechte Display. Öffne für IVA bei Bedarf ein eigenes zweites App-Fenster beziehungsweise eigene Tabs rechts; verwende, verschiebe oder übernimm kein Arbeitsfenster auf dem linken Display. Die lokalen Pipedrive-, Outlook- und WhatsApp-Helfer erzwingen diese Regel. Wenn das rechte Display fehlt oder ein Zielfenster dort nicht verifiziert werden kann, stoppe konkret statt links weiterzuarbeiten.`;
   if (request.mode === 'project-workflow') {
     return `Nadine hat diesen Projekt-Workflow in IVA ausdrücklich über den Button „Manuell auslösen“ gestartet. Führe jetzt genau einen operativen Einmallauf aus, ohne eine weitere Planbestätigung zu verlangen.
 
-Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.md vollständig. ${runtimeInstruction} Dies ist kein Bauauftrag: ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts. Führe nur den unten genannten Workflow mit seinen dokumentierten Quellen, Sicherheitsregeln, Verifikationen, Zeitlimits, Protokollen und Rückfallwegen aus. Normale erneute Anmeldungen erledigst du mit den vorhandenen sicheren Zugangsdaten selbstständig. Bei CAPTCHA, Kontosperre, technisch erzwungener externer Bestätigung oder einem fachlichen Sicherheits-Gate stoppst du mit dem konkreten Blocker. Erfinde keinen Erfolg.
+Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.md vollständig. ${runtimeInstruction} ${displayInstruction} Dies ist kein Bauauftrag: ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts. Führe nur den unten genannten Workflow mit seinen dokumentierten Quellen, Sicherheitsregeln, Verifikationen, Zeitlimits, Protokollen und Rückfallwegen aus. Normale erneute Anmeldungen erledigst du mit den vorhandenen sicheren Zugangsdaten selbstständig. Bei CAPTCHA, Kontosperre, technisch erzwungener externer Bestätigung oder einem fachlichen Sicherheits-Gate stoppst du mit dem konkreten Blocker. Erfinde keinen Erfolg.
 
 Manueller Einmallauf:
 ${request.prompt}${recoveryInstruction}
@@ -274,7 +276,7 @@ ${request.acceptanceCriteria?.length ? `Abnahmekriterien:\n${request.acceptanceC
   if (request.mode === 'operational') {
     return `Nadine hat diese konkrete Aktion ausdrücklich zur Ausführung auf ihrem iMac beauftragt. Führe sie jetzt genau dort aus, ohne eine weitere Planbestätigung zu verlangen.
 
-Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.md vollständig. ${runtimeInstruction} Dies ist ein operativer iMac-Auftrag und kein IVA-Bauauftrag: Ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts, außer der Auftrag verlangt selbst ausdrücklich eine Code- oder Systemänderung. Versende keine E-Mail und führe keine andere externe Kommunikation aus, sofern sie im Auftrag nicht eindeutig freigegeben ist. Verwende bei lokalen WhatsApp-Aufträgen ausschließlich die native WhatsApp-App. Wiederhole eine Aktion niemals allein deshalb, weil der Erfolgsnachweis verzögert oder uneindeutig ist.
+Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.md vollständig. ${runtimeInstruction} ${displayInstruction} Dies ist ein operativer iMac-Auftrag und kein IVA-Bauauftrag: Ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts, außer der Auftrag verlangt selbst ausdrücklich eine Code- oder Systemänderung. Versende keine E-Mail und führe keine andere externe Kommunikation aus, sofern sie im Auftrag nicht eindeutig freigegeben ist. Verwende bei lokalen WhatsApp-Aufträgen ausschließlich die native WhatsApp-App. Wiederhole eine Aktion niemals allein deshalb, weil der Erfolgsnachweis verzögert oder uneindeutig ist.
 
 Der autoritative Arbeitsordner liegt in iCloud. Bei „Resource deadlock avoided“, EAGAIN, EDEADLK oder kurzzeitig nicht lesbaren Dateien stößt du zuerst den lokalen iCloud-Download an und wiederholst den lesenden Zugriff; behandle das nicht vorschnell als fehlende Datei. Melde ausschließlich das tatsächlich verifizierte Ergebnis oder einen konkreten Blocker und erfinde keinen Erfolg.
 
@@ -638,8 +640,12 @@ export async function recordProjectWorkflowStep(jobId, stepId, stepStatus, check
   const existingIndex = steps.findIndex(step => step.id === normalizedStepId);
   if (existingIndex < 0) {
     const expectedIndex = expectedSteps.indexOf(normalizedStepId);
-    const missingEarlier = expectedSteps.slice(0, expectedIndex).find(id => !steps.some(step => step.id === id && step.status === 'completed'));
-    if (missingEarlier) throw new Error(`Teilschritt ${normalizedStepId} darf erst nach abgeschlossenem Teilschritt ${missingEarlier} protokolliert werden.`);
+    const missingEarlier = expectedSteps.slice(0, expectedIndex).find(id => !steps.some(step => step.id === id && ['completed', 'partial'].includes(step.status)));
+    if (missingEarlier) {
+      const earlier = steps.find(step => step.id === missingEarlier);
+      if (earlier?.status === 'blocked') throw new Error(`Teilschritt ${normalizedStepId} darf nach blockiertem Teilschritt ${missingEarlier} nicht gestartet werden.`);
+      throw new Error(`Teilschritt ${normalizedStepId} darf erst nach protokolliertem Teilschritt ${missingEarlier} gestartet werden.`);
+    }
   } else if (steps[existingIndex].status === 'completed') {
     const prior = steps[existingIndex];
     if (prior.status === normalizedStatus && prior.checked === checkedCount && prior.changed === changedCount) return workflowResultSummary(previous);
@@ -772,6 +778,10 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   const startedAt = new Date().toISOString();
   const runningState = await writeState(paths, { jobId, workerPid: process.pid, title: request.title, requestId: request.requestId, mode: request.mode, projectId: request.projectId, workflowId: request.workflowId, status: 'running', phase: request.mode === 'build' ? 'planning' : 'running', progress: request.mode === 'build' ? 10 : 5, detail: request.mode === 'build' ? 'Planung wurde begonnen.' : 'Workflow wurde gestartet.', createdAt: request.createdAt, startedAt, updatedAt: startedAt, workspace: REPO_ROOT });
   await reportTaskState(request, runningState);
+  if (['operational', 'project-workflow'].includes(request.mode)) {
+    const { requireRightDisplayWorkspace } = await import('./display-workspace.mjs');
+    await requireRightDisplayWorkspace();
+  }
   // Public scheduling refreshes inside the supported Browser session. A native
   // AppleEvents preflight would block that working channel before it can start.
   // The fresh reload remains mandatory in the prompt and reservation receipt.

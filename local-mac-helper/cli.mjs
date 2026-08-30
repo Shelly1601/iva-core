@@ -66,6 +66,7 @@ import {
 } from './credential-broker.mjs';
 import { ensurePortalLogin, portalAuthPolicy } from './portal-auth.mjs';
 import { completeFundingMail } from './funding-mail-completion.mjs';
+import { ensureAppWindowOnRightDisplay, requireRightDisplayWorkspace } from './display-workspace.mjs';
 
 async function readJson(filePath) {
   if (!filePath) throw new Error('Pfad zu einer JSON-Datei fehlt.');
@@ -128,6 +129,8 @@ async function main() {
     pipedrive: await diagnosePipedriveChrome(),
     whatsapp: await diagnoseWhatsAppMac(),
   }, null, 2));
+  if (command === 'right-display-status') return console.log(JSON.stringify(await requireRightDisplayWorkspace(), null, 2));
+  if (command === 'place-app-right') return console.log(JSON.stringify(await ensureAppWindowOnRightDisplay(filePath), null, 2));
   if (command === 'direct-sales-roster-status') return console.log(JSON.stringify(loadDirectSalesRosterSync(), null, 2));
   if (command === 'sync-direct-sales-roster') {
     if (filePath !== '--commit') throw new Error('Der Direktvertriebs-Abgleich wurde nicht gespeichert. Zum Bestätigen --commit anhängen.');
@@ -301,6 +304,8 @@ async function main() {
   node local-mac-helper/cli.mjs manufacturer-operation-record /pfad/ergebnis.json --commit
   node local-mac-helper/cli.mjs manufacturer-operations-report [JJJJ-MM-TT] [tage]
   node local-mac-helper/cli.mjs doctor
+  node local-mac-helper/cli.mjs right-display-status
+  node local-mac-helper/cli.mjs place-app-right <bundle-id>
   node local-mac-helper/cli.mjs direct-sales-roster-status
   node local-mac-helper/cli.mjs sync-direct-sales-roster --commit
   node local-mac-helper/cli.mjs read-pipedrive-deal <deal-id>

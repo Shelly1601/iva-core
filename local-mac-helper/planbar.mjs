@@ -5,6 +5,7 @@ import {
   PLANBAR_ENTER_BLOCK_TEXT,
   PLANBAR_MINIMUM_BLOCK_DAYS,
 } from '../operations/customer-scheduling.js';
+import { requireRightDisplayWorkspace } from './display-workspace.mjs';
 
 const PLANBAR_HOST = 'heathero-partner-a.planbar365.com';
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -31,16 +32,21 @@ function runAppleScript(script, { timeoutMs = 120000 } = {}) {
 }
 
 export async function executePlanbarJavaScript(javascript, { timeoutMs = 120000 } = {}) {
+  const workspace = await requireRightDisplayWorkspace();
   const script = `tell application "Google Chrome"
 repeat with w in windows
-  repeat with t in tabs of w
-    if (URL of t) contains "${PLANBAR_HOST}/resource/list" then return (execute t javascript ${JSON.stringify(String(javascript))})
-  end repeat
+  set windowBounds to bounds of w
+  set isRightWorkspace to (item 1 of windowBounds) is greater than or equal to ${Math.round(workspace.target.x)} and (item 3 of windowBounds) is less than or equal to ${Math.round(workspace.target.x + workspace.target.width)}
+  if isRightWorkspace then
+    repeat with t in tabs of w
+      if (URL of t) contains "${PLANBAR_HOST}/resource/list" then return (execute t javascript ${JSON.stringify(String(javascript))})
+    end repeat
+  end if
 end repeat
 return "NO_TAB"
 end tell`;
   const output = await runAppleScript(script, { timeoutMs });
-  if (output === 'NO_TAB') throw new Error('Planbar ist in Chrome nicht auf der Plantafel geöffnet.');
+  if (output === 'NO_TAB') throw new Error('Planbar ist nicht in einem Chrome-Fenster auf dem rechten Display geöffnet. Links wird nicht ersatzweise gearbeitet.');
   return output;
 }
 

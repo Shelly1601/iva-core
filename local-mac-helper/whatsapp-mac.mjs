@@ -4,6 +4,7 @@ import { access, mkdir, stat } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { buildFundingCaseReference } from './funding.mjs';
+import { ensureAppWindowOnRightDisplay } from './display-workspace.mjs';
 import {
   DIRECT_SALES_WHATSAPP_GROUP,
   cleanDirectSalesMemberName,
@@ -92,11 +93,13 @@ async function ensureWhatsAppProbe() {
 }
 
 export async function probeWhatsAppMacLink() {
+  await ensureAppWindowOnRightDisplay('net.whatsapp.WhatsApp');
   const binary = await ensureWhatsAppProbe();
   return JSON.parse(await commandOutput(binary, []));
 }
 
 async function runWhatsAppProbe(args = []) {
+  await ensureAppWindowOnRightDisplay('net.whatsapp.WhatsApp');
   const binary = await ensureWhatsAppProbe();
   return JSON.parse(await commandOutput(binary, args));
 }

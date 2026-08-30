@@ -42,7 +42,7 @@ node local-mac-helper/cli.mjs doctor
 
 Wenn `accessibility.enabled` noch `false` ist, muss der später verpackte Helper einmal unter **Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen** erlaubt werden. Die native Outlook-Schnittstelle wird bevorzugt; die Bedienungshilfe ist der Fallback für die neue Outlook-Oberfläche und geteilte Absender.
 
-Der Oberflächen-Fallback arbeitet absichtlich nach dem Prinzip „im Zweifel abbrechen“: Er prüft den sichtbaren Absender vor und nach dem Befüllen und überschreibt keinen Entwurf, der bereits einen Betreff enthält. Die Swift-Bridge wird lokal nach `~/Library/Application Support/IVA Mac Helper/bin/iva-ax` kompiliert.
+Der Oberflächen-Fallback arbeitet absichtlich nach dem Prinzip „im Zweifel abbrechen“: Er prüft den sichtbaren Absender vor und nach dem Befüllen und überschreibt keinen Entwurf, der bereits einen Betreff enthält. Die Swift-Bridge bleibt für die macOS-Bedienungshilfe am festen, bereits freigegebenen Pfad `~/Library/Application Support/IVA Mac Helper/bin/iva-ax`. Ein Quellhash, eine atomare Kompiliersperre und ein Kompatibilitäts-Zeitstempel verhindern, dass parallel auslaufende ältere Runtime-Versionen das aktuelle Binary zurücküberschreiben.
 
 ## Förderentwurf vorbereiten
 

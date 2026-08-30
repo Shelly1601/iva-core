@@ -7,6 +7,7 @@ import {
 } from './credential-broker.mjs';
 import { withMacWakeGuard } from './mac-wake-guard.mjs';
 import { typePanasonicTotpFromEnte } from './ente-auth.mjs';
+import { chromeBoundsAppleScript, requireRightDisplayWorkspace } from './display-workspace.mjs';
 
 const MAX_OUTPUT_BYTES = 128 * 1024;
 const DEFAULT_WAIT_MS = 2_500;
@@ -52,20 +53,27 @@ function hostCondition(hosts) {
 
 async function openPortalTab(profile) {
   const condition = hostCondition(profile.allowedHosts);
+  const workspace = await requireRightDisplayWorkspace();
   const script = `tell application "Google Chrome"
 activate
-if (count of windows) is 0 then make new window
 repeat with w in windows
-  repeat with tabIndex from 1 to (count of tabs of w)
-    set t to tab tabIndex of w
-    if ${condition} then
-      set active tab index of w to tabIndex
-      set index of w to 1
-      return "FOUND"
-    end if
-  end repeat
+  set windowBounds to bounds of w
+  set isRightWorkspace to (item 1 of windowBounds) is greater than or equal to ${Math.round(workspace.target.x)} and (item 3 of windowBounds) is less than or equal to ${Math.round(workspace.target.x + workspace.target.width)}
+  if isRightWorkspace then
+    repeat with tabIndex from 1 to (count of tabs of w)
+      set t to tab tabIndex of w
+      if ${condition} then
+        set active tab index of w to tabIndex
+        set index of w to 1
+        return "FOUND"
+      end if
+    end repeat
+  end if
 end repeat
-make new tab at end of tabs of front window with properties {URL:${appleScriptString(profile.loginUrl)}}
+set ivaWindow to make new window
+set URL of active tab of ivaWindow to ${appleScriptString(profile.loginUrl)}
+set bounds of ivaWindow to ${chromeBoundsAppleScript(workspace)}
+set index of ivaWindow to 1
 return "OPENED"
 end tell`;
   const result = await runAppleScript(script);
@@ -111,10 +119,15 @@ function probeJavascript(serviceId) {
 }
 
 async function executeJavascript(profile, javascript, { sensitive = false, hosts = profile.allowedHosts } = {}) {
+  const workspace = await requireRightDisplayWorkspace();
   const scans = hosts.map(host => `repeat with w in windows
-  repeat with t in tabs of w
-    if (URL of t contains ${appleScriptString(host)}) then return (execute t javascript ${appleScriptString(javascript)})
-  end repeat
+  set windowBounds to bounds of w
+  set isRightWorkspace to (item 1 of windowBounds) is greater than or equal to ${Math.round(workspace.target.x)} and (item 3 of windowBounds) is less than or equal to ${Math.round(workspace.target.x + workspace.target.width)}
+  if isRightWorkspace then
+    repeat with t in tabs of w
+      if (URL of t contains ${appleScriptString(host)}) then return (execute t javascript ${appleScriptString(javascript)})
+    end repeat
+  end if
 end repeat`).join('\n');
   const script = `tell application "Google Chrome"
 ${scans}

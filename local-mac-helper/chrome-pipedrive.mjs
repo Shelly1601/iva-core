@@ -6,6 +6,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/
 import { classifyFundingDocumentName } from './funding-document-extractor.mjs';
 import { resolveFundingSupervisor } from './funding.mjs';
 import { resolveFundingStage } from './pipedrive-funding.mjs';
+import { chromeBoundsAppleScript, requireRightDisplayWorkspace } from './display-workspace.mjs';
 
 const PIPEDRIVE_HOST = 'simplegategmbh.pipedrive.com';
 const MAX_OUTPUT_BYTES = 256 * 1024;
@@ -31,7 +32,7 @@ export function assertPipedriveFileActionAllowed(action) {
   return true;
 }
 
-function runAppleScript(script, { timeoutMs = 10000 } = {}) {
+function runAppleScript(script, { timeoutMs = 10000, sensitive = false } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn('/usr/bin/osascript', ['-'], { stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
@@ -46,7 +47,7 @@ function runAppleScript(script, { timeoutMs = 10000 } = {}) {
     child.on('close', code => {
       clearTimeout(timer);
       if (code === 0) resolve(stdout.trim());
-      else reject(new Error((stderr || stdout || `osascript beendet mit Code ${code}`).trim()));
+      else reject(new Error(sensitive ? 'Sensible Chrome-Steuerung ist fehlgeschlagen; Sitzungsdaten wurden ausgeblendet.' : (stderr || stdout || `osascript beendet mit Code ${code}`).trim()));
     });
     child.stdin.end(script);
   });
@@ -58,15 +59,31 @@ function dealIdFromUrl(value) {
 
 export async function executePipedriveJavaScript(javascript, { dealId = '', timeoutMs = 15000 } = {}) {
   const target = dealId ? `pipedrive.com/deal/${String(dealId).replace(/\D/g, '')}` : 'pipedrive.com/pipeline/1';
-  const script = `tell application "Google Chrome"
+  const workspace = await requireRightDisplayWorkspace();
+  const windowCondition = `set windowBounds to bounds of w
+  set isRightWorkspace to (item 1 of windowBounds) is greater than or equal to ${Math.round(workspace.target.x)} and (item 3 of windowBounds) is less than or equal to ${Math.round(workspace.target.x + workspace.target.width)}`;
+  const runInRightWindow = () => runAppleScript(`tell application "Google Chrome"
 repeat with w in windows
-  repeat with t in tabs of w
-    if (URL of t) contains "${target}" then return (execute t javascript ${JSON.stringify(String(javascript))})
-  end repeat
+  ${windowCondition}
+  if isRightWorkspace then
+    repeat with t in tabs of w
+      if (URL of t) contains "${target}" then return (execute t javascript ${JSON.stringify(String(javascript))})
+    end repeat
+  end if
 end repeat
 return "NO_TAB"
-end tell`;
-  const output = await runAppleScript(script, { timeoutMs });
+end tell`, { timeoutMs });
+  let output = await runInRightWindow();
+  if (output === 'NO_TAB' && !dealId) {
+    await runAppleScript(`tell application "Google Chrome"
+set ivaWindow to make new window
+set URL of active tab of ivaWindow to "https://${PIPEDRIVE_HOST}/pipeline/1"
+set bounds of ivaWindow to ${chromeBoundsAppleScript(workspace)}
+set index of ivaWindow to 1
+end tell`, { timeoutMs: 20000 });
+    await wait(2200);
+    output = await runInRightWindow();
+  }
   if (output === 'NO_TAB') throw new Error(`Kein geöffneter Pipedrive-Deal ${dealId || ''} gefunden.`.trim());
   return output;
 }
@@ -313,54 +330,49 @@ export async function readPipedriveFundingDeal({ dealId } = {}) {
 async function openTemporaryPipedriveDealTabs(dealIds) {
   const ids = [...new Set(dealIds.map(String))].filter(id => /^\d+$/.test(id));
   if (!ids.length) return [];
-  const blocks = ids.map(id => `set alreadyOpen to false
-repeat with w in windows
-  repeat with t in tabs of w
-    if (URL of t) contains "pipedrive.com/deal/${id}" then set alreadyOpen to true
-  end repeat
-end repeat
-if alreadyOpen is false then
-  make new tab at end of tabs of front window with properties {URL:"https://${PIPEDRIVE_HOST}/deal/${id}"}
-  set end of createdIds to "${id}"
-end if`).join('\n');
+  const workspace = await requireRightDisplayWorkspace();
+  const [firstId, ...remainingIds] = ids;
+  const blocks = remainingIds.map(id => `make new tab at end of tabs of ivaWindow with properties {URL:"https://${PIPEDRIVE_HOST}/deal/${id}"}`).join('\n');
   const output = await runAppleScript(`tell application "Google Chrome"
-set createdIds to {}
+set ivaWindow to make new window
+set URL of active tab of ivaWindow to "https://${PIPEDRIVE_HOST}/deal/${firstId}"
+set bounds of ivaWindow to ${chromeBoundsAppleScript(workspace)}
 ${blocks}
-set AppleScript's text item delimiters to ","
-return createdIds as text
+set index of ivaWindow to 1
+return id of ivaWindow as text
 end tell`, { timeoutMs: 20000 });
-  return output.split(',').map(value => value.trim()).filter(Boolean);
+  if (!/^\d+$/.test(output)) throw new Error('Das eigene rechte IVA-Chrome-Fenster konnte nicht verifiziert werden.');
+  return [`window:${output}`];
 }
 
-async function closeTemporaryPipedriveDealTabs(dealIds) {
-  const ids = [...new Set(dealIds.map(String))].filter(id => /^\d+$/.test(id));
-  if (!ids.length) return;
-  const conditions = ids.map(id => `(URL of t) contains "pipedrive.com/deal/${id}"`).join(' or ');
+async function closeTemporaryPipedriveDealTabs(handles) {
+  const windowIds = [...new Set(handles.map(value => String(value).match(/^window:(\d+)$/)?.[1]).filter(Boolean))];
+  if (!windowIds.length) return;
+  const blocks = windowIds.map(id => `if exists (first window whose id is ${id}) then close (first window whose id is ${id})`).join('\n');
   await runAppleScript(`tell application "Google Chrome"
-repeat with w in windows
-  set tabCount to count of tabs of w
-  repeat with i from tabCount to 1 by -1
-    set t to tab i of w
-    if ${conditions} then close t
-  end repeat
-end repeat
+${blocks}
 end tell`, { timeoutMs: 20000 });
 }
 
 export async function activatePipedriveDealTab(dealId, { run = runAppleScript, waitFn = wait, timeoutMs = 12_000 } = {}) {
   const id = String(dealId || '').replace(/\D/g, '');
   if (!id) throw new Error('Pipedrive-Deal-ID fehlt.');
+  const workspace = await requireRightDisplayWorkspace();
   const script = `tell application "Google Chrome"
 repeat with w in windows
-  set tabCount to count of tabs of w
-  repeat with i from 1 to tabCount
-    set t to tab i of w
-    if (URL of t) contains "pipedrive.com/deal/${id}" then
-      set active tab index of w to i
-      set index of w to 1
-      return "activated"
-    end if
-  end repeat
+  set windowBounds to bounds of w
+  set isRightWorkspace to (item 1 of windowBounds) is greater than or equal to ${Math.round(workspace.target.x)} and (item 3 of windowBounds) is less than or equal to ${Math.round(workspace.target.x + workspace.target.width)}
+  if isRightWorkspace then
+    set tabCount to count of tabs of w
+    repeat with i from 1 to tabCount
+      set t to tab i of w
+      if (URL of t) contains "pipedrive.com/deal/${id}" then
+        set active tab index of w to i
+        set index of w to 1
+        return "activated"
+      end if
+    end repeat
+  end if
 end repeat
 return "missing"
 end tell`;
@@ -383,20 +395,25 @@ end tell`;
 async function warmPipedriveDealTabs(dealIds) {
   const ids = [...new Set(dealIds.map(String))].filter(id => /^\d+$/.test(id));
   if (!ids.length) return 0;
+  const workspace = await requireRightDisplayWorkspace();
   const conditions = ids.map(id => `(URL of t) contains "pipedrive.com/deal/${id}"`).join(' or ');
   const result = await runAppleScript(`tell application "Google Chrome"
 set warmedCount to 0
 repeat with w in windows
-  set tabCount to count of tabs of w
-  repeat with i from 1 to tabCount
-    set t to tab i of w
-    if ${conditions} then
-      set active tab index of w to i
-      set index of w to 1
-      set warmedCount to warmedCount + 1
-      delay 1.8
-    end if
-  end repeat
+  set windowBounds to bounds of w
+  set isRightWorkspace to (item 1 of windowBounds) is greater than or equal to ${Math.round(workspace.target.x)} and (item 3 of windowBounds) is less than or equal to ${Math.round(workspace.target.x + workspace.target.width)}
+  if isRightWorkspace then
+    set tabCount to count of tabs of w
+    repeat with i from 1 to tabCount
+      set t to tab i of w
+      if ${conditions} then
+        set active tab index of w to i
+        set index of w to 1
+        set warmedCount to warmedCount + 1
+        delay 1.8
+      end if
+    end repeat
+  end if
 end repeat
 return warmedCount as text
 end tell`, { timeoutMs: 30000 });
@@ -406,17 +423,22 @@ end tell`, { timeoutMs: 30000 });
 async function executePipedriveJavaScriptForDeals(dealIds, javascript) {
   const ids = [...new Set(dealIds.map(String))].filter(id => /^\d+$/.test(id));
   if (!ids.length) return new Map();
+  const workspace = await requireRightDisplayWorkspace();
   const conditions = ids.map((id, index) => `${index ? 'else ' : ''}if tabURL contains "pipedrive.com/deal/${id}" then
       set jsResult to execute t javascript ${JSON.stringify(String(javascript))}
       set end of outputLines to "${id}|||" & jsResult`).join('\n    ');
   const output = await runAppleScript(`tell application "Google Chrome"
 set outputLines to {}
 repeat with w in windows
-  repeat with t in tabs of w
-    set tabURL to URL of t
-    ${conditions}
-    end if
-  end repeat
+  set windowBounds to bounds of w
+  set isRightWorkspace to (item 1 of windowBounds) is greater than or equal to ${Math.round(workspace.target.x)} and (item 3 of windowBounds) is less than or equal to ${Math.round(workspace.target.x + workspace.target.width)}
+  if isRightWorkspace then
+    repeat with t in tabs of w
+      set tabURL to URL of t
+      ${conditions}
+      end if
+    end repeat
+  end if
 end repeat
 set AppleScript's text item delimiters to linefeed
 return outputLines as text
@@ -1499,54 +1521,75 @@ async function listPipedriveDealFileRecords(dealId) {
 }
 
 async function downloadPipedriveFileViaSignedInSession({ dealId, file }) {
-  const marker = `iva-download-${randomUUID()}`;
-  let signedUrl = '';
+  const downloadUrl = await executePipedriveJavaScript(String.raw`(() => {
+    const resource = performance.getEntriesByType('resource').map(entry => entry.name).find(name => name.includes('session_token='));
+    const sessionToken = resource ? new URL(resource).searchParams.get('session_token') : '';
+    return sessionToken ? location.origin + '/api/v1/files/${String(file.id)}/download?strict_mode=true&session_token=' + encodeURIComponent(sessionToken) : '';
+  })()`, { dealId, timeoutMs: 15000 });
+  if (!downloadUrl.startsWith(`https://${PIPEDRIVE_HOST}/api/v1/files/${String(file.id)}/download?`)) {
+    throw new Error(`${file.name}: sichere Pipedrive-Downloadadresse konnte nicht vorbereitet werden.`);
+  }
+  const workspace = await requireRightDisplayWorkspace();
+  let downloadTabId = '';
   try {
-    const opened = await executePipedriveJavaScript(String.raw`(() => {
-      const resource = performance.getEntriesByType('resource').map(entry => entry.name).find(name => name.includes('session_token='));
-      const sessionToken = resource ? new URL(resource).searchParams.get('session_token') : '';
-      if (!sessionToken) return 'missing_session_token';
-      const anchor = document.createElement('a');
-      anchor.href = '/api/v1/files/${String(file.id)}/download?strict_mode=true&session_token=' + encodeURIComponent(sessionToken) + '#${marker}';
-      anchor.target = '_self';
-      anchor.style.display = 'none';
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      return 'opened';
-    })()`, { dealId, timeoutMs: 15000 });
-    if (opened !== 'opened') throw new Error(`${file.name}: signierter Download konnte nicht geöffnet werden.`);
+    downloadTabId = await runAppleScript(`tell application "Google Chrome"
+repeat with w in windows
+  set windowBounds to bounds of w
+  set isRightWorkspace to (item 1 of windowBounds) is greater than or equal to ${Math.round(workspace.target.x)} and (item 3 of windowBounds) is less than or equal to ${Math.round(workspace.target.x + workspace.target.width)}
+  if isRightWorkspace then
+    repeat with candidateTab in tabs of w
+      if (URL of candidateTab) contains "pipedrive.com/deal/${String(dealId)}" then
+        set downloadTab to make new tab at end of tabs of w with properties {URL:${JSON.stringify(downloadUrl)}}
+        return id of downloadTab as text
+      end if
+    end repeat
+  end if
+end repeat
+return ""
+end tell`, { timeoutMs: 15000, sensitive: true });
+    if (!/^\d+$/.test(downloadTabId)) throw new Error(`${file.name}: separater rechter Browser-Downloadtab konnte nicht verifiziert werden.`);
+
     const deadline = Date.now() + 30_000;
+    let signedUrl = '';
     while (Date.now() < deadline) {
       await wait(300);
       signedUrl = await runAppleScript(`tell application "Google Chrome"
 repeat with w in windows
-  repeat with t in tabs of w
-    set candidateUrl to URL of t
-    if candidateUrl contains "pipedrive-files" or candidateUrl contains "amazonaws.com" then return candidateUrl
-  end repeat
+  set windowBounds to bounds of w
+  set isRightWorkspace to (item 1 of windowBounds) is greater than or equal to ${Math.round(workspace.target.x)} and (item 3 of windowBounds) is less than or equal to ${Math.round(workspace.target.x + workspace.target.width)}
+  if isRightWorkspace then
+    repeat with candidateTab in tabs of w
+      set candidateUrl to URL of candidateTab
+      if (id of candidateTab as text) is ${JSON.stringify(downloadTabId)} and (candidateUrl contains "pipedrive-files" or candidateUrl contains "amazonaws.com") then return candidateUrl
+    end repeat
+  end if
 end repeat
 return ""
-end tell`, { timeoutMs: 10000 }).catch(() => '');
+end tell`, { timeoutMs: 10000, sensitive: true }).catch(() => '');
       if (signedUrl) break;
     }
-    if (!signedUrl) throw new Error(`${file.name}: signierte Pipedrive-Downloadadresse wurde nicht bereitgestellt.`);
+    if (!signedUrl) throw new Error(`${file.name}: signierte Pipedrive-Downloadadresse erschien nicht im separaten rechten IVA-Tab.`);
     const response = await fetch(signedUrl, { redirect: 'follow' });
     if (!response.ok) throw new Error(`${file.name}: Pipedrive-Download HTTP ${response.status}.`);
     const length = Number(response.headers.get('content-length') || 0);
     if (length > MAX_PIPEDRIVE_DOWNLOAD_BYTES) throw new Error(`${file.name}: Datei ist größer als 50 MB.`);
     const data = Buffer.from(await response.arrayBuffer());
     if (!data.length || data.length > MAX_PIPEDRIVE_DOWNLOAD_BYTES) throw new Error(`${file.name}: Datei ist leer oder größer als 50 MB.`);
-    return { data, contentType: String(response.headers.get('content-type') || '') };
+    return { data, contentType: String(response.headers.get('content-type') || file.mimeType || '') };
   } finally {
-    await runAppleScript(`tell application "Google Chrome"
+    if (/^\d+$/.test(downloadTabId)) {
+      await runAppleScript(`tell application "Google Chrome"
 repeat with w in windows
-  repeat with t in tabs of w
-    set candidateUrl to URL of t
-    if candidateUrl contains "pipedrive-files" or candidateUrl contains "amazonaws.com" or candidateUrl contains "/api/v1/files/${String(file.id)}/download" then set URL of t to "https://${PIPEDRIVE_HOST}/deal/${String(dealId)}"
-  end repeat
+  set windowBounds to bounds of w
+  set isRightWorkspace to (item 1 of windowBounds) is greater than or equal to ${Math.round(workspace.target.x)} and (item 3 of windowBounds) is less than or equal to ${Math.round(workspace.target.x + workspace.target.width)}
+  if isRightWorkspace then
+    repeat with candidateTab in tabs of w
+      if (id of candidateTab as text) is ${JSON.stringify(downloadTabId)} then close candidateTab
+    end repeat
+  end if
 end repeat
 end tell`, { timeoutMs: 10000 }).catch(() => {});
+    }
   }
 }
 

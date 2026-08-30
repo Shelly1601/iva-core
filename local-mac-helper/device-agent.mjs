@@ -23,6 +23,13 @@ const APP_ALLOWLIST = Object.freeze({
   Codex: Object.freeze(['/Applications/ChatGPT.app', '/Applications/Codex.app']),
   ChatGPT: Object.freeze(['/Applications/ChatGPT.app', '/Applications/Codex.app']),
 });
+const APP_BUNDLE_IDENTIFIERS = Object.freeze({
+  'Microsoft Outlook': 'com.microsoft.Outlook',
+  'Google Chrome': 'com.google.Chrome',
+  WhatsApp: 'net.whatsapp.WhatsApp',
+  Codex: 'com.openai.codex',
+  ChatGPT: 'com.openai.codex',
+});
 // Reine Task-Starts bedienen keine UI. Der gestartete Worker hält selbst die
 // UI-Sperre und den Wachschutz; Display-/Lockfehler dürfen die Übergabe nicht verdecken.
 const UI_ACTIONS = new Set(['computer.status', 'project.workflow.run', 'portal.login', 'app.open']);
@@ -161,13 +168,16 @@ async function openApplication(appName) {
     return candidate;
   })).catch(() => null);
   if (!appPath) throw new Error(`${appName} ist auf dem iMac nicht installiert.`);
-  return new Promise((resolve, reject) => {
+  await new Promise((resolve, reject) => {
     const child = spawn('/usr/bin/open', ['-a', appPath], { stdio: 'ignore' });
     child.on('error', reject);
     child.on('close', code => code === 0
-      ? resolve({ app: appName, applicationPath: appPath, opened: true })
+      ? resolve()
       : reject(new Error(`${appName} konnte nicht geöffnet werden.`)));
   });
+  const { ensureAppWindowOnRightDisplay } = await import('./display-workspace.mjs');
+  const display = await ensureAppWindowOnRightDisplay(APP_BUNDLE_IDENTIFIERS[appName]);
+  return { app: appName, applicationPath: appPath, opened: true, displayPolicy: display.workspace.policy, onRightDisplay: display.onRightDisplay === true };
 }
 
 // The tooltip endpoint behind the open Planbar board already returns the live
@@ -243,6 +253,7 @@ async function executeDeviceCommand(command) {
     const { diagnosePipedriveChrome } = await import('./chrome-pipedrive-status.mjs');
     const { diagnoseWhatsAppMac } = await import('./whatsapp-mac.mjs');
     const { runMacUiBridge } = await import('./macos-ui.mjs');
+    const { requireRightDisplayWorkspace } = await import('./display-workspace.mjs');
     // Die UI-Pruefungen laufen absichtlich nacheinander. Outlook und WhatsApp
     // greifen beide auf macOS Accessibility/Apple Events zu und koennen sich
     // bei parallelen Probes gegenseitig einen falschen Negativstatus liefern.
@@ -250,8 +261,10 @@ async function executeDeviceCommand(command) {
     const bridge = await runMacUiBridge(['accessibility-status'], { timeoutMs: 15000 }).catch(() => ({ trusted: false }));
     const pipedrive = await diagnosePipedriveChrome();
     const whatsapp = await diagnoseWhatsAppMac();
+    const display = await requireRightDisplayWorkspace();
     return {
       online: true,
+      display: { policy: display.policy, displayCount: display.displayCount, target: display.target },
       outlook: { installed: outlook.outlook?.installed, running: outlook.outlook?.running, accessibility: bridge.trusted === true },
       pipedrive: { chromeRunning: pipedrive.chromeRunning, readable: pipedrive.readDealFields },
       whatsapp: { installed: whatsapp.installed, running: whatsapp.running, linked: whatsapp.linkedAccountVerified },

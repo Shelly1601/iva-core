@@ -1,13 +1,15 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdir, readdir, realpath, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, rename, rmdir, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const SOURCE = fileURLToPath(new URL('./macos/iva-ax.swift', import.meta.url));
 const BIN_DIR = path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper', 'bin');
 const BINARY = path.join(BIN_DIR, 'iva-ax');
+const BINARY_DIGEST = `${BINARY}.sha256`;
+const COMPILE_LOCK = `${BINARY}.compile-lock`;
 const TEMP_DIR = path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper', 'tmp');
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 const OUTLOOK_ACCOUNT_LABELS = Object.freeze({
@@ -34,20 +36,53 @@ function run(command, args, { timeoutMs = 15000 } = {}) {
   });
 }
 
-async function needsCompile() {
-  try {
-    const [source, binary] = await Promise.all([stat(SOURCE), stat(BINARY)]);
-    return source.mtimeMs > binary.mtimeMs;
-  } catch {
-    return true;
-  }
-}
-
 export async function ensureMacUiBridge() {
   if (process.platform !== 'darwin') throw new Error('Die Outlook-Oberflächenautomation ist nur unter macOS verfügbar.');
-  if (await needsCompile()) {
-    await mkdir(BIN_DIR, { recursive: true, mode: 0o700 });
-    await run('/usr/bin/swiftc', [SOURCE, '-o', BINARY], { timeoutMs: 60000 });
+  const source = await readFile(SOURCE);
+  const digest = createHash('sha256').update(source).digest('hex');
+  const isCurrent = async () => {
+    const [binary, metadata] = await Promise.all([
+      readFile(BINARY).catch(() => null),
+      readFile(BINARY_DIGEST, 'utf8').then(value => JSON.parse(value)).catch(() => null),
+    ]);
+    if (!binary || metadata?.sourceDigest !== digest || !/^[a-f0-9]{64}$/.test(String(metadata?.binaryDigest || ''))) return false;
+    return createHash('sha256').update(binary).digest('hex') === metadata.binaryDigest;
+  };
+  if (await isCurrent()) return BINARY;
+
+  await mkdir(BIN_DIR, { recursive: true, mode: 0o700 });
+  const lockDeadline = Date.now() + 70_000;
+  while (true) {
+    try {
+      await mkdir(COMPILE_LOCK, { mode: 0o700 });
+      break;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      if (await isCurrent()) return BINARY;
+      if (Date.now() >= lockDeadline) throw new Error('Die macOS-Helferkompilierung ist durch einen parallelen Lauf blockiert.');
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+  }
+  const temporaryBinary = `${BINARY}.${randomUUID()}.tmp`;
+  const temporaryDigest = `${BINARY_DIGEST}.${randomUUID()}.tmp`;
+  try {
+    if (await isCurrent()) return BINARY;
+    await run('/usr/bin/swiftc', [SOURCE, '-o', temporaryBinary], { timeoutMs: 60000 });
+    const compiledBinary = await readFile(temporaryBinary);
+    const binaryDigest = createHash('sha256').update(compiledBinary).digest('hex');
+    await rename(temporaryBinary, BINARY);
+    await writeFile(temporaryDigest, `${JSON.stringify({ sourceDigest: digest, binaryDigest })}\n`, { mode: 0o600, flag: 'wx' });
+    await rename(temporaryDigest, BINARY_DIGEST);
+    // Alte, noch auslaufende Runtime-Versionen vergleichen nur Dateizeiten. Ein
+    // bewusst zukünftiger Zeitstempel verhindert, dass sie den freigegebenen
+    // stabilen Helferpfad wieder mit einer älteren Swift-Quelle überschreiben.
+    // Aktuelle Versionen verwenden ausschließlich den Quellhash oben.
+    const compatibilityMtime = new Date('2100-01-01T00:00:00.000Z');
+    await utimes(BINARY, compatibilityMtime, compatibilityMtime);
+  } finally {
+    await unlink(temporaryBinary).catch(() => {});
+    await unlink(temporaryDigest).catch(() => {});
+    await rmdir(COMPILE_LOCK).catch(() => {});
   }
   return BINARY;
 }
@@ -57,6 +92,29 @@ export async function runMacUiBridge(args, options) {
   const output = await run(binary, args.map(value => String(value ?? '')), options);
   try { return JSON.parse(output); }
   catch { throw new Error('Die macOS-Oberflächenautomation hat keine gültige Antwort geliefert.'); }
+}
+
+export async function describeDisplayLayout() {
+  return runMacUiBridge(['display-layout'], { timeoutMs: 15000 });
+}
+
+export async function assertRightDisplayAvailable({ requireSecondDisplay = true } = {}) {
+  const layout = await describeDisplayLayout();
+  if (requireSecondDisplay && !layout.hasMultipleDisplays) throw new Error('Rechtsbildschirm-Prüfung fehlgeschlagen: Es sind nicht mindestens zwei Displays aktiv.');
+  if (layout.ambiguousRightmost || !layout.rightmostScreen) throw new Error('Rechtsbildschirm-Prüfung fehlgeschlagen: Der rechte Bildschirm ist nicht eindeutig identifizierbar.');
+  return layout;
+}
+
+export async function inspectFrontmostWindowDisplay() {
+  return runMacUiBridge(['frontmost-window-display'], { timeoutMs: 15000 });
+}
+
+export async function assertFrontmostWindowOnRightDisplay({ requireSecondDisplay = true } = {}) {
+  const state = await inspectFrontmostWindowDisplay();
+  if (requireSecondDisplay && !state.hasMultipleDisplays) throw new Error('Fenster-Prüfung fehlgeschlagen: Es sind nicht mindestens zwei Displays aktiv.');
+  if (state.ambiguousRightmost || !state.rightmostScreen) throw new Error('Fenster-Prüfung fehlgeschlagen: Der rechte Bildschirm ist nicht eindeutig identifizierbar.');
+  if (!state.isOnRightmostScreen) throw new Error(`${String(state.applicationName || 'Die Vordergrund-App')} liegt nicht auf dem rechten Bildschirm.`);
+  return state;
 }
 
 function normalizeEmail(value) {
