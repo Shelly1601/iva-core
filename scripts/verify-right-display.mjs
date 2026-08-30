@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { requireRightDisplayWorkspace, resolveRightDisplayWorkspace, windowBoundsInsideRightDisplay } from '../local-mac-helper/display-workspace.mjs';
+import {
+  encodeRightDisplayAttestation,
+  requireRightDisplayWorkspace,
+  resolveRightDisplayAttestation,
+  resolveRightDisplayWorkspace,
+  windowBoundsInsideRightDisplay,
+} from '../local-mac-helper/display-workspace.mjs';
 
 const workspace = resolveRightDisplayWorkspace({ displays: [
   { id: '1', main: true, x: 0, y: 0, width: 2240, height: 1260 },
@@ -12,6 +18,26 @@ assert.ok(workspace.bounds.left > 2240);
 assert.ok(workspace.bounds.right < 7360);
 assert.equal(windowBoundsInsideRightDisplay([2260, -160, 7340, 1240], workspace), true);
 assert.equal(windowBoundsInsideRightDisplay([26, 30, 2060, 1178], workspace), false);
+
+const verifiedAt = Date.parse('2026-08-30T08:00:00.000Z');
+const attestation = encodeRightDisplayAttestation(workspace, {
+  verifiedAt,
+  expiresAt: verifiedAt + 60_000,
+});
+const attestedWorkspace = resolveRightDisplayAttestation(attestation, { now: verifiedAt + 30_000 });
+assert.equal(attestedWorkspace.target.id, '2');
+assert.equal(attestedWorkspace.attestedAt, '2026-08-30T08:00:00.000Z');
+let attestedBridgeCalls = 0;
+const inheritedWorkspace = await requireRightDisplayWorkspace({
+  attestation: encodeRightDisplayAttestation(workspace),
+  run: async () => { attestedBridgeCalls += 1; throw new Error('Bridge darf nicht erneut abgefragt werden.'); },
+});
+assert.equal(inheritedWorkspace.target.id, '2');
+assert.equal(attestedBridgeCalls, 0);
+assert.throws(
+  () => resolveRightDisplayAttestation(attestation, { now: verifiedAt + 60_001 }),
+  /ungültig oder abgelaufen/,
+);
 assert.throws(() => resolveRightDisplayWorkspace({ displays: [
   { id: '1', main: true, x: 0, y: 0, width: 2240, height: 1260 },
 ] }), /rechte Arbeitsdisplay ist nicht angeschlossen/);
@@ -70,6 +96,8 @@ assert.match(pipedriveSource, /separater rechter Browser-Downloadtab/);
 assert.doesNotMatch(pipedriveSource, /fetch\(downloadUrl/);
 assert.match(codexSource, /Bediene ausschließlich das physisch rechte Display/);
 assert.match(codexSource, /requireRightDisplayWorkspace/);
+assert.match(codexSource, /encodeRightDisplayAttestation/);
+assert.match(codexSource, /IVA_RIGHT_DISPLAY_ATTESTATION/);
 assert.match(planbarSource, /isRightWorkspace/);
 assert.match(whatsappSource, /ensureAppWindowOnRightDisplay\('net\.whatsapp\.WhatsApp'\)/);
 assert.match(macUiSource, /const BINARY = path\.join\(BIN_DIR, 'iva-ax'\)/);

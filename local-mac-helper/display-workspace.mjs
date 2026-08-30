@@ -2,6 +2,8 @@ import { spawn } from 'node:child_process';
 import { runMacUiBridge } from './macos-ui.mjs';
 
 export const IVA_UI_DISPLAY_POLICY = 'rightmost-external-display';
+export const IVA_RIGHT_DISPLAY_ATTESTATION_ENV = 'IVA_RIGHT_DISPLAY_ATTESTATION';
+const MAX_ATTESTATION_LIFETIME_MS = (6 * 60 * 60_000) + (5 * 60_000);
 
 function finiteNumber(value, label) {
   const number = Number(value);
@@ -56,6 +58,85 @@ export function windowBoundsInsideRightDisplay(bounds = [], workspace) {
     && right > left && bottom > top;
 }
 
+export function encodeRightDisplayAttestation(workspace, {
+  verifiedAt = Date.now(),
+  expiresAt = Number(verifiedAt) + MAX_ATTESTATION_LIFETIME_MS,
+} = {}) {
+  const verified = Number(verifiedAt);
+  const expires = Number(expiresAt);
+  if (!Number.isFinite(verified) || !Number.isFinite(expires)
+    || expires <= verified || expires - verified > MAX_ATTESTATION_LIFETIME_MS) {
+    throw new Error('Ungültige Laufzeit des Rechtsbildschirm-Nachweises.');
+  }
+  if (workspace?.policy !== IVA_UI_DISPLAY_POLICY || Number(workspace?.displayCount) < 2
+    || !windowBoundsInsideRightDisplay([
+      workspace?.bounds?.left,
+      workspace?.bounds?.top,
+      workspace?.bounds?.right,
+      workspace?.bounds?.bottom,
+    ], workspace)) {
+    throw new Error('Der Rechtsbildschirm-Nachweis enthält keine gültige Arbeitsfläche.');
+  }
+  const payload = {
+    version: 1,
+    policy: IVA_UI_DISPLAY_POLICY,
+    verifiedAt: new Date(verified).toISOString(),
+    expiresAt: new Date(expires).toISOString(),
+    displayCount: Number(workspace.displayCount),
+    target: workspace.target,
+    bounds: workspace.bounds,
+  };
+  return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+}
+
+export function resolveRightDisplayAttestation(encoded, { now = Date.now() } = {}) {
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(String(encoded || ''), 'base64url').toString('utf8'));
+  } catch {
+    throw new Error('Der Rechtsbildschirm-Nachweis ist beschädigt.');
+  }
+  const verifiedAt = Date.parse(payload?.verifiedAt || '');
+  const expiresAt = Date.parse(payload?.expiresAt || '');
+  const checkedAt = Number(now);
+  if (payload?.version !== 1 || payload?.policy !== IVA_UI_DISPLAY_POLICY
+    || !Number.isFinite(verifiedAt) || !Number.isFinite(expiresAt) || !Number.isFinite(checkedAt)
+    || verifiedAt > checkedAt + 60_000 || expiresAt <= checkedAt
+    || expiresAt <= verifiedAt || expiresAt - verifiedAt > MAX_ATTESTATION_LIFETIME_MS) {
+    throw new Error('Der Rechtsbildschirm-Nachweis ist ungültig oder abgelaufen.');
+  }
+  const workspace = Object.freeze({
+    policy: IVA_UI_DISPLAY_POLICY,
+    displayCount: finiteNumber(payload.displayCount, 'Anzahl'),
+    target: Object.freeze({
+      id: String(payload?.target?.id ?? ''),
+      main: payload?.target?.main === true,
+      x: finiteNumber(payload?.target?.x, 'x'),
+      y: finiteNumber(payload?.target?.y, 'y'),
+      width: finiteNumber(payload?.target?.width, 'width'),
+      height: finiteNumber(payload?.target?.height, 'height'),
+    }),
+    bounds: Object.freeze({
+      left: finiteNumber(payload?.bounds?.left, 'links'),
+      top: finiteNumber(payload?.bounds?.top, 'oben'),
+      right: finiteNumber(payload?.bounds?.right, 'rechts'),
+      bottom: finiteNumber(payload?.bounds?.bottom, 'unten'),
+    }),
+    attestedAt: payload.verifiedAt,
+    attestationExpiresAt: payload.expiresAt,
+  });
+  if (workspace.displayCount < 2 || workspace.target.width <= 0 || workspace.target.height <= 0
+    || !windowBoundsInsideRightDisplay([
+      workspace.bounds.left,
+      workspace.bounds.top,
+      workspace.bounds.right,
+      workspace.bounds.bottom,
+    ], workspace)) {
+    throw new Error('Der Rechtsbildschirm-Nachweis enthält keine gültige Arbeitsfläche.');
+  }
+  return workspace;
+}
+
 async function wakeDisplaysForVerification() {
   if (process.platform !== 'darwin') return;
   // Keep the synthetic user-activity assertion alive while CoreGraphics reads
@@ -77,7 +158,13 @@ export async function requireRightDisplayWorkspace({
   run = runMacUiBridge,
   waitFn = delay => new Promise(resolve => setTimeout(resolve, delay)),
   wakeFn = wakeDisplaysForVerification,
+  attestation = process.env[IVA_RIGHT_DISPLAY_ATTESTATION_ENV],
 } = {}) {
+  // The trusted iMac runner checks CoreGraphics before it starts a sandboxed
+  // Codex task. Reuse that task-scoped result inside the child: sandboxed
+  // processes can otherwise receive a false one-display snapshot even while
+  // the external screen and the real desktop session are both available.
+  if (String(attestation || '').trim()) return resolveRightDisplayAttestation(attestation);
   const maximumAttempts = Math.max(1, Math.min(30, Number(attempts) || 30));
   let lastError;
   const releaseWakeLease = await wakeFn();

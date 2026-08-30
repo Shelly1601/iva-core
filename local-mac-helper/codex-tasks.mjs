@@ -260,7 +260,7 @@ export function buildCodexPrompt(request) {
     ? `\n\nDies ist der automatische Wiederanlauf ${Number(request.recoveryAttempt)} nach einem unterbrochenen lokalen Worker. Prüfe vor jeder Schreib- oder Sendeaktion zuerst vorhandene lokale Belege, den sichtbaren Zielzustand und bereits erzeugte Ergebnisse. Setze beim ersten noch nicht verifizierten Schritt fort. Wiederhole niemals eine bereits sichtbare, gespeicherte oder anderweitig belegte Aktion. Der Wiederanlauf ist eine Fortsetzung desselben Auftrags, kein neuer Auftrag.`
     : '';
   const runtimeInstruction = `Die verbindlichen Projektanweisungen stehen in ${path.join(REPO_ROOT, '..', 'AGENTS.md')}; lies diese Datei, auch wenn im Unterordner iva-core keine eigene AGENTS.md liegt. Bestehende lokale IVA-Helfer startest du mit absolutem Pfad aus ${path.dirname(MODULE_PATH)}. Dieser geprüfte Laufzeitstand kommt vom zentralen IVA-Core. Projektquellen und Dokumente bleiben im gesetzten iCloud-Workspace. Keine zweite lokale Kopie als laufenden Agenten starten.`;
-  const displayInstruction = `Verbindliche Displayregel: Bediene ausschließlich das physisch rechte Display. Öffne für IVA bei Bedarf ein eigenes zweites App-Fenster beziehungsweise eigene Tabs rechts; verwende, verschiebe oder übernimm kein Arbeitsfenster auf dem linken Display. Die lokalen Pipedrive-, Outlook- und WhatsApp-Helfer erzwingen diese Regel. Wenn das rechte Display fehlt oder ein Zielfenster dort nicht verifiziert werden kann, stoppe konkret statt links weiterzuarbeiten.`;
+  const displayInstruction = 'Verbindliche Displayregel: Bediene ausschließlich das physisch rechte Display. Der zentrale iMac-Runner hat dessen Geometrie unmittelbar vor deinem Start geprüft und als laufzeitgebundenen Nachweis vererbt; `right-display-check.mjs --require-second-display` verwendet diesen Nachweis auch innerhalb der Sandbox. Öffne für IVA bei Bedarf ein eigenes zweites App-Fenster beziehungsweise eigene Tabs rechts; verwende, verschiebe oder übernimm kein Arbeitsfenster auf dem linken Display. Die lokalen Pipedrive-, Outlook- und WhatsApp-Helfer erzwingen diese Regel zusätzlich pro Zielfenster. Wenn ein Zielfenster dort nicht verifiziert werden kann, stoppe konkret statt links weiterzuarbeiten.';
   if (request.mode === 'project-workflow') {
     return `Nadine hat diesen Projekt-Workflow in IVA ausdrücklich über den Button „Manuell auslösen“ gestartet. Führe jetzt genau einen operativen Einmallauf aus, ohne eine weitere Planbestätigung zu verlangen.
 
@@ -826,9 +826,10 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   const startedAt = new Date().toISOString();
   const runningState = await writeState(paths, { jobId, workerPid: process.pid, title: request.title, requestId: request.requestId, mode: request.mode, projectId: request.projectId, workflowId: request.workflowId, status: 'running', phase: request.mode === 'build' ? 'planning' : 'running', progress: request.mode === 'build' ? 10 : 5, detail: request.mode === 'build' ? 'Planung wurde begonnen.' : 'Workflow wurde gestartet.', createdAt: request.createdAt, startedAt, updatedAt: startedAt, workspace: REPO_ROOT });
   await reportTaskState(request, runningState);
+  let rightDisplayAttestation = '';
   if (['operational', 'project-workflow'].includes(request.mode)) {
-    const { requireRightDisplayWorkspace } = await import('./display-workspace.mjs');
-    await requireRightDisplayWorkspace();
+    const { encodeRightDisplayAttestation, requireRightDisplayWorkspace } = await import('./display-workspace.mjs');
+    rightDisplayAttestation = encodeRightDisplayAttestation(await requireRightDisplayWorkspace());
   }
   // Public scheduling refreshes inside the supported Browser session. A native
   // AppleEvents preflight would block that working channel before it can start.
@@ -839,6 +840,7 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   const childEnv = {
     ...process.env,
     PATH: [path.dirname(command), process.env.PATH || ''].filter(Boolean).join(path.delimiter),
+    ...(rightDisplayAttestation ? { IVA_RIGHT_DISPLAY_ATTESTATION: rightDisplayAttestation } : {}),
   };
   const child = spawn(command, args, { cwd: REPO_ROOT, stdio: ['ignore', logHandle.fd, logHandle.fd], env: childEnv });
   if (child.pid) await recordCodexTaskHeartbeat(jobId, { childPid: child.pid }).catch(() => {});
