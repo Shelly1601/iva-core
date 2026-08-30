@@ -94,8 +94,8 @@ function dewarmteJobRows() {
 function dewarmteStandardCard() {
   const standard = state.dewarmteStandard;
   if (!standard) return '<div class="dewarmte-standard"><div class="muted">Standardaufbau wird geladen …</div></div>';
-  const sections = (standard.sections || []).map(section => `<div class="dewarmte-standard-section"><b>${esc(section.title)}</b><small>${section.items?.length ? `${esc(section.items.length)} Positionen fest zugeordnet` : 'Standardpositionen werden noch ergänzt'}</small>${section.items?.length ? `<details><summary>Positionen anzeigen</summary><ul>${section.items.map(item => `<li>${esc(item)}</li>`).join('')}</ul></details>` : ''}</div>`).join('');
-  return `<div class="dewarmte-standard"><div class="dewarmte-standard-cover"><span>Seite 1</span><div><b>${esc(standard.cover?.title || 'Deckblatt aus der Installationsplanung')}</b><small>Immer unverändert aus Seite 1 der Installationsplanung</small></div></div><div class="dewarmte-standard-grid">${sections}</div></div>`;
+  const sections = (standard.sections || []).map(section => `<div class="dewarmte-standard-section"><b>${esc(section.title)}</b><small>${section.items?.length ? `${esc(section.items.length)} Positionen zugeordnet${section.standardListPending ? ' · Standardliste folgt' : ''}` : 'Standardpositionen werden noch ergänzt'}</small>${section.items?.length ? `<details><summary>Positionen anzeigen</summary><ul>${section.items.map(item => `<li>${esc(item.material || item)}</li>`).join('')}</ul></details>` : ''}</div>`).join('');
+  return `<div class="dewarmte-standard"><div class="dewarmte-standard-cover"><span>Seite 1</span><div><b>${esc(standard.cover?.title || 'Deckblatt aus der Installationsplanung')}</b><small>Immer unverändert aus Seite 1 der Installationsplanung</small></div></div><div class="dewarmte-standard-grid">${sections}</div><div class="dewarmte-order-pages-note"><b>PDF-Anhang:</b> eine separat versendbare Bestellseite für HEAT|Hero und eine für DeWarmte.</div></div>`;
 }
 
 function dewarmteLinkPdfSection(project) {

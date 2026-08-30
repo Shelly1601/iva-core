@@ -149,6 +149,7 @@ check('Installationsplan-Materialliste besitzt den echten manuellen Start', js.i
 check('Alle drei Förderungsläufe und der geordnete Gesamtlauf besitzen den echten manuellen Start', ['funding-daily-sequence', 'funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning'].every(id => js.includes(`'${id}'`)) && js.includes('MANUAL_WORKFLOW_IDS'));
 check('DeWarmte zeigt Link-rein-PDF-raus direkt in der Projektakte', js.includes('Link rein → PDF raus') && js.includes('dewarmtePdfForm') && js.includes('/api/projects/dewarmte/link-pdf-jobs'));
 check('DeWarmte zeigt festen Deckblatt- und Materialaufbau', js.includes('Immer unverändert aus Seite 1 der Installationsplanung') && js.includes('DeWarmte Material') && js.includes('HEAT|Hero Material'));
+check('DeWarmte kündigt zwei separat versendbare Bestellseiten an', js.includes('eine separat versendbare Bestellseite für HEAT|Hero und eine für DeWarmte'));
 check('DeWarmte zeigt echten Fortschrittsbalken und aktualisiert laufende Aufträge automatisch', html.includes('.dewarmte-progress') && js.includes('role="progressbar"') && js.includes('scheduleDewarmtePolling') && js.includes('refreshAfterMs'));
 check('DeWarmte bietet Download, Mailentwurf und bestätigten Direktversand', js.includes('email-draft') && js.includes('email-send') && js.includes('direkt an ${recipientEmail} senden'));
 check('DeWarmte akzeptiert optionalen Freitext und eine zusätzliche PDF', js.includes('dewarmteSupplementaryText') && js.includes('dewarmteSupplementaryPdf') && js.includes('/api/projects/dewarmte/supplement-pdfs'));

@@ -25,13 +25,15 @@ Für jeden Lauf müssen mindestens Absender oder Betreff sowie das Empfängerpos
 5. Seite 1 der Quell-PDF immer unverändert als erste Seite und Deckblatt der Ergebnis-PDF übernehmen. Kein eigenes Deckblatt davor setzen.
 6. Aus Mail und Plan eine einfache deutsche Materialliste erstellen. Ab Seite 2 folgen in dieser Reihenfolge die Bereiche „DeWarmte Material“ und „HEAT|Hero Material“ gemäß der Standarddefinition. Jede Position enthält Menge, Material/Bauteil, kurze Spezifikation und Belegstelle. Fehlende Mengen werden nicht erfunden, sondern mit „nach Weg“, „vor Ort prüfen“ oder einem offenen Punkt kenntlich gemacht.
 7. Widersprüche oder nicht belastbar bezifferte Angaben separat unter „Vor finaler Bestellung klären“ aufführen.
-8. Ergebnis als A4-PDF unter `output/pdf/Materialliste_Installation_<Auftragsnummer>_<Kunde>.pdf` speichern. Alle Seiten rendern und visuell auf abgeschnittenen Text, Überlagerungen, fehlerhafte Zeichen und unschöne Seitenumbrüche prüfen.
-9. Die fertige PDF in der Abschlussnachricht als Datei an Nadine ausliefern. Dabei kurz bestätigen, dass das Quelldokument ausschließlich gelesen und nicht verändert oder gelöscht wurde.
+8. Die bisherige Ergebnis-PDF zunächst als Zwischenstand erzeugen und anschließend mit `node local-mac-helper/dewarmte-order-pages.mjs <zwischen-pdf> <output-pdf> --project <kunde-oder-projekt> --address <objektanschrift> --installation <installationszeitraum> --reference <auftragsnummer>` zwei eigenständige A4-Anhangseiten ergänzen: zuerst „Materialbestellung HEAT|Hero“, danach „Materialbestellung DeWarmte“. Jede Seite wiederholt die wichtigsten Projektdaten und muss separat versendbar sein. Endergebnis unter `output/pdf/Materialliste_Installation_<Auftragsnummer>_<Kunde>.pdf` speichern.
+9. Alle Seiten rendern und visuell auf abgeschnittenen Text, Überlagerungen, fehlerhafte Zeichen und unschöne Seitenumbrüche prüfen. Beide Bestellseiten müssen jeweils vollständig auf einer eigenen Seite stehen.
+10. Die fertige PDF in der Abschlussnachricht als Datei an Nadine ausliefern. Dabei kurz bestätigen, dass das Quelldokument ausschließlich gelesen und nicht verändert oder gelöscht wurde.
 
 ## Qualitätskriterien
 
 - Seite 1 stimmt sichtbar mit Seite 1 des bereitgestellten Originalplans überein.
 - Die Materialliste ist in „DeWarmte Material“ und „HEAT|Hero Material“ aufgeteilt und verwendet die versionierte Standardzuordnung.
+- Der PDF-Anhang enthält zwei separat versendbare Bestellseiten in der Reihenfolge HEAT|Hero, DeWarmte.
 - Die Materialliste ist deutsch, einfach, belegbasiert und enthält keine erfundenen Stückzahlen.
 - Mailangaben und Planangaben werden gemeinsam berücksichtigt.
 - Widersprüche bleiben sichtbar statt still aufgelöst zu werden.

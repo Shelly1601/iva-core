@@ -22,6 +22,7 @@ Die versionierte Standarddefinition steht in `projects/dewarmte-material-standar
 2. Ab Seite 2 folgt zuerst der Bereich **DeWarmte Material**.
 3. Danach folgt der Bereich **HEAT|Hero Material**.
 4. Nicht eindeutig zuordenbare oder unvollständige Positionen kommen getrennt unter **Vor finaler Bestellung klären**. Sie werden keiner Firma geraten zugeordnet.
+5. Ganz am Ende folgen zwei eigenständige Anhangseiten: zuerst **Materialbestellung HEAT|Hero**, danach **Materialbestellung DeWarmte**. Jede Bestellliste beginnt auf einer neuen Seite, wiederholt die wichtigsten Projekt-/Objektdaten und muss ohne die übrige PDF verständlich und separat versendbar sein.
 
 Die in der Standarddefinition enthaltenen HEAT|Hero-Positionen stammen aus Nadines markierter Ausgangsliste. Nur die tatsächlich mit einem Haken markierten Positionen wurden übernommen; handschriftliche Kürzel und Fragezeichen gelten nicht als Haken. Die noch ausstehende allgemeine Standardmaterialliste wird später ausschließlich in dieser Definition ergänzt, ohne den übrigen Ablauf neu aufzubauen.
 
@@ -34,8 +35,8 @@ Die in der Standarddefinition enthaltenen HEAT|Hero-Positionen stammen aus Nadin
 5. Optionalen Zusatztext und eine optionale Zusatz-PDF ausschließlich lesend als Vergleichskontext prüfen. Abweichungen, Präferenzen und offene Entscheidungen getrennt von den belegten Planmengen ausweisen.
 6. Danach eine einfache deutsche Materialliste aus den belegten Planangaben erstellen: Menge, Material/Bauteil, Spezifikation/Hinweis und Belegstelle. Die Liste muss in dieser Reihenfolge die Überschriften „DeWarmte Material“ und „HEAT|Hero Material“ enthalten. Die Standardzuordnungen aus `projects/dewarmte-material-standard.js` anwenden.
 7. Fehlende Mengen nicht erfinden. Widersprüche, offene Dimensionen und noch nicht eindeutig klassifizierte Positionen separat unter „Vor finaler Bestellung klären“ aufführen.
-8. Ergebnis unter `output/pdf/DeWarmte_Materialliste_<Auftragsnummer-oder-Kunde>.pdf` erzeugen. DeWarmte-Zwischenstände ausschließlich unter `tmp/pdfs/dewarmte-<Job-Schlüssel>/` ablegen, damit die Dreitagesbereinigung sie eindeutig erfasst.
-9. Alle Seiten mit Poppler rendern und visuell prüfen. Zusätzlich sicherstellen, dass die gerenderte erste Seite mit der gerenderten ersten Originalseite übereinstimmt.
+8. Zunächst die bisherige Ergebnis-PDF unter einem Zwischenpfad in `tmp/pdfs/dewarmte-<Job-Schlüssel>/` erzeugen. Anschließend mit `node local-mac-helper/dewarmte-order-pages.mjs <zwischen-pdf> <output-pdf> --project <kunde-oder-projekt> --address <objektanschrift> --installation <installationszeitraum> --reference <auftragsnummer>` genau die zwei versionierten Bestellseiten anhängen. Die endgültige Datei heißt `output/pdf/DeWarmte_Materialliste_<Auftragsnummer-oder-Kunde>.pdf`. DeWarmte-Zwischenstände ausschließlich unter dem genannten Temp-Pfad ablegen, damit die Dreitagesbereinigung sie eindeutig erfasst.
+9. Alle Seiten einschließlich beider Bestellseiten mit Poppler rendern und visuell prüfen. Zusätzlich sicherstellen, dass die gerenderte erste Seite mit der gerenderten ersten Originalseite übereinstimmt, beide Bestellseiten jeweils genau eine eigene A4-Seite belegen und alle Positionen vollständig lesbar sind.
 10. Die fertige PDF mit dem im Auftrag angegebenen Job-Schlüssel über den dokumentierten IVA-Helfer in die DeWarmte-Projektakte hochladen.
 11. Ausgabeart beachten:
    - `download`: keine Mail erstellen oder senden.

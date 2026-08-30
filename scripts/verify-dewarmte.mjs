@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+
+const pdfRequireBase = process.env.IVA_NODE_MODULES_DIR
+  ? path.join(path.resolve(process.env.IVA_NODE_MODULES_DIR), 'package.json')
+  : import.meta.url;
+const { PDFDocument } = createRequire(pdfRequireBase)('pdf-lib');
 
 const dataDir = await mkdtemp(path.join(os.tmpdir(), 'iva-dewarmte-'));
 process.env.IVA_MAC_HELPER_DATA_DIR = dataDir;
@@ -38,7 +44,7 @@ try {
     title: 'Deckblatt aus der Installationsplanung',
   });
   assert.deepEqual(DEWARMTE_MATERIAL_STANDARD.sections.map(section => section.title), ['DeWarmte Material', 'HEAT|Hero Material']);
-  assert.deepEqual(DEWARMTE_MATERIAL_STANDARD.sections[1].items, [
+  assert.deepEqual(DEWARMTE_MATERIAL_STANDARD.sections[1].items.map(entry => entry.material), [
     'Erdleitung / Schutzrohr',
     'Heizungsrohrleitung Pomp MP',
     'Adapter und Fittings Pomp MP',
@@ -49,6 +55,35 @@ try {
     'Anschlussmaterial Warmwasser-Zirkulation',
     'Elektroanschluss Pomp MP',
   ]);
+  assert.deepEqual(DEWARMTE_MATERIAL_STANDARD.sections[0].items.map(entry => entry.material), [
+    'Monoblock-Wärmepumpe Pomp MP',
+    'Warmwasser-Wärmepumpe Pomp T',
+    'Fundamentmaterial für Pomp MP',
+    'Gummifüße (Bigfoots)',
+    'Steuerungseinheit',
+    'Tado-Thermostat',
+    'Steuerungskabel Pomp T',
+    'SG-ready-Signalkabel',
+  ]);
+  assert.deepEqual(DEWARMTE_MATERIAL_STANDARD.orderAppendix.sectionOrder, ['heat-hero', 'dewarmte']);
+
+  const basePdf = await PDFDocument.create();
+  basePdf.addPage([595.28, 841.89]);
+  basePdf.setTitle('Test Materialliste');
+  const basePdfPath = path.join(dataDir, 'base.pdf');
+  const orderPdfPath = path.join(dataDir, 'output', 'Materialliste_mit_Bestellseiten.pdf');
+  await writeFile(basePdfPath, await basePdf.save());
+  const { appendDewarmteOrderPages } = await import('../local-mac-helper/dewarmte-order-pages.mjs');
+  const appended = await appendDewarmteOrderPages({
+    inputPath: basePdfPath,
+    outputPath: orderPdfPath,
+    outputRoot: path.join(dataDir, 'output'),
+    metadata: { project: 'Testkunde', address: 'Testweg 1', installation: 'KW 36/2026', reference: 'TEST-1' },
+  });
+  assert.equal(appended.pageCount, 3);
+  const reopenedOrderPdf = await PDFDocument.load(await readFile(orderPdfPath));
+  assert.equal(reopenedOrderPdf.getPageCount(), 3);
+  assert.match(reopenedOrderPdf.getSubject(), /getrennte Bestellseiten/);
 
   const runningJob = summarizeDewarmteLinkPdfJobs([{
     id: 'command-progress', action: 'project.workflow.run', status: 'completed', createdAt: '2026-08-30T08:00:00Z',
@@ -114,7 +149,9 @@ try {
   assert.match(workflow, /spätestens drei Tage/);
   assert.match(workflow, /DeWarmte Material/);
   assert.match(workflow, /HEAT\|Hero Material/);
-  console.log('PASS DeWarmte: Fortschritt, festes Grundgerüst, Zusatzdaten-Löschung und Mail-Dublettenschutz.');
+  assert.match(workflow, /Materialbestellung HEAT\|Hero/);
+  assert.match(workflow, /Materialbestellung DeWarmte/);
+  console.log('PASS DeWarmte: Fortschritt, getrennte Bestellseiten, Zusatzdaten-Löschung und Mail-Dublettenschutz.');
 } finally {
   await rm(dataDir, { recursive: true, force: true });
 }
