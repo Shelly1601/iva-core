@@ -55,9 +55,24 @@ export function windowBoundsInsideRightDisplay(bounds = [], workspace) {
     && right > left && bottom > top;
 }
 
-export async function requireRightDisplayWorkspace() {
-  const status = await runMacUiBridge(['display-status'], { timeoutMs: 15000 });
-  return resolveRightDisplayWorkspace(status);
+export async function requireRightDisplayWorkspace({
+  attempts = 6,
+  retryDelayMs = 500,
+  run = runMacUiBridge,
+  waitFn = delay => new Promise(resolve => setTimeout(resolve, delay)),
+} = {}) {
+  const maximumAttempts = Math.max(1, Math.min(10, Number(attempts) || 6));
+  let lastError;
+  for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+    try {
+      const status = await run(['display-status'], { timeoutMs: 15000 });
+      return resolveRightDisplayWorkspace(status);
+    } catch (error) {
+      lastError = error;
+      if (attempt < maximumAttempts) await waitFn(Math.max(100, Math.min(2000, Number(retryDelayMs) || 500)));
+    }
+  }
+  throw lastError;
 }
 
 export async function ensureAppWindowOnRightDisplay(bundleIdentifier) {

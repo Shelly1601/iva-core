@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { resolveRightDisplayWorkspace, windowBoundsInsideRightDisplay } from '../local-mac-helper/display-workspace.mjs';
+import { requireRightDisplayWorkspace, resolveRightDisplayWorkspace, windowBoundsInsideRightDisplay } from '../local-mac-helper/display-workspace.mjs';
 
 const workspace = resolveRightDisplayWorkspace({ displays: [
   { id: '1', main: true, x: 0, y: 0, width: 2240, height: 1260 },
@@ -19,6 +19,35 @@ assert.throws(() => resolveRightDisplayWorkspace({ displays: [
   { id: '1', main: true, x: 0, y: 0, width: 2240, height: 1260 },
   { id: '2', main: false, x: 0, y: -1440, width: 2240, height: 1440 },
 ] }), /nicht eindeutig links\/rechts/);
+
+let transientAttempts = 0;
+const recoveredWorkspace = await requireRightDisplayWorkspace({
+  attempts: 3,
+  retryDelayMs: 100,
+  waitFn: async () => {},
+  run: async () => {
+    transientAttempts += 1;
+    if (transientAttempts < 3) return { displays: [{ id: '1', main: true, x: 0, y: 0, width: 2240, height: 1260 }] };
+    return { displays: [
+      { id: '1', main: true, x: 0, y: 0, width: 2240, height: 1260 },
+      { id: '2', main: false, x: 2240, y: -180, width: 5120, height: 1440 },
+    ] };
+  },
+});
+assert.equal(transientAttempts, 3);
+assert.equal(recoveredWorkspace.target.id, '2');
+
+let persistentAttempts = 0;
+await assert.rejects(requireRightDisplayWorkspace({
+  attempts: 4,
+  retryDelayMs: 100,
+  waitFn: async () => {},
+  run: async () => {
+    persistentAttempts += 1;
+    return { displays: [{ id: '1', main: true, x: 0, y: 0, width: 2240, height: 1260 }] };
+  },
+}), /rechte Arbeitsdisplay ist nicht angeschlossen/);
+assert.equal(persistentAttempts, 4);
 
 const [pipedriveSource, codexSource, planbarSource, whatsappSource, macUiSource, macBridgeSource] = await Promise.all([
   readFile(new URL('../local-mac-helper/chrome-pipedrive.mjs', import.meta.url), 'utf8'),
