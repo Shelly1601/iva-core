@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { prioritizedPipedriveApiSourceDealIds } from '../local-mac-helper/chrome-pipedrive.mjs';
+import { fundingWonFollowUpIsVerified, prioritizedPipedriveApiSourceDealIds } from '../local-mac-helper/chrome-pipedrive.mjs';
 
 const taskRoot = await mkdtemp(path.join(os.tmpdir(), 'iva-funding-workflow-'));
 process.env.IVA_CODEX_TASK_ROOT = taskRoot;
@@ -28,6 +28,9 @@ function fakeSpawn() {
 try {
   assert.deepEqual(prioritizedPipedriveApiSourceDealIds(['8503', '8153', '8503', '317']), ['8153', '8503', '317']);
   assert.deepEqual(prioritizedPipedriveApiSourceDealIds(['8503', '317', '42'], { limit: 2 }), ['8503', '317']);
+  assert.equal(fundingWonFollowUpIsVerified({ statusVerified: true, followUpStageVerified: false }), true);
+  assert.equal(fundingWonFollowUpIsVerified({ statusVerified: false, followUpStageVerified: true }), true);
+  assert.equal(fundingWonFollowUpIsVerified({ statusVerified: false, followUpStageVerified: false }), false);
 
   const started = await startCodexTask({
     prompt: 'Führe den geordneten Förder-Tageslauf vollständig und geprüft aus.',

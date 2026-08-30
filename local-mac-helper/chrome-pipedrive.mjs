@@ -2016,6 +2016,10 @@ async function readPipedriveFundingDealGuardViaPipeline(dealId) {
   return result;
 }
 
+export function fundingWonFollowUpIsVerified(followUp = {}) {
+  return followUp.statusVerified === true || followUp.followUpStageVerified === true;
+}
+
 export async function markPipedriveFundingDealWon({ dealId, approvalFileName, confirmApply = false } = {}) {
   const id = String(dealId || '').replace(/\D/g, '');
   const fileName = path.basename(String(approvalFileName || '')).trim();
@@ -2090,18 +2094,19 @@ export async function markPipedriveFundingDealWon({ dealId, approvalFileName, co
       })()`, { timeoutMs: 30000 });
       followUp = JSON.parse(followUpRaw);
       if (followUp.error) throw new Error(`Pipedrive Folgephase für Deal ${id} konnte nach „Gewonnen“ nicht gelesen werden: ${followUp.error}. Status nicht erneut setzen.`);
-      if (followUp.statusVerified === true && followUp.followUpStageVerified === true) break;
+      if (fundingWonFollowUpIsVerified(followUp)) break;
     }
+  const followUpVerified = fundingWonFollowUpIsVerified(followUp);
   return {
-      dealId: id,
-      approvalFileName: fileName,
-      ...result,
-      ...followUp,
-      verified: result.verified === true && followUp.statusVerified === true,
-      fullyVerified: result.verified === true && followUp.statusVerified === true && followUp.followUpStageVerified === true,
-      requiresManualReview: followUp.followUpStageVerified !== true,
-      mutated: result.changed === true,
-      deletedFromPipedrive: false,
+    dealId: id,
+    approvalFileName: fileName,
+    ...result,
+    ...followUp,
+    verified: result.verified === true && followUpVerified,
+    fullyVerified: result.verified === true && followUpVerified,
+    requiresManualReview: !followUpVerified,
+    mutated: result.changed === true,
+    deletedFromPipedrive: false,
   };
 }
 
