@@ -734,7 +734,7 @@ export async function readPipedriveFundingDealsViaApi({ dealIds, batchSize = 8, 
         }
       };
       const fields = await request('/api/v1/dealFields?start=0&limit=500') || [];
-      const stages = await request('/api/v1/stages?pipeline_id=1&start=0&limit=500') || [];
+      const stages = await request('/api/v1/stages?start=0&limit=500') || [];
       const fieldByName = new Map(fields.map(field => [String(field.name || '').toLowerCase(), field]));
       const stageById = new Map(stages.map(stage => [String(stage.id), stage.name]));
       const personCache = new Map();

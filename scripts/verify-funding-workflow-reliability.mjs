@@ -76,6 +76,8 @@ try {
   assert.match(fundingReadSource, /ensurePipedriveDownloadSource\(\)/);
   assert.doesNotMatch(fundingReadSource, /openAuthenticatedPipedriveApiSource/,
     'der Förder-Vollscan soll die stabile rechte Pipeline-Sitzung statt einer vollständigen Deal-Seite verwenden');
+  assert.doesNotMatch(fundingReadSource, /stages\?pipeline_id=1/,
+    'automatisch ausgelöste Folgephasen außerhalb der Ausgangspipeline müssen mit ihrem Namen lesbar bleiben');
   assert.match(fundingReadSource, /Promise\.all\(\[/);
   assert.doesNotMatch(fundingReadSource, /xhr\.open\([^\n]+,\s*false\)/,
     'der Förder-Vollscan darf den rechten Pipedrive-Tab nicht mit synchronen XHR blockieren');
