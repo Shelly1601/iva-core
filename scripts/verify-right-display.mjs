@@ -110,9 +110,10 @@ const [pipedriveSource, codexSource, planbarSource, whatsappSource, macUiSource,
   readFile(new URL('../local-mac-helper/right-display-check.mjs', import.meta.url), 'utf8'),
 ]);
 assert.match(pipedriveSource, /set ivaWindow to make new window/);
-assert.match(pipedriveSource, /set URL of active tab of ivaWindow/);
+assert.match(pipedriveSource, /if ivaWindow is missing value then/);
+assert.match(pipedriveSource, /make new tab at end of tabs of ivaWindow/);
 assert.match(pipedriveSource, /set bounds of ivaWindow to/);
-assert.match(pipedriveSource, /window:\$\{output\}/);
+assert.match(pipedriveSource, /return output\.split\(','\)\.map\(id => `tab:\$\{id\}`\)/);
 assert.doesNotMatch(pipedriveSource, /anchor\.target\s*=\s*['_"]self/);
 assert.match(pipedriveSource, /set downloadTab to make new tab/);
 assert.match(pipedriveSource, /separater rechter Browser-Downloadtab/);

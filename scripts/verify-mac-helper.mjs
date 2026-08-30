@@ -68,6 +68,7 @@ import {
   activatePipedriveDealTab,
   applyPipedriveFundingFieldUpdates,
   assertPipedriveFileActionAllowed,
+  buildTemporaryPipedriveDealTabsAppleScript,
   renderPipedriveFundingInformationNote,
   resolvePipedriveFundingStageTransition,
 } from '../local-mac-helper/chrome-pipedrive.mjs';
@@ -346,6 +347,12 @@ assert.equal(FUNDING_WORKFLOW_POLICY.emptyWholeUserTrash, false);
 assert.equal(FUNDING_WORKFLOW_POLICY.noteSuffix, '(Notiz von Nadine via KI)');
 assert.equal(FUNDING_WORKFLOW_POLICY.processedMailFolder, 'fertig');
 assert.equal(assertFundingWorkflowOrder(), true);
+const reusablePipedriveTabs = buildTemporaryPipedriveDealTabsAppleScript(['3788', '3218'], { target: { x: 2240, width: 5120 }, bounds: { left: 2276, top: -158, right: 7324, bottom: 1238 } });
+assert.match(reusablePipedriveTabs, /repeat with w in windows/);
+assert.match(reusablePipedriveTabs, /if ivaWindow is missing value then/);
+assert.match(reusablePipedriveTabs, /make new tab at end of tabs of ivaWindow/);
+assert.match(reusablePipedriveTabs, /set end of createdTabIds to/);
+assert.doesNotMatch(reusablePipedriveTabs, /set ivaWindow to make new window\nset URL of active tab/);
 assert.throws(() => assertFundingWorkflowOrder(['amount', 'completeness', 'approval']), /Reihenfolge/);
 assert.equal(isImacFundingHost('iMac-von-Nadine.local'), true);
 assert.equal(isImacFundingHost('MacBook-Air-von-Nadine.local'), false);

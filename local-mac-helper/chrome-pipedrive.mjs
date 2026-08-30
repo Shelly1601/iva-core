@@ -340,30 +340,71 @@ export async function readPipedriveFundingDeal({ dealId } = {}) {
   };
 }
 
+export function buildTemporaryPipedriveDealTabsAppleScript(dealIds, workspace) {
+  const ids = [...new Set(dealIds.map(String))].filter(id => /^\d+$/.test(id));
+  if (!ids.length) return '';
+  const [firstId, ...remainingIds] = ids;
+  const blocks = remainingIds.map(id => `set createdTab to make new tab at end of tabs of ivaWindow with properties {URL:"https://${PIPEDRIVE_HOST}/deal/${id}"}
+set end of createdTabIds to (id of createdTab as text)`).join('\n');
+  return `tell application "Google Chrome"
+set ivaWindow to missing value
+repeat with w in windows
+  set windowBounds to bounds of w
+  set isRightWorkspace to (item 1 of windowBounds) is greater than or equal to ${Math.round(workspace.target.x)} and (item 3 of windowBounds) is less than or equal to ${Math.round(workspace.target.x + workspace.target.width)}
+  if isRightWorkspace then
+    repeat with candidateTab in tabs of w
+      if (URL of candidateTab) contains "${PIPEDRIVE_HOST}" then
+        set ivaWindow to w
+        exit repeat
+      end if
+    end repeat
+  end if
+  if ivaWindow is not missing value then exit repeat
+end repeat
+set createdTabIds to {}
+if ivaWindow is missing value then
+  set ivaWindow to make new window
+  set createdTab to active tab of ivaWindow
+  set URL of createdTab to "https://${PIPEDRIVE_HOST}/deal/${firstId}"
+  set bounds of ivaWindow to ${chromeBoundsAppleScript(workspace)}
+else
+  set createdTab to make new tab at end of tabs of ivaWindow with properties {URL:"https://${PIPEDRIVE_HOST}/deal/${firstId}"}
+end if
+set end of createdTabIds to (id of createdTab as text)
+${blocks}
+set index of ivaWindow to 1
+set previousDelimiters to AppleScript's text item delimiters
+set AppleScript's text item delimiters to ","
+set output to createdTabIds as text
+set AppleScript's text item delimiters to previousDelimiters
+return output
+end tell`;
+}
+
 async function openTemporaryPipedriveDealTabs(dealIds) {
   const ids = [...new Set(dealIds.map(String))].filter(id => /^\d+$/.test(id));
   if (!ids.length) return [];
   const workspace = await requireRightDisplayWorkspace();
-  const [firstId, ...remainingIds] = ids;
-  const blocks = remainingIds.map(id => `make new tab at end of tabs of ivaWindow with properties {URL:"https://${PIPEDRIVE_HOST}/deal/${id}"}`).join('\n');
-  const output = await runAppleScript(`tell application "Google Chrome"
-set ivaWindow to make new window
-set URL of active tab of ivaWindow to "https://${PIPEDRIVE_HOST}/deal/${firstId}"
-set bounds of ivaWindow to ${chromeBoundsAppleScript(workspace)}
-${blocks}
-set index of ivaWindow to 1
-return id of ivaWindow as text
-end tell`, { timeoutMs: 20000 });
-  if (!/^\d+$/.test(output)) throw new Error('Das eigene rechte IVA-Chrome-Fenster konnte nicht verifiziert werden.');
-  return [`window:${output}`];
+  const output = await runAppleScript(buildTemporaryPipedriveDealTabsAppleScript(ids, workspace), { timeoutMs: 20000 });
+  if (!/^\d+(?:,\d+)*$/.test(output)) throw new Error('Die eigenen rechten IVA-Chrome-Tabs konnten nicht verifiziert werden.');
+  return output.split(',').map(id => `tab:${id}`);
 }
 
 async function closeTemporaryPipedriveDealTabs(handles) {
+  const tabIds = [...new Set(handles.map(value => String(value).match(/^tab:(\d+)$/)?.[1]).filter(Boolean))];
   const windowIds = [...new Set(handles.map(value => String(value).match(/^window:(\d+)$/)?.[1]).filter(Boolean))];
-  if (!windowIds.length) return;
-  const blocks = windowIds.map(id => `if exists (first window whose id is ${id}) then close (first window whose id is ${id})`).join('\n');
+  if (!tabIds.length && !windowIds.length) return;
+  const tabBlocks = tabIds.map(id => `repeat with w in windows
+  try
+    set matchedTab to first tab of w whose id is ${id}
+    close matchedTab
+    exit repeat
+  end try
+end repeat`).join('\n');
+  const windowBlocks = windowIds.map(id => `if exists (first window whose id is ${id}) then close (first window whose id is ${id})`).join('\n');
   await runAppleScript(`tell application "Google Chrome"
-${blocks}
+${tabBlocks}
+${windowBlocks}
 end tell`, { timeoutMs: 20000 });
 }
 
