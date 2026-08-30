@@ -824,7 +824,7 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   const previousState = await readJson(paths.state);
   const executionRequest = { ...request, recoveryAttempt: Number(previousState.recoveryAttempts || 0) };
   const startedAt = new Date().toISOString();
-  const runningState = await writeState(paths, { jobId, workerPid: process.pid, title: request.title, requestId: request.requestId, mode: request.mode, projectId: request.projectId, workflowId: request.workflowId, status: 'running', phase: request.mode === 'build' ? 'planning' : 'running', progress: request.mode === 'build' ? 10 : 5, detail: request.mode === 'build' ? 'Planung wurde begonnen.' : 'Workflow wurde gestartet.', createdAt: request.createdAt, startedAt, updatedAt: startedAt, workspace: REPO_ROOT });
+  const runningState = await writeState(paths, { jobId, workerPid: process.pid, title: request.title, requestId: request.requestId, mode: request.mode, projectId: request.projectId, workflowId: request.workflowId, recoveryAttempts: Number(previousState.recoveryAttempts || 0), status: 'running', phase: request.mode === 'build' ? 'planning' : 'running', progress: request.mode === 'build' ? 10 : 5, detail: request.mode === 'build' ? 'Planung wurde begonnen.' : 'Workflow wurde gestartet.', createdAt: request.createdAt, startedAt, updatedAt: startedAt, workspace: REPO_ROOT });
   await reportTaskState(request, runningState);
   let rightDisplayAttestation = '';
   if (['operational', 'project-workflow'].includes(request.mode)) {
