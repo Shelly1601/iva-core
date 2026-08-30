@@ -1599,7 +1599,7 @@ function safePipedriveDownloadName(value, fileId) {
   return `${stem || 'pipedrive-dokument'}-${String(fileId)}${extension}`;
 }
 
-async function listPipedriveDealFileRecords(dealId) {
+async function listPipedriveDealFileRecords(dealId, { executionDealId = dealId } = {}) {
   const jobId = `iva-file-list-${randomUUID()}`;
   const started = JSON.parse(await executePipedriveJavaScript(String.raw`(() => {
     const dealId = ${JSON.stringify(String(dealId))};
@@ -1623,7 +1623,7 @@ async function listPipedriveDealFileRecords(dealId) {
       }
     })();
     return JSON.stringify({ started: true });
-  })()`, { dealId, timeoutMs: 30000 }));
+  })()`, { dealId: executionDealId, timeoutMs: 30000 }));
   if (!started.started) throw new Error(`Pipedrive-Dateiliste für Deal ${dealId} konnte nicht gestartet werden.`);
   try {
     const deadline = Date.now() + 30_000;
@@ -1632,7 +1632,7 @@ async function listPipedriveDealFileRecords(dealId) {
       const result = JSON.parse(await executePipedriveJavaScript(String.raw`(() => {
         const state = window.__ivaPipedriveFileLists?.[${JSON.stringify(jobId)}];
         return JSON.stringify(state ? { status: state.status, files: state.files || [], error: state.error || '' } : { status: 'missing' });
-      })()`, { dealId, timeoutMs: 15000 }));
+      })()`, { dealId: executionDealId, timeoutMs: 15000 }));
       if (result.status === 'complete') return (result.files || []).filter(file => /^\d+$/.test(file.id) && file.name);
       if (['error', 'missing'].includes(result.status)) throw new Error(`Pipedrive-Dateiliste für Deal ${dealId}: ${result.error || 'Status ging verloren.'}`);
     }
@@ -1641,16 +1641,16 @@ async function listPipedriveDealFileRecords(dealId) {
     await executePipedriveJavaScript(String.raw`(() => {
       if (window.__ivaPipedriveFileLists) delete window.__ivaPipedriveFileLists[${JSON.stringify(jobId)}];
       return 'cleaned';
-    })()`, { dealId, timeoutMs: 15000 }).catch(() => {});
+    })()`, { dealId: executionDealId, timeoutMs: 15000 }).catch(() => {});
   }
 }
 
-async function downloadPipedriveFileViaSignedInSession({ dealId, file }) {
+async function downloadPipedriveFileViaSignedInSession({ dealId, file, executionDealId = dealId }) {
   const downloadUrl = await executePipedriveJavaScript(String.raw`(() => {
     const resource = performance.getEntriesByType('resource').map(entry => entry.name).find(name => name.includes('session_token='));
     const sessionToken = resource ? new URL(resource).searchParams.get('session_token') : '';
     return sessionToken ? location.origin + '/api/v1/files/${String(file.id)}/download?strict_mode=true&session_token=' + encodeURIComponent(sessionToken) : '';
-  })()`, { dealId, timeoutMs: 15000 });
+  })()`, { dealId: executionDealId, timeoutMs: 15000 });
   if (!downloadUrl.startsWith(`https://${PIPEDRIVE_HOST}/api/v1/files/${String(file.id)}/download?`)) {
     throw new Error(`${file.name}: sichere Pipedrive-Downloadadresse konnte nicht vorbereitet werden.`);
   }
@@ -1663,7 +1663,7 @@ repeat with w in windows
   set isRightWorkspace to (item 1 of windowBounds) is greater than or equal to ${Math.round(workspace.target.x)} and (item 3 of windowBounds) is less than or equal to ${Math.round(workspace.target.x + workspace.target.width)}
   if isRightWorkspace then
     repeat with candidateTab in tabs of w
-      if (URL of candidateTab) contains "pipedrive.com/deal/${String(dealId)}" then
+      if (URL of candidateTab) contains "${PIPEDRIVE_HOST}" then
         set downloadTab to make new tab at end of tabs of w with properties {URL:${JSON.stringify(downloadUrl)}}
         return id of downloadTab as text
       end if
@@ -1718,16 +1718,27 @@ end tell`, { timeoutMs: 10000 }).catch(() => {});
   }
 }
 
+async function ensurePipedriveDownloadSource() {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const state = await executePipedriveJavaScript(String.raw`(() => {
+      const authenticated = performance.getEntriesByType('resource').some(entry => entry.name.includes('session_token='));
+      return authenticated ? 'authenticated' : 'loading';
+    })()`, { timeoutMs: 15_000 }).catch(() => 'loading');
+    if (state === 'authenticated') return true;
+    await wait(500);
+  }
+  throw new Error('Der rechte Pipedrive-Pipeline-Tab besitzt keine verifizierte angemeldete API-Sitzung.');
+}
+
 async function downloadPipedriveDealFilesUnlocked({ dealId, fileIds = [] } = {}) {
   const id = String(dealId || '').replace(/\D/g, '');
   if (!id) throw new Error('Für den Pipedrive-Dateidownload fehlt eine gültige Deal-ID.');
   const requestedIds = new Set((Array.isArray(fileIds) ? fileIds : []).map(value => String(value).replace(/\D/g, '')).filter(Boolean));
-  const createdIds = await openTemporaryPipedriveDealTabs([id]);
   let directory = '';
   try {
-    await activatePipedriveDealTab(id);
-    await waitForPipedriveDealTab(id);
-    const records = await listPipedriveDealFileRecords(id);
+    await ensurePipedriveDownloadSource();
+    const records = await listPipedriveDealFileRecords(id, { executionDealId: '' });
     const selected = requestedIds.size ? records.filter(file => requestedIds.has(file.id)) : records;
     if (requestedIds.size && selected.length !== requestedIds.size) throw new Error('Mindestens eine angeforderte Pipedrive-Datei gehört nicht zu diesem Deal.');
     if (!selected.length) return { dealId: id, directory: null, files: [], downloadedCount: 0, readOnlySource: true, deletedFromPipedrive: false };
@@ -1738,7 +1749,7 @@ async function downloadPipedriveDealFilesUnlocked({ dealId, fileIds = [] } = {})
     const failedFiles = [];
     for (const [index, file] of selected.entries()) {
       try {
-        const downloaded = await downloadPipedriveFileViaSignedInSession({ dealId: id, file });
+        const downloaded = await downloadPipedriveFileViaSignedInSession({ dealId: id, file, executionDealId: '' });
         const fileName = safePipedriveDownloadName(file.name, file.id);
         const filePath = path.join(directory, fileName);
         await writeFile(filePath, downloaded.data, { mode: 0o600, flag: 'wx' });
@@ -1750,7 +1761,7 @@ async function downloadPipedriveDealFilesUnlocked({ dealId, fileIds = [] } = {})
           error: String(error?.message || error).replace(/session_token=[^&\s]+/ig, 'session_token=[ausgeblendet]').slice(0, 300),
         });
       }
-      if (index + 1 < selected.length) await waitForPipedriveDealTab(id, { timeoutMs: 20_000 }).catch(() => {});
+      if (index + 1 < selected.length) await wait(250);
     }
     if (!files.length && failedFiles.length) {
       await rm(directory, { recursive: true, force: true });
@@ -1770,8 +1781,6 @@ async function downloadPipedriveDealFilesUnlocked({ dealId, fileIds = [] } = {})
   } catch (error) {
     if (directory) await rm(directory, { recursive: true, force: true }).catch(() => {});
     throw error;
-  } finally {
-    await closeTemporaryPipedriveDealTabs(createdIds).catch(() => {});
   }
 }
 

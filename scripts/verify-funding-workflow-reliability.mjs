@@ -76,6 +76,14 @@ try {
   assert.match(pipedriveSource, /failedFiles\.push/,
     'eine einzelne nicht ladbare Pipedrive-Datei darf nicht mehr den ganzen Deal-Download verwerfen');
   assert.match(pipedriveSource, /failedCount: failedFiles\.length/);
+  const downloadSource = pipedriveSource.slice(
+    pipedriveSource.indexOf('async function downloadPipedriveDealFilesUnlocked'),
+    pipedriveSource.indexOf('export function isRetryablePipedriveDownloadError'),
+  );
+  assert.match(downloadSource, /ensurePipedriveDownloadSource\(\)/);
+  assert.match(downloadSource, /executionDealId: ''/);
+  assert.doesNotMatch(downloadSource, /openTemporaryPipedriveDealTabs/,
+    'Dateidownloads sollen die stabile rechte Pipeline-Sitzung statt schwerer Deal-Seiten verwenden');
   assert.match(macUiSource, /for \(let attempt = 1; attempt <= 3; attempt \+= 1\)/);
   assert.match(macBridgeSource, /sidebarNodesEnsuringFolder/);
   assert.match(macBridgeSource, /AXPress erfolgreich quittieren/);
