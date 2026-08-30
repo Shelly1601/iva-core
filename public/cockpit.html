@@ -122,6 +122,12 @@
   .row:first-of-type{border-top:0}
   .row .tag{font-size:10px;font-weight:700;padding:1px 7px;border-radius:20px;background:rgba(79,157,255,.16);color:var(--blue-lt);margin-right:6px}
   .row .tm{color:var(--cyan);font-weight:600;margin-right:6px}
+  .todo-row{display:flex;align-items:flex-start;gap:9px}
+  .todo-check{flex:0 0 22px;width:22px;height:22px;margin-top:-1px;border:1px solid rgba(34,230,214,.55);border-radius:7px;background:rgba(3,6,14,.62);color:transparent;cursor:pointer;display:grid;place-items:center;font-size:14px;line-height:1;transition:background .15s,border-color .15s,transform .15s}
+  .todo-check:hover,.todo-check:focus-visible{border-color:var(--cyan);background:rgba(34,230,214,.14);outline:none;transform:scale(1.05)}
+  .todo-check:disabled{cursor:wait;opacity:.7;transform:none}
+  .todo-check.done{background:var(--cyan);border-color:var(--cyan);color:#04121a}
+  .todo-text{min-width:0;overflow-wrap:anywhere}
   .muted{color:var(--muted);font-size:12.5px}
   .workspace-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
   .workspace-actions button{border:1px solid var(--border2);background:rgba(3,6,14,.52);color:var(--text);border-radius:10px;padding:9px 5px;cursor:pointer;font-size:11px;line-height:1.25}
@@ -161,7 +167,7 @@
     </aside>
     <aside class="hud-col hud-right" id="colRight">
       <div class="card"><h3><span class="ic">🗓</span> Calendly <span class="cnt" id="c-cly">–</span></h3><div id="d-cly"><div class="muted">—</div></div></div>
-      <div class="card"><h3><span class="ic">✓</span> Todos <span class="cnt" id="c-todo">–</span></h3><div id="d-todo"><div class="muted">—</div></div></div>
+      <div class="card"><h3><span class="ic">✓</span> To-dos <span class="cnt" id="c-todo">–</span></h3><div id="d-todo"><div class="muted">—</div></div></div>
       <div class="card"><h3><span class="ic">↗</span> Arbeitsbereiche</h3><div class="workspace-actions"><button id="openProjects">Projekte</button><button id="openControl">Kontrollzentrum</button><button data-open-workspace="beratung">Beratung</button><button data-open-workspace="kunde">Kunden</button><button id="openInvestment">Investment</button><button id="openMarketing">Marketing</button><button id="openRecruiting">Recruiting</button><button id="openOpportunities">Chancenradar</button><button id="openWhatsApp">WhatsApp</button><button id="openAccounting">Buchhaltung</button><button id="openVoiceLab">Sprachlabor</button></div></div>
     </aside>
   </main>
@@ -579,6 +585,31 @@
   // ---- Daten ----
   function rows(el,arr,fn){el.innerHTML='';if(!arr||!arr.length){el.innerHTML='<div class="muted">nichts</div>';return;}
     arr.slice(0,6).forEach(x=>{const d=document.createElement('div');d.className='row';d.innerHTML=fn(x);el.appendChild(d);});}
+  function renderTodos(todos){
+    const el=$('d-todo');el.innerHTML='';$('c-todo').textContent=todos.length;
+    if(!todos.length){el.innerHTML='<div class="muted">alles erledigt</div>';return;}
+    todos.slice(0,6).forEach(todo=>{
+      const row=document.createElement('div');row.className='row todo-row';
+      const check=document.createElement('button');check.type='button';check.className='todo-check';check.textContent='✓';
+      check.title='Als erledigt abhaken';check.setAttribute('role','checkbox');check.setAttribute('aria-checked','false');check.setAttribute('aria-label','"'+String(todo.text||'To-do')+'" als erledigt abhaken');
+      const label=document.createElement('span');label.className='todo-text';label.textContent=todo.text||'';
+      check.addEventListener('click',async()=>{
+        check.disabled=true;check.classList.add('done');check.setAttribute('aria-checked','true');
+        try{
+          await api('/api/todos/toggle',{method:'POST',body:JSON.stringify({ts:todo.ts})});
+          await loadTodos();
+        }catch(error){
+          check.disabled=false;check.classList.remove('done');check.setAttribute('aria-checked','false');
+          setStatus('err','To-do konnte nicht abgehakt werden');
+        }
+      });
+      row.append(check,label);el.appendChild(row);
+    });
+  }
+  async function loadTodos(){
+    try{renderTodos(await api('/api/todos'));}
+    catch(e){$('d-todo').innerHTML='<div class="muted">—</div>';}
+  }
   async function loadData(){
     try{const cal=await api('/api/calendar');$('c-cal').textContent=cal.length;
       rows($('d-cal'),cal,s=>{const p=String(s).split(' – ');return '<span class="tm">'+(p[0]||'').replace(/^.*·\s*/,'')+'</span>'+(p[1]||p[0]);});}catch(e){$('d-cal').innerHTML='<div class="muted">—</div>';}
@@ -590,7 +621,7 @@
       rows($('d-mail'),Object.entries(bB),([b,n])=>'<span class="tag">'+b+'</span>'+n+' ungelesen');}catch(e){$('d-mail').innerHTML='<div class="muted">—</div>';}
     try{const cy=await api('/api/calendly');const ev=cy.events||[];$('c-cly').textContent=ev.length;
       rows($('d-cly'),ev,x=>'<span class="tm">'+(x.wann||'')+'</span>'+(x.termin||'')+(x.bucher?(' – '+x.bucher):''));}catch(e){$('d-cly').innerHTML='<div class="muted">—</div>';}
-    try{const td=await api('/api/todos');$('c-todo').textContent=td.length;rows($('d-todo'),td,x=>x.text);}catch(e){$('d-todo').innerHTML='<div class="muted">—</div>';}
+    await loadTodos();
   }
   function enableChat(){$('chatIn').disabled=false;$('chatSend').disabled=false;$('micBtn').disabled=false;}
   async function connect(){setStatus('','verbinde…');
