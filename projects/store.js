@@ -181,6 +181,18 @@ const HEAT_HERO_PROJECT = {
       nextStep: 'Nächsten automatischen Morgenlauf darauf prüfen, ob Bestandscheck und Forecast-Horizont nur eindeutige Präfix- und Vervollständigungsfälle ändern und alle übrigen sauber blockieren.',
     },
     {
+      id: 'installation-plan-material-list',
+      specVersion: 1,
+      name: 'Installationsplan → deutsche Materialliste-PDF',
+      status: 'active',
+      enabled: true,
+      schedule: 'Manuell · bei Eingang eines Installationsplans',
+      execution: 'iMac · Outlook, Chrome und lokale PDF-Erstellung auf dem rechten Display',
+      purpose: 'Eine eindeutige Installationsmail öffnen, den verlinkten Plan ausschließlich lesen, Seite 1 unverändert übernehmen und daraus eine einfache belegbasierte deutsche Materialliste als PDF für Nadine erstellen.',
+      safety: 'Mail und Quelldokument bleiben strikt unverändert: keine Bearbeitung, Kommentare, Umbenennung, Verschiebung oder Löschung. Keine externe Kommunikation; das Ergebnis wird ausschließlich Nadine bereitgestellt.',
+      nextStep: 'Bei Bedarf manuell starten und Mail-Absender, Empfänger, Betreff beziehungsweise Auftragsnummer im Auftrag nennen.',
+    },
+    {
       id: 'funding-daily-sequence',
       specVersion: 1,
       name: 'Förderung – Tageslauf 1 → 2 → 3',

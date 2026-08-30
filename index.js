@@ -3086,6 +3086,7 @@ const IMAC_MANUAL_PROJECT_WORKFLOWS = new Set([
   'planbar-weekly-export',
   'planbar-completion-morning',
   'montage-required-fields-morning',
+  'installation-plan-material-list',
 ]);
 
 async function triggerProjectWorkflowManually(projectId, workflowId) {

@@ -419,6 +419,11 @@ const PROJECT_WORKFLOW_TASKS = Object.freeze({
     prompt: 'Führe den in AGENTS.md und in der Heat-Hero-Projektautomation „Montage-Pflichtfelder morgens prüfen“ beschriebenen Ablauf jetzt genau einmal aus. Prüfe alle offenen Deals in „Montage terminieren“: Telefonnummer und E-Mail gegen die TMB sowie die Anlage gegen das unterschriebene Angebot. Ergänze ausschließlich eindeutig belegte leere Felder, überschreibe keine bestehenden Widersprüche und verifiziere jeden Schreibschritt sichtbar. Melde unklare Fälle statt zu raten.',
     acceptanceCriteria: ['Nur eindeutig belegte leere Pflichtfelder werden ergänzt.', 'Bestehende Werte und Widersprüche werden nicht still überschrieben.', 'Ergebnis, Änderungen und manuelle Prüffälle werden protokolliert.'],
   }),
+  'installation-plan-material-list': Object.freeze({
+    title: 'Installationsplan als deutsche Materialliste-PDF aufbereiten',
+    prompt: 'Lies INSTALLATION_PLAN_MATERIAL_LIST_WORKFLOW.md vollständig und führe den dort beschriebenen Workflow jetzt genau einmal aus. Suche die im Auftrag bezeichnete Installationsmail; falls nichts Genaueres angegeben ist, suche nach einer Mail von Daan Köster an n.sell@heat-hero.com. Öffne Mail und verlinkten Plan ausschließlich lesend auf dem iMac und nur auf dem rechten Display. Übernimm Seite 1 der Quell-PDF unverändert, erstelle danach eine einfache belegbasierte deutsche Materialliste und liefere die visuell geprüfte Ergebnis-PDF ausschließlich Nadine. Am Quelldokument, an der Mail und an Berechtigungen nichts ändern, verschieben oder löschen und keine Nachricht an Dritte senden.',
+    acceptanceCriteria: ['Mail und verlinktes Quelldokument wurden ausschließlich gelesen; nichts wurde bearbeitet, kommentiert, umbenannt, verschoben oder gelöscht.', 'Seite 1 der Ergebnis-PDF ist die unveränderte erste Seite des Originalplans.', 'Die deutsche Materialliste berücksichtigt belegte Angaben aus Mail und Plan und erfindet keine Mengen.', 'Widersprüche und unbezifferte Positionen sind als offene Prüfpunkte ausgewiesen.', 'Alle Ergebnis-PDF-Seiten wurden gerendert und visuell geprüft.', 'Die PDF wurde ausschließlich Nadine bereitgestellt; es gab keine externe Kommunikation.'],
+  }),
 });
 
 export async function startProjectWorkflowTask({
@@ -474,7 +479,7 @@ export async function startProjectWorkflowTask({
       requestId: requestId || `project-workflow-${normalizedWorkflowId}-${Date.now()}`,
     });
   }
-  return startCodexTask({
+  return startTask({
     ...definition,
     mode: 'project-workflow',
     projectId: 'heat-hero',

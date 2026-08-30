@@ -159,6 +159,11 @@ try {
     payload: { projectId: 'heat-hero', workflowId: 'planbar-weekly-export', displayName: 'Meine Planbar-Liste' },
   });
   assert.deepEqual(projectWorkflowCommand.payload, { projectId: 'heat-hero', workflowId: 'planbar-weekly-export', displayName: 'Meine Planbar-Liste', runMode: 'manual' });
+  const installationPlanCommand = await enqueueDeviceCommand({
+    action: 'project.workflow.run', requestedBy: 'test-installation-plan',
+    payload: { projectId: 'heat-hero', workflowId: 'installation-plan-material-list', displayName: 'Installationsplan als Materialliste' },
+  });
+  assert.equal(installationPlanCommand.payload.workflowId, 'installation-plan-material-list');
   const fundingSequenceCommand = await enqueueDeviceCommand({
     action: 'project.workflow.run', requestedBy: 'test-funding-scheduler',
     payload: { projectId: 'heat-hero', workflowId: 'funding-daily-sequence', displayName: 'Förderung – Tageslauf 1 → 2 → 3' },
@@ -292,6 +297,14 @@ try {
   assert.equal(directManualForecast.status, 'queued');
   assert.equal(directManualForecast.workflowId, 'planbar-weekly-export');
   assert.match(directManualForecast.prompt, /--run-mode manual --delivery-run/);
+  const directInstallationPlan = await startProjectWorkflowTask({
+    workflowId: 'installation-plan-material-list',
+    requestId: 'installation-plan-material-list:test',
+    startTask: async request => ({ status: 'queued', workflowId: request.workflowId, prompt: request.prompt, acceptanceCriteria: request.acceptanceCriteria }),
+  });
+  assert.equal(directInstallationPlan.workflowId, 'installation-plan-material-list');
+  assert.match(directInstallationPlan.prompt, /ausschließlich lesend/);
+  assert.equal(directInstallationPlan.acceptanceCriteria.some(item => /nichts.*gelöscht/.test(item)), true);
   const bootstrapSource = await readFile(new URL('../IVA-iMac-einmalig-verbinden.command', import.meta.url), 'utf8');
   assert.match(bootstrapSource, /nodejs\.org\/dist\/\$\{node_version\}/);
   assert.match(bootstrapSource, /shasum -a 256/);

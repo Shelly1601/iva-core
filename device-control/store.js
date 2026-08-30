@@ -214,7 +214,7 @@ function validatePayload(action, payload = {}) {
   if (action === 'project.workflow.run') {
     const projectId = cleanText(payload.projectId, 100);
     const workflowId = cleanText(payload.workflowId, 140);
-    const allowed = new Set(['funding-daily-sequence', 'funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning', 'planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning']);
+    const allowed = new Set(['funding-daily-sequence', 'funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning', 'planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning', 'installation-plan-material-list']);
     if (projectId !== 'heat-hero' || !allowed.has(workflowId)) throw new Error('Dieser Projekt-Workflow ist für den manuellen iMac-Start nicht freigegeben.');
     return {
       projectId,
