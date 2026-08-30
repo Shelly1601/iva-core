@@ -1,8 +1,6 @@
 #!/usr/bin/env node
-import { execFile, spawn } from 'node:child_process';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
+import { spawn } from 'node:child_process';
+import { requestDisplaySleepAfterRun } from './display-sleep-policy.mjs';
 
 function parseArguments(argv) {
   const separator = argv.indexOf('--');
@@ -19,9 +17,8 @@ function parseArguments(argv) {
     command,
     args,
     maxSeconds,
-    // Feste IVA-Betriebsregel: Während eines lokalen Arbeitslaufs darf der Mac
-    // weder in den Leerlauf noch in die Sperre wechseln. Nach jedem Abschluss
-    // gehen die Bildschirme aus – auch nach Timeout oder Fehler.
+    // Während des Laufs bleibt der Mac wach. Nach Abschluss darf IVA den Bildschirm
+    // nur bei einem wirklich unbeaufsichtigten Nachtlauf ausschalten.
     sleepDisplays: true,
     keepDisplayAwake: true,
     dryRun: options.includes('--dry-run'),
@@ -49,11 +46,6 @@ async function stopCaffeinate(child) {
     new Promise(resolve => setTimeout(resolve, 1500)),
   ]);
   if (child.exitCode === null) child.kill('SIGKILL');
-}
-
-async function sleepDisplays() {
-  if (process.platform !== 'darwin') return;
-  await execFileAsync('/usr/bin/pmset', ['displaysleepnow'], { timeout: 10000, maxBuffer: 128 * 1024 });
 }
 
 async function main() {
@@ -95,6 +87,7 @@ async function main() {
   timeout.unref?.();
 
   let result;
+  let displaySleepDecision = { requested: false, reason: 'disabled' };
   try {
     result = await taskResult;
   } finally {
@@ -102,7 +95,10 @@ async function main() {
     if (forceTimer) clearTimeout(forceTimer);
     await stopCaffeinate(wakeLock);
     if (options.sleepDisplays) {
-      await sleepDisplays().catch(error => console.error(`Workflow-Fenster: Display konnte nicht ausgeschaltet werden: ${error.message}`));
+      displaySleepDecision = await requestDisplaySleepAfterRun().catch(error => {
+        console.error(`Workflow-Fenster: Display-Regel konnte nicht geprüft werden: ${error.message}`);
+        return { requested: false, reason: 'policy-check-failed' };
+      });
     }
   }
 
@@ -114,7 +110,8 @@ async function main() {
     maxSeconds: options.maxSeconds,
     exitCode: result.code,
     signal: result.signal,
-    displaySleepRequested: options.sleepDisplays,
+    displaySleepRequested: displaySleepDecision.requested,
+    displaySleepDecision: displaySleepDecision.reason,
   };
   console.log(JSON.stringify(summary));
   if (timedOut) process.exitCode = 124;

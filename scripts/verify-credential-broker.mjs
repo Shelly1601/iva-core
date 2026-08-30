@@ -20,6 +20,10 @@ assert.equal(credentialBrokerPolicy().remoteSecretRead, false);
 assert.equal(portalAuthPolicy().arbitraryHosts, false);
 assert.equal(portalAuthPolicy().credentialsViaProcessArguments, false);
 assert.equal(macWakeGuardPolicy().displaySleepAfterRun, true);
+assert.equal(macWakeGuardPolicy().displaySleepRequiresUnattendedNight, true);
+assert.equal(macWakeGuardPolicy().displaySleepMinimumIdleSeconds, 3600);
+assert.equal(macWakeGuardPolicy().activeUserAlwaysProtected, true);
+assert.equal(macWakeGuardPolicy().daytimeForcedDisplaySleep, false);
 assert.equal(macWakeGuardPolicy().displaySleepOnlyAfterLastRun, true);
 assert.equal(macWakeGuardPolicy().sharedRunLeases, true);
 

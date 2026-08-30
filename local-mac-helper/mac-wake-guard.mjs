@@ -4,6 +4,7 @@ import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { mkdir, readFile, readdir, rmdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
+import { DISPLAY_SLEEP_POLICY, requestDisplaySleepAfterRun } from './display-sleep-policy.mjs';
 
 const execFileAsync = promisify(execFile);
 const WAKE_ROOT = process.env.IVA_MAC_WAKE_ROOT || path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper', 'wake-guards');
@@ -50,7 +51,7 @@ async function activeWakeLeases() {
   return active;
 }
 
-async function releaseWakeLease(file, { sleepDisplays, exec }) {
+async function releaseWakeLease(file, { sleepDisplays, exec, displaySleepOptions }) {
   const locked = await acquireReleaseLock();
   if (!locked) return;
   try {
@@ -59,9 +60,7 @@ async function releaseWakeLease(file, { sleepDisplays, exec }) {
     // eigene Lease anzulegen. So flackert das Display zwischen Übergabe und Lauf nicht.
     await new Promise(resolve => setTimeout(resolve, 700));
     const active = await activeWakeLeases();
-    if (sleepDisplays && active.length === 0) {
-      await exec('/usr/bin/pmset', ['displaysleepnow'], { timeout: 10_000, maxBuffer: 64 * 1024 });
-    }
+    if (sleepDisplays && active.length === 0) await requestDisplaySleepAfterRun({ ...displaySleepOptions, exec });
   } finally {
     await rmdir(RELEASE_LOCK).catch(() => {});
   }
@@ -86,6 +85,7 @@ export async function withMacWakeGuard(task, {
   spawnProcess = spawn,
   exec = execFileAsync,
   sleepDisplays = true,
+  displaySleepOptions = {},
   onCleanupWarning = message => console.warn(message),
 } = {}) {
   if (typeof task !== 'function') throw new Error('Mac-Wachschutz benötigt einen lokalen Arbeitslauf.');
@@ -112,7 +112,7 @@ export async function withMacWakeGuard(task, {
     await stopProcess(wakeLock).catch(error => {
       try { onCleanupWarning(`IVA-Wachschutz: ${error.message}`); } catch {}
     });
-    await releaseWakeLease(leaseFile, { sleepDisplays, exec })
+    await releaseWakeLease(leaseFile, { sleepDisplays, exec, displaySleepOptions })
       .catch(error => { try { onCleanupWarning(`Display konnte nach dem IVA-Lauf nicht sauber freigegeben werden: ${error.message}`); } catch {} });
   }
 }
@@ -123,6 +123,10 @@ export function macWakeGuardPolicy() {
     displaySleepPreventedDuringRun: true,
     automaticLockPreventedDuringRun: true,
     displaySleepAfterRun: true,
+    displaySleepRequiresUnattendedNight: true,
+    displaySleepMinimumIdleSeconds: DISPLAY_SLEEP_POLICY.minimumIdleSeconds,
+    activeUserAlwaysProtected: true,
+    daytimeForcedDisplaySleep: false,
     sharedRunLeases: true,
     displaySleepOnlyAfterLastRun: true,
     nestedGuardEnvironment: 'IVA_MAC_WAKE_GUARD_ACTIVE=1',

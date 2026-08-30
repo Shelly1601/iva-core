@@ -201,7 +201,15 @@ assert.equal(salvagedState.progress, 100);
 assert.equal(unsafeSalvageRelaunch, false);
 
 const warnings = [];
-const wakeOptions = { spawnProcess: fakeSpawn(false), exec: async () => { throw new Error('Fixture pmset Fehler'); }, onCleanupWarning: warning => warnings.push(warning) };
+const wakeOptions = {
+  spawnProcess: fakeSpawn(false),
+  exec: async command => {
+    if (command === '/usr/sbin/ioreg') return { stdout: '"HIDIdleTime" = 7200000000000' };
+    throw new Error('Fixture pmset Fehler');
+  },
+  displaySleepOptions: { now: new Date(2026, 7, 30, 23, 30), platform: 'darwin' },
+  onCleanupWarning: warning => warnings.push(warning),
+};
 assert.deepEqual(await withMacWakeGuard(async () => ({ jobId: 'kept' }), wakeOptions), { jobId: 'kept' });
 const primaryError = new Error('Ursprünglicher Workflowfehler');
 await assert.rejects(withMacWakeGuard(async () => { throw primaryError; }, wakeOptions), error => error === primaryError);
