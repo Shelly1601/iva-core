@@ -126,7 +126,7 @@ export function createPublicScheduling({
   function hasNewSnapshot(snapshot, attempt) {
     const times = snapshotTimes(snapshot);
     return snapshotResult(snapshot) && times.refreshedAt > attempt.baselineRefreshedAt
-      && times.updatedAt > attempt.baselineUpdatedAt && times.refreshedAt >= attempt.startedAt - 5_000;
+      && times.updatedAt > attempt.baselineUpdatedAt;
   }
   function previewResult(snapshot, phase = 'queued') {
     const visible = snapshotResult(snapshot);

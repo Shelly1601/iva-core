@@ -124,6 +124,21 @@ const secondProofToken=proofService.issueToken();await proofService.refresh(seco
 proofCapacity={...capacity,pageRefreshedAt:new Date(time+1000).toISOString(),updatedAt:new Date(time+2000).toISOString(),weeks:[{isoYear:2026,week:40,freeSlots:3}]};
 const proven=await proofService.availability(secondProofToken);
 assert.equal(proven.status,'ready');assert.equal(proven.refreshState,'completed');assert.equal(proven.weeks[0].availableBlocks,3);
+
+// A later visitor may join a globally deduplicated browser job whose verified
+// page reload already predates that visitor. A valid snapshot that is strictly
+// newer than this visitor's baseline still proves the shared refresh result.
+let sharedCapacity={...capacity,pageRefreshedAt:new Date(time-120000).toISOString(),updatedAt:new Date(time-90000).toISOString()};
+const sharedCommand={id:'shared-command',action:'codex.task.start',requestedBy:'heat-hero-public-availability',payload:{title:'Heat Hero: Planbar-Kapazität lesend prüfen'},status:'completed',result:{jobId:'shared-job'},createdAt:new Date(time-60000).toISOString(),expiresAt:new Date(time+60000).toISOString()};
+const sharedRun={jobId:'shared-job',status:'running'};
+const sharedService=createPublicScheduling({now:()=>time,project:async()=>({planbarCapacity:sharedCapacity}),commands:async()=>[sharedCommand],runs:async()=>[sharedRun],
+  agentStatus:async()=>({online:true,dispatchReady:true,release:PUBLIC_SCHEDULING_RELEASE}),enqueue:async()=>{throw new Error('Der bestehende globale Auftrag muss übernommen werden');}});
+const sharedToken=sharedService.issueToken();
+assert.equal((await sharedService.refresh(sharedToken,{force:true})).phase,'checking','Später Besucher übernimmt den bereits laufenden globalen Auftrag');
+sharedCapacity={...capacity,pageRefreshedAt:new Date(time-20000).toISOString(),updatedAt:new Date(time-10000).toISOString(),weeks:[{isoYear:2026,week:40,freeSlots:4}]};
+sharedRun.status='completed';
+const sharedResult=await sharedService.availability(sharedToken);
+assert.equal(sharedResult.status,'ready');assert.equal(sharedResult.refreshState,'completed');assert.equal(sharedResult.weeks[0].availableBlocks,4);
 time += 3*3600_000;
 assert.throws(()=>service.verifyToken(token),/abgelaufen/);
 
