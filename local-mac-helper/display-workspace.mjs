@@ -61,34 +61,40 @@ async function wakeDisplaysForVerification() {
   // Keep the synthetic user-activity assertion alive while CoreGraphics reads
   // the display list. Waiting for caffeinate to exit first lets a sleeping
   // external display detach again in the small gap before `display-status`.
-  const wakeLock = spawn('/usr/bin/caffeinate', ['-u', '-t', '5'], {
-    detached: true,
+  const wakeLock = spawn('/usr/bin/caffeinate', ['-u', '-t', '90'], {
     stdio: 'ignore',
   });
   wakeLock.unref();
-  await new Promise(resolve => setTimeout(resolve, 500));
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  return () => {
+    try { wakeLock.kill('SIGTERM'); } catch { /* The wake lease already ended. */ }
+  };
 }
 
 export async function requireRightDisplayWorkspace({
-  attempts = 10,
+  attempts = 30,
   retryDelayMs = 1500,
   run = runMacUiBridge,
   waitFn = delay => new Promise(resolve => setTimeout(resolve, delay)),
   wakeFn = wakeDisplaysForVerification,
 } = {}) {
-  const maximumAttempts = Math.max(1, Math.min(10, Number(attempts) || 10));
+  const maximumAttempts = Math.max(1, Math.min(30, Number(attempts) || 30));
   let lastError;
-  for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
-    try {
-      await wakeFn();
-      const status = await run(['display-status'], { timeoutMs: 5000 });
-      return resolveRightDisplayWorkspace(status);
-    } catch (error) {
-      lastError = error;
-      if (attempt < maximumAttempts) await waitFn(Math.max(100, Math.min(2000, Number(retryDelayMs) || 1500)));
+  const releaseWakeLease = await wakeFn();
+  try {
+    for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+      try {
+        const status = await run(['display-status'], { timeoutMs: 5000 });
+        return resolveRightDisplayWorkspace(status);
+      } catch (error) {
+        lastError = error;
+        if (attempt < maximumAttempts) await waitFn(Math.max(100, Math.min(2000, Number(retryDelayMs) || 1500)));
+      }
     }
+    throw lastError;
+  } finally {
+    if (typeof releaseWakeLease === 'function') releaseWakeLease();
   }
-  throw lastError;
 }
 
 export async function ensureAppWindowOnRightDisplay(bundleIdentifier) {
