@@ -700,9 +700,8 @@ export async function readPipedriveFundingDealsViaApi({ dealIds, batchSize = 8, 
   const safeBatchSize = 1;
   const snapshots = [];
   const errors = [];
-  const source = await openAuthenticatedPipedriveApiSource(ids);
-  const sourceDealId = source.dealId;
-  try {
+  await ensurePipedriveDownloadSource();
+  const sourceDealId = '';
   for (let offset = 0; offset < ids.length; offset += safeBatchSize) {
     const batch = ids.slice(offset, offset + safeBatchSize);
     const jobId = `iva-funding-read-${randomUUID()}`;
@@ -913,9 +912,6 @@ export async function readPipedriveFundingDealsViaApi({ dealIds, batchSize = 8, 
     mutated: false,
     source: 'pipedrive-read-api',
   };
-  } finally {
-    await closeTemporaryPipedriveDealTabs(source.createdIds).catch(() => {});
-  }
 }
 
 async function uploadPipedriveFileViaSignedInSession({ dealId, filePath, fileName }) {
