@@ -15,6 +15,7 @@ import * as brands from './marketing/brands.js';
 import { refineTone, analyzeWebsite } from './marketing/assist.js';
 import { klassifiziereMailBatch } from './klassifikation.js';
 import { importPanasonicLeadsToMeinCrm } from './integrations/meincrm-panasonic-leads.js';
+import { addTodoSubtask, createTodo, toggleTodoSubtask, updateTodoNotes } from './todos/model.js';
 // Stufe 1-3: Model Router, Skills, Agent-Registry.
 import { chooseModel, recordUsage, checkBudget } from './core/router.js';
 import { memorySkill } from './skills/memory.js';
@@ -2188,8 +2189,43 @@ app.get('/api/scheduling/types/:id/slots', async (req, res) => {
 });
 app.get('/api/scheduling/bookings', async (req, res) => res.json(await listBookings({ limit: req.query?.limit })));
 app.get('/api/todos', async (_req, res) => { const m = await loadMemory(); res.json((m.todos || []).filter(t => !t.done)); });
-app.post('/api/todos', async (req, res) => { const m = await loadMemory(); m.todos = m.todos || []; m.todos.push({ text: req.body?.text || '', done: false, ts: Date.now() }); await saveMemory(m); res.json({ ok: true }); });
+app.post('/api/todos', async (req, res) => {
+  try {
+    const m = await loadMemory();
+    m.todos = m.todos || [];
+    const todo = createTodo(req.body?.text);
+    m.todos.push(todo);
+    await saveMemory(m);
+    res.status(201).json({ ok: true, todo });
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
 app.post('/api/todos/toggle', async (req, res) => { const m = await loadMemory(); const t = (m.todos || []).find(t => t.ts === req.body?.ts); if (t) { t.done = !t.done; await saveMemory(m); } res.json({ ok: true }); });
+app.patch('/api/todos/:ts', async (req, res) => {
+  try {
+    const m = await loadMemory();
+    const todo = updateTodoNotes(m, req.params.ts, req.body?.notes);
+    if (!todo) return res.status(404).json({ error: 'To-do nicht gefunden' });
+    await saveMemory(m);
+    res.json({ ok: true, todo });
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.post('/api/todos/:ts/subtasks', async (req, res) => {
+  try {
+    const m = await loadMemory();
+    const result = addTodoSubtask(m, req.params.ts, req.body?.text);
+    if (!result) return res.status(404).json({ error: 'To-do nicht gefunden' });
+    await saveMemory(m);
+    res.status(201).json({ ok: true, ...result });
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.post('/api/todos/:ts/subtasks/:id/toggle', async (req, res) => {
+  const m = await loadMemory();
+  const result = toggleTodoSubtask(m, req.params.ts, req.params.id);
+  if (!result?.todo) return res.status(404).json({ error: 'To-do nicht gefunden' });
+  if (!result.subtask) return res.status(404).json({ error: 'Unterpunkt nicht gefunden' });
+  await saveMemory(m);
+  res.json({ ok: true, ...result });
+});
 app.post('/api/chat', async (req, res) => { try { res.json({ reply: await askIva(req.body?.message || '', req.body?.sessionId || 'web', req.body?.voice === true, req.body?.agentId || 'iva-standard') }); } catch (e) { res.json({ reply: 'Fehler: ' + e.message }); } });
 app.post('/api/chat/stream', async (req, res) => {
   const aborter = new AbortController();

@@ -127,7 +127,33 @@
   .todo-check:hover,.todo-check:focus-visible{border-color:var(--cyan);background:rgba(34,230,214,.14);outline:none;transform:scale(1.05)}
   .todo-check:disabled{cursor:wait;opacity:.7;transform:none}
   .todo-check.done{background:var(--cyan);border-color:var(--cyan);color:#04121a}
-  .todo-text{min-width:0;overflow-wrap:anywhere}
+  .todo-open{min-width:0;flex:1;display:flex;align-items:flex-start;gap:8px;border:0;background:transparent;color:var(--text);padding:0;text-align:left;cursor:pointer;font:inherit}
+  .todo-open:hover .todo-text,.todo-open:focus-visible .todo-text{color:var(--cyan)}
+  .todo-copy{min-width:0;flex:1;display:flex;flex-direction:column;gap:3px}
+  .todo-text{min-width:0;overflow-wrap:anywhere;transition:color .15s}
+  .todo-meta{font-size:10.5px;color:var(--muted)}
+  .todo-chevron{color:var(--blue-lt);font-size:18px;line-height:18px}
+  .todo-add-toggle{flex:0 0 22px;width:22px;height:22px;border-radius:7px;border:1px solid var(--border2);background:rgba(34,230,214,.1);color:var(--cyan);cursor:pointer;font-size:18px;line-height:18px;display:grid;place-items:center}
+  .todo-add-toggle:hover,.todo-add-toggle:focus-visible{border-color:var(--cyan);outline:none;background:rgba(34,230,214,.18)}
+  .todo-add-form,.subtask-add-form{display:flex;gap:7px;margin:0 0 9px}
+  .todo-add-form[hidden]{display:none}
+  .todo-add-form input,.subtask-add-form input,.todo-notes{min-width:0;flex:1;background:rgba(3,6,14,.72);border:1px solid var(--border2);color:var(--text);border-radius:9px;padding:9px 10px;font:inherit;outline:none}
+  .todo-add-form input:focus,.subtask-add-form input:focus,.todo-notes:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(34,230,214,.11)}
+  .todo-add-form button,.subtask-add-form button,.todo-save{border:0;border-radius:9px;background:linear-gradient(135deg,var(--cyan),var(--blue));color:#04121a;font-weight:800;padding:0 12px;cursor:pointer}
+  .todo-overlay{z-index:100;padding:18px}
+  .todo-editor{width:min(560px,94vw);max-height:min(760px,88dvh);overflow-y:auto;background:linear-gradient(180deg,#0d1730,#0a1122);border:1px solid var(--border2);border-radius:20px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.55)}
+  .todo-editor-head{display:flex;align-items:flex-start;gap:12px;margin-bottom:18px}
+  .todo-editor-head h2{font-size:19px;line-height:1.35;overflow-wrap:anywhere;flex:1}
+  .todo-close{width:34px;height:34px;flex:0 0 34px;border:1px solid var(--border2);border-radius:10px;background:rgba(3,6,14,.5);color:var(--text);font-size:20px;cursor:pointer}
+  .todo-editor h3{font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);margin:18px 0 8px}
+  .todo-notes{width:100%;min-height:112px;resize:vertical;display:block;line-height:1.45}
+  .todo-save{margin-top:8px;min-height:36px}
+  .subtask-list{display:flex;flex-direction:column}
+  .subtask-row{display:flex;align-items:flex-start;gap:9px;padding:9px 0;border-top:1px solid rgba(96,140,220,.12);font-size:13px}
+  .subtask-row:first-child{border-top:0}
+  .subtask-row.done .subtask-text{text-decoration:line-through;color:var(--muted)}
+  .subtask-text{overflow-wrap:anywhere;line-height:1.45}
+  .todo-feedback{min-height:17px;margin-top:6px;color:var(--cyan);font-size:11.5px}
   .muted{color:var(--muted);font-size:12.5px}
   .workspace-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
   .workspace-actions button{border:1px solid var(--border2);background:rgba(3,6,14,.52);color:var(--text);border-radius:10px;padding:9px 5px;cursor:pointer;font-size:11px;line-height:1.25}
@@ -167,7 +193,7 @@
     </aside>
     <aside class="hud-col hud-right" id="colRight">
       <div class="card"><h3><span class="ic">🗓</span> Calendly <span class="cnt" id="c-cly">–</span></h3><div id="d-cly"><div class="muted">—</div></div></div>
-      <div class="card"><h3><span class="ic">✓</span> To-dos <span class="cnt" id="c-todo">–</span></h3><div id="d-todo"><div class="muted">—</div></div></div>
+      <div class="card"><h3><span class="ic">✓</span> To-dos <span class="cnt" id="c-todo">–</span><button type="button" class="todo-add-toggle" id="todoAddToggle" title="Neues To-do" aria-label="Neues To-do hinzufügen" aria-expanded="false">+</button></h3><form class="todo-add-form" id="todoAddForm" hidden><input id="todoAddInput" maxlength="300" placeholder="Neues To-do …" aria-label="Neues To-do"><button type="submit">Hinzufügen</button></form><div id="d-todo"><div class="muted">—</div></div></div>
       <div class="card"><h3><span class="ic">↗</span> Arbeitsbereiche</h3><div class="workspace-actions"><button id="openProjects">Projekte</button><button id="openControl">Kontrollzentrum</button><button data-open-workspace="beratung">Beratung</button><button data-open-workspace="kunde">Kunden</button><button id="openInvestment">Investment</button><button id="openMarketing">Marketing</button><button id="openRecruiting">Recruiting</button><button id="openOpportunities">Chancenradar</button><button id="openWhatsApp">WhatsApp</button><button id="openAccounting">Buchhaltung</button><button id="openVoiceLab">Sprachlabor</button></div></div>
     </aside>
   </main>
@@ -212,6 +238,19 @@
     <button class="btn" id="cfgSave">Speichern & verbinden</button>
     <div class="hint">Bleibt in diesem Browser gespeichert.</div>
   </div>
+</div>
+
+<div class="overlay todo-overlay" id="todoOverlay">
+  <section class="todo-editor" role="dialog" aria-modal="true" aria-labelledby="todoEditorTitle">
+    <div class="todo-editor-head"><h2 id="todoEditorTitle">To-do</h2><button type="button" class="todo-close" id="todoClose" aria-label="To-do-Details schließen">×</button></div>
+    <h3>Unterpunkte</h3>
+    <form class="subtask-add-form" id="subtaskAddForm"><input id="subtaskAddInput" maxlength="300" placeholder="Nächsten Schritt hinzufügen …" aria-label="Neuen Unterpunkt"><button type="submit">Hinzufügen</button></form>
+    <div class="subtask-list" id="subtaskList"></div>
+    <h3>Notizen</h3>
+    <textarea class="todo-notes" id="todoNotes" maxlength="4000" placeholder="Gedanken, Links oder wichtige Infos zu diesem To-do …"></textarea>
+    <button type="button" class="todo-save" id="todoSaveNotes">Notiz speichern</button>
+    <div class="todo-feedback" id="todoFeedback" aria-live="polite"></div>
+  </section>
 </div>
 
 <script>
@@ -585,6 +624,36 @@
   // ---- Daten ----
   function rows(el,arr,fn){el.innerHTML='';if(!arr||!arr.length){el.innerHTML='<div class="muted">nichts</div>';return;}
     arr.slice(0,6).forEach(x=>{const d=document.createElement('div');d.className='row';d.innerHTML=fn(x);el.appendChild(d);});}
+  let activeTodoTs=null;
+  function todoMeta(todo){
+    const subtasks=Array.isArray(todo.subtasks)?todo.subtasks:[];
+    const parts=[];
+    if(subtasks.length)parts.push(subtasks.filter(item=>item.done).length+' von '+subtasks.length+' Schritten erledigt');
+    if(String(todo.notes||'').trim())parts.push('Notiz vorhanden');
+    return parts.join(' · ');
+  }
+  function closeTodoDetails(){activeTodoTs=null;$('todoOverlay').classList.remove('show');$('todoFeedback').textContent='';}
+  function showTodoFeedback(message,isError=false){$('todoFeedback').textContent=message;$('todoFeedback').style.color=isError?'#ff8a8a':'var(--cyan)';}
+  function renderTodoEditor(todo){
+    $('todoEditorTitle').textContent=todo.text||'To-do';$('todoNotes').value=todo.notes||'';$('todoFeedback').textContent='';
+    const list=$('subtaskList');list.innerHTML='';const subtasks=Array.isArray(todo.subtasks)?todo.subtasks:[];
+    if(!subtasks.length){list.innerHTML='<div class="muted">Noch keine Unterpunkte.</div>';return;}
+    subtasks.forEach(subtask=>{
+      const row=document.createElement('div');row.className='subtask-row'+(subtask.done?' done':'');
+      const check=document.createElement('button');check.type='button';check.className='todo-check'+(subtask.done?' done':'');check.textContent='✓';
+      check.setAttribute('role','checkbox');check.setAttribute('aria-checked',String(Boolean(subtask.done)));check.setAttribute('aria-label','"'+String(subtask.text||'Unterpunkt')+'" abhaken');
+      const text=document.createElement('span');text.className='subtask-text';text.textContent=subtask.text||'';
+      check.addEventListener('click',async()=>{
+        check.disabled=true;
+        try{
+          await api('/api/todos/'+encodeURIComponent(todo.ts)+'/subtasks/'+encodeURIComponent(subtask.id)+'/toggle',{method:'POST',body:'{}'});
+          await loadTodos({preserveDraft:true});
+        }catch(error){check.disabled=false;showTodoFeedback('Unterpunkt konnte nicht geändert werden.',true);}
+      });
+      row.append(check,text);list.appendChild(row);
+    });
+  }
+  function openTodoDetails(todo){activeTodoTs=todo.ts;renderTodoEditor(todo);$('todoOverlay').classList.add('show');setTimeout(()=>$('subtaskAddInput').focus(),80);}
   function renderTodos(todos){
     const el=$('d-todo');el.innerHTML='';$('c-todo').textContent=todos.length;
     if(!todos.length){el.innerHTML='<div class="muted">alles erledigt</div>';return;}
@@ -592,7 +661,12 @@
       const row=document.createElement('div');row.className='row todo-row';
       const check=document.createElement('button');check.type='button';check.className='todo-check';check.textContent='✓';
       check.title='Als erledigt abhaken';check.setAttribute('role','checkbox');check.setAttribute('aria-checked','false');check.setAttribute('aria-label','"'+String(todo.text||'To-do')+'" als erledigt abhaken');
-      const label=document.createElement('span');label.className='todo-text';label.textContent=todo.text||'';
+      const open=document.createElement('button');open.type='button';open.className='todo-open';open.setAttribute('aria-label','Details zu "'+String(todo.text||'To-do')+'" öffnen');
+      const copy=document.createElement('span');copy.className='todo-copy';
+      const label=document.createElement('span');label.className='todo-text';label.textContent=todo.text||'';copy.appendChild(label);
+      const meta=todoMeta(todo);if(meta){const info=document.createElement('span');info.className='todo-meta';info.textContent=meta;copy.appendChild(info);}
+      const chevron=document.createElement('span');chevron.className='todo-chevron';chevron.textContent='›';chevron.setAttribute('aria-hidden','true');
+      open.append(copy,chevron);open.addEventListener('click',()=>openTodoDetails(todo));
       check.addEventListener('click',async()=>{
         check.disabled=true;check.classList.add('done');check.setAttribute('aria-checked','true');
         try{
@@ -603,13 +677,43 @@
           setStatus('err','To-do konnte nicht abgehakt werden');
         }
       });
-      row.append(check,label);el.appendChild(row);
+      row.append(check,open);el.appendChild(row);
     });
   }
-  async function loadTodos(){
-    try{renderTodos(await api('/api/todos'));}
+  async function loadTodos({preserveDraft=false}={}){
+    const draft=preserveDraft&&activeTodoTs!==null?$('todoNotes').value:null;
+    try{
+      const todos=await api('/api/todos');renderTodos(todos);
+      if(activeTodoTs!==null){const active=todos.find(todo=>todo.ts===activeTodoTs);if(active){renderTodoEditor(active);if(draft!==null)$('todoNotes').value=draft;}else closeTodoDetails();}
+    }
     catch(e){$('d-todo').innerHTML='<div class="muted">—</div>';}
   }
+  $('todoAddToggle').addEventListener('click',()=>{
+    const form=$('todoAddForm'),willOpen=form.hidden;form.hidden=!willOpen;$('todoAddToggle').setAttribute('aria-expanded',String(willOpen));
+    if(willOpen)setTimeout(()=>$('todoAddInput').focus(),30);
+  });
+  $('todoAddForm').addEventListener('submit',async event=>{
+    event.preventDefault();const input=$('todoAddInput'),text=input.value.trim();if(!text)return;
+    const button=event.currentTarget.querySelector('button');button.disabled=true;
+    try{await api('/api/todos',{method:'POST',body:JSON.stringify({text})});input.value='';$('todoAddForm').hidden=true;$('todoAddToggle').setAttribute('aria-expanded','false');await loadTodos();}
+    catch(error){setStatus('err','To-do konnte nicht gespeichert werden');}
+    finally{button.disabled=false;}
+  });
+  $('subtaskAddForm').addEventListener('submit',async event=>{
+    event.preventDefault();const input=$('subtaskAddInput'),text=input.value.trim();if(!text||activeTodoTs===null)return;
+    const button=event.currentTarget.querySelector('button');button.disabled=true;
+    try{await api('/api/todos/'+encodeURIComponent(activeTodoTs)+'/subtasks',{method:'POST',body:JSON.stringify({text})});input.value='';await loadTodos({preserveDraft:true});input.focus();}
+    catch(error){showTodoFeedback('Unterpunkt konnte nicht gespeichert werden.',true);}
+    finally{button.disabled=false;}
+  });
+  $('todoSaveNotes').addEventListener('click',async()=>{
+    if(activeTodoTs===null)return;const button=$('todoSaveNotes');button.disabled=true;
+    try{await api('/api/todos/'+encodeURIComponent(activeTodoTs),{method:'PATCH',body:JSON.stringify({notes:$('todoNotes').value})});await loadTodos();showTodoFeedback('Notiz gespeichert.');}
+    catch(error){showTodoFeedback('Notiz konnte nicht gespeichert werden.',true);}
+    finally{button.disabled=false;}
+  });
+  $('todoClose').addEventListener('click',closeTodoDetails);
+  $('todoOverlay').addEventListener('click',event=>{if(event.target===$('todoOverlay'))closeTodoDetails();});
   async function loadData(){
     try{const cal=await api('/api/calendar');$('c-cal').textContent=cal.length;
       rows($('d-cal'),cal,s=>{const p=String(s).split(' – ');return '<span class="tm">'+(p[0]||'').replace(/^.*·\s*/,'')+'</span>'+(p[1]||p[0]);});}catch(e){$('d-cal').innerHTML='<div class="muted">—</div>';}
@@ -802,7 +906,7 @@
   $('dockChat').addEventListener('click',()=>{ const open=document.body.classList.contains('chat-open'); closeSheets(); if(!open){ document.body.classList.add('chat-open'); $('dockChat').classList.add('active'); $('chatIn').focus(); } });
   $('dockWidgets').addEventListener('click',()=>{ const open=document.body.classList.contains('dash-open'); closeSheets(); if(!open){ document.body.classList.add('dash-open'); $('dockWidgets').classList.add('active'); } });
   $('sheetBackdrop').addEventListener('click',closeSheets);
-  document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeSheets(); });
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape'){closeSheets();closeTodoDetails();} });
 
   // Boot am Script-Ende, damit alle Canvas-Variablen (cv, ctx, W, H, running, stars)
   // und alle Zeichen-Funktionen (loop, resizeNet, burst, cell, link, glow, hexPath) definiert sind.
