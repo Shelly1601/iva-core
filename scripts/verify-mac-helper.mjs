@@ -34,7 +34,7 @@ import {
   resolveFundingSheetColumns,
 } from '../local-mac-helper/funding-workflows.mjs';
 import { matchDirectSalesPartner } from '../local-mac-helper/direct-sales-roster.mjs';
-import { buildDeleteDraftsAppleScript, buildDraftAppleScript, buildForwardDraftAppleScript, normalizeDraftPayload } from '../local-mac-helper/outlook.mjs';
+import { buildDeleteDraftsAppleScript, buildDraftAppleScript, buildForwardDraftAppleScript, buildVerifiedSendAppleScript, normalizeDraftPayload } from '../local-mac-helper/outlook.mjs';
 import {
   FUNDING_BATCH_MODE,
   FUNDING_ROLLBACK_CONFIRMATION,
@@ -87,6 +87,12 @@ assert.equal(FUNDING_SIGNATURE.email, 'n.sell@heat-hero.com');
 assert.equal(FUNDING_SIGNATURE.website, 'https://www.heat-hero.com');
 assert.equal(FUNDING_ESCALATION_DELAY_DAYS, 7);
 assert.equal(FUNDING_ESCALATION_RECIPIENTS.ekd.email, 'k.bolz@heat-hero.com');
+const dewarmtePdfMail = { from: 'n.sell@heat-hero.com', to: ['kunde@example.com'], subject: 'DeWarmte Materialliste', body: 'Anbei die Materialliste.', attachments: ['/tmp/DeWarmte_Materialliste.pdf'] };
+assert.throws(() => buildVerifiedSendAppleScript(dewarmtePdfMail), /XLSX-Anlagen/);
+const verifiedPdfSend = buildVerifiedSendAppleScript(dewarmtePdfMail, { allowedExtensions: ['.pdf'], attachmentLabel: 'PDF' });
+assert.match(verifiedPdfSend.script, /PDF-Anlagen/);
+assert.match(verifiedPdfSend.script, /send draftMessage/);
+assert.equal(verifiedPdfSend.message.from, 'n.sell@heat-hero.com');
 const migratedMonitor = normalizeFundingMonitorState({ version: 1, mode: 'draft-review', emailSendEnabled: false, replyDraftsOnly: true });
 assert.equal(migratedMonitor.mode, 'review-only');
 assert.equal(migratedMonitor.migratedFromMode, 'draft-review');

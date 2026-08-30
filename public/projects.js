@@ -1,7 +1,7 @@
 const $ = id => document.getElementById(id);
 const TOKEN_KEY = 'iva_token';
-const state = { projects: [], current: null, activeFolderId: 'all', capacityOffset: 0, uploading: false, planbarRefreshing: false, planbarRefreshError: '', logoUrls: new Map() };
-const MANUAL_WORKFLOW_IDS = new Set(['workflow-protocol-summaries', 'funding-monitor', 'planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning', 'installation-plan-material-list']);
+const state = { projects: [], current: null, activeFolderId: 'all', capacityOffset: 0, uploading: false, planbarRefreshing: false, planbarRefreshError: '', dewarmteJobs: [], logoUrls: new Map() };
+const MANUAL_WORKFLOW_IDS = new Set(['workflow-protocol-summaries', 'funding-monitor', 'planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning', 'installation-plan-material-list', 'dewarmte-link-to-material-pdf']);
 
 function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
 function esc(value) { return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
@@ -79,6 +79,17 @@ function customerSchedulingSection(project) {
     ? `Zuletzt: <b>${esc(latest.customerName)}</b> · ${esc(latest.partnerName || 'Heat Hero')} (${esc(latest.partnerPrefix || 'HH')}) · KW ${esc(latest.week)}/${esc(latest.isoYear)} · Material vorher: ${latest.materialDeliverySpace ? 'Ja' : 'Nein'} · geschützt: ${latest.theftWeatherProtected ? 'Ja' : 'Nein'}${latest.allowFreeResourceFallback ? ' · Enter darf freien Platz nutzen' : ''}${latest.additionalInfo ? ' · Zusatzinfo vorhanden' : ''}<br><span id="planbarSchedulingStatus" role="status">${esc(latest.schedulingSummary || 'Noch kein gesicherter Planbar-Slot bestätigt.')}</span>`
     : 'Zuerst den Slot in Planbar sichern, danach fehlende Angaben ergänzen. Noch kein Kunde vorgemerkt.';
   return `<details class="workflow-launcher workflow-launcher-disclosure" aria-labelledby="customerSchedulingTitle"><summary><div class="workflow-launcher-head"><div><div class="eyebrow">Operativer Workflow</div><h2 id="customerSchedulingTitle">Kunde terminieren</h2><div class="muted">${latestSummary}</div></div><span class="workflow-tag">Planbar + Pipedrive</span></div></summary><div class="workflow-launcher-body"><div class="muted scheduling-intro">Kundentyp, Kunde, Kalenderwoche und Materialannahme erfassen. IVA verwendet automatisch das gespeicherte Planbar-Kürzel, wählt den passenden Block-/Freiplatzweg und meldet den verifizierten Termin anschließend in WhatsApp.</div>${planbarCapacityOverview(project)}${planbarSearchPanel()}<form class="schedule-form" id="customerSchedulingForm"><label><span>Kundenname</span><input id="scheduleCustomerName" name="customerName" maxlength="220" autocomplete="off" required placeholder="Vorname Nachname"></label><label><span>Kundentyp / Partner</span><select id="schedulePartner" name="partnerId" required>${partnerOptions}</select></label><label><span>Kalenderwoche</span><select id="scheduleWeek" name="week" required>${schedulingWeekOptions()}</select></label><button class="btn primary" type="submit">Jetzt terminieren</button><div class="schedule-checks"><label class="schedule-check"><input id="scheduleMaterialDeliverySpace" type="checkbox"><span class="schedule-question">Hat der Kunde Platz, Material einige Tage vor Montagebeginn anzunehmen?</span><span class="schedule-answer" data-answer-for="scheduleMaterialDeliverySpace">Nein</span></label><label class="schedule-check"><input id="scheduleTheftWeatherProtected" type="checkbox"><span class="schedule-question">Diebstahl- und wettersicher?</span><span class="schedule-answer" data-answer-for="scheduleTheftWeatherProtected">Nein</span></label><label class="schedule-check" id="scheduleEnterFallbackRow" hidden><input id="scheduleAllowFreeResourceFallback" type="checkbox"><span class="schedule-question">Enter: Falls kein vollständiger ENTER-Block vorhanden ist, einen vollständig freien Montag-bis-Freitag-Platz verwenden?</span><span class="schedule-answer" data-answer-for="scheduleAllowFreeResourceFallback">Nein</span></label></div><label class="schedule-extra"><span>Zusatzinfo · optional</span><textarea id="scheduleAdditionalInfo" maxlength="2000" placeholder="Nur ausfüllen, wenn diese Information zusätzlich in Planbar stehen soll."></textarea></label></form><details class="schedule-partner-settings"><summary>Kundentypen und Planbar-Kürzel verwalten</summary><div class="muted">Eine Zeile pro Typ im Format Name=Kürzel. Enter behält dabei automatisch seinen speziellen Block-Workflow.</div><textarea id="schedulePartnerPrefixes" maxlength="2000">${esc(partnerConfig)}</textarea><button class="btn" id="saveSchedulePartners" type="button">Kürzel speichern</button></details></div></details>`;
+}
+
+function dewarmteLinkPdfSection(project) {
+  if (project.id !== 'dewarmte') return '';
+  const jobs = state.dewarmteJobs || [];
+  const jobRows = jobs.length ? jobs.map(job => {
+    const statusText = ({ queued: 'Wartet', running: 'Wird erstellt', completed: 'Fertig', failed: 'Fehlgeschlagen', blocked: 'Prüfung nötig', timed_out: 'Zeitüberschreitung', incomplete: 'Unvollständig' })[job.status] || job.status;
+    const deliveryText = ({ download: 'Download', 'email-draft': 'Mailentwurf', 'email-send': 'Mailversand' })[job.deliveryMode] || 'Download';
+    return `<article class="dewarmte-job"><div><b>${esc(job.file?.name || 'Materiallisten-PDF')}</b><small>${esc(formatDate(job.createdAt))} · ${esc(deliveryText)}${job.recipientEmail ? ` an ${esc(job.recipientEmail)}` : ''}</small><small>${esc(job.detail)}</small></div><span class="badge ${esc(job.status)}">${esc(statusText)}</span>${job.file ? `<button class="btn" type="button" data-download-file="${esc(job.file.id)}" data-download-name="${esc(job.file.name)}">PDF herunterladen</button>` : ''}</article>`;
+  }).join('') : '<div class="planbar-search-empty">Noch keine PDF über einen Link erzeugt.</div>';
+  return `<section class="workflow-launcher dewarmte-launcher" id="dewarmteLinkWorkflow"><div class="workflow-launcher-head"><div><div class="eyebrow">DeWarmte Schnellworkflow</div><h2>Link rein → PDF raus</h2><div class="muted">Installationsplan-Link einfügen. IVA übernimmt Seite 1 unverändert und erstellt danach die einfache deutsche Materialliste.</div></div><span class="workflow-tag">Nur lesend</span></div><form class="dewarmte-form" id="dewarmtePdfForm"><label class="dewarmte-link-field"><span>Link zum Installationsplan</span><input id="dewarmteSourceUrl" type="url" inputmode="url" required maxlength="2000" autocomplete="off" placeholder="https://…"></label><label><span>Ausgabe</span><select id="dewarmteDeliveryMode"><option value="download">PDF zum Download</option><option value="email-draft">PDF + Mailentwurf</option><option value="email-send">PDF direkt per Mail senden</option></select></label><label id="dewarmteRecipientRow" class="hidden"><span>Empfänger</span><input id="dewarmteRecipientEmail" type="email" maxlength="320" autocomplete="email" placeholder="name@firma.de"></label><button class="btn primary" type="submit">PDF erzeugen</button></form><div class="dewarmte-hint">Die fertige PDF wird immer zuerst in dieser Projektakte gespeichert. Versand ist nur bei ausdrücklich gewähltem „direkt per Mail senden“ erlaubt.</div><div class="dewarmte-jobs-head"><h3>Letzte Aufträge</h3><button class="btn" id="refreshDewarmteJobs" type="button">↻ Status aktualisieren</button></div><div class="dewarmte-jobs">${jobRows}</div></section>`;
 }
 
 function forgetProjectLogo(projectId) {
@@ -249,11 +260,25 @@ function bindProjectActions() {
   if (planbarSearchForm) planbarSearchForm.onsubmit = searchPlanbar;
   const refreshPlanbarSearchButton = $('refreshPlanbarSearch');
   if (refreshPlanbarSearchButton) refreshPlanbarSearchButton.onclick = refreshPlanbarSearch;
+  const dewarmteForm = $('dewarmtePdfForm');
+  if (dewarmteForm) {
+    dewarmteForm.onsubmit = requestDewarmtePdf;
+    const delivery = $('dewarmteDeliveryMode');
+    const syncDelivery = () => {
+      const needsEmail = delivery.value !== 'download';
+      $('dewarmteRecipientRow').classList.toggle('hidden', !needsEmail);
+      $('dewarmteRecipientEmail').required = needsEmail;
+    };
+    delivery.onchange = syncDelivery;
+    syncDelivery();
+  }
+  if ($('refreshDewarmteJobs')) $('refreshDewarmteJobs').onclick = () => refreshDewarmteJobs({ rerender: true });
   $('editBrand').onclick = openBrandDialog;
   $('addNote').onclick = addNote;
   $('newFolder').onclick = openFolderDialog;
   document.querySelectorAll('[data-folder-id]').forEach(button => { button.onclick = () => { state.activeFolderId = button.dataset.folderId; render(); }; });
   document.querySelectorAll('[data-open-file]').forEach(button => { button.onclick = () => openFile(button.dataset.openFile); });
+  document.querySelectorAll('[data-download-file]').forEach(button => { button.onclick = () => downloadFile(button.dataset.downloadFile, button.dataset.downloadName); });
   document.querySelectorAll('[data-project-automation]').forEach(input => { input.onchange = () => toggleProjectAutomation(input); });
   document.querySelectorAll('[data-workflow-save]').forEach(button => { button.onclick = () => saveWorkflowName(button); });
   document.querySelectorAll('[data-workflow-action]').forEach(button => { button.onclick = () => runOrPrepareWorkflow(button); });
@@ -279,7 +304,7 @@ function render() {
   $('title').textContent = project.name;
   $('description').textContent = project.description || 'Projektakte für Ideen, Absprachen und Dokumente.';
   const objective = project.objective || project.description;
-  $('content').innerHTML = `${customerSchedulingSection(project)}${brandSection(project)}${notesSection(project)}${objective ? `<section class="hero"><div class="eyebrow">Zielbild</div><h2>${esc(objective)}</h2></section>` : ''}${archiveSection(project)}${operationalSections(project)}`;
+  $('content').innerHTML = `${customerSchedulingSection(project)}${dewarmteLinkPdfSection(project)}${brandSection(project)}${notesSection(project)}${objective ? `<section class="hero"><div class="eyebrow">Zielbild</div><h2>${esc(objective)}</h2></section>` : ''}${archiveSection(project)}${operationalSections(project)}`;
   collapseProjectSections();
   if ($('customerSchedulingForm')) $('customerSchedulingForm').insertAdjacentHTML('afterend', `<section id="schedulingHistory" class="capacity-overview">${schedulingHistory(project)}</section>`);
   if ($('customerSchedulingForm')) {
@@ -490,6 +515,11 @@ async function runOrPrepareWorkflow(button) {
   if (!state.current) return;
   const workflowId = button.dataset.workflowId;
   const workflow = (state.current.automations || []).find(item => item.id === workflowId);
+  if (workflowId === 'dewarmte-link-to-material-pdf') {
+    $('dewarmteLinkWorkflow')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setTimeout(() => $('dewarmteSourceUrl')?.focus(), 250);
+    return;
+  }
   const action = button.dataset.workflowAction;
   const question = action === 'run'
     ? `„${workflow?.name || 'Workflow'}“ jetzt einmal außerplanmäßig auslösen?`
@@ -514,6 +544,7 @@ function selectProject(id) {
   if (state.current) history.replaceState({}, '', `/projects?id=${encodeURIComponent(state.current.id)}`);
   else history.replaceState({}, '', '/projects');
   render();
+  if (state.current?.id === 'dewarmte') void refreshDewarmteJobs({ rerender: true });
 }
 
 async function load() {
@@ -523,12 +554,41 @@ async function load() {
     const id = new URLSearchParams(location.search).get('id');
     state.current = state.projects.find(project => project.id === id) || state.projects[0] || null;
     render();
+    if (state.current?.id === 'dewarmte') await refreshDewarmteJobs({ rerender: true });
     $('status').className = 'status on';
     $('status').textContent = 'aktuell';
   } catch (error) {
     $('status').className = 'status';
     $('status').textContent = error.message;
   }
+}
+
+async function requestDewarmtePdf(event) {
+  event.preventDefault();
+  if (state.current?.id !== 'dewarmte') return;
+  const sourceUrl = $('dewarmteSourceUrl').value.trim();
+  const deliveryMode = $('dewarmteDeliveryMode').value;
+  const recipientEmail = $('dewarmteRecipientEmail').value.trim();
+  if (deliveryMode === 'email-send' && !window.confirm(`Die fertige PDF nach der Prüfung direkt an ${recipientEmail} senden?`)) return;
+  const submit = event.submitter;
+  if (submit) { submit.disabled = true; submit.textContent = 'Wird an IVA übergeben …'; }
+  try {
+    const result = await api('/api/projects/dewarmte/link-pdf-jobs', { method: 'POST', body: { sourceUrl, deliveryMode, recipientEmail } });
+    $('dewarmteSourceUrl').value = '';
+    showToast(result.message || 'DeWarmte-PDF wird erzeugt.');
+    await refreshDewarmteJobs({ rerender: true });
+  } catch (error) { showToast(error.message, true); }
+  finally { if (submit && document.body.contains(submit)) { submit.disabled = false; submit.textContent = 'PDF erzeugen'; } }
+}
+
+async function refreshDewarmteJobs({ rerender = false } = {}) {
+  if (state.current?.id !== 'dewarmte') return;
+  try {
+    const [payload, project] = await Promise.all([api('/api/projects/dewarmte/link-pdf-jobs'), api('/api/projects/dewarmte')]);
+    state.dewarmteJobs = payload.jobs || [];
+    replaceProject(project);
+    if (rerender && state.current?.id === 'dewarmte') render();
+  } catch (error) { showToast(error.message, true); }
 }
 
 function openBrandDialog() {
@@ -657,6 +717,22 @@ async function openFile(fileId) {
     else window.location.href = objectUrl;
     setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
   } catch (error) { if (popup) popup.close(); showToast(error.message, true); }
+}
+
+async function downloadFile(fileId, fileName) {
+  if (!state.current) return;
+  try {
+    const response = await fetch(`/api/projects/${encodeURIComponent(state.current.id)}/files/${encodeURIComponent(fileId)}?download=1`, { headers: { Authorization: `Bearer ${token()}` } });
+    if (!response.ok) throw new Error('PDF konnte nicht heruntergeladen werden.');
+    const objectUrl = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = fileName || 'DeWarmte_Materialliste.pdf';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+  } catch (error) { showToast(error.message, true); }
 }
 
 async function removeProject(id) {

@@ -10,14 +10,14 @@ export const CENTRAL_RUNTIME_VERSION = 'imac-central-v5';
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 const allowedPath = value => /^local-mac-helper\/[a-z0-9-]+\.mjs$/.test(value)
   || /^local-mac-helper\/macos\/[a-z0-9-]+\.swift$/.test(value)
-  || ['local-mac-helper/runtime-package.json', 'local-mac-helper/manufacturer-lead-config.json', 'local-mac-helper/assets/heat-hero-logo.png', 'operations/customer-scheduling.js'].includes(value);
+  || ['local-mac-helper/runtime-package.json', 'local-mac-helper/manufacturer-lead-config.json', 'local-mac-helper/assets/heat-hero-logo.png', 'operations/customer-scheduling.js', 'projects/dewarmte.js'].includes(value);
 
 // Only deployed source files, never .env, credentials, customer files or outputs.
 export async function buildCentralRuntimeBundle(repo) {
   const names = (await readdir(path.join(repo, 'local-mac-helper')))
     .map(name => `local-mac-helper/${name}`).filter(allowedPath);
   names.push('local-mac-helper/macos/iva-ax.swift', 'local-mac-helper/macos/iva-whatsapp-probe.swift',
-    'local-mac-helper/assets/heat-hero-logo.png', 'operations/customer-scheduling.js');
+    'local-mac-helper/assets/heat-hero-logo.png', 'operations/customer-scheduling.js', 'projects/dewarmte.js');
   const files = [];
   for (const name of names.sort()) {
     const bytes = await readFile(path.join(repo, name));

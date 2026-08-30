@@ -384,6 +384,53 @@ const HEAT_HERO_PROJECT = {
   ],
 };
 
+const DEWARMTE_PROJECT = {
+  id: 'dewarmte',
+  name: 'DeWarmte',
+  company: 'DeWarmte',
+  category: 'Installationsplanung · Materiallisten',
+  status: 'active',
+  description: 'Installationsplan-Link einfügen, deutsche Materiallisten-PDF erzeugen und direkt herunterladen oder kontrolliert per Outlook bereitstellen.',
+  objective: 'Ein einfacher, aktiv gestarteter Ablauf: Link rein, geprüfte PDF raus - ohne vorherige Suche im Mailpostfach.',
+  principles: [
+    'Quelldokumente werden ausschließlich gelesen und niemals verändert oder gelöscht.',
+    'Seite 1 des Originalplans bleibt als unveränderte Übersicht erhalten.',
+    'Materialmengen werden nur aus belegten Angaben übernommen; offene Punkte bleiben sichtbar.',
+    'Jede PDF wird zuerst in der DeWarmte-Projektakte gespeichert. Mailversand erfolgt nur nach ausdrücklicher Auswahl.',
+  ],
+  areas: [
+    {
+      id: 'installation-pdfs', name: 'Installationsplan → Materialliste', status: 'active', owner: 'IVA Operations', specVersion: 1,
+      summary: 'Öffentliche HTTPS-Links rein lesend auswerten, die Originalübersicht übernehmen und eine deutsche Materiallisten-PDF erzeugen.',
+      nextStep: 'Link oben in der Projektakte einfügen und gewünschte Ausgabeart wählen.',
+    },
+  ],
+  automations: [
+    {
+      id: 'dewarmte-link-to-material-pdf',
+      specVersion: 1,
+      name: 'Link → deutsche Materialliste-PDF',
+      status: 'active',
+      enabled: true,
+      schedule: 'Manuell · direkt aus der DeWarmte-Projektakte',
+      execution: 'iMac · Chrome, lokale PDF-Prüfung und optional Outlook',
+      purpose: 'Einen eingefügten Installationsplan-Link ausschließlich lesen, Seite 1 unverändert übernehmen, eine deutsche Materialliste erzeugen und die PDF in der Projektakte bereitstellen.',
+      safety: 'Quelle strikt nur lesen. Keine Änderung, Löschung oder Verschiebung. Mail nur bei ausdrücklich gewähltem Entwurf oder Versand; Versand wird im Gesendet-Ordner verifiziert.',
+      nextStep: 'Im Bereich „Link rein → PDF raus“ Link und Ausgabeart eintragen.',
+    },
+  ],
+  phases: [
+    { phase: 1, name: 'Link übernehmen', status: 'active', result: 'Eindeutiger HTTPS-Link ohne Postfachsuche.' },
+    { phase: 2, name: 'PDF erzeugen und prüfen', status: 'active', result: 'Originalseite 1 plus deutsche Materialliste und offene Punkte.' },
+    { phase: 3, name: 'Download oder Mail', status: 'active', result: 'Datei in der Projektakte; optional Entwurf oder verifizierter Versand.' },
+  ],
+  protocolPolicy: { enabled: false },
+  runLog: [],
+  notes: [],
+  folders: [],
+  files: [],
+};
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -507,11 +554,12 @@ function normalizeFile(file = {}) {
     mime: clean(file.mime, 160) || 'application/octet-stream', bytes: Math.max(0, Number(file.bytes) || 0),
     sha256: clean(file.sha256, 128), folderId: clean(file.folderId, 100) || null,
     storageName: clean(file.storageName, 300), createdAt: iso(file.createdAt),
+    workflowId: clean(file.workflowId, 140), jobId: clean(file.jobId, 100),
   };
 }
 
 function seedProjects() {
-  return [clone(HEAT_HERO_PROJECT)];
+  return [clone(HEAT_HERO_PROJECT), clone(DEWARMTE_PROJECT)];
 }
 
 function normalizeArea(area = {}, fallback = {}) {
@@ -952,21 +1000,29 @@ export async function deleteProjectLogo(id) {
   return result.project;
 }
 
-export async function storeProjectFile(id, { name, mime, folderId, buffer }) {
+export async function storeProjectFile(id, { name, mime, folderId, buffer, workflowId = '', jobId = '' }) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error('Die Datei ist leer.');
   if (buffer.length > MAX_FILE_BYTES) throw new Error('Die Datei ist größer als 25 MB.');
   const safeName = clean(name, 240) || 'Dokument';
   const requestedFolderId = clean(folderId, 100) || null;
+  const safeWorkflowId = clean(workflowId, 140);
+  const safeJobId = clean(jobId, 100);
+  const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
   return mutate(async store => {
     const project = store.projects.find(item => item.id === clean(id, 100));
     if (!project) return null;
     if (requestedFolderId && !(project.folders || []).some(folder => folder.id === requestedFolderId)) throw new Error('Der Zielordner wurde nicht gefunden.');
+    const existing = safeJobId ? (project.files || []).find(file => file.jobId === safeJobId && file.workflowId === safeWorkflowId) : null;
+    if (existing) {
+      if (existing.sha256 !== sha256) throw new Error('Für diesen Workflow-Auftrag liegt bereits eine andere Datei in der Projektakte. Es wurde nichts überschrieben.');
+      return publicProject({ ...project, files: [existing] }).files[0];
+    }
     const extension = path.extname(safeName).replace(/[^a-z0-9.]/gi, '').slice(0, 16);
     const storageName = `${crypto.randomUUID()}${extension}`;
     const projectDir = projectFileDir(project.id);
     await fs.mkdir(projectDir, { recursive: true });
     await fs.writeFile(path.join(projectDir, storageName), buffer, { mode: 0o600 });
-    const file = normalizeFile({ name: safeName, mime, bytes: buffer.length, sha256: crypto.createHash('sha256').update(buffer).digest('hex'), folderId: requestedFolderId, storageName });
+    const file = normalizeFile({ name: safeName, mime, bytes: buffer.length, sha256, folderId: requestedFolderId, storageName, workflowId: safeWorkflowId, jobId: safeJobId });
     project.files = [...(project.files || []), file];
     return publicProject({ ...project, files: [file] }).files[0];
   });
@@ -997,4 +1053,4 @@ export async function deleteProject(id) {
   return deleted;
 }
 
-export { HEAT_HERO_PROJECT };
+export { DEWARMTE_PROJECT, HEAT_HERO_PROJECT };

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { validateDewarmteLinkPdfInput } from '../projects/dewarmte.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const STORE_FILE = path.join(DATA_DIR, 'device-commands.json');
@@ -214,8 +215,12 @@ function validatePayload(action, payload = {}) {
   if (action === 'project.workflow.run') {
     const projectId = cleanText(payload.projectId, 100);
     const workflowId = cleanText(payload.workflowId, 140);
-    const allowed = new Set(['funding-daily-sequence', 'funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning', 'planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning', 'installation-plan-material-list']);
-    if (projectId !== 'heat-hero' || !allowed.has(workflowId)) throw new Error('Dieser Projekt-Workflow ist für den manuellen iMac-Start nicht freigegeben.');
+    const heatHeroAllowed = new Set(['funding-daily-sequence', 'funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning', 'planbar-weekly-export', 'planbar-completion-morning', 'montage-required-fields-morning', 'installation-plan-material-list']);
+    const dewarmteAllowed = projectId === 'dewarmte' && workflowId === 'dewarmte-link-to-material-pdf';
+    if (!(projectId === 'heat-hero' && heatHeroAllowed.has(workflowId)) && !dewarmteAllowed) {
+      throw new Error('Dieser Projekt-Workflow ist für den manuellen iMac-Start nicht freigegeben.');
+    }
+    const dewarmteInput = dewarmteAllowed ? validateDewarmteLinkPdfInput(payload) : null;
     return {
       projectId,
       workflowId,
@@ -225,6 +230,7 @@ function validatePayload(action, payload = {}) {
       ...(payload.runMode === 'automatic' && cleanText(payload.automationSlotKey, 180)
         ? { automationSlotKey: cleanText(payload.automationSlotKey, 180) }
         : {}),
+      ...(dewarmteInput || {}),
     };
   }
   if (action === 'portal.credentials.status' || action === 'portal.login') {

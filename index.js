@@ -98,6 +98,7 @@ import {
   updatePlanbarCapacity,
   updateProject,
 } from './projects/store.js';
+import { summarizeDewarmteLinkPdfJobs, validateDewarmteLinkPdfInput } from './projects/dewarmte.js';
 import {
   getPlanbarSearchIndex,
   replacePlanbarSearchIndex,
@@ -1300,6 +1301,38 @@ app.post('/booking-api/:slug', async (req, res) => {
   } catch (error) { res.status(400).json({ error: error.message }); }
 });
 
+// Der iMac meldet fertige DeWarmte-PDFs über denselben attestierten Gerätekanal.
+// Der Endpunkt akzeptiert ausschließlich eine PDF für einen tatsächlich gestarteten
+// DeWarmte-Job und kann keine anderen Projektfelder verändern.
+app.post('/device-agent/:deviceId/projects/:projectId/files', express.raw({ type: 'application/pdf', limit: '25mb' }), async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID || req.params.projectId !== 'dewarmte') {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try {
+    const jobId = String(req.query?.jobId || '').trim();
+    const name = String(req.query?.name || '').trim();
+    if (!/^[a-f0-9-]{36}$/i.test(jobId) || !/\.pdf$/i.test(name) || !Buffer.isBuffer(req.body) || req.body.subarray(0, 5).toString('ascii') !== '%PDF-') {
+      return res.status(400).json({ error: 'Ungültige DeWarmte-PDF oder Job-Zuordnung.' });
+    }
+    const commands = await listDeviceCommands({ deviceId: IVA_IMAC_DEVICE_ID, limit: 500 });
+    const started = commands.some(command => command.action === 'project.workflow.run'
+      && command.payload?.projectId === 'dewarmte'
+      && command.payload?.workflowId === 'dewarmte-link-to-material-pdf'
+      && command.result?.jobId === jobId);
+    if (!started) return res.status(409).json({ error: 'Für diese PDF ist kein gestarteter DeWarmte-Auftrag belegt.' });
+    const file = await storeProjectFile('dewarmte', {
+      name,
+      mime: 'application/pdf',
+      buffer: req.body,
+      workflowId: 'dewarmte-link-to-material-pdf',
+      jobId,
+    });
+    res.status(file ? 201 : 404).json(file || { error: 'DeWarmte-Projekt nicht gefunden.' });
+  } catch (error) {
+    res.status(error?.type === 'entity.too.large' ? 413 : 400).json({ error: error.message });
+  }
+});
+
 // Der iMac meldet Workflow-Ergebnisse über seinen bereits eingerichteten,
 // ausschließlich im macOS-Schlüsselbund gespeicherten Gerätetoken. Dieser
 // enge Schreibweg akzeptiert nur Protokolle und keine sonstigen Projektfelder.
@@ -1308,7 +1341,8 @@ app.post('/device-agent/:deviceId/project-workflow-runs', async (req, res) => {
     return res.status(401).json({ error: 'unauthorized' });
   }
   try {
-    const stored = await recordProjectWorkflowResult('heat-hero', req.body || {});
+    const projectId = req.body?.projectId === 'dewarmte' ? 'dewarmte' : 'heat-hero';
+    const stored = await recordProjectWorkflowResult(projectId, req.body || {});
     let telegramReport = null;
     const fundingIds = new Set(['funding-daily-sequence', 'funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning']);
     const terminal = ['completed', 'failed', 'blocked', 'timed_out', 'incomplete'].includes(String(req.body?.status || ''));
@@ -1676,6 +1710,42 @@ app.get('/api/projects/:id', async (req, res) => {
   const project = await getProject(req.params.id);
   res.status(project ? 200 : 404).json(project || { error: 'not found' });
 });
+app.get('/api/projects/dewarmte/link-pdf-jobs', async (_req, res) => {
+  try {
+    const [project, commands, runs] = await Promise.all([
+      getProject('dewarmte'),
+      listDeviceCommands({ deviceId: IVA_IMAC_DEVICE_ID, limit: 500 }),
+      listProjectWorkflowRuns('dewarmte', { limit: 200 }),
+    ]);
+    if (!project) return res.status(404).json({ error: 'DeWarmte-Projekt nicht gefunden.' });
+    res.json({ jobs: summarizeDewarmteLinkPdfJobs(commands, project.files || [], runs) });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+app.post('/api/projects/dewarmte/link-pdf-jobs', async (req, res) => {
+  try {
+    const project = await getProject('dewarmte');
+    const workflow = project?.automations?.find(item => item.id === 'dewarmte-link-to-material-pdf');
+    if (!project || !workflow) return res.status(404).json({ error: 'DeWarmte-Linkworkflow nicht gefunden.' });
+    if (workflow.status !== 'active' || workflow.enabled !== true) return res.status(409).json({ error: 'Der DeWarmte-Linkworkflow ist ausgeschaltet.' });
+    const input = validateDewarmteLinkPdfInput(req.body || {});
+    const requestId = `dewarmte-link-pdf:${crypto.randomUUID()}`;
+    const command = await enqueueDeviceCommand({
+      deviceId: IVA_IMAC_DEVICE_ID,
+      action: 'project.workflow.run',
+      payload: {
+        projectId: 'dewarmte',
+        workflowId: 'dewarmte-link-to-material-pdf',
+        displayName: 'DeWarmte: Link → Materiallisten-PDF',
+        requestId,
+        runMode: 'manual',
+        ...input,
+      },
+      requestedBy: 'projects-dewarmte-link-pdf',
+      requestText: `DeWarmte-PDF aus eingefügtem Link erzeugen (${input.deliveryMode})`,
+    });
+    res.status(202).json({ queued: true, commandId: command.id, status: command.status, message: 'Link wurde an den DeWarmte-PDF-Workflow auf dem iMac übergeben.' });
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
 app.get('/api/projects/:id/planbar-capacity', async (req, res) => {
   const project = await getProject(req.params.id);
   res.status(project ? 200 : 404).json(project?.planbarCapacity || { error: 'not found' });
@@ -1780,7 +1850,7 @@ app.get('/api/projects/:id/files/:fileId', async (req, res) => {
     const file = await readProjectFile(req.params.id, req.params.fileId);
     if (!file) return res.status(404).json({ error: 'not found' });
     res.set('Content-Type', file.meta.mime || 'application/octet-stream');
-    res.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(file.meta.name)}`);
+    res.set('Content-Disposition', `${req.query?.download === '1' ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(file.meta.name)}`);
     res.send(file.buffer);
   } catch { res.status(404).json({ error: 'not found' }); }
 });

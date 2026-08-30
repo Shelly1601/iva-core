@@ -164,6 +164,18 @@ try {
     payload: { projectId: 'heat-hero', workflowId: 'installation-plan-material-list', displayName: 'Installationsplan als Materialliste' },
   });
   assert.equal(installationPlanCommand.payload.workflowId, 'installation-plan-material-list');
+  const dewarmteCommand = await enqueueDeviceCommand({
+    action: 'project.workflow.run', requestedBy: 'test-dewarmte-link',
+    payload: {
+      projectId: 'dewarmte', workflowId: 'dewarmte-link-to-material-pdf', displayName: 'Link → Materialliste',
+      sourceUrl: 'https://docs.google.com/document/d/test/edit#section', deliveryMode: 'email-draft', recipientEmail: 'nadine@example.com',
+    },
+  });
+  assert.equal(dewarmteCommand.payload.sourceUrl, 'https://docs.google.com/document/d/test/edit');
+  assert.equal(dewarmteCommand.payload.deliveryMode, 'email-draft');
+  await assert.rejects(enqueueDeviceCommand({
+    action: 'project.workflow.run', payload: { projectId: 'dewarmte', workflowId: 'dewarmte-link-to-material-pdf', sourceUrl: 'https://localhost/plan.pdf' },
+  }), /öffentlichen HTTPS-Link/);
   const fundingSequenceCommand = await enqueueDeviceCommand({
     action: 'project.workflow.run', requestedBy: 'test-funding-scheduler',
     payload: { projectId: 'heat-hero', workflowId: 'funding-daily-sequence', displayName: 'Förderung – Tageslauf 1 → 2 → 3' },
@@ -305,6 +317,16 @@ try {
   assert.equal(directInstallationPlan.workflowId, 'installation-plan-material-list');
   assert.match(directInstallationPlan.prompt, /ausschließlich lesend/);
   assert.equal(directInstallationPlan.acceptanceCriteria.some(item => /nichts.*gelöscht/.test(item)), true);
+  const directDewarmte = await startProjectWorkflowTask({
+    workflowId: 'dewarmte-link-to-material-pdf',
+    requestId: 'dewarmte-link-pdf:test',
+    workflowInput: { sourceUrl: 'https://example.com/installation.pdf', deliveryMode: 'email-send', recipientEmail: 'nadine@example.com' },
+    startTask: async request => ({ projectId: request.projectId, workflowId: request.workflowId, prompt: request.prompt }),
+  });
+  assert.equal(directDewarmte.projectId, 'dewarmte');
+  assert.match(directDewarmte.prompt, /publish-dewarmte-pdf/);
+  assert.match(directDewarmte.prompt, /deliver-dewarmte-pdf/);
+  assert.doesNotMatch(directDewarmte.prompt, /Postfachsuche durchführen/);
   const bootstrapSource = await readFile(new URL('../IVA-iMac-einmalig-verbinden.command', import.meta.url), 'utf8');
   assert.match(bootstrapSource, /nodejs\.org\/dist\/\$\{node_version\}/);
   assert.match(bootstrapSource, /shasum -a 256/);

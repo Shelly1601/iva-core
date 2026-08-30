@@ -6,7 +6,7 @@ import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { access } from 'node:fs/promises';
+import { access, readFile, stat } from 'node:fs/promises';
 
 const execFileAsync = promisify(execFile);
 export const IMAC_DEVICE_ID = 'imac-nadine';
@@ -126,6 +126,43 @@ async function request(pathname, { method = 'GET', body } = {}) {
   let payload = null;
   try { payload = text ? JSON.parse(text) : null; } catch {}
   if (!response.ok) throw new Error(`IVA-Gerätekanal HTTP ${response.status}: ${String(payload?.error || text || response.statusText).slice(0, 400)}`);
+  return payload;
+}
+
+export async function publishDewarmtePdf({ filePath, jobId }) {
+  const absolutePath = path.resolve(String(filePath || ''));
+  const safeJobId = String(jobId || '').trim();
+  if (!path.isAbsolute(absolutePath) || !/^[a-f0-9-]{36}$/i.test(safeJobId)) throw new Error('PDF-Pfad oder DeWarmte-Job-Schlüssel ist ungültig.');
+  const info = await stat(absolutePath);
+  if (!info.isFile() || info.size < 5 || info.size > 25 * 1024 * 1024 || path.extname(absolutePath).toLowerCase() !== '.pdf') {
+    throw new Error('Für die DeWarmte-Projektakte ist genau eine PDF-Datei bis 25 MB erforderlich.');
+  }
+  const buffer = await readFile(absolutePath);
+  if (buffer.subarray(0, 5).toString('ascii') !== '%PDF-') throw new Error('Die Datei besitzt keine gültige PDF-Signatur.');
+  const server = cleanServerUrl(process.env.IVA_DEVICE_SERVER_URL);
+  const token = await readImacDeviceToken();
+  const agent = imacDeviceAgentMetadata();
+  const query = new URLSearchParams({ name: path.basename(absolutePath), jobId: safeJobId });
+  const response = await fetch(`${server}/device-agent/${IMAC_DEVICE_ID}/projects/dewarmte/files?${query}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/pdf',
+      'X-IVA-Agent-Host': agent.hostname,
+      'X-IVA-Agent-Ui-Busy': agent.uiBusy ? 'true' : 'false',
+      'X-IVA-Agent-Protocol': String(agent.protocolVersion),
+      'X-IVA-Agent-Release': agent.release,
+      'X-IVA-Agent-Revision': agent.runtimeRevision,
+      'X-IVA-Agent-Workspace': agent.workspace,
+      'X-IVA-Agent-ICloud': agent.iCloudAuthoritative ? 'true' : 'false',
+    },
+    body: buffer,
+    signal: AbortSignal.timeout(60000),
+  });
+  const text = await response.text();
+  let payload = null;
+  try { payload = text ? JSON.parse(text) : null; } catch {}
+  if (!response.ok) throw new Error(`DeWarmte-PDF-Upload HTTP ${response.status}: ${String(payload?.error || text || response.statusText).slice(0, 400)}`);
   return payload;
 }
 
@@ -350,6 +387,7 @@ async function executeDeviceCommand(command) {
       requestId: command.payload?.requestId || command.id,
       runMode: command.payload?.runMode,
       automationSlotKey: command.payload?.automationSlotKey,
+      workflowInput: command.payload,
     });
   }
   if (command.action === 'app.open') return openApplication(command.payload?.app);

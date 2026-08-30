@@ -20,6 +20,7 @@ const {
   storeProjectLogo,
   updateProject,
 } = await import('../projects/store.js');
+const { summarizeDewarmteLinkPdfJobs, validateDewarmteLinkPdfInput } = await import('../projects/dewarmte.js');
 
 let failures = 0;
 function check(name, value) {
@@ -30,7 +31,14 @@ function check(name, value) {
 
 const projects = await listProjects();
 const heat = projects.find(item => item.id === 'heat-hero');
+const dewarmte = projects.find(item => item.id === 'dewarmte');
 check('Heat Hero vorhanden', heat);
+check('DeWarmte als eigenes Projekt vorhanden', dewarmte?.name === 'DeWarmte' && dewarmte.status === 'active');
+check('DeWarmte-Linkworkflow sichtbar und aktiv', dewarmte?.automations.some(item => item.id === 'dewarmte-link-to-material-pdf' && item.status === 'active' && item.enabled && item.toggleAvailable));
+check('DeWarmte-Quelle ist strikt nur lesend', dewarmte?.automations.some(item => item.id === 'dewarmte-link-to-material-pdf' && /keine Änderung.*Löschung/i.test(item.safety)));
+check('DeWarmte-Linkeingabe normalisiert Download ohne Empfänger', validateDewarmteLinkPdfInput({ sourceUrl: 'https://docs.google.com/document/d/test/edit#heading', deliveryMode: 'download' }).recipientEmail === '');
+check('DeWarmte-Mailversand braucht Empfänger', (() => { try { validateDewarmteLinkPdfInput({ sourceUrl: 'https://example.com/plan.pdf', deliveryMode: 'email-send' }); return false; } catch (error) { return /Empfängeradresse/.test(error.message); } })());
+check('DeWarmte blockiert lokale Quelllinks', (() => { try { validateDewarmteLinkPdfInput({ sourceUrl: 'https://127.0.0.1/plan.pdf' }); return false; } catch (error) { return /öffentlichen HTTPS-Link/.test(error.message); } })());
 check('Projektphasen sichtbar', heat.phases.length === 5);
 check('Automationen sichtbar', heat.automations.length >= 6);
 check('Planbar aktiv', heat.automations.some(item => item.id === 'planbar-weekly-export' && item.status === 'active' && item.enabled));
@@ -138,12 +146,38 @@ check('Projektworkflows haben echte Ein-Aus-Schalter', html.includes('.switch{')
 check('Workflow-Namen sind bearbeitbar und speicherbar', js.includes('data-workflow-name') && js.includes('data-workflow-save') && js.includes('saveWorkflowName'));
 check('Jeder Workflow hat manuellen Start oder IVA-Fertigstellungsauftrag', js.includes('▶ Jetzt auslösen') && js.includes('✦ Mit IVA fertig bauen') && js.includes('/${action}') && js.includes('runOrPrepareWorkflow'));
 check('Installationsplan-Materialliste besitzt den echten manuellen Start', js.includes("'installation-plan-material-list'") && js.includes('MANUAL_WORKFLOW_IDS'));
+check('DeWarmte zeigt Link-rein-PDF-raus direkt in der Projektakte', js.includes('Link rein → PDF raus') && js.includes('dewarmtePdfForm') && js.includes('/api/projects/dewarmte/link-pdf-jobs'));
+check('DeWarmte bietet Download, Mailentwurf und bestätigten Direktversand', js.includes('email-draft') && js.includes('email-send') && js.includes('direkt an ${recipientEmail} senden'));
+check('DeWarmte-Jobliste verknüpft fertige PDF mit echtem Download', js.includes('data-download-file') && js.includes('downloadFile') && js.includes('job.file?.name'));
 check('Markenprofil mit Logo, Website und Instagram ist bedienbar', html.includes('Markenprofil bearbeiten') && html.includes('projectWebsite') && html.includes('projectInstagram') && html.includes('projectLogo') && js.includes('/logo') && js.includes('projectLogo(project)'));
 check('Kunde terminieren steht oben mit Kundenname und KW-Auswahl bereit', html.includes('.workflow-launcher') && js.includes('Kunde terminieren') && js.includes('scheduleCustomerName') && js.includes('scheduleWeek') && js.includes('/customer-scheduling-requests'));
 check('Kunde terminieren startet direkt und erklärt die Fünf-Tage-Kapazität', js.includes('Jetzt terminieren') && js.includes('direkt an den Planbar-Workflow') && js.includes('vollständig freien fünf Tagen'));
 check('Kundentypen, Kürzelverwaltung und Enter-Ersatzplatz sind bedienbar', js.includes('schedulePartner') && js.includes('schedulePartnerPrefixes') && js.includes('saveCustomerSchedulingPartners') && js.includes('scheduleAllowFreeResourceFallback') && js.includes('ENTER-Block'));
 check('Kunde terminieren ist standardmäßig kompakt einklappbar', js.includes('<details class="workflow-launcher workflow-launcher-disclosure"') && html.includes('.workflow-launcher-disclosure'));
 check('Materialfragen und optionale Zusatzinfo stehen im Schnellstart bereit', js.includes('scheduleMaterialDeliverySpace') && js.includes('scheduleTheftWeatherProtected') && js.includes('scheduleAdditionalInfo'));
+const dewarmteJobId = '12345678-1234-4123-8123-123456789012';
+const dewarmteFile = await storeProjectFile('dewarmte', {
+  name: 'DeWarmte_Materialliste_Test.pdf', mime: 'application/pdf', buffer: Buffer.from('%PDF-test'),
+  workflowId: 'dewarmte-link-to-material-pdf', jobId: dewarmteJobId,
+});
+check('Erzeugte DeWarmte-PDF wird mit Job-Zuordnung gespeichert', dewarmteFile?.jobId === dewarmteJobId && dewarmteFile.workflowId === 'dewarmte-link-to-material-pdf');
+const duplicateDewarmteFile = await storeProjectFile('dewarmte', {
+  name: 'DeWarmte_Materialliste_Test.pdf', mime: 'application/pdf', buffer: Buffer.from('%PDF-test'),
+  workflowId: 'dewarmte-link-to-material-pdf', jobId: dewarmteJobId,
+});
+check('Wiederholter DeWarmte-Upload erzeugt keine PDF-Dublette', duplicateDewarmteFile?.id === dewarmteFile.id);
+const dewarmteJobs = summarizeDewarmteLinkPdfJobs([{
+  id: 'command-test', action: 'project.workflow.run', status: 'completed', createdAt: '2026-08-30T07:00:00Z', result: { jobId: dewarmteJobId },
+  payload: { projectId: 'dewarmte', workflowId: 'dewarmte-link-to-material-pdf', deliveryMode: 'download' },
+}], [dewarmteFile]);
+check('DeWarmte-Job wird nach PDF-Upload als fertig und downloadbar angezeigt', dewarmteJobs[0]?.status === 'completed' && dewarmteJobs[0]?.file?.id === dewarmteFile.id);
+const dewarmteUnverifiedMail = summarizeDewarmteLinkPdfJobs([{
+  id: 'command-mail-test', action: 'project.workflow.run', status: 'completed', createdAt: '2026-08-30T07:00:00Z', result: { jobId: dewarmteJobId },
+  payload: { projectId: 'dewarmte', workflowId: 'dewarmte-link-to-material-pdf', deliveryMode: 'email-send', recipientEmail: 'kunde@example.com' },
+}], [dewarmteFile], [{
+  workflowId: 'dewarmte-link-to-material-pdf', status: 'blocked', summary: 'Versandstatus muss im Gesendet-Ordner geprüft werden.', metrics: { jobId: dewarmteJobId },
+}]);
+check('Unklarer Mailversand bleibt trotz fertiger PDF sichtbar prüfbedürftig', dewarmteUnverifiedMail[0]?.status === 'blocked' && /Weitere Aktion nötig/.test(dewarmteUnverifiedMail[0]?.detail));
 
 console.log(failures ? `${failures} Fehler` : 'Projektakten erfolgreich verifiziert.');
 process.exit(failures ? 1 : 0);

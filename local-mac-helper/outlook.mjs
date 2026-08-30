@@ -205,14 +205,15 @@ function appendExactListVerification(lines, { actualVariable, expectedVariable, 
   );
 }
 
-export function buildVerifiedSendAppleScript(input = {}) {
+export function buildVerifiedSendAppleScript(input = {}, { allowedExtensions = ['.xlsx'], attachmentLabel = 'XLSX' } = {}) {
   const message = normalizeDraftPayload(input);
-  if (!message.attachments.length || message.attachments.some(file => path.extname(file).toLowerCase() !== '.xlsx')) {
-    throw new Error('Outlook-Versand abgebrochen: Es sind ausschließlich eine oder mehrere XLSX-Anlagen zulässig.');
+  const allowed = new Set(allowedExtensions.map(value => String(value).toLowerCase()));
+  if (!message.attachments.length || message.attachments.some(file => !allowed.has(path.extname(file).toLowerCase()))) {
+    throw new Error(`Outlook-Versand abgebrochen: Es sind ausschließlich ${attachmentLabel}-Anlagen zulässig.`);
   }
   const expectedAttachmentNames = message.attachments.map(file => path.basename(file));
   if (new Set(expectedAttachmentNames).size !== expectedAttachmentNames.length) {
-    throw new Error('Outlook-Versand abgebrochen: Doppelte XLSX-Anlagennamen sind nicht zulässig.');
+    throw new Error(`Outlook-Versand abgebrochen: Doppelte ${attachmentLabel}-Anlagennamen sind nicht zulässig.`);
   }
   const lines = [
     'tell application id "com.microsoft.Outlook"',
@@ -274,7 +275,7 @@ export function buildVerifiedSendAppleScript(input = {}) {
     'end repeat',
     `set expectedAttachmentNames to {${expectedAttachmentNames.map(appleScriptString).join(', ')}}`,
   );
-  appendExactListVerification(lines, { actualVariable: 'actualAttachmentNames', expectedVariable: 'expectedAttachmentNames', label: 'XLSX-Anlagen' });
+  appendExactListVerification(lines, { actualVariable: 'actualAttachmentNames', expectedVariable: 'expectedAttachmentNames', label: `${attachmentLabel}-Anlagen` });
   lines.push(
     'if senderAccount is not missing value then save draftMessage',
     'on error preflightError number preflightNumber',
@@ -564,6 +565,38 @@ export async function sendVerifiedOutlookXlsxMessage(input = {}) {
       sentFolderVerified: false,
       sentFolderVerificationError: String(error?.message || error).slice(0, 500),
     };
+  }
+}
+
+export async function sendVerifiedOutlookPdfMessage(input = {}) {
+  const message = normalizeDraftPayload(input);
+  const sentVerificationLookbackSeconds = Math.max(60, Math.min(3600, Number(input.sentVerificationLookbackSeconds) || 900));
+  if (message.attachments.length !== 1 || path.extname(message.attachments[0]).toLowerCase() !== '.pdf') {
+    throw new Error('Outlook-Versand abgebrochen: Es ist genau eine PDF-Anlage erforderlich.');
+  }
+  await validateAttachmentPaths(message.attachments);
+  const diagnosis = await diagnoseOutlook();
+  if (!diagnosis.outlook.installed || !diagnosis.outlook.running || !diagnosis.outlook.available) {
+    throw new Error('Outlook-Versand abgebrochen: Das exakte Outlook-Konto ist über die native Schnittstelle nicht verfügbar.');
+  }
+  const { script } = buildVerifiedSendAppleScript(message, { allowedExtensions: ['.pdf'], attachmentLabel: 'PDF' });
+  let output = '';
+  let sendAttemptError = '';
+  try {
+    output = await runAppleScript(script, { timeoutMs: 120000 });
+  } catch (error) {
+    if (!String(error?.message || error).includes('IVA_SEND_ATTEMPTED|')) throw error;
+    sendAttemptError = String(error?.message || error).slice(0, 500);
+  }
+  if (!sendAttemptError && !output.startsWith('sent|')) {
+    throw new Error('Outlook-Versand abgebrochen: Die native Schnittstelle hat den Versand nicht bestätigt.');
+  }
+  const sent = { sent: true, channel: 'outlook-applescript-pdf-exact-account', verifiedBeforeSend: true, sendAttemptError };
+  try {
+    const sentFolder = await verifyOutlookSentMessage({ ...message, lookbackSeconds: sentVerificationLookbackSeconds });
+    return { ...sent, sentFolderVerified: true, sentFolder };
+  } catch (error) {
+    return { ...sent, sentFolderVerified: false, sentFolderVerificationError: String(error?.message || error).slice(0, 500) };
   }
 }
 

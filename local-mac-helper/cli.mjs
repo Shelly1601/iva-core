@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { renderFundingMissingDocumentsEmail, withFundingSender } from './funding.mjs';
-import { createOutlookDraft, createOutlookForwardDraft, deleteOutlookDrafts, diagnoseOutlook, normalizeDraftPayload, updateOutlookDrafts } from './outlook.mjs';
+import { createOutlookDraft, createOutlookForwardDraft, deleteOutlookDrafts, diagnoseOutlook, normalizeDraftPayload, sendVerifiedOutlookPdfMessage, updateOutlookDrafts } from './outlook.mjs';
 import {
   createPipedriveFundingRequestNotes,
   createPipedriveFundingInformationNote,
@@ -39,7 +39,7 @@ import {
   uninstallFundingMonitorLaunchAgent,
 } from './funding-monitor-launchd.mjs';
 import { cleanupCompletedFundingReview, fundingLocalCleanupPolicy } from './funding-local-cleanup.mjs';
-import { imacDeviceAgentPolicy, provisionImacDeviceToken, runImacDeviceAgentOnce } from './device-agent.mjs';
+import { imacDeviceAgentPolicy, provisionImacDeviceToken, publishDewarmtePdf, runImacDeviceAgentOnce } from './device-agent.mjs';
 import {
   imacDeviceAgentLaunchdStatus,
   installImacDeviceAgentLaunchd,
@@ -67,6 +67,7 @@ import {
 import { ensurePortalLogin, portalAuthPolicy } from './portal-auth.mjs';
 import { completeFundingMail } from './funding-mail-completion.mjs';
 import { ensureAppWindowOnRightDisplay, requireRightDisplayWorkspace } from './display-workspace.mjs';
+import { beginDewarmteDelivery, finishDewarmteDelivery } from './dewarmte-delivery-state.mjs';
 
 async function readJson(filePath) {
   if (!filePath) throw new Error('Pfad zu einer JSON-Datei fehlt.');
@@ -98,7 +99,7 @@ const batchService = new FundingBatchService({
 });
 
 async function main() {
-  const [command, filePath, confirmation, extra, final] = process.argv.slice(2);
+  const [command, filePath, confirmation, extra, final, sixth] = process.argv.slice(2);
   if (command === 'credential-policy') return console.log(JSON.stringify({ keychain: credentialBrokerPolicy(), portalLogin: portalAuthPolicy() }, null, 2));
   if (command === 'credential-status') return console.log(JSON.stringify(await credentialBrokerStatus(filePath), null, 2));
   if (command === 'credential-setup') {
@@ -131,6 +132,40 @@ async function main() {
   }, null, 2));
   if (command === 'right-display-status') return console.log(JSON.stringify(await requireRightDisplayWorkspace(), null, 2));
   if (command === 'place-app-right') return console.log(JSON.stringify(await ensureAppWindowOnRightDisplay(filePath), null, 2));
+  if (command === 'publish-dewarmte-pdf') {
+    if (extra !== '--commit') throw new Error('Die PDF wurde nicht in die DeWarmte-Projektakte hochgeladen. Zum Bestätigen --commit anhängen.');
+    return console.log(JSON.stringify(await publishDewarmtePdf({ filePath, jobId: confirmation }), null, 2));
+  }
+  if (command === 'deliver-dewarmte-pdf') {
+    if (sixth !== '--commit') throw new Error('Die DeWarmte-Mail wurde nicht erstellt oder versandt. Zum Bestätigen --commit anhängen.');
+    const deliveryMode = String(confirmation || 'download');
+    if (!['download', 'email-draft', 'email-send'].includes(deliveryMode)) throw new Error('Unbekannte DeWarmte-Ausgabeart.');
+    if (deliveryMode === 'download') return console.log(JSON.stringify({ delivered: false, downloadOnly: true }, null, 2));
+    const recipientEmail = String(extra || '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) throw new Error('Für die DeWarmte-Mail fehlt eine gültige Empfängeradresse.');
+    const jobId = String(final || '').trim();
+    const subject = `DeWarmte Materialliste - ${path.basename(filePath, path.extname(filePath)).replace(/^DeWarmte[_ -]*/i, '').replace(/[_-]+/g, ' ')}`.slice(0, 240);
+    const mail = {
+      from: 'n.sell@heat-hero.com', to: [recipientEmail], cc: [], bcc: [], subject,
+      body: 'Hallo,\n\nanbei erhalten Sie die aus dem bereitgestellten Installationsplan erstellte Materialliste als PDF.\n\nViele Grüße\nNadine Sell',
+      attachments: [path.resolve(filePath)],
+    };
+    await beginDewarmteDelivery({ jobId, deliveryMode, recipientEmail, fileName: filePath });
+    try {
+      const result = deliveryMode === 'email-draft' ? await createOutlookDraft(mail) : await sendVerifiedOutlookPdfMessage(mail);
+      const status = deliveryMode === 'email-draft' ? 'draft-created' : result.sentFolderVerified ? 'sent-verified' : 'sent-unverified';
+      await finishDewarmteDelivery(jobId, { status, detail: result.sentFolderVerificationError || result.subject || subject });
+      if (deliveryMode === 'email-send' && result.sentFolderVerified !== true) {
+        const verificationError = new Error('Outlook hat den Versand angestoßen, aber die Nachricht konnte nicht eindeutig im Gesendet-Ordner bestätigt werden. Niemals erneut senden; ausschließlich den Gesendet-Ordner prüfen.');
+        verificationError.deliveryRecorded = true;
+        throw verificationError;
+      }
+      return console.log(JSON.stringify({ deliveryMode, ...result }, null, 2));
+    } catch (error) {
+      if (!error?.deliveryRecorded) await finishDewarmteDelivery(jobId, { status: 'failed-or-unclear', detail: error.message }).catch(() => {});
+      throw error;
+    }
+  }
   if (command === 'direct-sales-roster-status') return console.log(JSON.stringify(loadDirectSalesRosterSync(), null, 2));
   if (command === 'sync-direct-sales-roster') {
     if (filePath !== '--commit') throw new Error('Der Direktvertriebs-Abgleich wurde nicht gespeichert. Zum Bestätigen --commit anhängen.');
@@ -306,6 +341,8 @@ async function main() {
   node local-mac-helper/cli.mjs doctor
   node local-mac-helper/cli.mjs right-display-status
   node local-mac-helper/cli.mjs place-app-right <bundle-id>
+  node local-mac-helper/cli.mjs publish-dewarmte-pdf <pdf-pfad> <job-id> --commit
+  node local-mac-helper/cli.mjs deliver-dewarmte-pdf <pdf-pfad> <email-draft|email-send> <empfaenger> <job-id> --commit
   node local-mac-helper/cli.mjs direct-sales-roster-status
   node local-mac-helper/cli.mjs sync-direct-sales-roster --commit
   node local-mac-helper/cli.mjs read-pipedrive-deal <deal-id>
