@@ -3,6 +3,7 @@ import path from 'node:path';
 import { access, mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { sendVerifiedOutlookXlsxMessage, verifyOutlookSentMessage } from './outlook.mjs';
+import { collectAndBuildPlanbarForecast } from './planbar-forecast.mjs';
 
 export const PLANBAR_FORECAST_SENDER = 'n.sell@heat-hero.com';
 export const PLANBAR_FORECAST_RECIPIENT = 'a.keller@heat-hero.com';
@@ -13,10 +14,44 @@ const OUTPUT_ROOT = path.resolve(process.env.IVA_PLANBAR_OUTPUT_ROOT || path.joi
 const SEND_LOG = path.join(OUTPUT_ROOT, 'send-log.json');
 const REQUIRED_EXCLUSIONS = Object.freeze(['David Service', 'Dawid Service', 'Antonio Lausic', 'Antonio Lausich', 'Antonio Lausitsch']);
 const EXACT_HEADERS = Object.freeze(['Kalenderwoche', 'Kunde', 'Adresse', 'Anlage']);
-const MAX_PREPARED_RUN_AGE_MS = 72 * 60 * 60_000;
+const MAX_PREPARED_RUN_AGE_MS = 15 * 60_000;
+const MAX_LIVE_SOURCE_AGE_MS = 2 * 60_000;
 
 function sameStrings(left, right) {
   return JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
+}
+
+function normalizedForecastRow(row = {}) {
+  return {
+    kalenderwoche: String(row.kalenderwoche || '').trim(),
+    kalenderwocheNummer: Number(row.kalenderwocheNummer),
+    kunde: String(row.kunde || '').replace(/\s+/g, ' ').trim(),
+    adresse: String(row.adresse || '').replace(/\s+/g, ' ').trim(),
+    anlage: String(row.anlage || '').replace(/\s+/g, ' ').trim(),
+    hersteller: String(row.hersteller || '').replace(/\s+/g, ' ').trim(),
+    sourceId: String(row.sourceId || '').trim(),
+  };
+}
+
+function forecastRowKey(row) {
+  return [row.sourceId, row.kalenderwocheNummer, row.kalenderwoche, row.kunde, row.adresse, row.anlage, row.hersteller].join('|');
+}
+
+export function assertPlanbarForecastRowsCurrent(exportRows, currentRows) {
+  const expected = (Array.isArray(exportRows) ? exportRows : []).map(normalizedForecastRow).sort((a, b) => forecastRowKey(a).localeCompare(forecastRowKey(b), 'de'));
+  const current = (Array.isArray(currentRows) ? currentRows : []).map(normalizedForecastRow).sort((a, b) => forecastRowKey(a).localeCompare(forecastRowKey(b), 'de'));
+  if (!expected.length || !current.length) {
+    throw new Error('Forecast-Abbruch: Der Export oder die aktuelle Planbar-Abfrage enthält keine vergleichbaren Termine.');
+  }
+  if (JSON.stringify(expected) !== JSON.stringify(current)) {
+    const expectedKeys = new Set(expected.map(forecastRowKey));
+    const currentKeys = new Set(current.map(forecastRowKey));
+    const removed = expected.filter(row => !currentKeys.has(forecastRowKey(row))).slice(0, 5).map(row => `${row.kunde} (${row.kalenderwoche})`);
+    const added = current.filter(row => !expectedKeys.has(forecastRowKey(row))).slice(0, 5).map(row => `${row.kunde} (${row.kalenderwoche})`);
+    const details = [removed.length && `nicht mehr aktuell: ${removed.join(', ')}`, added.length && `neu/verschoben: ${added.join(', ')}`].filter(Boolean).join('; ');
+    throw new Error(`Forecast-Abbruch: Planbar wurde nach der Exporterstellung geändert${details ? ` (${details})` : ''}. Die Dateien werden neu erzeugt; es wurde nichts versendet.`);
+  }
+  return { rowCount: current.length, exactMatch: true };
 }
 
 function periodDetails(value) {
@@ -57,10 +92,11 @@ export async function validatePlanbarForecastRun(runDirectory, { outputRoot = OU
   const manifestFile = await access(path.join(directory, 'xlsx-manifest.json'))
     .then(() => path.join(directory, 'xlsx-manifest.json'))
     .catch(() => path.join(directory, 'manifest.json'));
-  const [manifest, qa, names] = await Promise.all([
+  const [manifest, qa, names, sourceSnapshot] = await Promise.all([
     readJson(manifestFile),
     readJson(path.join(directory, 'qa.json')),
     readdir(directory),
+    readJson(path.join(directory, 'forecast-data.json')),
   ]);
   const period = periodDetails(manifest.period);
   if (!Array.isArray(manifest.files) || manifest.files.length < 2) {
@@ -99,6 +135,14 @@ export async function validatePlanbarForecastRun(runDirectory, { outputRoot = OU
   if (Number(verification.excludedResourceLeaks || 0) !== 0) {
     throw new Error('Forecast-Abbruch: Eine ausgeschlossene Ressource ist in die Ausgabedateien gelangt.');
   }
+  if (!Array.isArray(sourceSnapshot?.source?.entries) || !Array.isArray(sourceSnapshot?.forecast?.rows)
+    || !sourceSnapshot?.source?.collectedAt || sourceSnapshot?.source?.cacheBypass !== true) {
+    throw new Error('Forecast-Abbruch: Der belegte, cachefreie Planbar-Snapshot dieses Laufs fehlt.');
+  }
+  if (Number(manifest.totalRows) !== Number(sourceSnapshot.forecast.rowCount)
+    || !sameStrings(manifest.manufacturers || [], Object.keys(sourceSnapshot.forecast.byManufacturer || {}))) {
+    throw new Error('Forecast-Abbruch: XLSX-Manifest und Planbar-Snapshot gehören nicht eindeutig zum selben Datenstand.');
+  }
   for (const item of qa) {
     if (!sameStrings(item.headers || [], EXACT_HEADERS) || Number(item.excelErrors || 0) !== 0 || !item.renderFile) {
       throw new Error(`Forecast-Abbruch: QA ist nicht grün für ${path.basename(String(item.file || 'unbekannt'))}.`);
@@ -120,9 +164,40 @@ export async function validatePlanbarForecastRun(runDirectory, { outputRoot = OU
     subject,
     attachments,
     attachmentNames: expectedXlsx,
+    sourceSnapshot,
     sender: PLANBAR_FORECAST_SENDER,
     recipient: PLANBAR_FORECAST_RECIPIENT,
   };
+}
+
+export async function assertPlanbarForecastRunCurrent(run, {
+  now = new Date(),
+  collectFreshForecast = collectAndBuildPlanbarForecast,
+  maxPreparedAgeMs = MAX_PREPARED_RUN_AGE_MS,
+  maxLiveSourceAgeMs = MAX_LIVE_SOURCE_AGE_MS,
+} = {}) {
+  const reference = now instanceof Date ? now.getTime() : Date.parse(now);
+  const sourceCollectedAt = Date.parse(run.sourceSnapshot?.source?.collectedAt || '');
+  if (!Number.isFinite(reference) || !Number.isFinite(sourceCollectedAt)
+    || sourceCollectedAt > reference + 60_000 || reference - sourceCollectedAt > maxPreparedAgeMs) {
+    throw new Error('Forecast-Abbruch: Der Export stammt nicht aus einer unmittelbar aktuellen Planbar-Abfrage. Die Dateien werden neu erzeugt; es wurde nichts versendet.');
+  }
+  const fresh = await collectFreshForecast({ isoYear: run.year, firstWeek: run.firstWeek, lastWeek: run.lastWeek });
+  const freshCollectedAt = Date.parse(fresh?.source?.collectedAt || '');
+  const checkedAt = Date.now();
+  if (!Number.isFinite(freshCollectedAt) || freshCollectedAt > checkedAt + 60_000
+    || checkedAt - freshCollectedAt > maxLiveSourceAgeMs || fresh?.source?.cacheBypass !== true) {
+    throw new Error('Forecast-Abbruch: Die erneute Planbar-Abfrage konnte nicht als aktuell und cachefrei belegt werden. Es wurde nichts versendet.');
+  }
+  const comparison = assertPlanbarForecastRowsCurrent(run.sourceSnapshot.forecast.rows, fresh.forecast?.rows);
+  if (Number(run.manifest.totalRows) !== Number(fresh.forecast?.rowCount)) {
+    throw new Error('Forecast-Abbruch: Die aktuelle Baustellenzahl weicht vom geprüften Export ab. Die Dateien werden neu erzeugt; es wurde nichts versendet.');
+  }
+  const freshManufacturers = Object.keys(fresh.forecast?.byManufacturer || {});
+  if (!sameStrings(run.manifest.manufacturers || [], freshManufacturers)) {
+    throw new Error('Forecast-Abbruch: Die aktuellen Herstellergruppen weichen vom geprüften Export ab. Die Dateien werden neu erzeugt; es wurde nichts versendet.');
+  }
+  return { ...comparison, sourceCollectedAt: run.sourceSnapshot.source.collectedAt, recheckedAt: fresh.source.collectedAt, cacheBypass: true };
 }
 
 export async function findRecentValidatedPlanbarForecastRun({ outputRoot = OUTPUT_ROOT, now = new Date(), maxAgeMs = MAX_PREPARED_RUN_AGE_MS } = {}) {
@@ -188,6 +263,7 @@ export async function deliverValidatedPlanbarForecast(run, {
   automationSlotKey = '',
   deliveryRunKey = '',
   now = () => new Date(),
+  verifyCurrent = null,
 } = {}) {
   const normalizedMode = runMode === 'automatic' ? 'automatic' : 'manual';
   const normalizedSlotKey = normalizedMode === 'automatic' ? String(automationSlotKey || '').slice(0, 180) : '';
@@ -264,6 +340,8 @@ export async function deliverValidatedPlanbarForecast(run, {
     }
   }
 
+  const freshness = typeof verifyCurrent === 'function' ? await verifyCurrent(run) : null;
+
   const message = {
     from: run.sender,
     to: [run.recipient],
@@ -275,6 +353,11 @@ export async function deliverValidatedPlanbarForecast(run, {
   // Vor dem UI-Aufruf persistieren: Stirbt der Prozess während des Klicks,
   // darf der nächste Lauf nur nachprüfen und niemals blind erneut senden.
   const entry = newDeliveryEntry(run, context, 'submission_started', now);
+  if (freshness) {
+    entry.sourceCollectedAt = freshness.sourceCollectedAt;
+    entry.planbarRecheckedAt = freshness.recheckedAt;
+    entry.planbarExactMatch = freshness.exactMatch === true;
+  }
   log.entries.push(entry);
   await saveLog(log);
   let result;
@@ -310,7 +393,7 @@ export async function deliverValidatedPlanbarForecast(run, {
       throw new Error(`Forecast-Abbruch: Der Versandstatus ist technisch unklar. Es wird ausdrücklich nicht erneut gesendet; ausschließlich der Gesendet-Ordner darf nachgeprüft werden. ${entry.sentFolderVerificationError}`);
     }
   }
-  return { ...preview, preview: false, sent: true, sentFolderVerified: entry.sentFolderVerified, sendLogEntry: entry, outlook: result };
+  return { ...preview, preview: false, sent: true, freshness, sentFolderVerified: entry.sentFolderVerified, sendLogEntry: entry, outlook: result };
 }
 
 export async function sendPlanbarForecastRun(runDirectory, {
@@ -320,6 +403,7 @@ export async function sendPlanbarForecastRun(runDirectory, {
   runMode = 'manual',
   automationSlotKey = '',
   deliveryRunKey = '',
+  collectFreshForecast,
 } = {}) {
   const run = await validatePlanbarForecastRun(runDirectory);
   if (!commit) {
@@ -333,7 +417,12 @@ export async function sendPlanbarForecastRun(runDirectory, {
       deliveryRunKey: runMode === 'automatic' ? `automatic:${String(automationSlotKey || '')}` : `manual:${String(deliveryRunKey || '')}`,
     };
   }
-  return deliverValidatedPlanbarForecast(run, { send, verify, runMode, automationSlotKey, deliveryRunKey });
+  return deliverValidatedPlanbarForecast(run, {
+    send, verify, runMode, automationSlotKey, deliveryRunKey,
+    verifyCurrent: currentRun => assertPlanbarForecastRunCurrent(currentRun, {
+      collectFreshForecast: collectFreshForecast || collectAndBuildPlanbarForecast,
+    }),
+  });
 }
 
 export async function latestVerifiedPlanbarForecastDelivery({ after = '' } = {}) {

@@ -278,29 +278,20 @@ try {
     workflowId: 'planbar-weekly-export',
     runMode: 'automatic',
     automationSlotKey: 'planbar-weekly-export:weekly:2026-W35',
-    findPreparedForecast: async () => ({ directory: '/prepared/forecast' }),
-    sendPreparedForecast: async (directory, context) => ({ sent: true, sentFolderVerified: true, directory, ...context }),
+    startTask: async request => ({ status: 'queued', workflowId: request.workflowId, prompt: request.prompt }),
   });
-  assert.deepEqual(directForecast, {
-    sent: true,
-    sentFolderVerified: true,
-    directory: '/prepared/forecast',
-    runMode: 'automatic',
-    automationSlotKey: 'planbar-weekly-export:weekly:2026-W35',
-  });
+  assert.equal(directForecast.status, 'queued');
+  assert.equal(directForecast.workflowId, 'planbar-weekly-export');
+  assert.match(directForecast.prompt, /--run-mode automatic --automation-slot/);
   const directManualForecast = await startProjectWorkflowTask({
     workflowId: 'planbar-weekly-export',
     runMode: 'manual',
     requestId: 'planbar-weekly-export:manual:1787983200000',
-    findPreparedForecast: async () => ({ directory: '/prepared/forecast' }),
-    sendPreparedForecast: async (directory, context) => ({ directory, ...context }),
+    startTask: async request => ({ status: 'queued', workflowId: request.workflowId, prompt: request.prompt }),
   });
-  assert.deepEqual(directManualForecast, {
-    directory: '/prepared/forecast',
-    runMode: 'manual',
-    automationSlotKey: '',
-    deliveryRunKey: 'planbar-weekly-export:manual:1787983200000',
-  });
+  assert.equal(directManualForecast.status, 'queued');
+  assert.equal(directManualForecast.workflowId, 'planbar-weekly-export');
+  assert.match(directManualForecast.prompt, /--run-mode manual --delivery-run/);
   const bootstrapSource = await readFile(new URL('../IVA-iMac-einmalig-verbinden.command', import.meta.url), 'utf8');
   assert.match(bootstrapSource, /nodejs\.org\/dist\/\$\{node_version\}/);
   assert.match(bootstrapSource, /shasum -a 256/);

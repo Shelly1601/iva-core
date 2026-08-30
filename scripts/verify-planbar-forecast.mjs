@@ -9,6 +9,7 @@ import {
 } from '../local-mac-helper/planbar-forecast.mjs';
 import { verifyOutlookXlsxComposeSnapshot } from '../local-mac-helper/macos-ui.mjs';
 import { buildSentVerificationAppleScript, buildVerifiedSendAppleScript } from '../local-mac-helper/outlook.mjs';
+import { assertPlanbarForecastRowsCurrent } from '../local-mac-helper/planbar-forecast-mail.mjs';
 
 assert.equal(isoWeekMonday(2026, 36), '2026-08-31');
 assert.equal(isoWeekMonday(2026, 45), '2026-11-02');
@@ -50,6 +51,18 @@ assert.equal(forecast.rows[1].kunde, 'Peter Galle');
 assert.equal(forecast.rows[1].adresse, 'Holsteiner Straße 7a, 06493 Ballenstedt');
 assert.equal(forecast.rows[1].anlage, 'Midea M-Thermal Nature Mono R290 8 kW - MHC-V8WD2RN7-BER90');
 assert.equal(forecast.excludedCount, 2);
+assert.equal(forecast.sourceRows.some(row => row.planbarColumn === 'Antonio Lausich'), true);
+assert.equal(forecast.rows.some(row => row.planbarColumn === 'Antonio Lausich'), false);
+
+assert.deepEqual(assertPlanbarForecastRowsCurrent(forecast.rows, structuredClone(forecast.rows)), { rowCount: forecast.rows.length, exactMatch: true });
+assert.throws(
+  () => assertPlanbarForecastRowsCurrent(forecast.rows, forecast.rows.map(row => row.kunde === 'Peter Galle' ? { ...row, kalenderwoche: 'KW 38', kalenderwocheNummer: 38 } : row)),
+  /Planbar wurde nach der Exporterstellung geändert.*Peter Galle/,
+);
+assert.throws(
+  () => assertPlanbarForecastRowsCurrent(forecast.rows, forecast.rows.filter(row => row.kunde !== 'Peter Galle')),
+  /nicht mehr aktuell: Peter Galle/,
+);
 
 const attachmentNames = [
   'Planbar_Gesamtliste_KW36-45_2026.xlsx',

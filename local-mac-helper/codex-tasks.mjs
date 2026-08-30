@@ -404,8 +404,8 @@ const PROJECT_WORKFLOW_TASKS = Object.freeze({
   }),
   'planbar-weekly-export': Object.freeze({
     title: 'Planbar-Forecast manuell ausführen',
-    prompt: 'Lies PLANBAR_FORECAST_WORKFLOW.md vollständig und führe den dort beschriebenen Forecast jetzt genau einmal für den aktuell vorgesehenen rollierenden Zehn-Wochen-Zeitraum aus. Die unmittelbar folgende Kalenderwoche bleibt ausgelassen. Erzeuge ausschließlich die geprüfte Gesamt-XLSX und die nichtleeren Hersteller-XLSX sowie manifest.json beziehungsweise xlsx-manifest.json und qa.json im aktuellen Laufordner. David Service, Dawid Service sowie Antonio Lausic, Lausich und Lausitsch sind harte Ausschlüsse. Versende niemals über Finder-, Spotlight- oder Outlook-Dateisuche und füge keine Anlage manuell nach einem Suchtreffer hinzu. Rufe nach vollständiger Tabellen-QA ausschließlich `node local-mac-helper/planbar-forecast-mail.mjs "<absoluter Laufordner>" --commit` auf. Dieser Sender akzeptiert nur die exakten vollständigen XLSX-Pfade aus dem geprüften Manifest, vergleicht Absender, Empfänger, Betreff und alle Anlagennamen erneut, verbietet PDFs und prüft danach den nativen Outlook-Ordner „Gesendet“. Wenn Outlook den Versand bereits bestätigt, die Gesendet-Prüfung aber noch nicht sichtbar ist, niemals erneut senden; dann ausschließlich den vorhandenen Versand anhand des Sendelogs und in „Gesendet“ nachprüfen.',
-    acceptanceCriteria: ['David/Dawid Service und Antonio Lausic/Lausich/Lausitsch sind vollständig ausgeschlossen.', 'Alle Anhänge stammen exakt aus dem geprüften Manifest, sind XLSX-Dateien und keine PDF ist enthalten.', 'Empfänger, Zeitraum, Anhänge und native Outlook-Gesendet-Prüfung sind im Sendelog protokolliert.', 'Ein fehlgeschlagener Nachweis nach bestätigtem Senden löst niemals einen Doppelversand aus.'],
+    prompt: 'Lies PLANBAR_FORECAST_WORKFLOW.md vollständig und führe den dort beschriebenen Forecast jetzt genau einmal für den aktuell vorgesehenen rollierenden Zehn-Wochen-Zeitraum aus. Erster fachlicher Schritt: Lade ausschließlich im eigenen Planbar-Fenster auf dem rechten Display den Kalender vollständig neu und warte auf die sichtbar aktuelle Plantafel. Lies danach cachefrei neu aus Planbar ein; `--from-existing`, eine vorbereitete Quelle und ein früherer Export sind verboten. Die unmittelbar folgende Kalenderwoche bleibt ausgelassen. Erzeuge ausschließlich aus diesem Lauf die geprüfte Gesamt-XLSX und die nichtleeren Hersteller-XLSX sowie forecast-data.json, manifest.json beziehungsweise xlsx-manifest.json und qa.json im aktuellen Laufordner. David Service, Dawid Service sowie Antonio Lausic, Lausich und Lausitsch sind harte Ausschlüsse. Rufe nach vollständiger Tabellen-QA ausschließlich den dokumentierten deterministischen Sender mit den für diesen Auftrag vorgegebenen Run-Parametern auf. Der Sender fragt Planbar unmittelbar vor Outlook nochmals cachefrei ab und versendet nur bei exakter Übereinstimmung mit dem Export-Snapshot; jede Verschiebung, Löschung oder Neuanlage führt zum Abbruch und zu neu zu erzeugenden Dateien. Wenn Outlook den Versand bereits bestätigt, die Gesendet-Prüfung aber noch nicht sichtbar ist, niemals erneut senden.',
+    acceptanceCriteria: ['Planbar wurde zuerst auf dem rechten Display sichtbar neu geladen und anschließend cachefrei ausgelesen.', 'David/Dawid Service und Antonio Lausic/Lausich/Lausitsch sind vollständig ausgeschlossen.', 'Unmittelbar vor Outlook stimmt eine zweite cachefreie Planbar-Abfrage exakt mit dem Export-Snapshot überein.', 'Alle Anhänge stammen exakt aus dem aktuellen geprüften Manifest, sind XLSX-Dateien und keine PDF ist enthalten.', 'Empfänger, Zeitraum, Anhänge, Quell- und Prüfzeitpunkt sowie native Outlook-Gesendet-Prüfung sind im Sendelog protokolliert.', 'Ein fehlgeschlagener Nachweis nach bestätigtem Senden löst niemals einen Doppelversand aus.'],
   }),
   'planbar-completion-morning': Object.freeze({
     title: 'Planbar-Vervollständigung manuell ausführen',
@@ -424,8 +424,7 @@ export async function startProjectWorkflowTask({
   requestId = '',
   runMode = 'manual',
   automationSlotKey = '',
-  findPreparedForecast,
-  sendPreparedForecast,
+  startTask = startCodexTask,
 } = {}) {
   const normalizedWorkflowId = clean(workflowId, 140);
   const definition = PROJECT_WORKFLOW_TASKS[normalizedWorkflowId];
@@ -460,24 +459,10 @@ export async function startProjectWorkflowTask({
     if (normalizedRunMode === 'manual' && !normalizedRequestId) {
       throw new Error('Dem manuellen Planbar-Forecast fehlt die eindeutige Auftrags-ID.');
     }
-    const mail = typeof findPreparedForecast === 'function' && typeof sendPreparedForecast === 'function'
-      ? null
-      : await import('./planbar-forecast-mail.mjs');
-    const findPrepared = typeof findPreparedForecast === 'function' ? findPreparedForecast : mail.findRecentValidatedPlanbarForecastRun;
-    const sendPrepared = typeof sendPreparedForecast === 'function'
-      ? sendPreparedForecast
-      : (directory, context) => mail.sendPlanbarForecastRun(directory, { commit: true, ...context });
-    const prepared = await findPrepared();
-    const deliveryContext = {
-      runMode: normalizedRunMode,
-      automationSlotKey: normalizedAutomationSlotKey,
-      ...(normalizedRunMode === 'manual' ? { deliveryRunKey: normalizedRequestId } : {}),
-    };
-    if (prepared) return sendPrepared(prepared.directory, deliveryContext);
     const senderFlags = normalizedRunMode === 'automatic'
       ? `--run-mode automatic --automation-slot ${JSON.stringify(normalizedAutomationSlotKey)}`
       : `--run-mode manual --delivery-run ${JSON.stringify(normalizedRequestId)}`;
-    return startCodexTask({
+    return startTask({
       ...definition,
       prompt: `${definition.prompt}\n\nAuslöseart dieses Auftrags: ${normalizedRunMode}. Beim verbindlichen Sender müssen zusätzlich exakt diese Parameter verwendet werden: ${senderFlags}.`,
       mode: 'project-workflow',

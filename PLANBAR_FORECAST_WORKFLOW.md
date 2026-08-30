@@ -1,6 +1,14 @@
 # Planbar-Forecast an Angelo – verbindlicher Freitagsworkflow
 
-Stand: 29.08.2026
+Stand: 30.08.2026
+
+## Verbindlicher Aktualitätslauf vor jedem Versand
+
+1. Nach der technischen Rechtsbildschirm-Prüfung ist der **erste fachliche Schritt** Planbar: ausschließlich das eigene Chrome-Fenster auf dem rechten Display öffnen beziehungsweise aktivieren, den Planbar-Kalender vollständig neu laden und warten, bis die Plantafel wieder sichtbar geladen ist. Andere Planbar-Fenster oder Tabs, insbesondere auf dem linken Display, bleiben unangetastet.
+2. Die Forecast-Daten werden danach cachefrei neu aus Planbar eingelesen. `forecast-data.json` und `data.json` müssen im aktuellen Laufordner entstehen. `--from-existing`, ältere Quelldateien und vorbereitete Exporte sind technisch gesperrt.
+3. Quelle, XLSX-Erzeugung, technische und visuelle Prüfung sowie Versand müssen in demselben Lauf liegen. Der belegte Planbar-Snapshot darf beim Versand höchstens 15 Minuten alt sein.
+4. Unmittelbar bevor Outlook geöffnet wird, fragt der deterministische Sender denselben Zeitraum nochmals cachefrei aus Planbar ab. Die exportrelevanten Termine müssen einschließlich Kalenderwoche, Kunde, Adresse, Anlage, Hersteller und Quell-ID exakt mit dem Export-Snapshot übereinstimmen. Die Gesamtzahl und die Herstellergruppen müssen ebenfalls identisch sein.
+5. Schon eine Verschiebung, Löschung oder Neuanlage zwischen Export und Versand bricht den Versand ab. Es werden keine alten Dateien versendet; Daten und XLSX müssen aus einer weiteren neuen Planbar-Abfrage neu erzeugt und erneut geprüft werden.
 
 ## Zeitplan und Empfänger
 
@@ -47,13 +55,13 @@ Die Zeilen sind nach Kalenderwoche und Kunde sortiert. Kopfzeile und Filter blei
 
 ## Technische Prüfung vor Versand
 
-1. Der Spreadsheet-Workflow erzeugt im aktuellen Laufordner Gesamt- und Herstellerdateien sowie `manifest.json` (alternativ kompatibel: `xlsx-manifest.json`) und `qa.json`.
+1. Der Spreadsheet-Workflow erzeugt im aktuellen Laufordner aus der unmittelbar zuvor erstellten `forecast-data.json` und `data.json` die Gesamt- und Herstellerdateien sowie `manifest.json` (alternativ kompatibel: `xlsx-manifest.json`) und `qa.json`.
 2. Jede erzeugte XLSX wird wieder eingelesen und auf Struktur und Formel-/Dateifehler geprüft.
 3. Jedes Tabellenblatt wird gerendert und visuell auf abgeschnittene oder unlesbare Inhalte kontrolliert.
 4. Das Manifest muss genau eine Gesamtdatei und genau eine nichtleere Datei je Hersteller enthalten.
 5. Das Manifest muss die beiden Ausschlüsse `David Service` und `Antonio Lausich`, eine vollständige Spaltenzuordnung und die Zahl der entfernten Termine ausweisen.
 6. Dateiendungen aller Anlagen müssen `.xlsx` sein; bei `.pdf` bricht der Versand ab.
-7. Vor dem sichtbaren Outlook-Versand Manifest und Anhänge erneut validieren, Doppelversand über `send-log.json` und Outlook `Gesendet` ausschließen und die gesendete Nachricht anschließend in Outlook verifizieren.
+7. Vor dem sichtbaren Outlook-Versand die zweite cachefreie Planbar-Abfrage und den exakten Snapshot-Abgleich durchführen, danach Manifest und Anhänge erneut validieren, Doppelversand über `send-log.json` und Outlook `Gesendet` ausschließen und die gesendete Nachricht anschließend in Outlook verifizieren.
 
 Der Versand erfolgt ausschließlich mit dem deterministischen iMac-Sender:
 
@@ -63,7 +71,7 @@ node local-mac-helper/planbar-forecast-mail.mjs "/absoluter/iCloud-Laufordner" -
 
 Der zentrale Freitagslauf ergänzt stattdessen `--run-mode automatic --automation-slot "<stabile Wochen-Slot-ID>"`. Jeder neue ausdrückliche manuelle Auftrag erhält eine neue `--delivery-run`-ID; technische Wiederholungen desselben Auftrags behalten dieselbe ID. Manuelle Aufträge dürfen niemals eine Automatik-Slot-ID erhalten.
 
-Der Sender übernimmt nur die exakten vollständigen XLSX-Pfade aus dem Manifest. Finder-, Spotlight- oder Outlook-Dateisuche ist für Anlagen verboten. Vor dem Senden werden Absender, Empfänger, Betreff und die vollständige sichtbare Anhangsliste erneut verglichen; jede zusätzliche oder fehlende Datei und jede PDF führen zum Abbruch. Nach geschlossenem Verfassen-Fenster wird die Nachricht über Outlooks natives `Gesendet`-Postfach anhand Betreff, Empfänger und exakter Anlagenliste geprüft. Wurde das Senden bereits bestätigt, darf ein noch ausstehender Gesendet-Nachweis niemals einen erneuten Versand auslösen.
+Der Sender übernimmt nur die exakten vollständigen XLSX-Pfade aus dem Manifest. Er verlangt `forecast-data.json`, prüft deren Alter und liest Planbar unmittelbar vor Outlook erneut cachefrei. Finder-, Spotlight- oder Outlook-Dateisuche ist für Anlagen verboten. Vor dem Senden werden Absender, Empfänger, Betreff und die vollständige sichtbare Anhangsliste erneut verglichen; jede Planbar-Abweichung, jede zusätzliche oder fehlende Datei und jede PDF führen zum Abbruch. Nach geschlossenem Verfassen-Fenster wird die Nachricht über Outlooks natives `Gesendet`-Postfach anhand Betreff, Empfänger und exakter Anlagenliste geprüft. Wurde das Senden bereits bestätigt, darf ein noch ausstehender Gesendet-Nachweis niemals einen erneuten Versand auslösen.
 
 ## Protokollierung
 

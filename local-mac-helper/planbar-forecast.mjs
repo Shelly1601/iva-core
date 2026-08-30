@@ -140,6 +140,7 @@ export function buildPlanbarForecast(rawEntries, {
   lastWeek = PLANBAR_FORECAST_LAST_WEEK,
 } = {}) {
   const rows = [];
+  const sourceRows = [];
   const excluded = [];
   for (const entry of Array.isArray(rawEntries) ? rawEntries : []) {
     const startDate = dateOnly(entry.start);
@@ -148,27 +149,53 @@ export function buildPlanbarForecast(rawEntries, {
     const address = normalizePlanbarAddress(entry.workAddress);
     const manufacturer = normalizePlanbarManufacturer(entry.task);
     const system = extractPlanbarSystem(entry.task);
-    if (!startDate || !customer || isExcludedPlanbarForecastEntry(entry)) {
+    if (!startDate || !customer) {
       excluded.push({
         id: clean(entry.id),
         team: clean(entry.team),
         customer: customer || clean(entry.entryCustomerName),
-        reason: EXCLUDED_RESOURCE_PATTERN.test(clean(entry.team)) ? 'ausgeschlossene Ressource' : 'interner Termin',
+        reason: 'interner Termin',
       });
       continue;
     }
+    const excludedResource = EXCLUDED_RESOURCE_PATTERN.test(clean(entry.team));
+    const internalEntry = INTERNAL_BLOCK_PATTERN.test([entry.entryCustomerName, entry.customerName, entry.task].map(clean).join(' '));
+    const excludedEntry = excludedResource || internalEntry;
+    let overlapsForecast = false;
     for (let week = Number(firstWeek); week <= Number(lastWeek); week += 1) {
       const monday = isoWeekMonday(isoYear, week);
       const followingMonday = addDays(monday, 7);
       if (startDate >= followingMonday || endDateExclusive <= monday) continue;
-      rows.push({
+      overlapsForecast = true;
+      const row = {
         kalenderwoche: `KW ${week}`,
         kalenderwocheNummer: week,
         kunde: customer,
         adresse: address,
         anlage: system,
         hersteller: manufacturer,
+        planbarColumn: clean(entry.team),
         sourceId: clean(entry.id),
+      };
+      if (!internalEntry) {
+        sourceRows.push({
+          calendarWeek: row.kalenderwoche,
+          customer: row.kunde,
+          address: row.adresse,
+          system: row.anlage,
+          manufacturer: row.hersteller,
+          planbarColumn: row.planbarColumn,
+          sourceId: row.sourceId,
+        });
+      }
+      if (!excludedEntry) rows.push(row);
+    }
+    if (excludedEntry && overlapsForecast) {
+      excluded.push({
+        id: clean(entry.id),
+        team: clean(entry.team),
+        customer,
+        reason: excludedResource ? 'ausgeschlossene Ressource' : 'interner Termin',
       });
     }
   }
@@ -195,6 +222,7 @@ export function buildPlanbarForecast(rawEntries, {
     rowCount: finalRows.length,
     excludedCount: excluded.length,
     rows: finalRows,
+    sourceRows,
     byManufacturer,
     excluded,
   };
@@ -218,9 +246,12 @@ export async function collectPlanbarForecastSource({
     url.searchParams.set('start', ${JSON.stringify(rangeStart)});
     url.searchParams.set('end', ${JSON.stringify(rangeEndExclusive)});
     url.searchParams.set('globalEdit', 'true');
+    url.searchParams.set('_ivaForecastFresh', String(Date.now()));
     const request = new XMLHttpRequest();
     request.open('GET', url.toString(), false);
     request.setRequestHeader('Accept', 'application/json');
+    request.setRequestHeader('Cache-Control', 'no-cache, no-store, max-age=0');
+    request.setRequestHeader('Pragma', 'no-cache');
     request.send(null);
     if (request.status < 200 || request.status >= 300) throw new Error('Planbar HTTP ' + request.status);
     const payload = JSON.parse(request.responseText || '{}');
@@ -237,6 +268,7 @@ export async function collectPlanbarForecastSource({
     for (const cell of document.querySelectorAll('.fc-datagrid-body [data-resource-id]')) addTeam(cell.getAttribute('data-resource-id'), cell.innerText);
     return JSON.stringify({
       collectedAt: new Date().toISOString(),
+      cacheBypass: true,
       rangeStart: ${JSON.stringify(rangeStart)},
       rangeEndExclusive: ${JSON.stringify(rangeEndExclusive)},
       entries: (Array.isArray(payload.entries) ? payload.entries : []).map(entry => ({
