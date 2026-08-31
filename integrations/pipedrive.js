@@ -8,6 +8,7 @@ const OAUTH_TOKEN_URL = 'https://oauth.pipedrive.com/oauth/token';
 const STATE_TTL_MS = 10 * 60_000;
 const TOKEN_REFRESH_SKEW_MS = 60_000;
 const MAX_WEBHOOK_EVENTS = 500;
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const IVA_NOTE_SIGNATURE = '(Notiz von Nadine via KI)';
 const DEAL_CUSTOM_FIELD_KEYS = Object.values(PIPEDRIVE_LAYOUT.dealFields).map(field => field.key).join(',');
 export const PIPEDRIVE_WRITE_CONFIRMATION = 'Pipedrive schreiben';
@@ -417,11 +418,11 @@ export async function searchPipedriveDeals(term, { exactMatch = false, limit = 5
   return { term: value, items: result.data?.items || result.data || [], additionalData: result.additionalData };
 }
 
-export async function getPipedriveDealBundle(id) {
+export async function getPipedriveDealBundle(id, { customFieldKeys = DEAL_CUSTOM_FIELD_KEYS } = {}) {
   const dealId = clean(id, 40);
   if (!/^\d+$/.test(dealId)) throw new Error('Ungültige Pipedrive-Deal-ID.');
   const dealResult = await pipedriveRequest(`/api/v2/deals/${dealId}${queryString({
-    custom_fields: DEAL_CUSTOM_FIELD_KEYS,
+    custom_fields: clean(customFieldKeys, 4000) || DEAL_CUSTOM_FIELD_KEYS,
     include_option_labels: true,
     include_fields: 'next_activity_id,last_activity_id,files_count,notes_count,activities_count,undone_activities_count,source_lead_id',
   })}`);
@@ -436,6 +437,165 @@ export async function getPipedriveDealBundle(id) {
     pipedriveRequest(`/api/v2/activities?deal_id=${dealId}&limit=500`).then(result => result.data || []),
   ]);
   return { deal, person, organization, notes, files, activities };
+}
+
+function primaryEmail(record) {
+  const emails = Array.isArray(record?.email) ? record.email : [];
+  return clean(emails.find(item => item?.primary && item?.value)?.value || emails.find(item => item?.value)?.value, 500) || null;
+}
+
+function fundingNoteEvidence(note) {
+  const content = String(note?.content || '');
+  const text = htmlText(content).replace(/\s+/g, ' ').trim();
+  const marker = content.match(/IVA-FUNDING-REQUEST:\d+:[0-9a-f]{24}/i)?.[0] || null;
+  const kfwEvidenceMarker = content.match(/IVA-KFW-EVIDENCE:\d+:[0-9a-f]{24}/i)?.[0] || null;
+  const humanReadableIvaRequest = /^fehlende unterlagen:/i.test(text)
+    && /angefragt\./i.test(text)
+    && text.toLowerCase().endsWith(IVA_NOTE_SIGNATURE.toLowerCase());
+  const kfwEmailMatch = text.match(/[a-z0-9.!#$%&'*+/=?^_{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+  const kfwSecretAfterEmail = kfwEmailMatch
+    ? text.slice((kfwEmailMatch.index || 0) + kfwEmailMatch[0].length).trim().match(/^(\S{6,})/)?.[1] || ''
+    : '';
+  const hasKfwCredentials = Boolean(kfwEmailMatch)
+    && (/(?:passwort|kennwort)\s*[:=\-]\s*\S{3,}/i.test(text)
+      || (/kfw.{0,30}konto/i.test(text) && /[A-Za-z]/.test(kfwSecretAfterEmail) && /\d/.test(kfwSecretAfterEmail)));
+  return {
+    noteId: String(note?.id || ''),
+    addTime: note?.add_time || note?.addTime || null,
+    updateTime: note?.update_time || note?.updateTime || null,
+    hasKfwCredentials,
+    invalidatesKfwCredentials: /(?:zugangsdaten|passwort|kennwort|kfw.{0,30}konto).{0,80}(?:stimm(?:en|t)\s*nicht|ungültig|ungueltig|geändert|geaendert|nicht\s+bestätigt|nicht\s+bestaetigt|nicht\s+bestatigt)|(?:konto|aktivierungslink).{0,60}(?:nicht\s+bestätigt|nicht\s+bestaetigt|nicht\s+bestatigt)/i.test(text),
+    isIvaFundingRequest: Boolean(marker) || humanReadableIvaRequest,
+    marker,
+    kfwEvidenceMarker,
+    includesKfwMissing: (Boolean(marker) || humanReadableIvaRequest) && /(?:kfw.{0,60}(?:konto|bestätigung|bestatigung|bestaetigung|zugang)|bestätigung.{0,60}kfw|bestatigung.{0,60}kfw|bestaetigung.{0,60}kfw)/i.test(text),
+    redactedExcerpt: hasKfwCredentials
+      ? 'KfW-Zugangsdaten in der Notiz vorhanden; E-Mail-Adresse und Passwort vollständig ausgeblendet.'
+      : text.replace(/[a-z0-9.!#$%&'*+/=?^_{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/ig, '[E-Mail ausgeblendet]')
+        .replace(/((?:passwort|kennwort)\s*[:=\-]\s*)\S+/ig, '$1[ausgeblendet]').slice(0, 600),
+  };
+}
+
+export async function getPipedriveFundingSnapshot(id) {
+  const structure = await cachedPipedriveFundingStructure();
+  const relevantFieldNames = new Set(['vertriebspartner', 'e-mail', 'e-mail-adresse', 'email', 'auftragsnummer', 'angebotsnummer', 'angebotsnummer (sevdesk)', 'kundennummer', 'kunden-nr.', 'telefonnummer', 'telefon', 'mobilnummer', 'anlage', 'einkommensbonus', 'einkommens-bonus']);
+  const customFieldKeys = structure.dealFields.filter(field => relevantFieldNames.has(clean(field.name).toLocaleLowerCase('de-DE'))).map(field => field.key).filter(Boolean).join(',');
+  const bundle = await getPipedriveDealBundle(id, { customFieldKeys });
+  const { deal, person, notes, files } = bundle;
+  const fieldByName = new Map(structure.dealFields.map(field => [clean(field.name).toLocaleLowerCase('de-DE'), field]));
+  const field = (...names) => names.map(name => fieldByName.get(String(name).toLocaleLowerCase('de-DE'))).find(Boolean) || null;
+  const value = (...names) => {
+    const definition = field(...names);
+    return definition ? deal?.custom_fields?.[definition.key] ?? deal?.[definition.key] ?? null : null;
+  };
+  const enumLabel = (rawValue, definition) => definition?.options?.find(option => String(option.id) === String(rawValue))?.label || rawValue || null;
+  const stageName = structure.stages.find(stage => String(stage.id) === String(deal.stage_id))?.name || String(deal.stage_id || '');
+  const customerName = clean(deal.person_name || person?.name, 500) || null;
+  const title = clean(deal.title, 1000);
+  const titleOrderNumber = title.match(/\bHH-(?:AN|AB)-[A-Z0-9-]{4,}\b/i)?.[0]?.toUpperCase() || null;
+  const location = customerName ? (() => {
+    const tail = title.replace(/^AM:\s*/i, '').slice(customerName.length).replace(/^\s*-\s*/, '');
+    const candidate = tail.split(/\s+-\s+/)[0]?.trim() || '';
+    return !candidate || candidate === '-' || /HH-(?:AN|AB)-|SOL\s*LIVING|HEAT\s*HERO|EKD/i.test(candidate) ? null : candidate;
+  })() : null;
+  const vpId = value('Vertriebspartner');
+  const vp = /^\d+$/.test(String(vpId || ''))
+    ? await pipedriveRequest(`/api/v2/persons/${encodeURIComponent(vpId)}`).then(result => result.data).catch(() => null)
+    : null;
+  const incomeBonusValue = value('Einkommensbonus', 'Einkommens-Bonus');
+  const incomeBonusRequested = incomeBonusValue == null ? null
+    : /^(ja|yes|beantragt|true|1)$/i.test(String(incomeBonusValue).trim()) ? true
+      : /^(nein|no|nicht beantragt|false|0)$/i.test(String(incomeBonusValue).trim()) ? false : null;
+  const evidence = notes.map(fundingNoteEvidence);
+  const plantField = field('Anlage');
+  return {
+    dealId: String(deal.id || id),
+    url: `https://${config().allowedCompanyDomain}/deal/${String(deal.id || id)}`,
+    dealTitle: title,
+    pipeline: structure.pipelines.find(item => String(item.id) === String(deal.pipeline_id))?.name || String(deal.pipeline_id || ''),
+    stage: stageName,
+    customerName,
+    customerPersonId: deal.person_id?.value ? String(deal.person_id.value) : deal.person_id ? String(deal.person_id) : null,
+    customerEmail: clean(value('E-Mail', 'E-Mail-Adresse', 'Email'), 500) || primaryEmail(person),
+    orderNumber: clean(value('Auftragsnummer', 'Angebotsnummer', 'Angebotsnummer (sevdesk)'), 200) || titleOrderNumber,
+    customerNumber: clean(value('Kundennummer', 'Kunden-Nr.'), 200) || null,
+    phoneNumber: clean(value('Telefonnummer', 'Telefon', 'Mobilnummer'), 200) || null,
+    plant: clean(enumLabel(value('Anlage'), plantField), 500) || null,
+    incomeBonusRequested,
+    location,
+    vpName: clean(vp?.name || (typeof vpId === 'string' && vpId.includes('@') ? vpId : ''), 500) || null,
+    vpPersonId: vpId ? String(vpId) : null,
+    vpEmail: primaryEmail(vp) || (typeof vpId === 'string' && vpId.includes('@') ? vpId.toLowerCase() : null),
+    files: files.map(file => clean(file.name || file.file_name, 500)).filter(Boolean),
+    fileRecords: files.map(file => ({ id: String(file.id || ''), name: clean(file.name || file.file_name, 500), size: Number(file.file_size || file.size || 0), mimeType: clean(file.file_type || file.mime_type, 200) })).filter(file => /^\d+$/.test(file.id) && file.name),
+    noteCount: notes.length,
+    latestNoteAt: evidence.map(note => note.updateTime || note.addTime).filter(Boolean).sort().at(-1) || null,
+    latestExternalNote: evidence.filter(note => !note.isIvaFundingRequest).sort((a, b) => String(b.updateTime || b.addTime || '').localeCompare(String(a.updateTime || a.addTime || '')))[0] || null,
+    kfwAccountConfirmedByCredentials: evidence.some(note => note.hasKfwCredentials),
+    kfwCredentialEvidenceNoteIds: evidence.filter(note => note.hasKfwCredentials).map(note => note.noteId),
+    kfwCredentialInvalidationNoteIds: evidence.filter(note => note.invalidatesKfwCredentials).map(note => note.noteId),
+    ivaFundingRequestNotes: evidence.filter(note => note.isIvaFundingRequest),
+    readOnly: true,
+    mutated: false,
+    source: 'iva-core-pipedrive-api',
+  };
+}
+
+let fundingStructureCache = null;
+async function cachedPipedriveFundingStructure() {
+  if (fundingStructureCache && fundingStructureCache.expiresAt > Date.now()) return fundingStructureCache.value;
+  const value = await getPipedriveStructure();
+  fundingStructureCache = { value, expiresAt: Date.now() + 5 * 60_000 };
+  return value;
+}
+
+export async function listPipedriveFundingBoard() {
+  const structure = await getPipedriveStructure();
+  const targets = [
+    { output: 'Angebot veröffentlicht', aliases: ['Angebot veröffentlicht', 'Angebot gesendet'] },
+    { output: 'Antrag eingereicht / Förderunterlagen einreichen', aliases: ['Antrag eingereicht / Förderunterlagen einreichen', 'Auftrag eingereicht / Förderunterlagen einreichen'] },
+    { output: 'Förderung beantragt', aliases: ['Förderung beantragen', 'Förderung beantragt'] },
+  ];
+  const pipeline = structure.pipelines.find(item => Number(item.id) === Number(PIPEDRIVE_LAYOUT.pipelines.orderFeasibility.id));
+  if (!pipeline) throw new Error('Die Pipedrive-Pipeline Auftragsmachbarkeit ist nicht verfügbar.');
+  const stages = {};
+  for (const target of targets) {
+    const matches = structure.stages.filter(stage => Number(stage.pipeline_id ?? stage.pipelineId) === Number(pipeline.id)
+      && target.aliases.some(alias => clean(alias).toLocaleLowerCase('de-DE') === clean(stage.name).toLocaleLowerCase('de-DE')));
+    const deals = [];
+    for (const stage of matches) {
+      let cursor = '';
+      do {
+        const page = await listPipedriveDeals({ pipelineId: pipeline.id, stageId: stage.id, status: 'open', limit: 500, cursor });
+        deals.push(...page.deals.map(deal => ({ id: String(deal.id), title: clean(deal.title, 1000), stage: target.output })));
+        cursor = clean(page.additionalData?.next_cursor || page.additionalData?.pagination?.next_cursor, 500);
+      } while (cursor);
+    }
+    stages[target.output] = [...new Map(deals.map(deal => [deal.id, deal])).values()];
+  }
+  return { pipeline: clean(pipeline.name), readOnly: true, source: 'iva-core-pipedrive-api', stages };
+}
+
+export async function downloadPipedriveDealFile({ dealId, fileId } = {}) {
+  const id = clean(dealId, 40);
+  const requestedFileId = clean(fileId, 40);
+  if (!/^\d+$/.test(id) || !/^\d+$/.test(requestedFileId)) throw new Error('Ungültige Pipedrive-Deal- oder Datei-ID.');
+  const bundle = await getPipedriveDealBundle(id);
+  const file = bundle.files.find(item => String(item.id) === requestedFileId);
+  if (!file) throw new Error('Die Pipedrive-Datei gehört nicht zu diesem Deal.');
+  if (Number(file.file_size || file.size || 0) > MAX_FILE_BYTES) throw new Error('Die Pipedrive-Datei ist größer als 50 MB.');
+  const credential = await validCredential();
+  const url = new URL(`${safeApiDomain(credential.apiDomain)}/api/v1/files/${requestedFileId}/download`);
+  if (credential.mode === 'api-token') url.searchParams.set('api_token', credential.apiToken);
+  const response = await fetch(url, {
+    headers: credential.mode === 'oauth' ? { Authorization: `Bearer ${credential.accessToken}` } : {},
+    redirect: 'follow',
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) throw new Error(`Pipedrive-Datei konnte nicht geladen werden (${response.status}).`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (!buffer.length || buffer.length > MAX_FILE_BYTES) throw new Error('Die Pipedrive-Datei ist leer oder größer als 50 MB.');
+  return { buffer, filename: clean(file.name || file.file_name || `pipedrive-${requestedFileId}`, 500), type: clean(response.headers.get('content-type') || file.file_type || file.mime_type || 'application/octet-stream', 200) };
 }
 
 function htmlText(value) {

@@ -396,7 +396,8 @@ try {
   assert.match(deviceAgentRuntimeSource, /'codex\.task\.start'/);
   assert.match(deviceAgentRuntimeSource, /revision: 'append'/);
   assert.match(deviceAgentRuntimeSource, /ChatGPT: Object\.freeze\(\['\/Applications\/ChatGPT\.app'/);
-  assert.match(deviceAgentRuntimeSource, /chrome-pipedrive-status\.mjs/);
+  assert.match(deviceAgentRuntimeSource, /background-integrations\.mjs/);
+  assert.doesNotMatch(deviceAgentRuntimeSource, /chrome-pipedrive-status\.mjs/);
   assert.match(deviceAgentRunnerSource, /LOCAL_RUNTIME \? path\.join\(LOCAL_HELPER_DIR, 'device-agent\.mjs'\)/);
   assert.match(deviceAgentRunnerSource, /scheduleLocalRuntimeMigration/);
   assert.match(deviceAgentRunnerSource, /de\.iva\.device-agent-migrator/);

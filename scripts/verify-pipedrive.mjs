@@ -92,6 +92,7 @@ globalThis.fetch = async (input, options = {}) => {
   }
   if (url.pathname === '/api/v1/notes') return ok(notes);
   if (url.pathname === '/api/v1/deals/123/files') return ok([{ id: 44, name: 'Angebot.pdf' }]);
+  if (url.pathname === '/api/v1/files/44/download') return new Response(Buffer.from('%PDF-pipedrive-test'), { status: 200, headers: { 'Content-Type': 'application/pdf' } });
   if (url.pathname === '/api/v2/activities') return ok([{ id: 55, subject: 'Nachfassen' }]);
   return json({ success: false, error: `Unerwarteter Testaufruf: ${url.pathname}` }, 500);
 };
@@ -102,8 +103,11 @@ const {
   completePipedriveOAuth,
   createPipedriveAuthUrl,
   createPipedriveDealNote,
+  downloadPipedriveDealFile,
   getPipedriveDealBundle,
+  getPipedriveFundingSnapshot,
   getPipedriveStructure,
+  listPipedriveFundingBoard,
   listPipedriveDeals,
   pipedriveRequest,
   pipedriveStatus,
@@ -155,6 +159,16 @@ try {
   assert.equal(bundle.person.name, 'Max Muster');
   assert.equal(bundle.files[0].name, 'Angebot.pdf');
   assert.equal(bundle.activities[0].subject, 'Nachfassen');
+  const fundingBoard = await listPipedriveFundingBoard();
+  assert.equal(fundingBoard.source, 'iva-core-pipedrive-api');
+  assert.equal(fundingBoard.stages['Angebot veröffentlicht'][0].id, '123');
+  const fundingSnapshot = await getPipedriveFundingSnapshot(123);
+  assert.equal(fundingSnapshot.customerName, 'Max Muster');
+  assert.equal(fundingSnapshot.orderNumber, 'HH-100');
+  assert.equal(fundingSnapshot.fileRecords[0].id, '44');
+  assert.equal(fundingSnapshot.source, 'iva-core-pipedrive-api');
+  const downloaded = await downloadPipedriveDealFile({ dealId: 123, fileId: 44 });
+  assert.equal(downloaded.buffer.toString(), '%PDF-pipedrive-test');
 
   await assert.rejects(
     createPipedriveDealNote({ dealId: 123, text: 'Geprüfter Test', confirmation: PIPEDRIVE_WRITE_CONFIRMATION }),

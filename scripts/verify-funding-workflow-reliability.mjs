@@ -56,6 +56,8 @@ try {
 
   const codexTaskSource = await readFile(new URL('../local-mac-helper/codex-tasks.mjs', import.meta.url), 'utf8');
   const pipedriveSource = await readFile(new URL('../local-mac-helper/chrome-pipedrive.mjs', import.meta.url), 'utf8');
+  const backgroundSource = await readFile(new URL('../local-mac-helper/background-integrations.mjs', import.meta.url), 'utf8');
+  const fundingScanSource = await readFile(new URL('../local-mac-helper/funding-scan.mjs', import.meta.url), 'utf8');
   const macUiSource = await readFile(new URL('../local-mac-helper/macos-ui.mjs', import.meta.url), 'utf8');
   const macBridgeSource = await readFile(new URL('../local-mac-helper/macos/iva-ax.swift', import.meta.url), 'utf8');
   assert.match(codexTaskSource, /recoveryAttempts: Number\(previousState\.recoveryAttempts \|\| 0\)/,
@@ -64,34 +66,16 @@ try {
     'ein manueller Förderlauf darf nach einem früheren Tagesabschluss bewusst erneut gestartet werden');
   assert.match(codexTaskSource, /\['completed', 'no_changes'\]\.includes\(state\.workflowOutcome\)/,
     'nur ein fachlich verifizierter automatischer Förderabschluss darf den Tag deduplizieren');
-  assert.match(pipedriveSource, /hasAuthenticatedApiSession/);
-  assert.match(pipedriveSource, /openAuthenticatedPipedriveApiSource/);
-  const fundingReadSource = pipedriveSource.slice(
-    pipedriveSource.indexOf('export async function readPipedriveFundingDealsViaApi'),
-    pipedriveSource.indexOf('async function uploadPipedriveFileViaSignedInSession'),
-  );
-  assert.match(fundingReadSource, /__ivaPipedriveFundingReads/);
-  assert.match(fundingReadSource, /new AbortController\(\)/);
-  assert.match(fundingReadSource, /const safeBatchSize = 1/);
-  assert.match(fundingReadSource, /ensurePipedriveDownloadSource\(\)/);
-  assert.doesNotMatch(fundingReadSource, /openAuthenticatedPipedriveApiSource/,
-    'der Förder-Vollscan soll die stabile rechte Pipeline-Sitzung statt einer vollständigen Deal-Seite verwenden');
-  assert.doesNotMatch(fundingReadSource, /stages\?pipeline_id=1/,
-    'automatisch ausgelöste Folgephasen außerhalb der Ausgangspipeline müssen mit ihrem Namen lesbar bleiben');
-  assert.match(fundingReadSource, /Promise\.all\(\[/);
-  assert.doesNotMatch(fundingReadSource, /xhr\.open\([^\n]+,\s*false\)/,
-    'der Förder-Vollscan darf den rechten Pipedrive-Tab nicht mit synchronen XHR blockieren');
-  assert.match(pipedriveSource, /failedFiles\.push/,
+  assert.match(fundingScanSource, /from '\.\/background-integrations\.mjs'/,
+    'der Förder-Vollscan muss den IVA-Core-Hintergrund statt Chrome verwenden');
+  assert.doesNotMatch(fundingScanSource, /chrome-pipedrive/);
+  assert.match(backgroundSource, /\/background\/pipedrive\/funding-board/);
+  assert.match(backgroundSource, /\/background\/pipedrive\/deals\/\$\{id\}/);
+  assert.doesNotMatch(backgroundSource, /Google Chrome|osascript|executePipedriveJavaScript|session_token/,
+    'Pipedrive-Lesen und -Download dürfen keinerlei Browser- oder Sitzungstokenweg enthalten');
+  assert.match(backgroundSource, /failedFiles\.push/,
     'eine einzelne nicht ladbare Pipedrive-Datei darf nicht mehr den ganzen Deal-Download verwerfen');
-  assert.match(pipedriveSource, /failedCount: failedFiles\.length/);
-  const downloadSource = pipedriveSource.slice(
-    pipedriveSource.indexOf('async function downloadPipedriveDealFilesUnlocked'),
-    pipedriveSource.indexOf('export function isRetryablePipedriveDownloadError'),
-  );
-  assert.match(downloadSource, /ensurePipedriveDownloadSource\(\)/);
-  assert.match(downloadSource, /executionDealId: ''/);
-  assert.doesNotMatch(downloadSource, /openTemporaryPipedriveDealTabs/,
-    'Dateidownloads sollen die stabile rechte Pipeline-Sitzung statt schwerer Deal-Seiten verwenden');
+  assert.match(backgroundSource, /failedCount: failedFiles\.length/);
   const fundingNoteSource = pipedriveSource.slice(
     pipedriveSource.indexOf('export async function createPipedriveFundingRequestNote'),
     pipedriveSource.indexOf('async function readPipedriveApiBatchAsync'),

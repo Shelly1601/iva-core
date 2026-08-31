@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
-import { collectPipedriveFundingDealIds, readPipedriveFundingDealsViaApi } from './chrome-pipedrive.mjs';
+import { collectPipedriveFundingDealIds, readPipedriveFundingDealsViaApi } from './background-integrations.mjs';
 
 export const FUNDING_BASE_REQUIRED_DOCUMENTS = Object.freeze([
   'signed_offer',

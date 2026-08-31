@@ -6,7 +6,8 @@ import { timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { renderFundingMissingDocumentsEmail, withFundingSender } from './funding.mjs';
 import { createOutlookDraft, deleteOutlookDrafts, diagnoseOutlook, normalizeDraftPayload } from './outlook.mjs';
-import { applyPipedriveFundingFieldUpdates, diagnosePipedriveChrome, readPipedriveFundingDeal } from './chrome-pipedrive.mjs';
+import { applyPipedriveFundingFieldUpdates } from './chrome-pipedrive.mjs';
+import { backgroundIntegrationStatus, readPipedriveFundingDeal } from './background-integrations.mjs';
 import { decideFundingDealAction, validatePipedriveFundingSnapshot } from './pipedrive-funding.mjs';
 import { diagnoseWhatsAppMac } from './whatsapp-mac.mjs';
 import { analyzeFundingPdf, buildPipedriveFieldProposals } from './funding-document-extractor.mjs';
@@ -103,7 +104,7 @@ export function createMacHelperServer() {
       }
       if (req.method === 'GET' && url.pathname === '/v1/doctor') return json(res, 200, {
         outlook: await diagnoseOutlook(),
-        pipedrive: await diagnosePipedriveChrome(),
+        backgroundIntegrations: await backgroundIntegrationStatus(),
         whatsapp: await diagnoseWhatsAppMac(),
       });
       const pipedriveDealMatch = url.pathname.match(/^\/v1\/pipedrive\/deals\/(\d+)\/funding-snapshot$/);

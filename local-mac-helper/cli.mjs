@@ -7,14 +7,19 @@ import { createOutlookDraft, createOutlookForwardDraft, deleteOutlookDrafts, dia
 import {
   createPipedriveFundingRequestNotes,
   createPipedriveFundingInformationNote,
-  diagnosePipedriveChrome,
-  downloadPipedriveDealFiles,
   markPipedriveFundingDealWon,
-  readPipedriveFundingDeal,
   transitionPipedriveFundingStage,
   uploadPipedriveDealFiles,
   updatePipedriveFundingRequestNotes,
 } from './chrome-pipedrive.mjs';
+import {
+  backgroundIntegrationStatus,
+  downloadAirtableCorrectedOffer,
+  downloadPipedriveDealFiles,
+  getAirtableWorkflowRecord,
+  listAirtableInstallationQueue,
+  readPipedriveFundingDeal,
+} from './background-integrations.mjs';
 import { diagnoseWhatsAppMac, syncDirectSalesRosterFromWhatsApp } from './whatsapp-mac.mjs';
 import { loadDirectSalesRosterSync } from './direct-sales-roster.mjs';
 import { startMacHelperServer } from './server.mjs';
@@ -128,7 +133,7 @@ async function main() {
   }
   if (command === 'doctor') return console.log(JSON.stringify({
     outlook: await diagnoseOutlook(),
-    pipedrive: await diagnosePipedriveChrome(),
+    backgroundIntegrations: await backgroundIntegrationStatus(),
     whatsapp: await diagnoseWhatsAppMac(),
   }, null, 2));
   if (command === 'right-display-status') return console.log(JSON.stringify(await requireRightDisplayWorkspace(), null, 2));
@@ -212,6 +217,10 @@ async function main() {
   }
   if (command === 'serve') return startMacHelperServer();
   if (command === 'read-pipedrive-deal') return console.log(JSON.stringify(await readPipedriveFundingDeal({ dealId: filePath }), null, 2));
+  if (command === 'background-integration-status') return console.log(JSON.stringify(await backgroundIntegrationStatus(), null, 2));
+  if (command === 'airtable-installation-queue') return console.log(JSON.stringify(await listAirtableInstallationQueue({ maxRecords: filePath }), null, 2));
+  if (command === 'airtable-record') return console.log(JSON.stringify(await getAirtableWorkflowRecord(filePath), null, 2));
+  if (command === 'download-airtable-corrected-offer') return console.log(JSON.stringify(await downloadAirtableCorrectedOffer({ recordId: filePath, attachmentId: confirmation }), null, 2));
   if (command === 'download-pipedrive-files') {
     const fileIds = String(confirmation || '').split(',').map(value => value.trim()).filter(Boolean);
     return console.log(JSON.stringify(await downloadPipedriveDealFiles({ dealId: filePath, fileIds }), null, 2));
@@ -387,6 +396,10 @@ async function main() {
   node local-mac-helper/cli.mjs direct-sales-roster-status
   node local-mac-helper/cli.mjs sync-direct-sales-roster --commit
   node local-mac-helper/cli.mjs read-pipedrive-deal <deal-id>
+  node local-mac-helper/cli.mjs background-integration-status
+  node local-mac-helper/cli.mjs airtable-installation-queue [max-datensaetze]
+  node local-mac-helper/cli.mjs airtable-record <record-id>
+  node local-mac-helper/cli.mjs download-airtable-corrected-offer <record-id> <attachment-id>
   node local-mac-helper/cli.mjs download-pipedrive-files <deal-id> [datei-id,datei-id]
   node local-mac-helper/cli.mjs upload-pipedrive-files <deal-id> <pdf-ordner> --commit
   node local-mac-helper/cli.mjs transition-pipedrive-funding-stage <deal-id> <von-phase> <nach-phase> --commit

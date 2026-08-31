@@ -11,7 +11,9 @@ Stand: 29. August 2026 - Version 2
 
 ## Quelle und fester Airtable-Umfang
 
-- Airtable-Link: `https://airtable.com/appBsUeEsjEBzIMDc/pagyBs7hOhHp6u3gh`
+- Technische Quelle ist ausschließlich die offizielle Airtable REST API im IVA-Core-Hintergrund. Die Airtable-Oberfläche und Browser-Tabs werden für diesen Workflow nicht geöffnet oder ausgelesen.
+- Lesebefehl auf dem iMac: `node local-mac-helper/cli.mjs airtable-installation-queue`; Detailabruf: `node local-mac-helper/cli.mjs airtable-record <record-id>`; korrigiertes Angebot: `node local-mac-helper/cli.mjs download-airtable-corrected-offer <record-id> <attachment-id>`.
+- Der frühere Airtable-Link `https://airtable.com/appBsUeEsjEBzIMDc/pagyBs7hOhHp6u3gh` dient nur noch als menschlicher Referenzlink und ist keine Workflowquelle.
 - Base: `appBsUeEsjEBzIMDc`
 - Interface: `pbdt3FMtYOHgD4m0G`
 - Seite: `pagyBs7hOhHp6u3gh` (`Überblick`)
@@ -42,7 +44,7 @@ Stand: 29. August 2026 - Version 2
 
 1. Primäre fachliche Quelle bleibt der Anhang im Airtable-Feld `Angebot korrigiert`.
 2. Ist dort genau ein eindeutiges, lesbares und zum Airtable-Fall passendes korrigiertes Angebot vorhanden, belegt ausschließlich dieses Dokument Auftragsnummer und Planbar-Beschreibung.
-3. Fehlt `Angebot korrigiert`, ist das Dokument unleserlich oder reicht es fachlich nicht für eine eindeutige Zuordnung, darf einmalig und nur für denselben Airtable-Fall Pipedrive rein lesend als Ersatzweg geprüft werden.
+3. Fehlt `Angebot korrigiert`, ist das Dokument unleserlich oder reicht es fachlich nicht für eine eindeutige Zuordnung, darf einmalig und nur für denselben Airtable-Fall Pipedrive rein lesend über den IVA-Core-API-Hintergrund geprüft werden. Kein Pipedrive-Browserfenster und kein Tab darf dafür geöffnet, geschlossen oder ausgelesen werden.
 4. Im erlaubten Ersatzweg den Kunden in Pipedrive eindeutig finden, dealweit nach dem unterschriebenen Angebot suchen und die Regeln aus `PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md` für Auftragsnummer, Original-PDF, visuelle Streichungen und optionale Auswahl inhaltlich gleich anwenden.
 5. Wird trotz vollständiger Suche kein unterschriebenes Angebot gefunden, darf ersatzweise nur eine PDF verwendet werden, deren Angebotsnummer eindeutig mit der Nummer im Deal und dem Kunden übereinstimmt. Bei mehreren oder widersprüchlichen Nummern bleibt der Fall unverändert.
 6. Das Airtable-Feld `Angebot`, freie Deal-Felder, bloße Dateinamen ohne geöffnete Dokumentprüfung, TMB oder andere Quellen dürfen Auftragsnummer und Beschreibung weiterhin nicht ersatzweise belegen.

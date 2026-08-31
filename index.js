@@ -202,8 +202,11 @@ import {
   completePipedriveOAuth,
   createPipedriveAuthUrl,
   createPipedriveDealNote,
+  downloadPipedriveDealFile,
   getPipedriveDealBundle,
+  getPipedriveFundingSnapshot,
   getPipedriveStructure,
+  listPipedriveFundingBoard,
   listPipedriveDeals,
   pipedriveStatus,
   pipedriveWebhookStatus,
@@ -1244,6 +1247,51 @@ app.get('/device-agent/:deviceId/runtime', async (req, res) => {
 app.get('/device-agent/:deviceId/status', async (req, res) => {
   if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
   res.json(await deviceAgentStatus(req.params.deviceId));
+});
+app.get('/device-agent/:deviceId/background/status', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
+  try {
+    const [pipedrive, airtable] = await Promise.all([pipedriveStatus(), airtableStatus()]);
+    res.set('Cache-Control', 'no-store').json({ pipedrive, airtable });
+  } catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.get('/device-agent/:deviceId/background/pipedrive/funding-board', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
+  try { res.set('Cache-Control', 'no-store').json(await listPipedriveFundingBoard()); }
+  catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.get('/device-agent/:deviceId/background/pipedrive/deals/:dealId', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
+  try { res.set('Cache-Control', 'no-store').json(await getPipedriveFundingSnapshot(req.params.dealId)); }
+  catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.get('/device-agent/:deviceId/background/pipedrive/deals/:dealId/files/:fileId', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
+  try {
+    const file = await downloadPipedriveDealFile({ dealId: req.params.dealId, fileId: req.params.fileId });
+    res.set('Cache-Control', 'no-store');
+    res.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.filename)}`);
+    res.type(file.type).send(file.buffer);
+  } catch (error) { res.status(404).json({ error: error.message }); }
+});
+app.get('/device-agent/:deviceId/background/airtable/installation-queue', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
+  try { res.set('Cache-Control', 'no-store').json(await listAirtableInstallationQueue({ maxRecords: req.query?.maxRecords })); }
+  catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.get('/device-agent/:deviceId/background/airtable/records/:recordId', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
+  try { res.set('Cache-Control', 'no-store').json(await getAirtableWorkflowRecord(req.params.recordId)); }
+  catch (error) { res.status(502).json({ error: error.message }); }
+});
+app.get('/device-agent/:deviceId/background/airtable/records/:recordId/corrected-offer/:attachmentId', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
+  try {
+    const file = await downloadAirtableCorrectedOffer({ recordId: req.params.recordId, attachmentId: req.params.attachmentId });
+    res.set('Cache-Control', 'no-store');
+    res.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.filename)}`);
+    res.type(file.type).send(file.buffer);
+  } catch (error) { res.status(404).json({ error: error.message }); }
 });
 app.get('/device-agent/:deviceId/funding-runtime-status', async (req, res) => {
   if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);

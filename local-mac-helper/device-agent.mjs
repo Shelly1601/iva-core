@@ -319,7 +319,7 @@ async function executeDeviceCommand(command) {
   }
   if (command.action === 'computer.status') {
     const { diagnoseOutlook } = await import('./outlook.mjs');
-    const { diagnosePipedriveChrome } = await import('./chrome-pipedrive-status.mjs');
+    const { backgroundIntegrationStatus } = await import('./background-integrations.mjs');
     const { diagnoseWhatsAppMac } = await import('./whatsapp-mac.mjs');
     const { runMacUiBridge } = await import('./macos-ui.mjs');
     const { requireRightDisplayWorkspace } = await import('./display-workspace.mjs');
@@ -328,14 +328,15 @@ async function executeDeviceCommand(command) {
     // bei parallelen Probes gegenseitig einen falschen Negativstatus liefern.
     const outlook = await diagnoseOutlook();
     const bridge = await runMacUiBridge(['accessibility-status'], { timeoutMs: 15000 }).catch(() => ({ trusted: false }));
-    const pipedrive = await diagnosePipedriveChrome();
+    const backgroundIntegrations = await backgroundIntegrationStatus();
     const whatsapp = await diagnoseWhatsAppMac();
     const display = await requireRightDisplayWorkspace();
     return {
       online: true,
       display: { policy: display.policy, displayCount: display.displayCount, target: display.target },
       outlook: { installed: outlook.outlook?.installed, running: outlook.outlook?.running, accessibility: bridge.trusted === true },
-      pipedrive: { chromeRunning: pipedrive.chromeRunning, readable: pipedrive.readDealFields },
+      pipedrive: { backgroundApi: true, readable: backgroundIntegrations?.pipedrive?.readReady === true },
+      airtable: { backgroundApi: true, readable: backgroundIntegrations?.airtable?.readReady === true, writeEnabled: false },
       whatsapp: { installed: whatsapp.installed, running: whatsapp.running, linked: whatsapp.linkedAccountVerified },
     };
   }
