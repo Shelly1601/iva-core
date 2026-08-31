@@ -7,18 +7,20 @@ import { createOutlookDraft, createOutlookForwardDraft, deleteOutlookDrafts, dia
 import {
   createPipedriveFundingRequestNotes,
   createPipedriveFundingInformationNote,
-  markPipedriveFundingDealWon,
-  transitionPipedriveFundingStage,
-  uploadPipedriveDealFiles,
   updatePipedriveFundingRequestNotes,
 } from './chrome-pipedrive.mjs';
 import {
+  applyPipedriveFundingFieldUpdates,
   backgroundIntegrationStatus,
   downloadAirtableCorrectedOffer,
   downloadPipedriveDealFiles,
   getAirtableWorkflowRecord,
   listAirtableInstallationQueue,
+  listPipedriveDealsByStageName,
+  markPipedriveFundingDealWon,
   readPipedriveFundingDeal,
+  transitionPipedriveFundingStage,
+  uploadPipedriveDealFiles,
 } from './background-integrations.mjs';
 import { diagnoseWhatsAppMac, syncDirectSalesRosterFromWhatsApp } from './whatsapp-mac.mjs';
 import { loadDirectSalesRosterSync } from './direct-sales-roster.mjs';
@@ -218,6 +220,12 @@ async function main() {
   if (command === 'serve') return startMacHelperServer();
   if (command === 'read-pipedrive-deal') return console.log(JSON.stringify(await readPipedriveFundingDeal({ dealId: filePath }), null, 2));
   if (command === 'background-integration-status') return console.log(JSON.stringify(await backgroundIntegrationStatus(), null, 2));
+  if (command === 'list-pipedrive-stage') return console.log(JSON.stringify(await listPipedriveDealsByStageName(filePath), null, 2));
+  if (command === 'apply-pipedrive-fields') {
+    if (confirmation !== '--commit') throw new Error('Pipedrive-Felder wurden nicht geändert. Zum Bestätigen --commit anhängen.');
+    const input = await readJson(filePath);
+    return console.log(JSON.stringify(await applyPipedriveFundingFieldUpdates({ dealId: input.dealId, fieldProposals: input.fieldProposals || input, confirmApply: true }), null, 2));
+  }
   if (command === 'airtable-installation-queue') return console.log(JSON.stringify(await listAirtableInstallationQueue({ maxRecords: filePath }), null, 2));
   if (command === 'airtable-record') return console.log(JSON.stringify(await getAirtableWorkflowRecord(filePath), null, 2));
   if (command === 'download-airtable-corrected-offer') return console.log(JSON.stringify(await downloadAirtableCorrectedOffer({ recordId: filePath, attachmentId: confirmation }), null, 2));
@@ -397,6 +405,8 @@ async function main() {
   node local-mac-helper/cli.mjs sync-direct-sales-roster --commit
   node local-mac-helper/cli.mjs read-pipedrive-deal <deal-id>
   node local-mac-helper/cli.mjs background-integration-status
+  node local-mac-helper/cli.mjs list-pipedrive-stage "Phasenname"
+  node local-mac-helper/cli.mjs apply-pipedrive-fields /pfad/feldvorschlaege.json --commit
   node local-mac-helper/cli.mjs airtable-installation-queue [max-datensaetze]
   node local-mac-helper/cli.mjs airtable-record <record-id>
   node local-mac-helper/cli.mjs download-airtable-corrected-offer <record-id> <attachment-id>

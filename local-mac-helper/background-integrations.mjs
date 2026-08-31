@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { classifyFundingDocumentName } from './funding-document-extractor.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -25,9 +25,12 @@ async function token() {
   return value;
 }
 
-async function request(pathname, { binary = false, timeoutMs = 30_000 } = {}) {
+async function request(pathname, { method = 'GET', body, binary = false, timeoutMs = 30_000 } = {}) {
+  const rawBody = Buffer.isBuffer(body);
   const response = await fetch(`${serverUrl()}${pathname}`, {
-    headers: { Authorization: `Bearer ${await token()}` },
+    method,
+    headers: { Authorization: `Bearer ${await token()}`, ...(rawBody ? { 'Content-Type': 'application/octet-stream' } : body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+    body: rawBody ? body : body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (binary) {
@@ -66,6 +69,34 @@ export async function readPipedriveFundingDeal({ dealId } = {}) {
   if (!id) throw new Error('Für die Pipedrive-Prüfung fehlt eine gültige Deal-ID.');
   const snapshot = await request(`/device-agent/${DEVICE_ID}/background/pipedrive/deals/${id}`, { timeoutMs: 60_000 });
   return { ...snapshot, documents: (snapshot.files || []).map(classifyFundingDocumentName), source: 'iva-core-pipedrive-api' };
+}
+
+export async function listPipedriveDealsByStageName(stageName) {
+  const name = String(stageName || '').replace(/\s+/g, ' ').trim();
+  if (!name) throw new Error('Pipedrive-Phase fehlt.');
+  return request(`/device-agent/${DEVICE_ID}/background/pipedrive/stages/${encodeURIComponent(name)}`, { timeoutMs: 60_000 });
+}
+
+export async function applyPipedriveFundingFieldUpdates({ dealId, fieldProposals, confirmApply = false } = {}) {
+  if (confirmApply !== true) throw new Error('Pipedrive-Felder wurden nicht geändert: confirmApply=true fehlt.');
+  const updates = (Array.isArray(fieldProposals?.proposals) ? fieldProposals.proposals : [])
+    .filter(item => item?.action === 'propose_fill' && Number.isInteger(item.evidence?.page) && Number(item.evidence?.confidence) >= 0.9 && String(item.evidence?.sourceFile || '').toLowerCase().endsWith('.pdf'))
+    .map(item => ({ field: String(item.targetField || '').trim(), value: String(item.proposedValue || '').trim().slice(0, 500) }))
+    .filter(item => item.field && item.value);
+  if (!updates.length) return { dealId: String(dealId), results: [], mutated: false, reason: 'Keine sicher befüllbaren leeren Felder.' };
+  return request(`/device-agent/${DEVICE_ID}/background/pipedrive/deals/${String(dealId).replace(/\D/g, '')}/fields`, { method: 'PATCH', body: { updates }, timeoutMs: 60_000 });
+}
+
+export async function transitionPipedriveFundingStage({ dealId, fromStage, toStage, confirmApply = false } = {}) {
+  if (confirmApply !== true) throw new Error('Pipedrive-Phase wurde nicht geändert: confirmApply=true fehlt.');
+  const id = String(dealId || '').replace(/\D/g, '');
+  return request(`/device-agent/${DEVICE_ID}/background/pipedrive/deals/${id}/funding-transition`, { method: 'POST', body: { fromStage, toStage }, timeoutMs: 60_000 });
+}
+
+export async function markPipedriveFundingDealWon({ dealId, approvalFileName, confirmApply = false } = {}) {
+  if (confirmApply !== true) throw new Error('Der Deal wurde nicht auf „Gewonnen“ gesetzt: confirmApply=true fehlt.');
+  const id = String(dealId || '').replace(/\D/g, '');
+  return request(`/device-agent/${DEVICE_ID}/background/pipedrive/deals/${id}/won`, { method: 'POST', body: { approvalFileName }, timeoutMs: 90_000 });
 }
 
 export async function readPipedriveFundingDealsViaApi({ dealIds, onProgress } = {}) {
@@ -109,6 +140,25 @@ export async function downloadPipedriveDealFiles({ dealId, fileIds = [] } = {}) 
   }
   if (!files.length && failedFiles.length) await rm(directory, { recursive: true, force: true });
   return { dealId: id, directory: files.length ? directory : null, files, failedFiles, downloadedCount: files.length, failedCount: failedFiles.length, complete: failedFiles.length === 0, readOnlySource: true, deletedFromPipedrive: false, source: 'iva-core-pipedrive-api' };
+}
+
+export async function uploadPipedriveDealFiles({ dealId, directory } = {}) {
+  const id = String(dealId || '').replace(/\D/g, '');
+  const absoluteDirectory = path.resolve(String(directory || ''));
+  if (!id) throw new Error('Für den Pipedrive-Dateiupload fehlt eine gültige Deal-ID.');
+  const directoryInfo = await stat(absoluteDirectory);
+  if (!directoryInfo.isDirectory()) throw new Error('Der Pipedrive-Uploadpfad ist kein Ordner.');
+  const names = (await readdir(absoluteDirectory)).filter(name => !name.startsWith('.')).sort();
+  if (!names.length || names.length > 100) throw new Error('Der Pipedrive-Uploadordner muss 1 bis 100 Dateien enthalten.');
+  const results = [];
+  for (const fileName of names) {
+    const filePath = path.join(absoluteDirectory, fileName);
+    const info = await stat(filePath);
+    if (!info.isFile() || info.size < 1 || info.size > MAX_FILE_BYTES) throw new Error(`${fileName}: ungültige Dateigröße.`);
+    const result = await request(`/device-agent/${DEVICE_ID}/background/pipedrive/deals/${id}/files?name=${encodeURIComponent(fileName)}`, { method: 'POST', body: await readFile(filePath), timeoutMs: 90_000 });
+    results.push({ fileName, status: result.alreadyPresent ? 'already_present' : 'uploaded', uploaded: result.uploaded === true, verified: result.verified === true, fileId: result.fileId || null });
+  }
+  return { dealId: id, results, uploadedCount: results.filter(item => item.uploaded).length, fullyVerified: results.every(item => item.verified), deletedFromPipedrive: false, source: 'iva-core-pipedrive-api' };
 }
 
 export async function listAirtableInstallationQueue({ maxRecords = 500 } = {}) {

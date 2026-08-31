@@ -598,6 +598,139 @@ export async function downloadPipedriveDealFile({ dealId, fileId } = {}) {
   return { buffer, filename: clean(file.name || file.file_name || `pipedrive-${requestedFileId}`, 500), type: clean(response.headers.get('content-type') || file.file_type || file.mime_type || 'application/octet-stream', 200) };
 }
 
+export async function listPipedriveDealsByStageName(stageName) {
+  const requested = clean(stageName, 300).toLocaleLowerCase('de-DE');
+  if (!requested) throw new Error('Pipedrive-Phase fehlt.');
+  const structure = await getPipedriveStructure();
+  const aliasGroups = [
+    ['montage terminieren', 'montage terminiert, rg+ab senden'],
+    ['angebot veröffentlicht', 'angebot gesendet'],
+    ['antrag eingereicht / förderunterlagen einreichen', 'auftrag eingereicht / förderunterlagen einreichen'],
+    ['förderung beantragen', 'förderung beantragt'],
+  ];
+  const aliases = aliasGroups.find(group => group.includes(requested)) || [requested];
+  const matches = structure.stages.filter(stage => aliases.includes(clean(stage.name).toLocaleLowerCase('de-DE')));
+  if (matches.length !== 1) throw new Error(matches.length ? 'Pipedrive-Phase ist nicht eindeutig.' : 'Pipedrive-Phase wurde nicht gefunden.');
+  const stage = matches[0];
+  const deals = [];
+  let cursor = '';
+  do {
+    const page = await listPipedriveDeals({ pipelineId: stage.pipeline_id ?? stage.pipelineId, stageId: stage.id, status: 'open', limit: 500, cursor });
+    deals.push(...page.deals.map(deal => ({ id: String(deal.id), title: clean(deal.title, 1000), stage: clean(stage.name), stageId: Number(stage.id), pipelineId: Number(stage.pipeline_id ?? stage.pipelineId) })));
+    cursor = clean(page.additionalData?.next_cursor || page.additionalData?.pagination?.next_cursor, 500);
+  } while (cursor);
+  return { stage: clean(stage.name), stageId: Number(stage.id), pipelineId: Number(stage.pipeline_id ?? stage.pipelineId), count: deals.length, deals, readOnly: true, source: 'iva-core-pipedrive-api' };
+}
+
+export async function updatePipedriveDealFieldsByName({ dealId, updates, confirmation } = {}) {
+  assertConfirmedWrite(confirmation);
+  const id = clean(dealId, 40);
+  if (!/^\d+$/.test(id)) throw new Error('Ungültige Pipedrive-Deal-ID.');
+  const allowed = new Set(['Auftragsnummer', 'Kundennummer', 'Telefonnummer', 'E-Mail', 'Anlage']);
+  const requested = (Array.isArray(updates) ? updates : []).map(item => ({ field: clean(item?.field, 100), value: clean(item?.value, 500) })).filter(item => allowed.has(item.field) && item.value);
+  if (!requested.length || requested.length > allowed.size) throw new Error('Keine gültigen Pipedrive-Feldänderungen übergeben.');
+  const structure = await getPipedriveStructure();
+  const descriptors = requested.map(item => {
+    const matches = structure.dealFields.filter(field => clean(field.name) === item.field);
+    if (matches.length !== 1) throw new Error(`Pipedrive-Feld „${item.field}“ fehlt oder ist nicht eindeutig.`);
+    return { ...item, descriptor: matches[0] };
+  });
+  const keys = descriptors.map(item => item.descriptor.key).join(',');
+  const before = (await pipedriveRequest(`/api/v2/deals/${id}${queryString({ custom_fields: keys, include_option_labels: true })}`)).data || {};
+  const changes = {};
+  const results = [];
+  for (const item of descriptors) {
+    const current = before.custom_fields?.[item.descriptor.key] ?? before[item.descriptor.key] ?? null;
+    if (current !== null && current !== undefined && String(current).trim() !== '') {
+      results.push({ field: item.field, status: 'existing_value_present', mutated: false });
+      continue;
+    }
+    let value = item.value;
+    if (item.field === 'Anlage' && Array.isArray(item.descriptor.options)) {
+      const options = item.descriptor.options.filter(option => clean(option.label).toLocaleLowerCase('de-DE') === item.value.toLocaleLowerCase('de-DE'));
+      if (options.length !== 1) {
+        results.push({ field: item.field, status: options.length ? 'ambiguous_select_option' : 'select_option_not_found', mutated: false });
+        continue;
+      }
+      value = options[0].id;
+    }
+    changes[item.descriptor.key] = value;
+    results.push({ field: item.field, status: 'prepared', mutated: false });
+  }
+  if (Object.keys(changes).length) await pipedriveRequest(`/api/v2/deals/${id}`, { method: 'PATCH', body: { custom_fields: changes }, write: true });
+  const after = (await pipedriveRequest(`/api/v2/deals/${id}${queryString({ custom_fields: keys, include_option_labels: true })}`)).data || {};
+  for (const result of results.filter(item => item.status === 'prepared')) {
+    const item = descriptors.find(candidate => candidate.field === result.field);
+    const expected = changes[item.descriptor.key];
+    const actual = after.custom_fields?.[item.descriptor.key] ?? after[item.descriptor.key] ?? null;
+    result.status = sameFieldValue(actual, expected) ? 'updated_and_verified' : 'update_not_verified';
+    result.mutated = actual !== null && actual !== undefined && String(actual).trim() !== '';
+    result.verified = sameFieldValue(actual, expected);
+  }
+  return { dealId: id, results, mutated: results.some(item => item.mutated), fullyVerified: results.filter(item => item.status !== 'existing_value_present').every(item => item.verified === true), source: 'iva-core-pipedrive-api' };
+}
+
+export async function transitionPipedriveFundingStageApi({ dealId, fromStage, toStage, confirmation } = {}) {
+  assertConfirmedWrite(confirmation);
+  const allowed = [
+    { from: ['Angebot veröffentlicht', 'Angebot gesendet'], to: ['Antrag eingereicht / Förderunterlagen einreichen', 'Auftrag eingereicht / Förderunterlagen einreichen'] },
+    { from: ['Antrag eingereicht / Förderunterlagen einreichen', 'Auftrag eingereicht / Förderunterlagen einreichen'], to: ['Förderung beantragen', 'Förderung beantragt'] },
+  ];
+  const normalize = value => clean(value, 300).toLocaleLowerCase('de-DE');
+  const rule = allowed.find(item => item.from.some(value => normalize(value) === normalize(fromStage)) && item.to.some(value => normalize(value) === normalize(toStage)));
+  if (!rule) throw new Error('Nicht freigegebener Pipedrive-Förderphasenwechsel.');
+  const structure = await getPipedriveStructure();
+  const fromMatches = structure.stages.filter(stage => rule.from.some(value => normalize(value) === normalize(stage.name)));
+  const toMatches = structure.stages.filter(stage => rule.to.some(value => normalize(value) === normalize(stage.name)));
+  if (fromMatches.length !== 1 || toMatches.length !== 1) throw new Error('Pipedrive-Förderphase fehlt oder ist nicht eindeutig.');
+  return { dealId: String(dealId), ...(await updatePipedriveDealStage({ dealId, expectedStageId: fromMatches[0].id, targetStageId: toMatches[0].id, confirmation })), source: 'iva-core-pipedrive-api' };
+}
+
+export async function markPipedriveFundingDealWonApi({ dealId, approvalFileName, confirmation } = {}) {
+  assertConfirmedWrite(confirmation);
+  const id = clean(dealId, 40);
+  const fileName = path.basename(clean(approvalFileName, 500));
+  if (!/^\d+$/.test(id) || !/\.pdf$/i.test(fileName) || !/(?:kfw.{0,40}zusage|zusage.{0,40}kfw|zuschuss.{0,20}(?:zusage|bescheid))/i.test(fileName)) {
+    throw new Error('„Gewonnen“ ist nur mit gültiger Deal-ID und eindeutig bezeichnetem KfW-Zusageschreiben als PDF zulässig.');
+  }
+  const before = await getPipedriveFundingSnapshot(id);
+  if (!['förderung beantragen', 'förderung beantragt'].includes(clean(before.stage).toLocaleLowerCase('de-DE'))) throw new Error(`Deal ${id} steht nicht eindeutig in „Förderung beantragt“.`);
+  if (before.files.filter(name => path.basename(name) === fileName).length !== 1) throw new Error(`Das KfW-Zusageschreiben „${fileName}“ ist im Deal nicht genau einmal vorhanden.`);
+  const current = (await pipedriveRequest(`/api/v2/deals/${id}`)).data || {};
+  const alreadyPresent = clean(current.status).toLowerCase() === 'won';
+  if (!alreadyPresent) await pipedriveRequest(`/api/v2/deals/${id}`, { method: 'PATCH', body: { status: 'won' }, write: true });
+  let after = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (attempt) await new Promise(resolve => setTimeout(resolve, 1500));
+    after = (await pipedriveRequest(`/api/v2/deals/${id}`)).data || {};
+    if (clean(after.status).toLowerCase() === 'won') break;
+  }
+  if (clean(after?.status).toLowerCase() !== 'won') throw new Error('Pipedrive-Status „Gewonnen“ wurde nicht bestätigt.');
+  return { dealId: id, changed: !alreadyPresent, alreadyPresent, verified: true, status: after.status, stageId: String(after.stage_id || ''), mutated: !alreadyPresent, deletedFromPipedrive: false, source: 'iva-core-pipedrive-api' };
+}
+
+export async function uploadPipedriveDealFile({ dealId, filename, buffer } = {}) {
+  const id = clean(dealId, 40);
+  const safeFilename = path.basename(clean(filename, 500));
+  if (!/^\d+$/.test(id) || !safeFilename || !Buffer.isBuffer(buffer) || !buffer.length || buffer.length > MAX_FILE_BYTES) throw new Error('Ungültiger Pipedrive-Dateiupload.');
+  const before = await getPipedriveDealBundle(id);
+  if (before.files.some(file => clean(file.name || file.file_name) === safeFilename)) return { dealId: id, fileName: safeFilename, uploaded: false, alreadyPresent: true, verified: true };
+  const credential = await validCredential();
+  if (!config().writeEnabled) throw new Error('Pipedrive-Schreibzugriff ist noch nicht freigeschaltet.');
+  const url = new URL(`${safeApiDomain(credential.apiDomain)}/api/v1/files`);
+  if (credential.mode === 'api-token') url.searchParams.set('api_token', credential.apiToken);
+  const form = new FormData();
+  form.set('deal_id', id);
+  form.set('file', new Blob([buffer]), safeFilename);
+  const response = await fetch(url, { method: 'POST', headers: credential.mode === 'oauth' ? { Authorization: `Bearer ${credential.accessToken}` } : {}, body: form, signal: AbortSignal.timeout(60_000) });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.success === false) throw new Error(safeError(payload, response));
+  const after = await getPipedriveDealBundle(id);
+  const matches = after.files.filter(file => clean(file.name || file.file_name) === safeFilename);
+  if (matches.length !== 1) throw new Error('Pipedrive-Dateiupload wurde nicht eindeutig bestätigt.');
+  return { dealId: id, fileName: safeFilename, fileId: String(matches[0].id || ''), uploaded: true, alreadyPresent: false, verified: true };
+}
+
 function htmlText(value) {
   return String(value || '')
     .replace(/<br\s*\/?>/gi, '\n')

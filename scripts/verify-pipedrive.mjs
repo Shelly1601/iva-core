@@ -18,6 +18,7 @@ const pipelines = Object.values(PIPEDRIVE_LAYOUT.pipelines).map(item => ({ id: i
 const stages = Object.values(PIPEDRIVE_LAYOUT.stages).map(item => ({ id: item.id, pipeline_id: item.pipelineId, name: item.name, active_flag: true }));
 const dealFields = Object.values(PIPEDRIVE_LAYOUT.dealFields).map(item => ({ id: item.id, key: item.key, name: item.name, field_type: 'varchar', active_flag: true }));
 let notes = [];
+let files = [{ id: 44, name: 'Angebot.pdf' }];
 let dealStage = 20;
 let dealValues = {
   title: 'Testdeal',
@@ -91,8 +92,12 @@ globalThis.fetch = async (input, options = {}) => {
     return ok(note);
   }
   if (url.pathname === '/api/v1/notes') return ok(notes);
-  if (url.pathname === '/api/v1/deals/123/files') return ok([{ id: 44, name: 'Angebot.pdf' }]);
+  if (url.pathname === '/api/v1/deals/123/files') return ok(files);
   if (url.pathname === '/api/v1/files/44/download') return new Response(Buffer.from('%PDF-pipedrive-test'), { status: 200, headers: { 'Content-Type': 'application/pdf' } });
+  if (url.pathname === '/api/v1/files' && String(options.method || '').toUpperCase() === 'POST') {
+    files.push({ id: 45, name: 'Korrektur.pdf' });
+    return ok(files.at(-1));
+  }
   if (url.pathname === '/api/v2/activities') return ok([{ id: 55, subject: 'Nachfassen' }]);
   return json({ success: false, error: `Unerwarteter Testaufruf: ${url.pathname}` }, 500);
 };
@@ -115,7 +120,9 @@ const {
   recordPipedriveWebhook,
   searchPipedriveDeals,
   updatePipedriveDealField,
+  updatePipedriveDealFieldsByName,
   updatePipedriveDealStage,
+  uploadPipedriveDealFile,
 } = await import('../integrations/pipedrive.js');
 const { pipedriveSkill, pipedriveSkillMeta } = await import('../skills/pipedrive.js');
 
@@ -175,6 +182,13 @@ try {
     /noch nicht freigeschaltet/,
   );
   process.env.PIPEDRIVE_WRITE_ENABLED = 'true';
+  dealValues.custom_fields[PIPEDRIVE_LAYOUT.dealFields.orderNumber.key] = null;
+  const fieldBatch = await updatePipedriveDealFieldsByName({ dealId: 123, updates: [{ field: 'Auftragsnummer', value: 'HH-200' }], confirmation: PIPEDRIVE_WRITE_CONFIRMATION });
+  assert.equal(fieldBatch.fullyVerified, true);
+  assert.equal(fieldBatch.results[0].status, 'updated_and_verified');
+  const uploadedFile = await uploadPipedriveDealFile({ dealId: 123, filename: 'Korrektur.pdf', buffer: Buffer.from('%PDF-upload') });
+  assert.equal(uploadedFile.uploaded, true);
+  assert.equal(uploadedFile.verified, true);
   const note = await createPipedriveDealNote({ dealId: 123, text: 'Geprüfter Test', confirmation: PIPEDRIVE_WRITE_CONFIRMATION });
   assert.equal(note.created, true);
   assert.equal(note.verified, true);
@@ -200,7 +214,7 @@ try {
   const orderNumberUpdate = await updatePipedriveDealField({
     dealId: 123,
     field: 'orderNumber',
-    expectedValue: 'HH-100',
+    expectedValue: 'HH-200',
     value: 'HH-101',
     confirmation: PIPEDRIVE_WRITE_CONFIRMATION,
   });

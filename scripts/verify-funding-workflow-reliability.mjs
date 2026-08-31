@@ -58,6 +58,7 @@ try {
   const pipedriveSource = await readFile(new URL('../local-mac-helper/chrome-pipedrive.mjs', import.meta.url), 'utf8');
   const backgroundSource = await readFile(new URL('../local-mac-helper/background-integrations.mjs', import.meta.url), 'utf8');
   const fundingScanSource = await readFile(new URL('../local-mac-helper/funding-scan.mjs', import.meta.url), 'utf8');
+  const cliSource = await readFile(new URL('../local-mac-helper/cli.mjs', import.meta.url), 'utf8');
   const macUiSource = await readFile(new URL('../local-mac-helper/macos-ui.mjs', import.meta.url), 'utf8');
   const macBridgeSource = await readFile(new URL('../local-mac-helper/macos/iva-ax.swift', import.meta.url), 'utf8');
   assert.match(codexTaskSource, /recoveryAttempts: Number\(previousState\.recoveryAttempts \|\| 0\)/,
@@ -76,6 +77,14 @@ try {
   assert.match(backgroundSource, /failedFiles\.push/,
     'eine einzelne nicht ladbare Pipedrive-Datei darf nicht mehr den ganzen Deal-Download verwerfen');
   assert.match(backgroundSource, /failedCount: failedFiles\.length/);
+  assert.match(backgroundSource, /export async function uploadPipedriveDealFiles/);
+  assert.match(backgroundSource, /export async function transitionPipedriveFundingStage/);
+  assert.match(backgroundSource, /export async function applyPipedriveFundingFieldUpdates/);
+  assert.match(cliSource, /listPipedriveDealsByStageName/);
+  assert.doesNotMatch(cliSource.match(/import \{[\s\S]*?\} from '\.\/chrome-pipedrive\.mjs';/)?.[0] || '', /downloadPipedriveDealFiles|uploadPipedriveDealFiles|transitionPipedriveFundingStage|markPipedriveFundingDealWon/,
+    'Pipedrive-Lesen, Dateiübertragung und Phasenstatus dürfen im CLI nicht mehr aus dem Chrome-Modul kommen');
+  assert.match(codexTaskSource, /list-pipedrive-stage "Montage terminieren"/);
+  assert.match(codexTaskSource, /keine Pipedrive-Browser-Tabs/);
   const fundingNoteSource = pipedriveSource.slice(
     pipedriveSource.indexOf('export async function createPipedriveFundingRequestNote'),
     pipedriveSource.indexOf('async function readPipedriveApiBatchAsync'),

@@ -462,7 +462,7 @@ const PROJECT_WORKFLOW_TASKS = Object.freeze({
   }),
   'montage-required-fields-morning': Object.freeze({
     title: 'Montage-Pflichtfelder manuell prüfen',
-    prompt: 'Führe den in AGENTS.md und in der Heat-Hero-Projektautomation „Montage-Pflichtfelder morgens prüfen“ beschriebenen Ablauf jetzt genau einmal aus. Prüfe alle offenen Deals in „Montage terminieren“: Telefonnummer und E-Mail gegen die TMB sowie die Anlage gegen das unterschriebene Angebot. Ergänze ausschließlich eindeutig belegte leere Felder, überschreibe keine bestehenden Widersprüche und verifiziere jeden Schreibschritt sichtbar. Melde unklare Fälle statt zu raten.',
+    prompt: 'Führe den in AGENTS.md und in der Heat-Hero-Projektautomation „Montage-Pflichtfelder morgens prüfen“ beschriebenen Ablauf jetzt genau einmal aus. Lies Pipedrive ausschließlich über die offiziellen IVA-Core-Hintergrundbefehle `node local-mac-helper/cli.mjs list-pipedrive-stage "Montage terminieren"`, `read-pipedrive-deal` und `download-pipedrive-files`; öffne, schließe oder lies dafür keine Pipedrive-Browser-Tabs. Prüfe alle offenen Deals in „Montage terminieren“: Telefonnummer und E-Mail gegen die TMB sowie die Anlage gegen das unterschriebene Angebot. Ergänze ausschließlich eindeutig belegte leere Felder über `apply-pipedrive-fields ... --commit`, überschreibe keine bestehenden Widersprüche und verifiziere jeden Schreibschritt über die API-Rücklesung. Melde unklare Fälle statt zu raten.',
     acceptanceCriteria: ['Nur eindeutig belegte leere Pflichtfelder werden ergänzt.', 'Bestehende Werte und Widersprüche werden nicht still überschrieben.', 'Ergebnis, Änderungen und manuelle Prüffälle werden protokolliert.'],
   }),
   'manufacturer-leads-wattfox': Object.freeze({
