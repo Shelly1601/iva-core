@@ -473,7 +473,8 @@ try {
   assert.match((await deviceCommandStatus(mutation.id)).error, /Keine automatische Wiederholung/);
 
   console.log('Device-Control: zentrales Laufzeitpaket und UI-Serialisierung prüfen …');
-  const { buildCentralRuntimeBundle, validateCentralRuntimeBundle, prepareCentralRuntime, activateCentralRuntime } = await import('../local-mac-helper/central-runtime.mjs');
+  const { CENTRAL_RUNTIME_VERSION, buildCentralRuntimeBundle, validateCentralRuntimeBundle, prepareCentralRuntime, activateCentralRuntime } = await import('../local-mac-helper/central-runtime.mjs');
+  assert.equal(CENTRAL_RUNTIME_VERSION, DEVICE_AGENT_RELEASE, 'Runtime-Bundle und Agent-Heartbeat müssen dieselbe Release-ID tragen');
   const bundle = await buildCentralRuntimeBundle(path.resolve(fileURLToPath(new URL('..', import.meta.url))));
   validateCentralRuntimeBundle(bundle);
   assert.ok(bundle.files.some(file => file.path === 'operations/customer-scheduling.js'));
