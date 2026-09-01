@@ -7,9 +7,53 @@ const dayAfter = date => new Date(Date.parse(date + 'T00:00:00Z') + 86400000).to
 // Executed only through the supported Browser tool's read-only DOM evaluator.
 // Deliberately excludes customer names, contact data, cookies and hidden app state.
 export function readPlanbarCapacityDom() {
+  const datedCells = Array.from(document.querySelectorAll('th.fc-timeline-slot-label[data-date]'));
+  const groupedRows = [];
+  const rowIndexes = new Map();
+  for (const cell of datedCells) {
+    const row = cell.closest?.('tr');
+    if (!row) continue;
+    let index = rowIndexes.get(row);
+    if (index === undefined) {
+      index = groupedRows.length;
+      rowIndexes.set(row, index);
+      groupedRows.push([]);
+    }
+    const rect = cell.getBoundingClientRect();
+    groupedRows[index].push({
+      date: cell.getAttribute('data-date'),
+      colspan: Number.parseInt(cell.getAttribute('colspan') || String(cell.colSpan || ''), 10),
+      left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+    });
+  }
+  const nextDate = date => new Date(Date.parse(date + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10);
+  const chronologicalLeafRows = groupedRows.filter(cells => cells.length >= 28 && cells.every((cell, index) => {
+    const previous = cells[index - 1];
+    return /^\d{4}-\d{2}-\d{2}$/.test(cell.date) && cell.colspan === 1
+      && Number.isFinite(cell.left) && Number.isFinite(cell.right) && cell.right - cell.left >= 5
+      && Number.isFinite(cell.top) && Number.isFinite(cell.bottom) && cell.bottom - cell.top >= 5
+      && (!previous || (nextDate(previous.date) === cell.date
+        && Math.abs(previous.right - cell.left) <= 2
+        && Math.abs(previous.top - cell.top) <= 2
+        && Math.abs(previous.bottom - cell.bottom) <= 2));
+  }));
+  const fullestCount = Math.max(0, ...chronologicalLeafRows.map(cells => cells.length));
+  const fullestRows = chronologicalLeafRows.filter(cells => cells.length === fullestCount);
+  if (fullestRows.length !== 1) throw new Error('Tageskopfzeile fehlt oder ist mehrdeutig.');
+  const selectedDays = fullestRows[0];
   return {
     url: location.href, ready: document.readyState, observedAt: new Date().toISOString(),
-    days: Array.from(document.querySelectorAll('th.fc-timeline-slot-label[data-date][colspan="1"]')).map(e => ({ date: e.getAttribute('data-date'), left: e.getBoundingClientRect().left, right: e.getBoundingClientRect().right })),
+    dayHeader: {
+      selectionRule: 'unique-fullest-chronological-tr-v1',
+      datedCellCount: datedCells.length,
+      candidateRowCount: groupedRows.length,
+      chronologicalLeafRowCount: chronologicalLeafRows.length,
+      fullestRowCellCount: fullestCount,
+      fullestRowTieCount: fullestRows.length,
+      selectedStartDate: selectedDays[0].date,
+      selectedEndDate: selectedDays.at(-1).date,
+    },
+    days: selectedDays.map(({ date, left, right }) => ({ date, left, right })),
     resources: Array.from(document.querySelectorAll('.fc-datagrid-body [data-resource-id]')).map(e => ({ id: e.getAttribute('data-resource-id'), name: e.textContent.replace(/\s+/g, ' ').trim() })),
     rows: Array.from(document.querySelectorAll('.fc-timeline-body [data-resource-id]')).map(e => ({ id: e.getAttribute('data-resource-id'),
       events: Array.from(e.querySelectorAll('.fc-timeline-event-harness, .fc-bg-event')).map(b => ({ left: b.getBoundingClientRect().left, right: b.getBoundingClientRect().right })) })),
@@ -18,7 +62,15 @@ export function readPlanbarCapacityDom() {
 
 export function normalizePlanbarDomWindow(input) {
   if (input?.url !== ORIGIN + '/resource/list' || input.ready !== 'complete') throw new Error('Keine vollständig geladene Planbar-Plantafel.');
-  const { days, resources, rows } = input;
+  const { dayHeader, days, resources, rows } = input;
+  if (dayHeader?.selectionRule !== 'unique-fullest-chronological-tr-v1'
+    || !Number.isInteger(dayHeader.datedCellCount) || dayHeader.datedCellCount < days?.length
+    || !Number.isInteger(dayHeader.candidateRowCount) || dayHeader.candidateRowCount < 1
+    || !Number.isInteger(dayHeader.chronologicalLeafRowCount) || dayHeader.chronologicalLeafRowCount < 1
+    || dayHeader.fullestRowTieCount !== 1 || dayHeader.fullestRowCellCount !== days?.length
+    || dayHeader.selectedStartDate !== days?.[0]?.date || dayHeader.selectedEndDate !== days?.at(-1)?.date) {
+    throw new Error('Tageskopfzeile fehlt oder ist mehrdeutig.');
+  }
   if (!Array.isArray(days) || days.length < 28 || !Array.isArray(resources) || !resources.length || !Array.isArray(rows) || rows.length !== resources.length) throw new Error('Kalender oder Ressourcen unvollständig.');
   const ids = new Set(resources.map(r => r.id));
   if (ids.size !== resources.length || rows.some(r => !ids.has(r.id)) || new Set(rows.map(r => r.id)).size !== ids.size) throw new Error('Ressourcenzuordnung mehrdeutig.');

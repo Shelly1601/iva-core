@@ -14,7 +14,7 @@ const { createPublicScheduling, validatePublicSchedulingInput, PUBLIC_SCHEDULING
 const { isoWeekRange, PLANBAR_CAPACITY_RULE_VERSION, mergePlanbarSchedulingProgress, planbarSchedulingKey } = await import('../operations/customer-scheduling.js');
 const { refreshPlanbarPage } = await import('../local-mac-helper/planbar.mjs');
 const tasks = await import('../local-mac-helper/codex-tasks.mjs');
-const { buildBrowserPlanbarCapacity, normalizePlanbarDomWindow } = await import('../local-mac-helper/planbar-browser-capacity.mjs');
+const { buildBrowserPlanbarCapacity, normalizePlanbarDomWindow, readPlanbarCapacityDom } = await import('../local-mac-helper/planbar-browser-capacity.mjs');
 let time = Date.parse('2026-08-28T09:00:00Z');
 const payload = { firstName: 'Fixture', lastName: 'Kunde', objectLocation: '12345 Testort', isoYear: 2026, week: 40, materialDeliverySpace: false, theftWeatherProtected: true, additionalInfo: '' };
 const capacity = { minimumBlockDays: 5, countingRuleVersion: PLANBAR_CAPACITY_RULE_VERSION, updatedAt: new Date(time).toISOString(), pageRefreshedAt: new Date(time).toISOString(), weeks: [{ isoYear: 2026, week: 40, freeSlots: 1 }, { isoYear: 2026, week: 41, freeSlots: 0 }] };
@@ -165,10 +165,62 @@ await assert.rejects(refreshPlanbarPage({login:async()=>{},wait:async()=>{},time
 // Browser fallback consumes only actual rendered geometry. Two independent
 // calendar passes must agree; missing/unstable data can never release a week.
 const observed=Date.parse('2026-08-28T09:01:00Z');
-const domWindow=(start)=>({url:'https://heathero-partner-a.planbar365.com/resource/list',ready:'complete',observedAt:new Date(observed).toISOString(),
-  days:Array.from({length:56},(_,i)=>({date:new Date(Date.parse(start)+i*86400000).toISOString().slice(0,10),left:i*40,right:(i+1)*40})),
-  resources:[{id:'team',name:'Fixture Team'},{id:'excluded',name:'Dawid Service'}],
-  rows:[{id:'team',events:[{left:0,right:40}]},{id:'excluded',events:[]}]});
+const fixtureDays=start=>Array.from({length:56},(_,i)=>({date:new Date(Date.parse(start)+i*86400000).toISOString().slice(0,10),left:i*40,right:(i+1)*40}));
+const domWindow=(start)=>{
+  const days=fixtureDays(start);
+  return {url:'https://heathero-partner-a.planbar365.com/resource/list',ready:'complete',observedAt:new Date(observed).toISOString(),
+    dayHeader:{selectionRule:'unique-fullest-chronological-tr-v1',datedCellCount:days.length,candidateRowCount:1,chronologicalLeafRowCount:1,
+      fullestRowCellCount:days.length,fullestRowTieCount:1,selectedStartDate:days[0].date,selectedEndDate:days.at(-1).date},
+    days,resources:[{id:'team',name:'Fixture Team'},{id:'excluded',name:'Dawid Service'}],
+    rows:[{id:'team',events:[{left:0,right:40}]},{id:'excluded',events:[]}]};
+};
+
+const browserDomFixture=({duplicateDayRow=false}={})=>{
+  const makeRow=(definitions,top)=>{
+    const row={};
+    return definitions.map(({date,left,right,colspan})=>({
+      colSpan:colspan, closest:selector=>selector==='tr'?row:null,
+      getAttribute:name=>name==='data-date'?date:name==='colspan'?String(colspan):null,
+      getBoundingClientRect:()=>({left,right,top,bottom:top+20}),
+    }));
+  };
+  const days=fixtureDays('2026-08-28');
+  // Real FullCalendar hierarchy: a month row may have a one-day boundary
+  // cell with the same data-date and colspan as a leaf day.
+  const month=makeRow([
+    {date:days[0].date,left:0,right:40,colspan:1},
+    {date:days[1].date,left:40,right:1280,colspan:31},
+    {date:days[32].date,left:1280,right:2240,colspan:24},
+  ],0);
+  const daily=makeRow(days.map(day=>({...day,colspan:1})),20);
+  const headers=duplicateDayRow?[...month,...daily,...makeRow(days.map(day=>({...day,colspan:1})),40)]:[...month,...daily];
+  const resources=[{id:'team',name:'Fixture Team'},{id:'excluded',name:'Dawid Service'}].map(item=>({
+    textContent:item.name,getAttribute:name=>name==='data-resource-id'?item.id:null,
+  }));
+  const rows=[{id:'team',events:[{left:0,right:40}]},{id:'excluded',events:[]}].map(item=>({
+    getAttribute:name=>name==='data-resource-id'?item.id:null,
+    querySelectorAll:()=>item.events.map(event=>({getBoundingClientRect:()=>event})),
+  }));
+  return {querySelectorAll:selector=>selector==='th.fc-timeline-slot-label[data-date]'?headers
+    :selector==='.fc-datagrid-body [data-resource-id]'?resources
+    :selector==='.fc-timeline-body [data-resource-id]'?rows:[],readyState:'complete'};
+};
+const originalDocument=Object.getOwnPropertyDescriptor(globalThis,'document');
+const originalLocation=Object.getOwnPropertyDescriptor(globalThis,'location');
+try {
+  Object.defineProperty(globalThis,'document',{configurable:true,value:browserDomFixture()});
+  Object.defineProperty(globalThis,'location',{configurable:true,value:{href:'https://heathero-partner-a.planbar365.com/resource/list'}});
+  const selected=readPlanbarCapacityDom();
+  assert.equal(selected.days.length,56,'Die vollständige tägliche Blattzeile der 8-Wochen-Ansicht wird gewählt');
+  assert.equal(selected.days[0].date,'2026-08-28');
+  assert.equal(selected.dayHeader.candidateRowCount,2);
+  assert.equal(selected.dayHeader.datedCellCount,59,'Der einspaltige Monatskopf bleibt als Kandidat belegt, aber nicht als Tag erfasst');
+  Object.defineProperty(globalThis,'document',{configurable:true,value:browserDomFixture({duplicateDayRow:true})});
+  assert.throws(()=>readPlanbarCapacityDom(),/mehrdeutig/,'Zwei gleich vollständige Tageszeilen bleiben fail-closed');
+} finally {
+  if(originalDocument)Object.defineProperty(globalThis,'document',originalDocument);else delete globalThis.document;
+  if(originalLocation)Object.defineProperty(globalThis,'location',originalLocation);else delete globalThis.location;
+}
 const domProof={refreshedAt:'2026-08-28T09:00:00Z',windows:[domWindow('2026-08-28'),domWindow('2026-10-23')]};
 domProof.repeatedWindows=structuredClone(domProof.windows).map(w=>({...w,observedAt:new Date(observed+10000).toISOString()}));
 const computed=buildBrowserPlanbarCapacity(domProof,{now:observed+20000});
@@ -177,6 +229,11 @@ assert(computed.weeks.every(w=>w.freeSlots<=1),'Ausgeschlossene Teams zählen ni
 for (const mutate of [p=>delete p.repeatedWindows,p=>p.repeatedWindows[0].rows[0].events.push({left:80,right:120}),p=>p.windows[0].rows.pop(),p=>p.windows[1].days[0].date='2026-10-24',p=>p.repeatedWindows[0].observedAt=p.windows[0].observedAt]) {
   const bad=structuredClone(domProof);mutate(bad);assert.throws(()=>buildBrowserPlanbarCapacity(bad,{now:observed+20000}));
 }
+const duplicateDays=domWindow('2026-08-28');duplicateDays.days.splice(1,0,{...duplicateDays.days[0]});duplicateDays.dayHeader.datedCellCount++;
+duplicateDays.dayHeader.fullestRowCellCount++;assert.throws(()=>normalizePlanbarDomWindow(duplicateDays),/Tagesraster/,'Doppelte Tagesköpfe werden nicht dedupliziert');
+const dateGap=domWindow('2026-08-28');dateGap.days[10].date='2026-09-08';assert.throws(()=>normalizePlanbarDomWindow(dateGap),/Tagesraster/,'Datumslücken bleiben gesperrt');
+const incompleteResources=domWindow('2026-08-28');incompleteResources.rows.pop();assert.throws(()=>normalizePlanbarDomWindow(incompleteResources),/unvollständig/,'Unvollständige Ressourcen bleiben gesperrt');
+const emptyLoadingView=domWindow('2026-08-28');emptyLoadingView.rows.forEach(row=>{row.events=[];});assert.throws(()=>normalizePlanbarDomWindow(emptyLoadingView),/leere Ladeansicht/,'Leere Ladeansichten bleiben gesperrt');
 const subpixel=domWindow('2026-08-28');subpixel.rows[0].events=[{left:39.7,right:80.1}];
 assert.equal(normalizePlanbarDomWindow(subpixel).bookings[0].startDate,'2026-08-28');
 assert.equal(normalizePlanbarDomWindow(subpixel).bookings[0].endDateExclusive,'2026-08-31','Unklare Pixelkante wird belegt gezählt, nie frei gerundet');
