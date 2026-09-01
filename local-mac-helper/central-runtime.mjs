@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 
 const execAsync = promisify(execFile);
-export const CENTRAL_RUNTIME_VERSION = 'imac-central-v8';
+export const CENTRAL_RUNTIME_VERSION = 'imac-central-v6';
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 const allowedPath = value => /^local-mac-helper\/[a-z0-9-]+\.mjs$/.test(value)
   || /^local-mac-helper\/macos\/[a-z0-9-]+\.swift$/.test(value)

@@ -380,6 +380,8 @@ try {
   assert.match(codexTaskSource, /request\.mode === 'operational'/);
   assert.match(codexTaskSource, /materializeIcloudWorkspace/);
   assert.doesNotMatch(codexTaskSource, /'--sandbox'[^\n]+?'--approve-for-me'/, 'Codex CLI erlaubt --sandbox nicht zusammen mit --approve-for-me');
+  const centralInstallerSource = await readFile(new URL('../local-mac-helper/install-central-runtime.mjs', import.meta.url), 'utf8');
+  assert.match(centralInstallerSource, /requiredRelease: DEVICE_AGENT_RELEASE/, 'Bundle-Schema und Agent-Release-ID bleiben getrennt');
   assert.equal(inferProjectWorkflowStatus('Status: **fachlich blockiert**.\n\nGrund: Pflichtdaten fehlen.'), 'blocked');
   assert.equal(inferProjectWorkflowStatus('Status: technisch blockiert\nKeine Schreibaktion.'), 'blocked');
   assert.equal(inferProjectWorkflowStatus('Ergebnis: technisch blockiert\nKeine Schreibaktion.'), 'blocked');
@@ -473,8 +475,7 @@ try {
   assert.match((await deviceCommandStatus(mutation.id)).error, /Keine automatische Wiederholung/);
 
   console.log('Device-Control: zentrales Laufzeitpaket und UI-Serialisierung prüfen …');
-  const { CENTRAL_RUNTIME_VERSION, buildCentralRuntimeBundle, validateCentralRuntimeBundle, prepareCentralRuntime, activateCentralRuntime } = await import('../local-mac-helper/central-runtime.mjs');
-  assert.equal(CENTRAL_RUNTIME_VERSION, DEVICE_AGENT_RELEASE, 'Runtime-Bundle und Agent-Heartbeat müssen dieselbe Release-ID tragen');
+  const { buildCentralRuntimeBundle, validateCentralRuntimeBundle, prepareCentralRuntime, activateCentralRuntime } = await import('../local-mac-helper/central-runtime.mjs');
   const bundle = await buildCentralRuntimeBundle(path.resolve(fileURLToPath(new URL('..', import.meta.url))));
   validateCentralRuntimeBundle(bundle);
   assert.ok(bundle.files.some(file => file.path === 'operations/customer-scheduling.js'));

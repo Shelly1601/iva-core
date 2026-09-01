@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { activateCentralRuntime, centralRuntimeRoot, prepareCentralRuntime } from './central-runtime.mjs';
-import { assertImacExecutionHost, fetchCentralRuntimeBundle, fetchImacDeviceAgentStatus } from './device-agent.mjs';
+import { assertImacExecutionHost, DEVICE_AGENT_RELEASE, fetchCentralRuntimeBundle, fetchImacDeviceAgentStatus } from './device-agent.mjs';
 import { buildImacDeviceAgentLaunchAgent, imacDeviceAgentPlistFile, verifyImacDeviceAgentConnection } from './device-agent-launchd.mjs';
 
 const exec = promisify(execFile);
@@ -28,7 +28,7 @@ export async function installCentralRuntime() {
     await exec('/usr/bin/plutil', ['-lint', plist]);
     await exec('/bin/launchctl', ['bootout', domain, plist]).catch(() => {});
     await exec('/bin/launchctl', ['bootstrap', domain, plist]);
-    return await verifyImacDeviceAgentConnection({ baselineLastSeenAt: baseline.lastSeenAt, requiredRelease: bundle.version });
+    return await verifyImacDeviceAgentConnection({ baselineLastSeenAt: baseline.lastSeenAt, requiredRelease: DEVICE_AGENT_RELEASE });
   } catch (error) {
     await exec('/bin/launchctl', ['bootout', domain, plist]).catch(() => {});
     await writeFile(plist, previous, { mode: 0o600 });
