@@ -173,9 +173,13 @@ export function normalizePlanbarCapacitySnapshot(input = {}) {
   }
   const weeks = [...byWeek.values()].sort((left, right) => left.isoYear - right.isoYear || left.week - right.week);
   const parsedUpdatedAt = new Date(input.updatedAt || Date.now());
+  const refreshMode = ['direct-live-read', 'page-reload-fallback', 'browser-page-reload'].includes(input.refreshMode)
+    ? input.refreshMode : null;
   return {
     updatedAt: Number.isNaN(parsedUpdatedAt.getTime()) ? new Date().toISOString() : parsedUpdatedAt.toISOString(),
+    sourceCheckedAt: Number.isFinite(Date.parse(input.sourceCheckedAt)) ? new Date(input.sourceCheckedAt).toISOString() : null,
     pageRefreshedAt: Number.isFinite(Date.parse(input.pageRefreshedAt)) ? new Date(input.pageRefreshedAt).toISOString() : null,
+    refreshMode,
     source: 'Planbar · vollständig freie Ressourcen von Montag bis Freitag',
     excludedResources: ['Dawid Service', 'Antonio Lausic'],
     minimumBlockDays: PLANBAR_MINIMUM_BLOCK_DAYS,

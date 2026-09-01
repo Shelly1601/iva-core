@@ -3,9 +3,9 @@ import { isoWeekRange, PLANBAR_CAPACITY_RULE_VERSION } from '../operations/custo
 import { addCustomerSchedulingRequest, getProject } from '../projects/store.js';
 import { deviceAgentStatus, enqueueDeviceCommand, listDeviceCommands } from '../device-control/store.js';
 import { listAgentRuns } from '../operations/store.js';
-import { buildPlanbarCapacityReadTask, PLANBAR_CAPACITY_TASK_TITLE } from '../local-mac-helper/planbar-browser-capacity.mjs';
+import { PLANBAR_CAPACITY_TASK_TITLE } from '../local-mac-helper/planbar-browser-capacity.mjs';
 
-export const PUBLIC_SCHEDULING_RELEASE = 'imac-central-v7';
+export const PUBLIC_SCHEDULING_RELEASE = 'imac-central-v8';
 export const PUBLIC_SCHEDULING_PATH = '/heat-hero/termin';
 export const PUBLIC_SCHEDULING_API = '/heat-hero-termin-api';
 const MAX_AGE = 5 * 60_000;
@@ -14,6 +14,7 @@ const REFRESH_ATTEMPT_MAX_AGE = 20 * 60_000;
 // this longer display window in the actual Planbar reservation/receipt gate.
 export const PUBLIC_SCHEDULING_PREVIEW_MAX_AGE = 24 * 60 * 60_000;
 const TOKEN_AGE = 2 * 60 * 60_000;
+const DIRECT_REFRESH_MODES = new Set(['direct-live-read', 'page-reload-fallback']);
 const ACK = {
   accepted: true,
   nextUrl: '/heat-hero/termin/anfrage-erhalten',
@@ -92,13 +93,19 @@ export function createPublicScheduling({
       throw failure('Die Terminprüfung ist gerade nicht erreichbar. Bitte versuchen Sie es in Kürze erneut.', 503);
     }
   }
+  function verifiedSourceTime(snapshot) {
+    const sourceCheckedAt = Date.parse(snapshot?.sourceCheckedAt || '');
+    if (DIRECT_REFRESH_MODES.has(snapshot?.refreshMode) && Number.isFinite(sourceCheckedAt)) return sourceCheckedAt;
+    const pageRefreshedAt = Date.parse(snapshot?.pageRefreshedAt || '');
+    return Number.isFinite(pageRefreshedAt) ? pageRefreshedAt : 0;
+  }
   function snapshotResult(snapshot) {
-    const refreshed = Date.parse(snapshot?.pageRefreshedAt || '');
+    const verifiedAt = verifiedSourceTime(snapshot);
     const observed = Date.parse(snapshot?.updatedAt || '');
-    if (!Number.isFinite(refreshed) || !Number.isFinite(observed) || observed < refreshed
-      || observed > now() + 60_000 || refreshed > now() + 60_000
+    if (!verifiedAt || !Number.isFinite(observed) || observed < verifiedAt
+      || observed > now() + 60_000 || verifiedAt > now() + 60_000
       || snapshot.minimumBlockDays !== 5 || snapshot.countingRuleVersion !== PLANBAR_CAPACITY_RULE_VERSION
-      || now() - refreshed > PUBLIC_SCHEDULING_PREVIEW_MAX_AGE) return null;
+      || now() - verifiedAt > PUBLIC_SCHEDULING_PREVIEW_MAX_AGE) return null;
     const weeks = (snapshot.weeks || []).filter(item => {
       try { return Number.isInteger(item.freeSlots) && item.freeSlots > 0 && item.freeSlots <= 500
         && Date.parse(isoWeekRange(item.isoYear, item.week).startDate) > now(); }
@@ -109,23 +116,23 @@ export function createPublicScheduling({
       endDate.setUTCDate(endDate.getUTCDate() - 1);
       return { isoYear, week, startDate: range.startDate, endDate: endDate.toISOString().slice(0, 10), availableBlocks: freeSlots };
     });
-    const fresh = now() - refreshed <= MAX_AGE;
-    return { status: fresh ? 'ready' : 'preview', weeks, updatedAt: snapshot.updatedAt,
-      expiresAt: new Date(refreshed + MAX_AGE).toISOString(),
-      requestExpiresAt: new Date(refreshed + PUBLIC_SCHEDULING_PREVIEW_MAX_AGE).toISOString(),
+    const fresh = now() - verifiedAt <= MAX_AGE;
+    return { status: fresh ? 'ready' : 'preview', weeks, updatedAt: new Date(verifiedAt).toISOString(),
+      expiresAt: new Date(verifiedAt + MAX_AGE).toISOString(),
+      requestExpiresAt: new Date(verifiedAt + PUBLIC_SCHEDULING_PREVIEW_MAX_AGE).toISOString(),
       refreshing: false };
   }
   function snapshotTimes(snapshot) {
-    const refreshedAt = Date.parse(snapshot?.pageRefreshedAt || '');
+    const verifiedAt = verifiedSourceTime(snapshot);
     const updatedAt = Date.parse(snapshot?.updatedAt || '');
-    return { refreshedAt: Number.isFinite(refreshedAt) ? refreshedAt : 0, updatedAt: Number.isFinite(updatedAt) ? updatedAt : 0 };
+    return { verifiedAt, updatedAt: Number.isFinite(updatedAt) ? updatedAt : 0 };
   }
   function pruneRefreshAttempts() {
     for (const [nonce, attempt] of refreshAttempts) if (now() - attempt.startedAt > REFRESH_ATTEMPT_MAX_AGE) refreshAttempts.delete(nonce);
   }
   function hasNewSnapshot(snapshot, attempt) {
     const times = snapshotTimes(snapshot);
-    return snapshotResult(snapshot) && times.refreshedAt > attempt.baselineRefreshedAt
+    return snapshotResult(snapshot) && times.verifiedAt > attempt.baselineVerifiedAt
       && times.updatedAt > attempt.baselineUpdatedAt;
   }
   function previewResult(snapshot, phase = 'queued') {
@@ -188,7 +195,7 @@ export function createPublicScheduling({
   async function refresh(formToken, { force = false } = {}) {
     const token = verifyToken(formToken);
     return transaction(async () => {
-      // Fast path: don't wait for the Mac, its queue or a new browser worker
+      // Fast path: don't wait for the Mac or its queue
       // when a fully checked, still-fresh snapshot already exists.
       const rawSnapshot = (await project())?.planbarCapacity;
       const snapshot = snapshotResult(rawSnapshot);
@@ -198,10 +205,10 @@ export function createPublicScheduling({
       let command = existing;
       if (!command) {
         rateLimit('refresh:global', 8, 60_000);
-        command = await enqueue({ action: 'codex.task.start', payload: buildPlanbarCapacityReadTask(), requestedBy: 'heat-hero-public-availability', requestText: 'Montagewochen für den Heat-Hero-Terminlink aktuell prüfen' });
+        command = await enqueue({ action: 'planbar.search.refresh', requestedBy: 'heat-hero-public-availability', requestText: 'Montagewochen für den Heat-Hero-Terminlink aktuell prüfen' });
       }
       const baseline = snapshotTimes(rawSnapshot);
-      refreshAttempts.set(token.nonce, { startedAt: now(), baselineRefreshedAt: baseline.refreshedAt,
+      refreshAttempts.set(token.nonce, { startedAt: now(), baselineVerifiedAt: baseline.verifiedAt,
         baselineUpdatedAt: baseline.updatedAt, commandId: command?.id });
       return previewResult(rawSnapshot, command?.status === 'running' ? 'checking' : 'queued');
     });

@@ -285,6 +285,13 @@ export async function enqueueDeviceCommand({ deviceId = IVA_IMAC_DEVICE_ID, acti
         && item.payload?.requestId === normalizedPayload.requestId);
       if (existing) return { ...existing };
     }
+    if (actionName === 'planbar.search.refresh') {
+      const existing = store.commands.find(item => item.deviceId === device
+        && item.action === actionName
+        && ['queued', 'running'].includes(item.status)
+        && Date.parse(item.expiresAt) > now.getTime());
+      if (existing) return { ...existing };
+    }
     if (actionName === 'planbar.customer.schedule' || actionName === 'project.workflow.run') {
       // Eine Outbox-Wiederholung nach einem Serverabbruch muss auch einen schon
       // abgeschlossenen Auftrag wiederfinden, nicht erneut ausführen.

@@ -119,7 +119,8 @@ export function buildBrowserPlanbarCapacity({ refreshedAt, windows, repeatedWind
     weeks.push({ isoYear, week, freeSlots: countPlanbarFreeWorkweekCapacity({ resources:first.resources, bookings, year:isoYear, week }) });
   }
   if (weeks.length < 12) throw new Error('Weniger als zwölf vollständig geprüfte zukünftige Kalenderwochen.');
-  return { updatedAt: new Date(now).toISOString(), pageRefreshedAt: refreshedAt,
+  return { updatedAt: new Date(now).toISOString(), sourceCheckedAt: null, pageRefreshedAt: refreshedAt,
+    refreshMode:'browser-page-reload',
     minimumBlockDays:5, countingRuleVersion:PLANBAR_CAPACITY_RULE_VERSION,
     excludedResources:['Dawid Service','Antonio Lausic'], weeks:weeks.slice(0,12) };
 }

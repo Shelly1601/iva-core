@@ -228,7 +228,9 @@ export function buildPlanbarCapacitySnapshot(index, { weekCount = 12 } = {}) {
   }
   return {
     updatedAt: index.updatedAt || new Date().toISOString(),
+    sourceCheckedAt: index.sourceCheckedAt || null,
     pageRefreshedAt: index.pageRefreshedAt || null,
+    refreshMode: index.refreshMode || null,
     minimumBlockDays: PLANBAR_MINIMUM_BLOCK_DAYS,
     countingRuleVersion: PLANBAR_CAPACITY_RULE_VERSION,
     excludedResources: ['Dawid Service', 'Antonio Lausic'],

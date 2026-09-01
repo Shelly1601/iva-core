@@ -12,7 +12,7 @@ import { cleanupExpiredDewarmteLocalData, storeDewarmteLocalSupplement } from '.
 const execFileAsync = promisify(execFile);
 export const IMAC_DEVICE_ID = 'imac-nadine';
 export const DEVICE_AGENT_PROTOCOL_VERSION = 2;
-export const DEVICE_AGENT_RELEASE = 'imac-central-v7';
+export const DEVICE_AGENT_RELEASE = 'imac-central-v8';
 const RUNTIME_REVISION = (() => { try { return JSON.parse(readFileSync(new URL('../release.json', import.meta.url), 'utf8')).revision || ''; } catch { return ''; } })();
 const KEYCHAIN_SERVICE = 'de.iva.device-agent';
 const KEYCHAIN_ACCOUNT = IMAC_DEVICE_ID;
@@ -260,8 +260,10 @@ export async function collectFreshPlanbarSearchSnapshot({ collect, refresh } = {
   const reloadPlanbar = refresh || planbar.refreshPlanbarPage;
   let directError;
   try {
+    const live = await readLiveIndex({ timeoutMs: 30_000 });
     return {
-      ...await readLiveIndex({ timeoutMs: 30_000 }),
+      ...live,
+      sourceCheckedAt: live.updatedAt,
       pageRefreshedAt: null,
       refreshMode: 'direct-live-read',
     };
@@ -270,8 +272,10 @@ export async function collectFreshPlanbarSearchSnapshot({ collect, refresh } = {
   }
   try {
     const page = await reloadPlanbar();
+    const live = await readLiveIndex({ timeoutMs: 60_000 });
     return {
-      ...await readLiveIndex({ timeoutMs: 60_000 }),
+      ...live,
+      sourceCheckedAt: live.updatedAt,
       pageRefreshedAt: page?.refreshedAt || null,
       refreshMode: 'page-reload-fallback',
     };
@@ -389,6 +393,7 @@ async function executeDeviceCommand(command) {
       rangeEndExclusive: stored.rangeEndExclusive,
       capacityWeeks: storedCapacity.planbarCapacity?.weeks || capacity.weeks,
       minimumCapacityBlockDays: capacity.minimumBlockDays,
+      sourceCheckedAt: capacity.sourceCheckedAt,
       refreshMode: snapshot.refreshMode,
       readOnly: true,
     };

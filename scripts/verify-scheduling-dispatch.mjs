@@ -210,9 +210,13 @@ const wakeOptions = {
   displaySleepOptions: { now: new Date(2026, 7, 30, 23, 30), platform: 'darwin' },
   onCleanupWarning: warning => warnings.push(warning),
 };
+const inheritedWakeGuard = process.env.IVA_MAC_WAKE_GUARD_ACTIVE;
+delete process.env.IVA_MAC_WAKE_GUARD_ACTIVE;
 assert.deepEqual(await withMacWakeGuard(async () => ({ jobId: 'kept' }), wakeOptions), { jobId: 'kept' });
 const primaryError = new Error('Ursprünglicher Workflowfehler');
 await assert.rejects(withMacWakeGuard(async () => { throw primaryError; }, wakeOptions), error => error === primaryError);
+if (inheritedWakeGuard === undefined) delete process.env.IVA_MAC_WAKE_GUARD_ACTIVE;
+else process.env.IVA_MAC_WAKE_GUARD_ACTIVE = inheritedWakeGuard;
 assert.equal(warnings.length, 2);
 
 // /current ist ein Symlink. Der CLI-Einstieg muss ausgeführt werden, nicht Exit 0 ohne Wirkung.

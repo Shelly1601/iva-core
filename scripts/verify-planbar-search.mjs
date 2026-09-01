@@ -59,6 +59,8 @@ const direct = await collectFreshPlanbarSearchSnapshot({
   refresh: async () => { reloads += 1; return { refreshedAt: 'never' }; },
 });
 assert.equal(direct.refreshMode, 'direct-live-read');
+assert.equal(direct.sourceCheckedAt, '2026-08-29T12:00:00.000Z');
+assert.equal(direct.pageRefreshedAt, null, 'Ein direkter Quellcheck behauptet keinen Seitenreload');
 assert.equal(reloads, 0, 'die Live-Lesung wartet nicht unnötig auf einen Planbar-Seitenreload');
 
 let reads = 0;
@@ -71,6 +73,7 @@ const fallback = await collectFreshPlanbarSearchSnapshot({
   refresh: async () => { reloads += 1; return { refreshedAt: '2026-08-29T12:00:30.000Z' }; },
 });
 assert.equal(fallback.refreshMode, 'page-reload-fallback');
+assert.equal(fallback.sourceCheckedAt, '2026-08-29T12:01:00.000Z');
 assert.equal(fallback.pageRefreshedAt, '2026-08-29T12:00:30.000Z');
 assert.equal(reads, 2);
 

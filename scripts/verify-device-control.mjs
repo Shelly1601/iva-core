@@ -126,6 +126,8 @@ try {
   const planbarCommand = await enqueueDeviceCommand({ action: 'planbar.search.refresh', requestedBy: 'test' });
   assert.equal(planbarCommand.action, 'planbar.search.refresh');
   assert.deepEqual(planbarCommand.payload, {});
+  const duplicatePlanbarCommand = await enqueueDeviceCommand({ action: 'planbar.search.refresh', requestedBy: 'second-visitor' });
+  assert.equal(duplicatePlanbarCommand.id, planbarCommand.id, 'parallele direkte Planbar-Reads teilen denselben queued/running Command');
   const busyPlanbarClaim = await claimNextDeviceCommand(IVA_IMAC_DEVICE_ID, { ...imacMetadata, uiBusy: true });
   assert.equal(busyPlanbarClaim.id, planbarCommand.id, 'die reine Planbar-Live-Lesung darf trotz belegter UI sofort laufen');
   await completeDeviceCommand({

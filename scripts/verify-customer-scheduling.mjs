@@ -155,6 +155,8 @@ assert.equal(countPlanbarFreeWorkweekCapacity({
 const { buildPlanbarCapacitySnapshot } = await import('../local-mac-helper/planbar.mjs');
 const measuredCapacity = buildPlanbarCapacitySnapshot({
   updatedAt: '2026-08-26T08:00:00.000Z',
+  sourceCheckedAt: '2026-08-26T08:00:00.000Z',
+  refreshMode: 'direct-live-read',
   rangeStart: '2026-08-24',
   resources,
   enterBlockers: [
@@ -167,6 +169,12 @@ const measuredCapacity = buildPlanbarCapacitySnapshot({
 assert.equal(measuredCapacity.weeks.length, 12);
 assert.deepEqual(measuredCapacity.weeks.find(item => item.week === 37), { isoYear: 2026, week: 37, freeSlots: 0 });
 assert.equal(measuredCapacity.minimumBlockDays, 5);
+assert.equal(measuredCapacity.sourceCheckedAt, '2026-08-26T08:00:00.000Z');
+assert.equal(measuredCapacity.pageRefreshedAt, null);
+assert.equal(measuredCapacity.refreshMode, 'direct-live-read');
+const normalizedDirectCapacity=normalizePlanbarCapacitySnapshot(measuredCapacity);
+assert.equal(normalizedDirectCapacity.sourceCheckedAt,measuredCapacity.sourceCheckedAt);
+assert.equal(normalizedDirectCapacity.refreshMode,'direct-live-read');
 const bookings = [
   { resourceId: '1439', startDate: '2026-09-21', endDateExclusive: '2026-09-26' },
   { resourceId: '1490', startDate: '2026-09-24', endDateExclusive: '2026-09-25' },

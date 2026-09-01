@@ -30,9 +30,15 @@ assert.deepEqual(availability.weeks[0], { isoYear: 2026, week: 40, startDate: '2
 assert.equal(availability.expiresAt,new Date(time+5*60000).toISOString());
 assert.equal(JSON.stringify(availability).includes('customerName'), false);
 assert.equal(JSON.stringify(availability).includes('freeSlots'), false);
-for (const forbidden of ['resources','bookings','jobs','customerId','appointmentId','resourceName','excludedResources','countingRuleVersion','pageRefreshedAt']) {
+for (const forbidden of ['resources','bookings','jobs','customerId','appointmentId','resourceName','excludedResources','countingRuleVersion','pageRefreshedAt','sourceCheckedAt','refreshMode','commandId']) {
   assert.equal(JSON.stringify(availability).includes(forbidden),false,`Öffentliches DTO enthält kein internes Feld ${forbidden}`);
 }
+const directCapacity={...capacity,updatedAt:new Date(time).toISOString(),sourceCheckedAt:new Date(time).toISOString(),pageRefreshedAt:null,refreshMode:'direct-live-read'};
+const directReady=createPublicScheduling({now:()=>time,project:async()=>({planbarCapacity:directCapacity,customerSchedulingRequests:[]}),
+  addRequest:async()=>({stored:true}),commands:async()=>[],runs:async()=>[]});
+const directToken=directReady.issueToken();
+assert.equal((await directReady.availability(directToken)).status,'ready','Ein bestätigter direkter Tooltip-Abruf ist ein frischer Live-Quellcheck');
+assert.equal((await directReady.submit(payload,directToken)).accepted,true,'Ein frischer direkter Live-Snapshot ist absendbar');
 assert.equal(validatePublicSchedulingInput(payload, time).materialDeliverySpace, false, 'Nein ist eine gültige Pflichtantwort');
 for (const patch of [{firstName:''},{lastName:''},{objectLocation:''},{materialDeliverySpace:undefined},{theftWeatherProtected:'false'},{week:53,isoYear:2025},{week:1},{website:'spam'},{firstName:'a\ncommand'},{additionalInfo:'a'.repeat(2001)}]) {
   assert.throws(() => validatePublicSchedulingInput({...payload,...patch}, time));
@@ -77,6 +83,8 @@ const coalesced=[];
 const refreshing = createPublicScheduling({now:()=>time, project:current, agentStatus:async()=>({online:true,dispatchReady:true,release:PUBLIC_SCHEDULING_RELEASE}),commands:async()=>coalesced,enqueue:async value=>{refreshes++;coalesced.push({...value,status:'queued',expiresAt:new Date(time+60000).toISOString()});return {id:'fixture'};}});
 await Promise.all(Array.from({length:6},()=>refreshing.refresh(refreshing.issueToken())));
 assert.equal(refreshes,1,'Mehrere Besucher erzeugen nur eine parallele Planbar-Aktualisierung');
+assert.equal(coalesced[0].action,'planbar.search.refresh','Öffentliche Force-Refreshes erzeugen ausschließlich den direkten Lesebefehl');
+assert.deepEqual(coalesced[0].payload,undefined,'Der direkte Read benötigt keinen Browser-Worker-Prompt');
 assert.equal((await refreshing.availability(refreshing.issueToken())).phase,'queued','Wartender iMac wird als Warteschlange gemeldet');
 coalesced[0].status='running';
 assert.equal((await refreshing.availability(refreshing.issueToken())).phase,'checking','Laufende Planbar-Prüfung wird getrennt gemeldet');
@@ -89,8 +97,9 @@ assert.equal(unavailable.refreshing,false,'Fehlgeschlagene Prüfung endet statt 
 assert(!JSON.stringify(unavailable).includes('private customer'),'Interne Fehler bleiben privat');
 await refreshing.refresh(refreshing.issueToken());
 assert.equal(refreshes,2,'Nur explizite erneute Leseprüfung erzeugt einen neuen Auftrag');
-const handedOff=coalesced.at(-1);
-handedOff.status='completed'; handedOff.result={jobId:'capacity-fixture'};
+const handedOff={id:'legacy-browser-command',action:'codex.task.start',requestedBy:'heat-hero-public-availability',
+  payload:{title:'Heat Hero: Planbar-Kapazität lesend prüfen'},status:'completed',result:{jobId:'capacity-fixture'},
+  createdAt:new Date(time).toISOString(),expiresAt:new Date(time+60000).toISOString()};
 coalesced.splice(0,coalesced.length,handedOff);
 const capacityRuns=[];
 const workerAware=createPublicScheduling({now:()=>time,project:current,commands:async()=>coalesced,runs:async()=>capacityRuns});
@@ -110,35 +119,36 @@ await assert.rejects(oldAgent.refresh(oldAgent.issueToken()),/nicht erreichbar/)
 
 // A completed queue/job is not a result. The same visitor only succeeds after
 // the attested browser read has published a strictly newer verified snapshot.
-let proofCapacity={...capacity,pageRefreshedAt:new Date(time-60000).toISOString(),updatedAt:new Date(time-30000).toISOString()};
-const proofCommand={id:'proof-command',action:'codex.task.start',requestedBy:'heat-hero-public-availability',payload:{title:'Heat Hero: Planbar-Kapazität lesend prüfen'},status:'queued',createdAt:new Date(time).toISOString(),expiresAt:new Date(time+60000).toISOString()};
+let proofCapacity={...capacity,sourceCheckedAt:new Date(time-60000).toISOString(),pageRefreshedAt:null,refreshMode:'direct-live-read',updatedAt:new Date(time-30000).toISOString()};
+const proofCommand={id:'proof-command',action:'planbar.search.refresh',requestedBy:'heat-hero-public-availability',payload:{},status:'queued',createdAt:new Date(time).toISOString(),expiresAt:new Date(time+60000).toISOString()};
 const proofRuns=[];
 const proofService=createPublicScheduling({now:()=>time,project:async()=>({planbarCapacity:proofCapacity}),commands:async()=>[proofCommand],runs:async()=>proofRuns,
   agentStatus:async()=>({online:true,dispatchReady:true,release:PUBLIC_SCHEDULING_RELEASE})});
 const proofToken=proofService.issueToken();
 assert.equal((await proofService.refresh(proofToken,{force:true})).status,'preview');
-proofCommand.status='completed';proofCommand.result={jobId:'proof-job'};proofRuns.push({jobId:'proof-job',status:'completed'});
-assert.equal((await proofService.availability(proofToken)).status,'error','Jobende ohne aktualisierten Snapshot ist kein Verfügbarkeitsergebnis');
-proofCommand.status='queued';proofCommand.result=undefined;proofRuns.length=0;
+proofCommand.status='completed';proofCommand.result={refreshMode:'direct-live-read'};
+assert.equal((await proofService.availability(proofToken)).status,'error','Command-Ende ohne strikt neueren Snapshot ist kein Verfügbarkeitsergebnis');
+proofCommand.status='queued';proofCommand.result=undefined;
 const secondProofToken=proofService.issueToken();await proofService.refresh(secondProofToken,{force:true});
-proofCapacity={...capacity,pageRefreshedAt:new Date(time+1000).toISOString(),updatedAt:new Date(time+2000).toISOString(),weeks:[{isoYear:2026,week:40,freeSlots:3}]};
+proofCapacity={...capacity,sourceCheckedAt:new Date(time+1000).toISOString(),pageRefreshedAt:null,refreshMode:'direct-live-read',updatedAt:new Date(time+2000).toISOString(),weeks:[{isoYear:2026,week:40,freeSlots:3}]};
 const proven=await proofService.availability(secondProofToken);
 assert.equal(proven.status,'ready');assert.equal(proven.refreshState,'completed');assert.equal(proven.weeks[0].availableBlocks,3);
 
 // A later visitor may join a globally deduplicated browser job whose verified
 // page reload already predates that visitor. A valid snapshot that is strictly
 // newer than this visitor's baseline still proves the shared refresh result.
-let sharedCapacity={...capacity,pageRefreshedAt:new Date(time-120000).toISOString(),updatedAt:new Date(time-90000).toISOString()};
-const sharedCommand={id:'shared-command',action:'codex.task.start',requestedBy:'heat-hero-public-availability',payload:{title:'Heat Hero: Planbar-Kapazität lesend prüfen'},status:'completed',result:{jobId:'shared-job'},createdAt:new Date(time-60000).toISOString(),expiresAt:new Date(time+60000).toISOString()};
-const sharedRun={jobId:'shared-job',status:'running'};
-const sharedService=createPublicScheduling({now:()=>time,project:async()=>({planbarCapacity:sharedCapacity}),commands:async()=>[sharedCommand],runs:async()=>[sharedRun],
+let sharedCapacity={...capacity,sourceCheckedAt:new Date(time-120000).toISOString(),pageRefreshedAt:null,refreshMode:'direct-live-read',updatedAt:new Date(time-90000).toISOString()};
+const sharedCommand={id:'shared-command',action:'planbar.search.refresh',requestedBy:'heat-hero-public-availability',payload:{},status:'running',createdAt:new Date(time-60000).toISOString(),expiresAt:new Date(time+60000).toISOString()};
+const sharedService=createPublicScheduling({now:()=>time,project:async()=>({planbarCapacity:sharedCapacity}),commands:async()=>[sharedCommand],runs:async()=>[],
   agentStatus:async()=>({online:true,dispatchReady:true,release:PUBLIC_SCHEDULING_RELEASE}),enqueue:async()=>{throw new Error('Der bestehende globale Auftrag muss übernommen werden');}});
-const sharedToken=sharedService.issueToken();
-assert.equal((await sharedService.refresh(sharedToken,{force:true})).phase,'checking','Später Besucher übernimmt den bereits laufenden globalen Auftrag');
-sharedCapacity={...capacity,pageRefreshedAt:new Date(time-20000).toISOString(),updatedAt:new Date(time-10000).toISOString(),weeks:[{isoYear:2026,week:40,freeSlots:4}]};
-sharedRun.status='completed';
-const sharedResult=await sharedService.availability(sharedToken);
+const sharedToken=sharedService.issueToken(), sharedTokenTwo=sharedService.issueToken();
+assert.equal((await sharedService.refresh(sharedToken,{force:true})).phase,'checking','Der erste Besucher übernimmt den bereits laufenden direkten Auftrag');
+assert.equal((await sharedService.refresh(sharedTokenTwo,{force:true})).phase,'checking','Der zweite Besucher teilt denselben direkten Auftrag');
+sharedCapacity={...capacity,sourceCheckedAt:new Date(time-20000).toISOString(),pageRefreshedAt:null,refreshMode:'direct-live-read',updatedAt:new Date(time-10000).toISOString(),weeks:[{isoYear:2026,week:40,freeSlots:4}]};
+sharedCommand.status='completed';
+const [sharedResult,sharedResultTwo]=await Promise.all([sharedService.availability(sharedToken),sharedService.availability(sharedTokenTwo)]);
 assert.equal(sharedResult.status,'ready');assert.equal(sharedResult.refreshState,'completed');assert.equal(sharedResult.weeks[0].availableBlocks,4);
+assert.deepEqual(sharedResultTwo,sharedResult,'Beide Besucher akzeptieren denselben gegenüber ihrer Baseline strikt neuen Snapshot');
 time += 3*3600_000;
 assert.throws(()=>service.verifyToken(token),/abgelaufen/);
 
@@ -225,6 +235,7 @@ const domProof={refreshedAt:'2026-08-28T09:00:00Z',windows:[domWindow('2026-08-2
 domProof.repeatedWindows=structuredClone(domProof.windows).map(w=>({...w,observedAt:new Date(observed+10000).toISOString()}));
 const computed=buildBrowserPlanbarCapacity(domProof,{now:observed+20000});
 assert.equal(computed.weeks.length,12);
+assert.equal(computed.refreshMode,'browser-page-reload','Alte Browser-Snapshots behalten einen ehrlichen Reload-Nachweis');
 assert(computed.weeks.every(w=>w.freeSlots<=1),'Ausgeschlossene Teams zählen nicht');
 for (const mutate of [p=>delete p.repeatedWindows,p=>p.repeatedWindows[0].rows[0].events.push({left:80,right:120}),p=>p.windows[0].rows.pop(),p=>p.windows[1].days[0].date='2026-10-24',p=>p.repeatedWindows[0].observedAt=p.windows[0].observedAt]) {
   const bad=structuredClone(domProof);mutate(bad);assert.throws(()=>buildBrowserPlanbarCapacity(bad,{now:observed+20000}));
@@ -283,7 +294,8 @@ try {
   assert(!JSON.stringify(session).includes('freeSlots')&&!JSON.stringify(session).includes('customerName'),'Sofortantwort enthält keine internen Details');
   response=await fetch(`${base}/availability`,{method:'POST',headers:{'Content-Type':'application/json','X-Form-Token':session.formToken},body:JSON.stringify({force:true})});
   assert.equal(response.status,200);assert.equal((await response.json()).refreshing,true);assert.equal(httpCommands.length,1,'Auto-/Force-Refresh erzeugt einen echten Geräteauftrag');
-  httpCapacity={...capacity,pageRefreshedAt:new Date(httpNow+1000).toISOString(),updatedAt:new Date(httpNow+2000).toISOString(),weeks:[{isoYear:2026,week:40,freeSlots:2}]};
+  assert.equal(httpCommands[0].action,'planbar.search.refresh');
+  httpCapacity={...capacity,sourceCheckedAt:new Date(httpNow+1000).toISOString(),pageRefreshedAt:null,refreshMode:'direct-live-read',updatedAt:new Date(httpNow+2000).toISOString(),weeks:[{isoYear:2026,week:40,freeSlots:2}]};
   response=await fetch(`${base}/availability`,{headers:{'X-Form-Token':session.formToken}});
   const refreshedHttp=await response.json();assert.equal(refreshedHttp.status,'ready');assert.equal(refreshedHttp.weeks[0].availableBlocks,2);
   response=await fetch(`${base}/requests`,{method:'POST',headers:{'Content-Type':'application/json','X-Form-Token':session.formToken},body:JSON.stringify(payload)});

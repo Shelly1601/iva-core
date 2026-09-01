@@ -30,6 +30,7 @@ try {
   });
   assert.equal(duplicate.assessment.trafficLight, 'red');
   assert.equal(duplicate.duplicateOf, first.id);
+  await accounting.updateAccountingDocument(duplicate.id, { invoiceDate: '2026-08-04' });
 
   const summary = await accounting.accountingSummary({ month: '2026-08' });
   assert.equal(summary.counts.all, 2);
@@ -47,4 +48,3 @@ try {
 } finally {
   await fs.rm(testDir, { recursive: true, force: true });
 }
-
