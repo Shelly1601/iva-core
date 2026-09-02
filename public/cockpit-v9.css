@@ -1,4 +1,4 @@
-/* IVA v9.4 · Living Command Center
+/* IVA v9.5 · Living Command Center
    The existing cockpit logic remains intact; this layer turns the start page into
    a calm, avatar-first app launcher instead of a wall of dashboard cards. */
 
@@ -368,9 +368,9 @@ body.widget-open .widget-drawer { transform: translateX(0); opacity: 1; pointer-
 .chat .head .o { width: 17px; height: 17px; }
 .msgs { min-height: 28px; padding: 7px 14px; gap: 7px; }
 .bubble { padding: 6px 10px; font-size: 12px; }
-.ask { padding: 8px 10px; gap: 7px; }
-.ask input { padding: 9px 12px; }
-.ask button { min-height: 36px; }
+.ask { width: 100%; min-width: 0; padding: 8px 10px; gap: 7px; }
+.ask input { flex: 1 1 0; width: 0; min-width: 0; padding: 9px 12px; }
+.ask button { flex: 0 0 auto; min-height: 36px; }
 .footer { margin-top: 3px; }
 
 @media (max-width: 1180px) and (min-width: 901px) {
@@ -441,10 +441,32 @@ body.widget-open .widget-drawer { transform: translateX(0); opacity: 1; pointer-
   body.widget-open .sheet-backdrop,
   body.apps-open .sheet-backdrop { display: block; opacity: 1; pointer-events: auto; }
 
-  .chat { height: 58dvh; max-height: 58dvh; min-height: 0; }
-  .chat .head { padding: 11px 15px; }
-  .chat .msgs { padding: 12px; }
-  .chat .ask { padding: 10px; }
+  .chat {
+    left: max(8px, env(safe-area-inset-left));
+    right: max(8px, env(safe-area-inset-right));
+    bottom: calc(var(--dock-h) + env(safe-area-inset-bottom) + 8px);
+    width: auto;
+    height: min(43dvh, 410px);
+    max-height: min(43dvh, 410px);
+    min-height: 280px;
+    border: 1px solid rgba(104, 192, 232, .34);
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(10, 24, 48, .96), rgba(4, 12, 27, .985));
+    box-shadow: 0 -10px 32px rgba(0, 0, 0, .42), 0 0 28px rgba(27, 148, 198, .1);
+  }
+  .chat .head { flex: 0 0 auto; padding: 11px 14px; font-size: 12px; }
+  .chat .msgs { min-height: 0; padding: 12px; }
+  .chat .ask {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 10px;
+    background: rgba(2, 8, 20, .72);
+  }
+  .chat .ask input { width: 100%; height: 48px; font-size: 16px; border-radius: 13px; }
+  .chat .ask #chatSend { min-width: 82px; min-height: 48px; padding: 0 15px; border-radius: 13px; }
+  .chat[aria-busy="true"] .ask #chatSend { opacity: .72; cursor: wait; }
   .footer { display: none; }
   .sheet-dash .sheet-body { padding: 12px 8px; text-align: center; }
   .sheet-dash .sheet-body h2 { font-size: 17px; }
@@ -456,11 +478,18 @@ body.widget-open .widget-drawer { transform: translateX(0); opacity: 1; pointer-
   .iva-presence { bottom: calc(var(--dock-h) + env(safe-area-inset-bottom) + 14px); }
 }
 
+@media (max-width: 390px) {
+  .chat { left: 6px; right: 6px; min-height: 260px; }
+  .chat .ask { gap: 6px; padding: 8px; }
+  .chat .ask #chatSend { min-width: 74px; padding: 0 11px; }
+}
+
 @media (max-height: 720px) and (max-width: 560px) {
   .iva-presence { top: calc(env(safe-area-inset-top) + 59px); bottom: calc(var(--dock-h) + env(safe-area-inset-bottom) + 10px); }
   .home-apps { padding-top: 5px; padding-bottom: 4px; }
   .app-tile { height: 47px; }
   .app-module { width: 31px; height: 31px; }
+  .chat { height: min(39dvh, 330px); max-height: min(39dvh, 330px); min-height: 250px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

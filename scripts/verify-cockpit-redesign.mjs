@@ -40,6 +40,10 @@ assert.match(html, /function dataVeil\(/, 'Der Hintergrund braucht fließende Da
 assert.match(html, /function neuralMark\(/, 'Die schwebenden Module brauchen eigene neuronale Glyphen');
 assert.match(html, /seed\(INNER,0\.28,26\);seed\(OUTER,0\.44,20\)/, 'Die schwebenden Bereiche müssen deutlich größer als zuvor gerendert werden');
 assert.match(html, /function setAppsOpen\(open\)/, 'Das App-Raster braucht einen gemeinsamen Desktop-/Mobil-Schaltzustand');
+assert.match(html, /id="chatForm"/, 'Der Chat braucht einen nativen Formularversand für mobile Browser');
+assert.match(html, /id="chatSend"[^>]+type="submit"|type="submit"[^>]+id="chatSend"/, 'Der Senden-Button muss das Chatformular zuverlässig absenden');
+assert.match(html, /enterkeyhint="send"/, 'Die mobile Tastatur muss eine Senden-Aktion anbieten');
+assert.match(html, /chatForm'\)\.addEventListener\('submit'/, 'Der Versand muss über das Formularereignis laufen');
 assert.doesNotMatch(html, /popup=yes|window\.open\(/, 'Das neue Cockpit darf keine Browser-Pop-ups öffnen');
 
 for (const state of ['listening', 'thinking', 'speaking']) {
@@ -48,8 +52,10 @@ for (const state of ['listening', 'thinking', 'speaking']) {
 assert.match(css, /grid-template-columns:\s*repeat\(4/, 'Das App-Raster muss auf kleinen Handys vier Spalten nutzen');
 assert.match(css, /body\.apps-open \.home-apps/, 'Das App-Raster darf erst nach dem Apps-Klick sichtbar werden');
 assert.match(css, /body\.apps-open \.app-tile:nth-child/, 'Die App-Module müssen gestaffelt hochploppen');
+assert.match(css, /grid-template-columns:\s*minmax\(0, 1fr\) auto/, 'Die mobile Eingabe muss den Senden-Button innerhalb des Viewports halten');
+assert.match(css, /\.chat \.ask input \{ width: 100%; height: 48px/, 'Das mobile Eingabefeld braucht eine sichere Touch-Größe');
 assert.match(css, /prefers-reduced-motion/, 'Animationen müssen Rücksicht auf reduzierte Bewegung nehmen');
 assert.match(js, /MutationObserver/, 'Der Avatar muss auf echte Voice-Zustandswechsel reagieren');
 assert.match(js, /openWidget/, 'Daten-Apps müssen sich innerhalb des Cockpits öffnen');
 
-console.log('PASS Cockpit v9.4: IVA-first Bühne, aufklappbare Apps, größere Flugmodule und interne Navigation geprüft.');
+console.log('PASS Cockpit v9.5: IVA-first Bühne, kompakter mobiler Chat, zuverlässiger Formularversand und Apps geprüft.');
