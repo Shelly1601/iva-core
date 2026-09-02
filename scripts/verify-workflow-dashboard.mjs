@@ -19,6 +19,9 @@ const snapshot = {
     { id: 'run-queued', name: 'Wartender Lauf', source: 'IVA Core', status: 'queued', summary: 'Eingereiht.', updatedAt: recent },
     { id: 'run-blocked', name: 'Fachlich blockiert', source: 'Railway-Automation', status: 'blocked', error: 'CAPTCHA verlangt externe Bestätigung.', updatedAt: recent },
     { id: 'run-failed', name: 'Technischer Fehler', source: 'Railway-Automation', status: 'failed', error: 'Temporärer Verbindungsfehler.', updatedAt: recent },
+    { id: 'run-failed-duplicate', name: 'Technischer Fehler', source: 'Railway-Automation', status: 'failed', error: 'Temporärer Verbindungsfehler.', updatedAt: '2026-09-02T11:58:30.000Z' },
+    { id: 'run-old-blocker', name: 'Alter Blocker', source: 'iMac', status: 'blocked', detail: 'CAPTCHA verlangt externe Bestätigung.', updatedAt: '2026-08-30T10:00:00.000Z' },
+    { id: 'run-generic-blocker', name: 'Unklarer Blocker', source: 'Codex', status: 'blocked', blocker: 'Der Workflow endete mit einem fachlichen oder technischen Blocker.', updatedAt: recent },
     { id: 'run-done', name: 'Erledigter Lauf', source: 'IVA Core', status: 'completed', summary: 'Ergebnis geprüft.', updatedAt: recent },
   ],
   buildProgress: {
@@ -35,8 +38,11 @@ assert.equal(dashboard.running[0].phase, 'Tests');
 assert.equal(dashboard.running[0].progress, 54);
 assert.ok(dashboard.waiting.some(item => item.id === 'run-stale' && item.stale), 'Veraltete Läufe müssen aus „laufend“ entfernt werden');
 assert.ok(dashboard.waiting.some(item => item.id === 'run-failed' && item.technicalReview), 'Technische Fehler bleiben eine Prüfung und werden nicht zum fachlichen Blocker');
+assert.equal(dashboard.waiting.filter(item => item.title === 'Technischer Fehler').length, 1, 'Wiederholte identische technische Fehler dürfen die aktuellen Zahlen nicht aufblasen');
+assert.ok(dashboard.waiting.some(item => item.id === 'run-generic-blocker' && item.technicalReview), 'Ein unspezifischer Sammel-Blocker ist noch kein belegter fachlicher Blocker');
 assert.equal(dashboard.blocked.length, 1, 'Nur ausdrücklich blockierte Läufe gehören in die Blockergruppe');
 assert.match(dashboard.blocked[0].blocker, /CAPTCHA/);
+assert.ok(!dashboard.blocked.some(item => item.id === 'run-old-blocker'), 'Alte Blocker bleiben in der Historie, aber nicht in der aktuellen Übersicht');
 assert.equal(dashboard.done.length, 1);
 assert.equal(buildWorkflowDashboard({ activity: [{ id: 'no-progress', status: 'running', updatedAt: recent }] }, { now }).running[0].progress, null, 'Ohne gemeldeten Prozentwert darf IVA keinen Fortschritt erfinden');
 
