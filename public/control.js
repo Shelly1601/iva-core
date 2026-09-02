@@ -9,6 +9,31 @@ function setStatus(kind,text){ $('status').className='status'+(kind?' '+kind:'')
 async function api(path,options={}){ const response=await fetch(path,{...options,headers:{Authorization:'Bearer '+token(),...(options.body?{'Content-Type':'application/json'}:{}),...(options.headers||{})},body:options.body?JSON.stringify(options.body):undefined}); const payload=await response.json().catch(()=>({})); if(!response.ok)throw new Error(payload.error||'HTTP '+response.status); return payload; }
 function empty(text){ return `<div class="empty">${esc(text)}</div>`; }
 
+function workflowCard(item){
+  const kind=item.group==='running'?'live':item.group==='done'?'ready':item.group==='waiting'?'off':'';
+  const hasProgress=item.progress!=null&&item.progress!==''&&Number.isFinite(Number(item.progress));
+  const progress=hasProgress?Math.max(0,Math.min(100,Number(item.progress))):null;
+  const progressView=hasProgress
+    ? `<div class="workflow-progress-label"><span>Echter Fortschritt</span><b>${esc(progress)} %</b></div><div class="progress-track" role="progressbar" aria-label="${esc(item.title)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${esc(progress)}"><div class="progress-fill${item.group==='blocked'?' blocked':''}" style="width:${progress}%"></div></div>`
+    : '<div class="workflow-progress-label"><span>Fortschritt</span><b>von Quelle nicht gemeldet</b></div>';
+  const blocker=item.group==='blocked'?`<div class="workflow-blocker"><b>Konkreter Blocker:</b> ${esc(item.blocker||'Der Lauf ist ausdrücklich als blockiert gemeldet, aber ohne weiteren Grund.')}</div>`:'';
+  const stale=item.stale?'<div class="workflow-stale">Nicht mehr als aktiv gezählt: Seit über fünf Minuten fehlt ein echtes Update.</div>':'';
+  const technical=item.technicalReview?'<div class="workflow-stale">Technischer Zwischenfehler – fachlich nicht automatisch als blockiert gewertet.</div>':'';
+  return `<article class="workflow-card"><div class="workflow-card-head"><div><h4>${esc(item.title)}</h4><div class="workflow-source">${esc(item.source)}</div></div><span class="badge ${kind}">${esc(item.label)}</span></div><div class="workflow-purpose">${esc(item.purpose)}</div><div class="workflow-facts"><span>Phase</span><b>${esc(item.phase)}</b><span>Letztes Update</span><b>${fmt(item.updatedAt)}</b><span>Detail</span><b>${esc(item.detail)}</b></div>${progressView}${blocker}${stale}${technical}</article>`;
+}
+function renderWorkflowDashboard(){
+  const dashboard=window.IVAWorkflowDashboard?.buildWorkflowDashboard(state.status||{})||{running:[],waiting:[],blocked:[],done:[],counts:{running:0,waiting:0,blocked:0,done:0}};
+  $('workflowCountRunning').textContent=dashboard.counts.running;
+  $('workflowCountWaiting').textContent=dashboard.counts.waiting;
+  $('workflowCountBlocked').textContent=dashboard.counts.blocked;
+  $('workflowCountDone').textContent=dashboard.counts.done;
+  const renderGroup=(id,items,label,limit)=>{ $(id).innerHTML=items.length?items.slice(0,limit).map(workflowCard).join(''):`<div class="workflow-empty">${esc(label)}</div>`; };
+  renderGroup('workflowRunning',dashboard.running,'Gerade läuft kein belegter Workflow.',8);
+  renderGroup('workflowWaiting',dashboard.waiting,'Keine wartenden oder technisch zu prüfenden Läufe.',8);
+  renderGroup('workflowBlocked',dashboard.blocked,'Kein fachlicher Blocker gemeldet.',8);
+  renderGroup('workflowDone',dashboard.done,'Noch kein erledigter Lauf erfasst.',5);
+}
+
 function buildTaskCard(item){
   const blocked=item.status==='blocked';
   const steps=(item.steps||[]).map(step=>`<div class="milestone ${esc(step.state)}" title="${esc(step.label)}"><i></i><span>${esc(step.label)}</span></div>`).join('');
@@ -118,7 +143,7 @@ function renderImacStatus(){
   const el=$('imacStatus');
   if(el)el.innerHTML=`<b>${esc(label)}</b><div class="meta">Handy · MacBook · Telegram → IVA-Core → iMac · ${esc(agent.release||'Version unbekannt')}${agent.runtimeRevision?' · '+esc(agent.runtimeRevision.slice(0,12)):''}</div><div class="meta">${esc(agent.detail||'')} · Letzter Abruf: ${fmt(agent.lastPolledAt)}</div>`;
 }
-function render(){ renderImacStatus(); renderBuildProgress(); renderMetrics(); renderIncidents(); renderAutomations(); renderAgents(); renderConnectors(); renderApprovals(); renderRuns(); renderBacklog(); renderAudit(); }
+function render(){ renderImacStatus(); renderWorkflowDashboard(); renderBuildProgress(); renderMetrics(); renderIncidents(); renderAutomations(); renderAgents(); renderConnectors(); renderApprovals(); renderRuns(); renderBacklog(); renderAudit(); }
 function makeCollapsible(){ document.querySelectorAll('.main>section.card,.main>section.grid>.card').forEach(card=>{ const heading=card.querySelector(':scope>h2'); if(!heading)return; const subtitle=heading.nextElementSibling?.classList?.contains('muted')?heading.nextElementSibling:null; const details=document.createElement('details'); details.className=card.className+' disclosure'; details.style.cssText=card.style.cssText; const summary=document.createElement('summary'); summary.innerHTML=`<div><span>${esc(heading.textContent)}</span>${subtitle?`<small>${esc(subtitle.textContent)}</small>`:''}</div>`; const body=document.createElement('div'); body.className='disclosure-body'; [...card.children].forEach(child=>{ if(child!==heading&&child!==subtitle)body.appendChild(child); }); details.append(summary,body); card.replaceWith(details); }); }
 async function load(){
   if(state.loading)return;

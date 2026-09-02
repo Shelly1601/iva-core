@@ -85,10 +85,10 @@
     body.chat-open .sheet-backdrop,body.dash-open .sheet-backdrop{opacity:1;pointer-events:auto}
 
     /* Bottom dock — Chat | Wake | Mic | Widgets | TTS. */
-    .dock{display:flex;align-items:stretch;gap:8px;position:fixed;left:0;right:0;bottom:0;padding:8px 12px calc(8px + env(safe-area-inset-bottom));background:linear-gradient(180deg,rgba(5,7,14,0),rgba(5,7,14,.9) 30%,rgba(5,7,14,.98));border-top:1px solid var(--border);z-index:70;backdrop-filter:blur(14px);height:calc(var(--dock-h) + env(safe-area-inset-bottom))}
+    .dock{display:flex;align-items:stretch;gap:5px;position:fixed;left:0;right:0;bottom:0;padding:8px 8px calc(8px + env(safe-area-inset-bottom));background:linear-gradient(180deg,rgba(5,7,14,0),rgba(5,7,14,.9) 30%,rgba(5,7,14,.98));border-top:1px solid var(--border);z-index:70;backdrop-filter:blur(14px);height:calc(var(--dock-h) + env(safe-area-inset-bottom))}
     .dock > .dock-btn,.dock #wakeBtn,.dock #micBtn,.dock #ttsBtn{flex:1;height:48px;min-width:0;border-radius:14px;background:rgba(16,24,44,.75);border:1px solid var(--border2);color:var(--text);font-size:20px;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;line-height:1;animation:none;box-shadow:none}
-    .dock > .dock-btn{font-size:18px;flex-direction:column;gap:2px}
-    .dock > .dock-btn .lbl{font-size:10px;letter-spacing:.5px;color:var(--muted);text-transform:uppercase}
+    .dock > .dock-btn{font-size:18px;flex-direction:column;gap:2px;text-decoration:none}
+    .dock > .dock-btn .lbl{font-size:9px;letter-spacing:.25px;color:var(--muted);text-transform:uppercase}
     .dock > .dock-btn.active{background:linear-gradient(135deg,var(--cyan),var(--blue));color:#04121a}
     .dock > .dock-btn.active .lbl{color:#04121a}
     .dock #micBtn.rec{background:var(--cyan);color:#04121a;animation:pulse 1.1s infinite}
@@ -158,6 +158,7 @@
   .workspace-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
   .workspace-actions button{border:1px solid var(--border2);background:rgba(3,6,14,.52);color:var(--text);border-radius:10px;padding:9px 5px;cursor:pointer;font-size:11px;line-height:1.25}
   .workspace-actions button:hover{border-color:var(--cyan);color:var(--cyan)}
+  .workflow-entry{display:block;color:inherit;text-decoration:none}.workflow-entry:hover{border-color:var(--cyan)}.workflow-entry-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:11px}.workflow-entry-head h3{margin:0}.workflow-entry-link{font-size:10px;color:var(--cyan);white-space:nowrap}.workflow-counts{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.workflow-count{border:1px solid var(--border);border-radius:10px;padding:8px;background:rgba(3,6,14,.45);text-align:center}.workflow-count b{display:block;font-size:20px;line-height:1;color:var(--cyan)}.workflow-count span{display:block;color:var(--muted);font-size:9px;margin-top:4px}.workflow-count.waiting b{color:#ffc76b}.workflow-count.blocked b{color:#ff8585}.workflow-update{margin-top:8px;color:var(--muted);font-size:9px}.workflow-dock-icon{position:relative}.workflow-dock-badge{position:absolute;top:-7px;right:-12px;min-width:18px;height:18px;border-radius:999px;padding:0 4px;display:grid;place-items:center;background:var(--cyan);color:#04121a;font-size:9px;font-weight:900;border:2px solid #08101f}
   #net{display:block;position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
   .overlay{position:fixed;inset:0;background:rgba(3,6,14,.82);backdrop-filter:blur(6px);display:none;align-items:center;justify-content:center;z-index:50}
   .overlay.show{display:flex}
@@ -187,6 +188,7 @@
     <div class="hud-label">IVA · COMMAND CENTER</div>
     <canvas id="net"></canvas>
     <aside class="hud-col hud-left" id="colLeft">
+      <a class="card workflow-entry" id="workflowEntry" href="/control" aria-label="Aktuelle Workflows im Kontrollzentrum öffnen"><div class="workflow-entry-head"><h3><span class="ic">↻</span> Aktuelle Workflows</h3><span class="workflow-entry-link">Kontrollzentrum →</span></div><div class="workflow-counts"><div class="workflow-count"><b id="cockpitWorkflowRunning">0</b><span>laufend</span></div><div class="workflow-count waiting"><b id="cockpitWorkflowWaiting">0</b><span>wartend</span></div><div class="workflow-count blocked"><b id="cockpitWorkflowBlocked">0</b><span>blockiert</span></div></div><div class="workflow-update" id="cockpitWorkflowUpdated">Echte Live-Daten werden geladen …</div></a>
       <div class="card"><h3><span class="ic">📅</span> Termine <span class="cnt" id="c-cal">–</span></h3><div id="d-cal"><div class="muted">—</div></div></div>
       <div class="card"><h3><span class="ic">🔥</span> Leads <span class="cnt" id="c-lead">–</span></h3><div id="d-lead"><div class="muted">—</div></div></div>
       <div class="card"><h3><span class="ic">✉️</span> Postfächer <span class="cnt" id="c-mail">–</span></h3><div id="d-mail"><div class="muted">—</div></div></div>
@@ -222,6 +224,7 @@
   <span class="dock-slot" id="dockWake"></span>
   <span class="dock-slot" id="dockMic"></span>
   <button type="button" class="dock-btn" id="dockWidgets"><span>▦</span><span class="lbl">Widgets</span></button>
+  <a class="dock-btn" id="dockWorkflows" href="/control" aria-label="Aktuelle Workflows öffnen"><span class="workflow-dock-icon">↻<b class="workflow-dock-badge" id="dockWorkflowBadge">0</b></span><span class="lbl">Workflows</span></a>
   <span class="dock-slot" id="dockTts"></span>
 </nav>
 <button type="button" class="stop-iva" id="stopIvaBtn" title="IVA sofort stoppen" aria-label="IVA sofort stoppen">⏹</button>
@@ -253,6 +256,7 @@
   </section>
 </div>
 
+<script src="/workflow-dashboard.js"></script>
 <script>
   const LS={tok:'iva_token', voice:'iva_voice'};
   const cfg=()=>({url:(location.origin&&location.origin!=='null')?location.origin:'',tok:localStorage.getItem(LS.tok)||'',voice:localStorage.getItem(LS.voice)||''});
@@ -265,6 +269,20 @@
     if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
   function setStatus(s,t){const d=$('statusDot');d.className='dot'+(s==='on'?' on':s==='err'?' err':'');$('statusTxt').textContent=t;
     $('m-stat').textContent=s==='on'?'online':s==='err'?'Fehler':'offline';$('m-stat').style.color=s==='on'?'var(--cyan)':s==='err'?'#ff6a6a':'var(--slate)';}
+  function renderWorkflowSummary(snapshot){
+    const dashboard=window.IVAWorkflowDashboard.buildWorkflowDashboard(snapshot||{});
+    $('cockpitWorkflowRunning').textContent=dashboard.counts.running;
+    $('cockpitWorkflowWaiting').textContent=dashboard.counts.waiting;
+    $('cockpitWorkflowBlocked').textContent=dashboard.counts.blocked;
+    $('dockWorkflowBadge').textContent=dashboard.counts.running+dashboard.counts.waiting+dashboard.counts.blocked;
+    $('dockWorkflows').setAttribute('aria-label',`${dashboard.counts.running} laufend, ${dashboard.counts.waiting} wartend, ${dashboard.counts.blocked} blockiert – aktuelle Workflows öffnen`);
+    const generated=dashboard.generatedAt?new Date(dashboard.generatedAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}):'gerade';
+    $('cockpitWorkflowUpdated').textContent=`Live-Stand ${generated} · Veraltete Läufe zählen nicht als aktiv.`;
+  }
+  async function loadWorkflowSummary(){
+    try{renderWorkflowSummary(await api('/api/control/status'));}
+    catch(error){$('cockpitWorkflowUpdated').textContent='Workflow-Zahlen derzeit nicht erreichbar.';}
+  }
 
   // ---- Chat ----
   let chatAbort=null;
@@ -730,7 +748,7 @@
   function enableChat(){$('chatIn').disabled=false;$('chatSend').disabled=false;$('micBtn').disabled=false;}
   async function connect(){setStatus('','verbinde…');
     try{await api('/api/todos');setStatus('on','verbunden');enableChat();
-      $('msgs').innerHTML='<div class="bubble sys">Verbunden. Frag mich was — ich greif live auf deine Daten zu.</div>';loadData();}
+      $('msgs').innerHTML='<div class="bubble sys">Verbunden. Frag mich was — ich greif live auf deine Daten zu.</div>';loadData();loadWorkflowSummary();}
     catch(e){ if(String(e.message).includes('401')){setStatus('err','Token nötig');openSetup();bubble('sys','Bitte API-Token eintragen (⚙︎).');}
       else{setStatus('err','nicht erreichbar');bubble('sys','Server nicht erreichbar: '+e.message);} }}
 
@@ -750,6 +768,7 @@
   });
 
   connect();
+  setInterval(()=>{if(document.visibilityState==='visible')loadWorkflowSummary();},10000);
 
   /* ===== Netzwerk (Motion) ===== */
   const cv=$('net'),ctx=cv.getContext('2d');let W=0,H=0,DPR=1,running=false,stars=[];
