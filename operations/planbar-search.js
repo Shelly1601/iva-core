@@ -17,6 +17,21 @@ function normalizedText(value) {
     .toLocaleLowerCase('de-DE');
 }
 
+export function auditPlanbarDescription(value) {
+  const description = clean(value, 3000);
+  const normalized = normalizedText(description);
+  const gaps = [];
+  if (!description) gaps.push('missing-description');
+  if (/\bbosch\b/i.test(description)) {
+    const hasBoschIdentifier = /\bbosch\b[\s\S]{0,180}\b(?=[a-z0-9-]*[a-z])(?=[a-z0-9-]*\d)[a-z0-9-]{4,}\b/i.test(description);
+    if (!hasBoschIdentifier) gaps.push('bosch-model-number');
+  }
+  if (normalized.includes('vaillant') && !/\bvaillant\s+(?:plus|pro)\b/i.test(description)) {
+    gaps.push('vaillant-variant');
+  }
+  return { completeByFormat: gaps.length === 0, gaps };
+}
+
 function validDate(value) {
   const text = clean(value, 20);
   return /^\d{4}-\d{2}-\d{2}$/.test(text) && !Number.isNaN(Date.parse(`${text}T00:00:00Z`)) ? text : '';
@@ -59,6 +74,7 @@ function normalizeAppointment(input = {}) {
     id: clean(input.id, 180) || crypto.createHash('sha256').update(fingerprint).digest('hex').slice(0, 24),
     customerName,
     description,
+    descriptionAudit: auditPlanbarDescription(description),
     team,
     resourceId,
     startDate,
@@ -113,7 +129,23 @@ export async function replacePlanbarSearchIndex(input = {}) {
 
 export async function getPlanbarSearchIndex() {
   const index = await readIndex();
-  return { ...index, appointmentCount: index.appointments.length };
+  const descriptionCandidates = index.appointments.filter(item => item.descriptionAudit?.completeByFormat === false);
+  return {
+    ...index,
+    appointmentCount: index.appointments.length,
+    descriptionAudit: {
+      candidateCount: descriptionCandidates.length,
+      completeByFormatCount: index.appointments.length - descriptionCandidates.length,
+      candidates: descriptionCandidates.map(item => ({
+        id: item.id,
+        customerName: item.customerName,
+        startDate: item.startDate,
+        week: item.week,
+        gaps: item.descriptionAudit.gaps,
+      })),
+      note: 'Format-Vorfilter; fachliche Vollständigkeit muss weiterhin gegen die eindeutige Dokumentkette geprüft werden.',
+    },
+  };
 }
 
 export async function searchPlanbarAppointments({ query, weeks = 0, fromDate } = {}) {

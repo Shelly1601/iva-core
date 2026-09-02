@@ -6,10 +6,19 @@ import path from 'node:path';
 const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'iva-planbar-search-'));
 process.env.DATA_DIR = tempDir;
 const {
+  auditPlanbarDescription,
   getPlanbarSearchIndex,
   replacePlanbarSearchIndex,
   searchPlanbarAppointments,
 } = await import(`../operations/planbar-search.js?test=${Date.now()}`);
+
+assert.deepEqual(auditPlanbarDescription(''), { completeByFormat: false, gaps: ['missing-description'] });
+assert.deepEqual(auditPlanbarDescription('7 kW Bosch, Neu-Isolierung'), { completeByFormat: false, gaps: ['bosch-model-number'] });
+assert.equal(auditPlanbarDescription('7 kW Bosch, Bosch Inneneinheit CS6800IAW12E').completeByFormat, true);
+assert.equal(auditPlanbarDescription('7 kW Bosch CS6800iAW 7, Neu-Isolierung').completeByFormat, true);
+assert.deepEqual(auditPlanbarDescription('11 kW Vaillant, Außenverrohrung 2 m'), { completeByFormat: false, gaps: ['vaillant-variant'] });
+assert.equal(auditPlanbarDescription('11 kW Vaillant Pro, Außenverrohrung 2 m').completeByFormat, true);
+assert.equal(auditPlanbarDescription('12 kW Vaillant Plus, Außenverrohrung 2 m').completeByFormat, true);
 
 const snapshot = await replacePlanbarSearchIndex({
   updatedAt: '2026-08-22T15:00:00.000Z',
@@ -22,7 +31,9 @@ const snapshot = await replacePlanbarSearchIndex({
   ],
 });
 assert.equal(snapshot.appointmentCount, 3);
-assert.equal((await getPlanbarSearchIndex()).appointments.find(item => item.customerName.includes('Schneider')).week, 39);
+const storedIndex = await getPlanbarSearchIndex();
+assert.equal(storedIndex.appointments.find(item => item.customerName.includes('Schneider')).week, 39);
+assert.equal(storedIndex.descriptionAudit.candidateCount, 0);
 
 const byName = await searchPlanbarAppointments({ query: 'Schneider' });
 assert.equal(byName.count, 1);

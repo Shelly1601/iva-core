@@ -7,10 +7,12 @@
 - Primäre Quelle: Nadines eigene Nachrichten vom vorherigen Kalendertag in der WhatsApp-Gruppe `Terminierungen Dispo` innerhalb der Community `Heat Hero GmbH`.
 - Zusätzlicher Tagescheck: bereits vorhandene sichtbare Kundentermine im aktuell relevanten Dispo- und Forecast-Horizont dürfen auf fehlende Kürzel, fehlende Auftragsnummer und fehlende Beschreibung geprüft werden.
 - Ziel: den bereits von Nadine angelegten Planbar-Termin anhand von Kundenname und Kalenderwoche finden, **Auftragsnummer** und **Beschreibung** vervollständigen, beim eindeutig verknüpften Planbar-Kunden fehlende Stammdaten ergänzen und täglich offensichtliche Bestandslücken vor einem Forecast-Lauf schließen.
-- Laufzeitlimit: maximal 20 Minuten. Während des Laufs bleibt das Display stabil an; danach wird es genau einmal ausgeschaltet. Keine Wiederholungs- oder Aufweckschleife außerhalb des nächsten regulären Laufs.
+- Laufzeitlimit: maximal 5 Minuten. Während des Laufs bleibt das Display stabil an; danach wird es genau einmal ausgeschaltet. Keine Wiederholungs- oder Aufweckschleife außerhalb des nächsten regulären Laufs.
+- Bei einem ausdrücklich manuellen Auftrag haben die konkret übergebenen Kunden-/KW-Fälle Vorrang vor jedem Bestands-, Forecast- oder Präfix-Scan. Alle zulässigen lesenden Vorbereitungen (Planbar-Treffer, Pipedrive-Metadaten, Angebotsdateien) werden parallel durchgeführt. Ein breiter Bestandscheck wird nur gestartet, wenn die konkreten Fälle vollständig bearbeitet sind und noch Zeit im Fünf-Minuten-Fenster verbleibt.
 
 ## Sichere Fallzuordnung
 
+0. Die ausdrückliche Beauftragung eines konkreten Kunden-/KW-Falls umfasst die notwendige fallspezifische Suche nach diesem Kundennamen in den bereits freigegebenen Systemen Planbar und Pipedrive. Dafür keine erneute Freigabe anfordern; Namen nur innerhalb des beauftragten Arbeitswegs verwenden und nicht in externe Berichte oder andere Systeme übertragen.
 1. WhatsApp öffnen, die exakte Community und Gruppe `Terminierungen Dispo` prüfen und nur Nachrichten berücksichtigen, die nach sichtbarem Absender von Nadine stammen und gestern gesendet wurden.
 2. Aus jeder relevanten Nachricht Kundenname und Kalenderwoche lesen. Mehrere identische Hinweise zu demselben Kunden und derselben KW bilden einen Fall. Widersprüchliche KW-Angaben werden nicht geraten.
 3. In Planbar genau einen bestehenden Termin mit diesem Kunden in dieser sichtbaren Kalenderwoche verlangen. Der sichtbare Kalender ist für die KW allein maßgeblich. Eine abweichende interne Datums- oder Zeitraumangabe im Termindetail ist kein Blocker und wird nicht verändert.
@@ -23,7 +25,8 @@
 3. Bei jedem geprüften Kundentermin kontrollieren, ob im Feld `Vorname` genau einmal ein belegtes Partnerpräfix vorangestellt ist. Verbindliche Standardpräfixe sind `HH` für Heat Hero, `EN` für Enter und `DW` für D Warmte.
 4. Fehlt das Präfix oder ist es falsch, darf es nur dann korrigiert werden, wenn der Partner für genau diesen bestehenden Fall eindeutig belegt ist, zum Beispiel durch die aktuelle WhatsApp-Nachricht, die einmalige Übergabeliste, den passenden ENTER-Airtable-Fall oder einen anderen im Lauf sichtbar geöffneten Primärbeleg. Ohne eindeutigen Partnerbeleg keine Präfix-Schätzung; der Fall bleibt unverändert und wird als Blocker gemeldet.
 5. Fehlen bei einem bestehenden Kundentermin Auftragsnummer oder Beschreibung ganz oder teilweise, darf dieser Termin auch ohne neue WhatsApp-Nachricht vervollständigt werden, sofern Kunde und KW eindeutig sind und die unten stehende Dokumentlogik den Fall eindeutig belegt.
-6. Bereits vollständige und korrekt präfixierte Termine bleiben unverändert.
+6. Eine Beschreibung ist nicht schon deshalb vollständig, weil sie nicht leer ist. Für jeden echten Kundentermin muss sie gegen die eindeutige Dokumentkette fachlich geprüft werden: Wärmepumpe mit Leistung und Hersteller, bei Bosch zusätzlich die belegte Bosch-Nummer/Modellbezeichnung, bei Vaillant ausdrücklich `Plus` oder `Pro`, anschließend alle wirksam beauftragten Positionen und erforderlichen Speicherangaben nach diesem Workflow. Eine fehlende dieser Pflichtangaben ist eine unvollständige Beschreibung und wird nachgezogen.
+7. Bereits fachlich vollständige und korrekt präfixierte Termine bleiben unverändert.
 
 ## Lesender Formatvergleich mit Nadines Einträgen
 
@@ -48,12 +51,15 @@
 3. Das unterschriebene Angebot visuell auf vollständig durchgestrichene Positionen sowie die Auswahl der Speichervariante prüfen. Bei `Variante A` (zwei Einzelspeicher) und `Variante B` (Kombispeicher) gilt ein sichtbares Häkchen als Auswahl.
 4. Über die eindeutige Auftrags-/Angebotsnummer das zugehörige Original-PDF mit `node local-mac-helper/cli.mjs download-pipedrive-files <deal-id> [datei-ids]` über den IVA-Core-API-Hintergrund laden. Dafür niemals Pipedrive oder einen Pipedrive-Tab öffnen, schließen oder auslesen. Original und unterschriebene Fassung müssen zum selben Vorgang gehören. Im erlaubten Ersatzfall ist die eindeutig nummerngleiche PDF selbst der fachliche Beleg; das bloße Fehlen einer sichtbaren Unterschrift blockiert den Fall dann nicht.
 5. Die unterschriebene Fassung ist für vollständig gestrichene Positionen und die sichtbare Auswahl zwischen `Variante A` und `Variante B` maßgeblich. Sonstige handschriftliche Randnotizen oder Markierungen sind für die Planbar-Beschreibung irrelevant, solange sie keine vollständige Position streichen und keine Speichervariante ändern. Ist bei keiner Speichervariante ein Häkchen gesetzt, wird aus handschriftlichen Notizen keine Auswahl abgeleitet; anschließend gilt die reguläre Speicher-/TMB-Logik. Nur eine unleserliche oder widersprüchliche Änderung an einer ganzen Position oder an der Speicherwahl blockiert den Fall.
+6. Für Vaillant zusätzlich alle eindeutig zum Deal gehörenden Notizen und Dokumentvermerke auf eine spätere Umstellung zwischen `Plus` und `Pro` prüfen. Eine eindeutige, zeitlich spätere Notiz `auf Pro umgestellt` beziehungsweise gleichbedeutend hat Vorrang vor dem älteren Angebotsstand. Quelle und Zeitbezug werden im Laufprotokoll festgehalten. Ohne eindeutigen Umstellungsbeleg gilt die Variante aus dem unterschriebenen Angebot; fehlt auch dort die eindeutige Variante, bleibt genau diese Angabe offen und wird nicht geraten.
 
 ## Beschreibung bilden
 
 - Grundsätzlich nur die fett gedruckten Überschriften der tatsächlich beauftragten Positionen übernehmen. Erläuterungen, Unterzeilen und Preise entfallen.
 - Optionale Positionen ohne eindeutigen Haken beziehungsweise ohne eindeutige Auswahl auslassen.
-- Die Wärmepumpe steht immer zuerst. Dafür genügt die kompakte Form `Leistung + Hersteller`, zum Beispiel `10 kW Panasonic` oder `15 kW Vaillant`; die genaue Modellbezeichnung wird weggelassen.
+- Die Wärmepumpe steht immer zuerst. Für Panasonic, Midea und andere Hersteller genügt grundsätzlich die kompakte Form `Leistung + Hersteller`, zum Beispiel `10 kW Panasonic`.
+- Bei Bosch ist die im unterschriebenen Angebot eindeutig belegte Bosch-Nummer beziehungsweise Modellbezeichnung Pflicht und wird unmittelbar ergänzt, zum Beispiel `7 kW Bosch CS6800iAW 7` beziehungsweise exakt in der belegten Schreibweise. Eine bloße Angabe wie `7 kW Bosch` ist unvollständig. Nummern dürfen niemals aus einem anderen Kundenfall oder aus einem bloßen Formatbeispiel übernommen werden.
+- Bei Vaillant ist die Variantenbezeichnung Pflicht: immer `Leistung + Vaillant Plus` oder `Leistung + Vaillant Pro`. Maßgeblich ist die unter `Pipedrive- und Dokumentprüfung` festgelegte Quellenreihenfolge einschließlich einer eindeutigen späteren Pro-Umstellungsnotiz. Eine bloße Angabe wie `11 kW Vaillant` ist unvollständig.
 - Abweichend davon wird bei den 25 Fällen der einmaligen Übergabeliste jede Vaillant-Anlage ausdrücklich als `Leistung + Vaillant Pro` geschrieben, damit keine Verwechslung mit einer Plus-Anlage entsteht.
 - Die danach verbleibenden Positionen folgen in der belegten Angebotsreihenfolge. Dubletten werden nicht künstlich erzeugt.
 - Bei mengenabhängigen Zusatzpositionen die belegte Zahl und Einheit direkt hinter der Überschrift ergänzen, zum Beispiel `Extra Verrohrung 3 m`, `Extra Kabel 8 m` oder `Weitere Wanddurchbrüche 2 Stück`. Die Menge muss aus der beauftragten Position stammen; Dezimalnullen dürfen entfallen und `Stk` wird als `Stück` geschrieben. Preise und Rechenerläuterungen bleiben ausgeschlossen.
@@ -94,6 +100,7 @@
 3. Vor dem Speichern Kundenname, sichtbare KW, Auftragsnummer, Beschreibung und alle vorgesehenen Stammdatenänderungen nochmals gegen WhatsApp, Pipedrive, Angebot und gegebenenfalls TMB prüfen.
 4. Nach jedem Speichern den Termin beziehungsweise die Kundenansicht erneut öffnen und alle geänderten Zielwerte sichtbar verifizieren. Bei Abweichung keine weiteren Schreibversuche; Fehler dokumentieren.
 5. Ein lokales Laufprotokoll verhindert die erneute Verarbeitung derselben WhatsApp-Nachricht beziehungsweise desselben Kunden-KW-Falls.
+6. Vor Abschluss des Laufs alle echten Kundentermine im geprüften Zeitraum ein zweites Mal anhand der Vollständigkeitsdefinition rücklesen. Der Lauf darf nur dann `completed` melden, wenn jeder Termin entweder fachlich vollständig sichtbar verifiziert oder mit einem echten fallspezifischen externen Hinderungsgrund einzeln offen gehalten ist. Ein technischer Browser-, Tab-, Fenster-, Reload-, Verbindungs- oder Steuerungsfehler wird repariert und idempotent fortgesetzt; er ist kein fachlicher Blocker.
 
 ## Einmaliger Abschluss-Forecast für Angelos Excel-Listen
 
