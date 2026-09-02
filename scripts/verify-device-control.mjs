@@ -263,12 +263,20 @@ try {
     /keine zwei fortlaufenden Railway-Heartbeats/,
     'ein einzelner oder stehengebliebener Heartbeat darf die Installation nicht grün melden',
   );
-  const { codexJobIdForRequest, codexTaskPolicy, inferProjectWorkflowStatus, startProjectWorkflowTask } = await import('../local-mac-helper/codex-tasks.mjs');
+  const { buildCodexPrompt, codexJobIdForRequest, codexTaskPolicy, inferProjectWorkflowStatus, startProjectWorkflowTask } = await import('../local-mac-helper/codex-tasks.mjs');
   const stableJobId = codexJobIdForRequest('same-command');
   assert.equal(codexJobIdForRequest('same-command'), stableJobId);
   assert.match(stableJobId, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
   assert.notEqual(codexJobIdForRequest('other-command'), stableJobId);
   const codexPolicy = codexTaskPolicy();
+  const preventionPrompt = buildCodexPrompt({
+    jobId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', mode: 'operational', prompt: 'Prüfe den technischen Status vollständig.',
+    preventionLessons: [{ fingerprint: '1234567890abcdef12345678', prevention: 'Vorab die zentrale Sitzung prüfen.', evidence: 'Der Folgelauf war erfolgreich.' }],
+  });
+  assert.match(preventionPrompt, /Verbindliches Fehlergedächtnis/);
+  assert.match(preventionPrompt, /1234567890abcdef12345678/);
+  assert.match(preventionPrompt, /incident-resolve/);
+  assert.match(preventionPrompt, /niemals blind wiederholen/i);
   assert.equal(codexPolicy.arbitraryWorkspace, false);
   assert.equal(codexPolicy.sandbox, 'workspace-write');
   assert.equal(path.isAbsolute(codexPolicy.workspace), true);
@@ -479,6 +487,8 @@ try {
   const bundle = await buildCentralRuntimeBundle(path.resolve(fileURLToPath(new URL('..', import.meta.url))));
   validateCentralRuntimeBundle(bundle);
   assert.ok(bundle.files.some(file => file.path === 'operations/customer-scheduling.js'));
+  assert.ok(bundle.files.some(file => file.path === 'operations/incident-memory.js'));
+  assert.ok(bundle.files.some(file => file.path === 'local-mac-helper/incident-journal.mjs'));
   assert.ok(bundle.files.every(file => !/\.env|outputs\//.test(file.path)));
   const corrupt = structuredClone(bundle);
   corrupt.files[0].content = Buffer.from('corrupt').toString('base64');

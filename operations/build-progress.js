@@ -249,11 +249,11 @@ export function buildJobsNeedingRefresh({ requests = [], commands = [], now = Da
 }
 
 export const CURRENT_BUILD_RELEASE = Object.freeze({
-  id: 'complete-operations-journal-v2',
-  title: 'Vollständiges Betriebsjournal im Kontrollzentrum',
-  summary: 'Codex-Bauaufträge, iMac-Befehle, Projekt-Workflows, Railway-Automationen und IVA-Chatläufe erscheinen mit echtem Zeitstempel, Status und Ergebnis in einer gemeinsamen Historie.',
-  detail: 'Der belegte Angelo-Forecast vom 23.08.2026 ist sichtbar; zukünftige lokale Läufe melden Start, Fortschritt und Endergebnis automatisch.',
-  implementedAt: '2026-08-26T08:57:52.000Z',
+  id: 'self-learning-incident-memory-v1',
+  title: 'Selbstlernendes Fehlergedächtnis für alle IVA-Läufe',
+  summary: 'Technische Störungen werden lokal und zentral dedupliziert, sanitisiert, nach verifizierter Reparatur als Prävention wiederverwendet und im Kontrollzentrum verständlich angezeigt.',
+  detail: 'IVA-Chat, iMac-/Codex-Aufträge, Projekt-Workflows und Railway-Automationen laden passende bewährte Reparaturen vor dem nächsten ähnlichen Lauf. Unklare Schreibaktionen bleiben gegen blinde Wiederholung geschützt.',
+  implementedAt: '2026-09-02T08:35:00.000Z',
   livePath: '/control',
 });
 

@@ -42,7 +42,7 @@
     "test:accounting": "node scripts/verify-accounting.mjs",
     "test:opportunities": "node scripts/verify-opportunities.mjs",
     "test:voice": "node scripts/verify-voice-lab.mjs",
-    "test:operations": "node scripts/verify-operations.mjs",
+    "test:operations": "node scripts/verify-operations.mjs && node scripts/verify-incident-memory.mjs",
     "test:todos": "node scripts/verify-todos.mjs",
     "test:control-activity": "node scripts/verify-control-activity.mjs",
     "test:automations": "node scripts/verify-automations.mjs",

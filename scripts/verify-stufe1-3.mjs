@@ -102,7 +102,7 @@ eq('  iva-knowledge enabled', AGENTS['iva-knowledge'].enabled, true);
 eq('  iva-recruiting enabled', AGENTS['iva-recruiting'].enabled, true);
 eq('  iva-builder enabled', getAgent('iva-builder').id, 'iva-builder');
 eq('  getAgent(unbekannt) -> iva-standard', getAgent('does-not-exist').id, 'iva-standard');
-eq('  iva-standard allowedSkills', getAgent('iva-standard').allowedSkills, ['memory', 'calendar', 'mails', 'crm', 'pipedrive', 'airtable', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'builder', 'qonekto', 'lumit', 'capabilityReview', 'knowledgeLibrary', 'recruiting', 'deviceControl', 'planbar', 'investment']);
+eq('  iva-standard allowedSkills', getAgent('iva-standard').allowedSkills, ['memory', 'calendar', 'mails', 'crm', 'pipedrive', 'airtable', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'builder', 'qonekto', 'lumit', 'capabilityReview', 'knowledgeLibrary', 'recruiting', 'deviceControl', 'planbar', 'investment', 'incidentMemory']);
 truthy('  Alle aktiven Agenten besitzen alle gemeinsamen Schnittstellen', Object.values(AGENTS).filter(agent => agent.enabled).every(agent => SHARED_INTERFACE_SKILLS.every(skill => agent.allowedSkills.includes(skill))));
 eq('  Workflows besitzen dieselben gemeinsamen Schnittstellen', WORKFLOW_INTERFACE_SKILLS, SHARED_INTERFACE_SKILLS);
 eq('  Schnittstellenrichtlinie ist zentral geteilt', getInterfaceAccessPolicy().mode, 'shared-interfaces');

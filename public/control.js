@@ -34,15 +34,27 @@ function renderBuildProgress(){
 }
 
 function renderMetrics(){
-  const s=state.status||{}, ops=s.operations||{}, connectors=s.connectors||{}, automations=s.automations||{};
+  const s=state.status||{}, ops=s.operations||{}, connectors=s.connectors||{}, automations=s.automations||{}, incidents=s.incidents||{};
   const values=[
     [automations.enabled||0,'Automationen an','good'],
     [automations.failedToday||0,'Workflow-Fehler heute',automations.failedToday?'bad':'good'],
     [`${connectors.ready||0} / ${connectors.total||0}`,'Anbindungen bereit',(connectors.ready||0)===(connectors.total||0)?'good':'warn'],
     [ops.approvals?.pending||0,'offene Freigaben',ops.approvals?.pending?'warn':'good'],
     [ops.runs?.failed||0,'fehlgeschlagene Läufe',ops.runs?.failed?'bad':'good'],
+    [incidents.preventedCount||0,'Wiederholungen vermieden','good'],
   ];
   $('metrics').innerHTML=values.map(([value,label,kind])=>`<div class="metric ${kind}"><b>${esc(value)}</b><small>${esc(label)}</small></div>`).join('');
+}
+function renderIncidents(){
+  const memory=state.status?.incidents||{};
+  $('incidentSummary').innerHTML=[
+    `<span class="good">${esc(memory.resolved||0)} gelöste Ursachen</span>`,
+    `<span class="warn">${esc(memory.open||0)} offen</span>`,
+    `<span>${esc(memory.recurring||0)} wiederkehrend</span>`,
+    `<span class="good">${esc(memory.preventedCount||0)} Wiederholungen vermieden</span>`,
+  ].join('');
+  const items=memory.items||[];
+  $('incidents').innerHTML=items.length?items.slice(0,12).map(item=>`<article class="list-item incident-item ${item.status==='resolved'?'resolved':'open'}"><div class="list-head"><div><b>${esc(item.workflowId||item.action||item.system||'Technische Störung')}</b><div class="activity-source">${esc(item.system||'iva')} · ${esc(item.step||item.action||'Lauf')}</div></div><span class="badge ${item.status==='resolved'?'ready':''}">${item.status==='resolved'?'gelöst':'offen'} · ${esc(item.occurrences||1)}×</span></div><p>${esc(item.error||'Störung protokolliert.')}</p>${item.prevention?`<div class="incident-fix">Prävention: ${esc(item.prevention)}</div>`:''}${item.evidence?`<div class="incident-proof">✓ ${esc(item.evidence)}</div>`:''}<div class="meta">Zuletzt: ${fmt(item.lastSeenAt)} · eingesetzt ${esc(item.preventionUses||0)}× · vermieden ${esc(item.preventedCount||0)}×</div></article>`).join(''):empty('Noch keine technische Störung protokolliert.');
 }
 function automationStatus(item){ const run=item.lastRun; if(!run)return ['noch kein Lauf','off']; if(run.status==='completed')return ['zuletzt erfolgreich','ready']; if(run.status==='waiting')return ['läuft · wartet auf Endnachweis','ready']; if(run.status==='failed')return ['zuletzt Fehler','']; if(run.status==='blocked')return ['blockiert','']; return [run.status,'off']; }
 function statusView(status){
@@ -106,7 +118,7 @@ function renderImacStatus(){
   const el=$('imacStatus');
   if(el)el.innerHTML=`<b>${esc(label)}</b><div class="meta">Handy · MacBook · Telegram → IVA-Core → iMac · ${esc(agent.release||'Version unbekannt')}${agent.runtimeRevision?' · '+esc(agent.runtimeRevision.slice(0,12)):''}</div><div class="meta">${esc(agent.detail||'')} · Letzter Abruf: ${fmt(agent.lastPolledAt)}</div>`;
 }
-function render(){ renderImacStatus(); renderBuildProgress(); renderMetrics(); renderAutomations(); renderAgents(); renderConnectors(); renderApprovals(); renderRuns(); renderBacklog(); renderAudit(); }
+function render(){ renderImacStatus(); renderBuildProgress(); renderMetrics(); renderIncidents(); renderAutomations(); renderAgents(); renderConnectors(); renderApprovals(); renderRuns(); renderBacklog(); renderAudit(); }
 function makeCollapsible(){ document.querySelectorAll('.main>section.card,.main>section.grid>.card').forEach(card=>{ const heading=card.querySelector(':scope>h2'); if(!heading)return; const subtitle=heading.nextElementSibling?.classList?.contains('muted')?heading.nextElementSibling:null; const details=document.createElement('details'); details.className=card.className+' disclosure'; details.style.cssText=card.style.cssText; const summary=document.createElement('summary'); summary.innerHTML=`<div><span>${esc(heading.textContent)}</span>${subtitle?`<small>${esc(subtitle.textContent)}</small>`:''}</div>`; const body=document.createElement('div'); body.className='disclosure-body'; [...card.children].forEach(child=>{ if(child!==heading&&child!==subtitle)body.appendChild(child); }); details.append(summary,body); card.replaceWith(details); }); }
 async function load(){
   if(state.loading)return;

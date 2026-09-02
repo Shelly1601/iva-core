@@ -4,6 +4,11 @@ import {
   finishAutomationRun,
   getAutomation,
 } from './store.js';
+import {
+  findPreventiveLessons,
+  markPreventiveLessonUsed,
+  recordIncident,
+} from '../operations/incident-memory.js';
 
 const TIME_ZONE = 'Europe/Berlin';
 
@@ -78,6 +83,9 @@ export function createAutomationOrchestrator(handlers = {}) {
     if (started.duplicate) return { automationId: id, skipped: true, reason: started.exhausted ? 'attempts-exhausted' : 'duplicate', run: started.run };
     let timeout;
     try {
+      const preventiveLessons = await findPreventiveLessons({
+        system: 'railway', workflowId: id, action: 'automation.run', step: 'execute', runId: started.run.id,
+      });
       const result = await Promise.race([
         handler({
           automation,
@@ -86,6 +94,7 @@ export function createAutomationOrchestrator(handlers = {}) {
           slotKey: started.run.slotKey,
           attempt: started.run.attempt,
           previousResult: started.resumed ? started.run.result || {} : {},
+          preventiveLessons,
         }),
         new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error(`Zeitlimit nach ${automation.timeoutMs} ms überschritten.`)), automation.timeoutMs); }),
       ]);
@@ -95,9 +104,30 @@ export function createAutomationOrchestrator(handlers = {}) {
         summary: result?.summary || (requestedStatus === 'completed' ? 'Automatischer Lauf erfolgreich abgeschlossen.' : requestedStatus === 'waiting' ? 'Automatischer Lauf wartet auf das bestätigte Endergebnis.' : 'Automatischer Lauf nicht ausgeführt.'),
         error: result?.error || '', result: result || {},
       });
+      for (const incident of Array.isArray(result?.incidents) ? result.incidents : []) {
+        await recordIncident({
+          ...incident,
+          system: incident.system || 'railway',
+          workflowId: incident.workflowId || id,
+          action: incident.action || 'automation.run',
+          runId: started.run.id,
+          source: 'railway-automation',
+        });
+      }
+      for (const prevention of Array.isArray(result?.preventionsApplied) ? result.preventionsApplied : []) {
+        await markPreventiveLessonUsed(prevention.fingerprint, {
+          runId: started.run.id,
+          prevented: prevention.prevented === true,
+          evidence: prevention.evidence || result?.summary || '',
+        }).catch(() => null);
+      }
       return { automationId: id, skipped: requestedStatus === 'skipped', run, result };
     } catch (error) {
       const run = await finishAutomationRun(started.run.id, { status: 'failed', summary: 'Automatischer Lauf fehlgeschlagen.', error: error.message });
+      await recordIncident({
+        system: 'railway', workflowId: id, action: 'automation.run', step: 'execute', runId: started.run.id,
+        source: 'railway-automation', error: error.message, status: 'open', severity: 'high',
+      }).catch(() => null);
       throw Object.assign(error, { automationRun: run });
     } finally {
       clearTimeout(timeout);

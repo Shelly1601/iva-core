@@ -225,6 +225,24 @@ export async function reportOperationalRun(input = {}) {
   return request(`/device-agent/${IMAC_DEVICE_ID}/operational-runs`, { method: 'POST', body: input });
 }
 
+export async function fetchIncidentPreventions(input = {}) {
+  const query = new URLSearchParams();
+  for (const key of ['system', 'workflowId', 'action', 'step', 'runId', 'limit']) {
+    if (input[key] !== undefined && input[key] !== '') query.set(key, String(input[key]));
+  }
+  return request(`/device-agent/${IMAC_DEVICE_ID}/incidents/recommendations?${query}`);
+}
+
+export async function reportIncident(input = {}) {
+  return request(`/device-agent/${IMAC_DEVICE_ID}/incidents`, { method: 'POST', body: input });
+}
+
+export async function reportPreventionUse(fingerprint, input = {}) {
+  const safeFingerprint = String(fingerprint || '').trim();
+  if (!/^[a-f0-9]{24}$/.test(safeFingerprint)) throw new Error('Ungültiger Fehlerfingerabdruck.');
+  return request(`/device-agent/${IMAC_DEVICE_ID}/incidents/${safeFingerprint}/prevention-use`, { method: 'POST', body: input });
+}
+
 export async function reportProjectWorkflowRun(input = {}) {
   return request(`/device-agent/${IMAC_DEVICE_ID}/project-workflow-runs`, { method: 'POST', body: input });
 }

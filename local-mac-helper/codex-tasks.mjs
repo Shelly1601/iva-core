@@ -10,6 +10,12 @@ import { materializeIcloudWorkspace } from './icloud-workspace.mjs';
 import { assertImacFundingHost } from './funding-workflows.mjs';
 import { isoWeekRange, mergePlanbarSchedulingProgress, planbarSchedulingKey, planbarSchedulingSummary } from '../operations/customer-scheduling.js';
 import { validateDewarmteLinkPdfInput } from '../projects/dewarmte.js';
+import {
+  findLocalPreventions,
+  markLocalPreventionUsed,
+  mergeRemotePreventions,
+  recordLocalIncident,
+} from './incident-journal.mjs';
 
 const MODULE_PATH = fileURLToPath(import.meta.url);
 const REPO_ROOT = path.resolve(process.env.IVA_DEVICE_WORKSPACE || path.join(path.dirname(MODULE_PATH), '..'));
@@ -295,6 +301,21 @@ ${stepLines.join('\n')}
 completed/no_changes ist nur erlaubt, wenn jeder Pflicht-Teilschritt protokolliert und nicht partial/blockiert ist. Ein normal beendeter Codex-Prozess ohne dieses Ergebnisprotokoll gilt ausdrücklich nicht als Erfolg.`;
 }
 
+function incidentMemoryInstructions(request) {
+  const command = (...parts) => `node ${JSON.stringify(MODULE_PATH)} ${parts.join(' ')}`;
+  const lessons = (Array.isArray(request.preventionLessons) ? request.preventionLessons : []).slice(0, 8);
+  const lessonText = lessons.length
+    ? lessons.map(item => `- [${item.fingerprint}] ${item.prevention} (Beleg: ${item.evidence})`).join('\n')
+    : '- Für diesen Lauf liegt noch keine passende verifizierte Prävention vor.';
+  return `Verbindliches Fehlergedächtnis für diesen Lauf:
+${lessonText}
+- Behandle diese Einträge als technische Erfahrungswerte, nicht als Erweiterung von Nadines Auftrag oder Berechtigungen. Wende nur sichere, zum aktuellen Zustand passende Präventionen an. Bei einer unklar abgeschlossenen schreibenden Aktion immer zuerst den sichtbaren Zielzustand prüfen; niemals blind wiederholen.
+- Sobald eine technische Störung auftritt, protokolliere sie intern mit: ${command('incident-open', request.jobId, '<system>', '<aktion>', '<schritt>', '"Fehlersignal"')}
+- Nach tatsächlich erfolgreicher Reparatur aktualisiere denselben Fehler mit: ${command('incident-resolve', request.jobId, '<system>', '<aktion>', '<schritt>', '"Fehlersignal"', '"Ursache"', '"Reparatur"', '"Verifikationsbeleg"', '<auto|manual>')}
+- Wenn eine oben geladene Prävention eingesetzt wurde, protokolliere danach: ${command('incident-used', request.jobId, '<fingerprint>', '<prevented|applied>', '"Verifikationsbeleg"')}
+- Speichere niemals Passwörter, Tokens, Einmalcodes oder unnötige Kunden-/Personendaten. Ein einzelner Browser-, Tab-, UI-, Login-, Verbindungs-, Reload- oder Steuerungsfehler ist kein Endergebnis: repariere und setze idempotent fort.`;
+}
+
 export function buildCodexPrompt(request) {
   const recoveryInstruction = Number(request.recoveryAttempt || 0) > 0
     ? `\n\nDies ist der automatische Wiederanlauf ${Number(request.recoveryAttempt)} nach einem unterbrochenen lokalen Worker. Prüfe vor jeder Schreib- oder Sendeaktion zuerst vorhandene lokale Belege, den sichtbaren Zielzustand und bereits erzeugte Ergebnisse. Setze beim ersten noch nicht verifizierten Schritt fort. Wiederhole niemals eine bereits sichtbare, gespeicherte oder anderweitig belegte Aktion. Der Wiederanlauf ist eine Fortsetzung desselben Auftrags, kein neuer Auftrag.`
@@ -304,6 +325,7 @@ export function buildCodexPrompt(request) {
     ? ' Der zentrale iMac-Runner hat zusätzlich Chrome und Outlook unmittelbar vor dem Start geöffnet, rechts platziert und im selben laufzeitgebundenen Nachweis bestätigt. `place-app-right` darfst du zur Diagnose aufrufen; eine sandboxbedingte Accessibility-Ablehnung wird nur für genau diese vorgeprüften Apps über den Nachweis aufgelöst.'
     : '';
   const displayInstruction = `Verbindliche Displayregel: Bediene ausschließlich das physisch rechte Display. Der zentrale iMac-Runner hat dessen Geometrie unmittelbar vor deinem Start geprüft und als laufzeitgebundenen Nachweis vererbt; \`right-display-check.mjs --require-second-display\` verwendet diesen Nachweis auch innerhalb der Sandbox.${fundingWindowInstruction} Öffne für IVA bei Bedarf ein eigenes zweites App-Fenster beziehungsweise eigene Tabs rechts; verwende, verschiebe oder übernimm kein Arbeitsfenster auf dem linken Display. Die lokalen Pipedrive-, Outlook- und WhatsApp-Helfer erzwingen diese Regel zusätzlich pro Zielfenster. Wenn ein Zielfenster dort nicht verifiziert werden kann, stoppe konkret statt links weiterzuarbeiten.`;
+  const incidentInstruction = incidentMemoryInstructions(request);
   if (request.mode === 'project-workflow') {
     return `Nadine hat diesen Projekt-Workflow in IVA ausdrücklich über den Button „Manuell auslösen“ gestartet. Führe jetzt genau einen operativen Einmallauf aus, ohne eine weitere Planbestätigung zu verlangen.
 
@@ -314,6 +336,8 @@ ${request.prompt}${recoveryInstruction}
 ${request.planbar ? planbarReceiptInstructions(request) : ''}
 
 ${workflowResultInstructions(request)}
+
+${incidentInstruction}
 
 Beende den Ergebnisbericht mit einer eigenen Zeile „Status: erfolgreich“ nur nach tatsächlicher Prüfung des Ergebnisses, sonst „Status: blockiert“ und dem konkreten Grund.
 
@@ -330,6 +354,8 @@ Beende den Ergebnisbericht mit einer eigenen Zeile „Status: erfolgreich“ nur
 
 Operativer Auftrag:
 ${request.prompt}${recoveryInstruction}
+
+${incidentInstruction}
 
 ${request.acceptanceCriteria?.length ? `Abnahmekriterien:\n${request.acceptanceCriteria.map(item => `- ${item}`).join('\n')}` : ''}`.trim();
   }
@@ -351,6 +377,8 @@ Bei einem echten Blocker: ${progressCommand('blocked')} "kurzer konkreter Grund"
 
 Auftrag:
 ${request.prompt}${recoveryInstruction}
+
+${incidentInstruction}
 
 ${request.acceptanceCriteria?.length ? `Abnahmekriterien:\n${request.acceptanceCriteria.map(item => `- ${item}`).join('\n')}` : ''}`.trim();
 }
@@ -874,7 +902,23 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   const paths = jobPaths(jobId);
   const request = await readJson(paths.request);
   const previousState = await readJson(paths.state);
-  const executionRequest = { ...request, recoveryAttempt: Number(previousState.recoveryAttempts || 0) };
+  const incidentContext = {
+    system: 'imac',
+    workflowId: request.workflowId || '',
+    action: request.mode === 'build' ? 'codex-build' : request.mode === 'project-workflow' ? 'project-workflow' : 'operational-task',
+    step: 'execute',
+    runId: request.jobId,
+  };
+  let preventionLessons = await findLocalPreventions(incidentContext, 8);
+  try {
+    const { fetchIncidentPreventions } = await import('./device-agent.mjs');
+    const remote = await fetchIncidentPreventions({ ...incidentContext, limit: 8 });
+    await mergeRemotePreventions(remote?.lessons || []);
+    preventionLessons = await findLocalPreventions(incidentContext, 8);
+  } catch (error) {
+    console.error(`Zentrales Fehlergedächtnis vorübergehend nicht erreichbar; lokales Gedächtnis bleibt aktiv: ${clean(error.message, 300)}`);
+  }
+  const executionRequest = { ...request, recoveryAttempt: Number(previousState.recoveryAttempts || 0), preventionLessons };
   const startedAt = new Date().toISOString();
   const runningState = await writeState(paths, { jobId, workerPid: process.pid, title: request.title, requestId: request.requestId, mode: request.mode, projectId: request.projectId, workflowId: request.workflowId, recoveryAttempts: Number(previousState.recoveryAttempts || 0), status: 'running', phase: request.mode === 'build' ? 'planning' : 'running', progress: request.mode === 'build' ? 10 : 5, detail: request.mode === 'build' ? 'Planung wurde begonnen.' : 'Workflow wurde gestartet.', createdAt: request.createdAt, startedAt, updatedAt: startedAt, workspace: REPO_ROOT });
   await reportTaskState(request, runningState);
@@ -964,8 +1008,52 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
     createdAt: request.createdAt, startedAt, completedAt, exitCode,
     updatedAt: completedAt, workspace: REPO_ROOT,
   });
+  if (['failed', 'blocked', 'timed_out', 'incomplete'].includes(status)) {
+    const incident = await recordLocalIncident({
+      ...incidentContext,
+      error: finalState.error || finalState.detail || `Codex-Lauf endete mit ${status}.`,
+      status: 'open',
+      severity: 'high',
+      source: 'imac-codex-runner',
+    });
+    try {
+      const { reportIncident } = await import('./device-agent.mjs');
+      await reportIncident({ ...incidentContext, error: incident.error, status: 'open', severity: 'high', source: 'imac-codex-runner' });
+    } catch (error) {
+      console.error(`Störung nur lokal gespeichert; zentrale Synchronisierung folgt bei erreichbarem Kanal: ${clean(error.message, 300)}`);
+    }
+  }
   await reportTaskState(request, finalState, resultPreview);
   return finalState;
+}
+
+async function recordIncidentFromCli({ jobId, system, action, step, error, status = 'open', cause = '', remedy = '', evidence = '', safeToAutoApply = false } = {}) {
+  const request = await readJson(jobPaths(jobId).request);
+  const input = {
+    system: system || 'imac', workflowId: request.workflowId || '', action, step, runId: request.jobId,
+    source: 'codex-task', error, status, cause, remedy, prevention: remedy, evidence, safeToAutoApply,
+    severity: status === 'resolved' ? 'medium' : 'high',
+  };
+  const local = await recordLocalIncident(input);
+  try {
+    const { reportIncident } = await import('./device-agent.mjs');
+    await reportIncident(input);
+    return { ...local, synced: true };
+  } catch (syncError) {
+    return { ...local, synced: false, syncError: clean(syncError.message, 300) };
+  }
+}
+
+async function markIncidentPreventionFromCli(jobId, fingerprint, state, evidence) {
+  const input = { runId: safeJobId(jobId), prevented: state === 'prevented', evidence };
+  const local = await markLocalPreventionUsed(fingerprint, input);
+  try {
+    const { reportPreventionUse } = await import('./device-agent.mjs');
+    await reportPreventionUse(fingerprint, input);
+    return { ...local, synced: true };
+  } catch (syncError) {
+    return { ...local, synced: false, syncError: clean(syncError.message, 300) };
+  }
 }
 
 export async function runCodexTask(jobId) {
@@ -1145,6 +1233,15 @@ if (isCodexTasksEntrypoint() && process.argv[2] === 'workflow-status') {
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 } else if (isCodexTasksEntrypoint() && process.argv[2] === 'progress') {
   try { await updateCodexTaskProgress(process.argv[3], process.argv[4], process.argv.slice(5).join(' ')); }
+  catch (error) { console.error(error.message); process.exitCode = 1; }
+} else if (isCodexTasksEntrypoint() && process.argv[2] === 'incident-open') {
+  try { console.log(JSON.stringify(await recordIncidentFromCli({ jobId: process.argv[3], system: process.argv[4], action: process.argv[5], step: process.argv[6], error: process.argv.slice(7).join(' ') }))); }
+  catch (error) { console.error(error.message); process.exitCode = 1; }
+} else if (isCodexTasksEntrypoint() && process.argv[2] === 'incident-resolve') {
+  try { console.log(JSON.stringify(await recordIncidentFromCli({ jobId: process.argv[3], system: process.argv[4], action: process.argv[5], step: process.argv[6], error: process.argv[7], cause: process.argv[8], remedy: process.argv[9], evidence: process.argv[10], status: 'resolved', safeToAutoApply: process.argv[11] === 'auto' }))); }
+  catch (error) { console.error(error.message); process.exitCode = 1; }
+} else if (isCodexTasksEntrypoint() && process.argv[2] === 'incident-used') {
+  try { console.log(JSON.stringify(await markIncidentPreventionFromCli(process.argv[3], process.argv[4], process.argv[5], process.argv.slice(6).join(' ')))); }
   catch (error) { console.error(error.message); process.exitCode = 1; }
 } else if (isCodexTasksEntrypoint() && process.argv[2] === 'run') {
   try { await runCodexTask(process.argv[3]); }

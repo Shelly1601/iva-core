@@ -10,14 +10,14 @@ export const CENTRAL_RUNTIME_VERSION = 'imac-central-v6';
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 const allowedPath = value => /^local-mac-helper\/[a-z0-9-]+\.mjs$/.test(value)
   || /^local-mac-helper\/macos\/[a-z0-9-]+\.swift$/.test(value)
-  || ['local-mac-helper/runtime-package.json', 'local-mac-helper/manufacturer-lead-config.json', 'local-mac-helper/assets/heat-hero-logo.png', 'operations/customer-scheduling.js', 'projects/dewarmte.js', 'projects/dewarmte-material-standard.js'].includes(value);
+  || ['local-mac-helper/runtime-package.json', 'local-mac-helper/manufacturer-lead-config.json', 'local-mac-helper/assets/heat-hero-logo.png', 'operations/customer-scheduling.js', 'operations/incident-memory.js', 'projects/dewarmte.js', 'projects/dewarmte-material-standard.js'].includes(value);
 
 // Only deployed source files, never .env, credentials, customer files or outputs.
 export async function buildCentralRuntimeBundle(repo) {
   const names = (await readdir(path.join(repo, 'local-mac-helper')))
     .map(name => `local-mac-helper/${name}`).filter(allowedPath);
   names.push('local-mac-helper/macos/iva-ax.swift', 'local-mac-helper/macos/iva-whatsapp-probe.swift',
-    'local-mac-helper/assets/heat-hero-logo.png', 'operations/customer-scheduling.js', 'projects/dewarmte.js', 'projects/dewarmte-material-standard.js');
+    'local-mac-helper/assets/heat-hero-logo.png', 'operations/customer-scheduling.js', 'operations/incident-memory.js', 'projects/dewarmte.js', 'projects/dewarmte-material-standard.js');
   const files = [];
   for (const name of names.sort()) {
     const bytes = await readFile(path.join(repo, name));
@@ -37,7 +37,7 @@ export function validateCentralRuntimeBundle(bundle) {
     size += bytes.length;
     if (size > 12 * 1024 * 1024 || digest(bytes) !== file.sha256) throw new Error('IVA-Laufzeitpaket hat die Inhaltsprüfung nicht bestanden.');
   }
-  for (const required of ['local-mac-helper/device-agent-runner.mjs', 'local-mac-helper/device-agent.mjs', 'local-mac-helper/central-runtime.mjs', 'local-mac-helper/runtime-package.json', 'operations/customer-scheduling.js', 'projects/dewarmte-material-standard.js']) {
+  for (const required of ['local-mac-helper/device-agent-runner.mjs', 'local-mac-helper/device-agent.mjs', 'local-mac-helper/central-runtime.mjs', 'local-mac-helper/runtime-package.json', 'operations/customer-scheduling.js', 'operations/incident-memory.js', 'projects/dewarmte-material-standard.js']) {
     if (!names.has(required)) throw new Error(`IVA-Laufzeitpaket unvollständig: ${required}`);
   }
   const revision = digest(JSON.stringify(bundle.files.map(({ path, sha256 }) => ({ path, sha256 }))));
