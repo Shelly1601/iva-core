@@ -40,10 +40,13 @@ assert.match(html, /function dataVeil\(/, 'Der Hintergrund braucht fließende Da
 assert.match(html, /function neuralMark\(/, 'Die schwebenden Module brauchen eigene neuronale Glyphen');
 assert.match(html, /seed\(INNER,0\.28,26\);seed\(OUTER,0\.44,20\)/, 'Die schwebenden Bereiche müssen deutlich größer als zuvor gerendert werden');
 assert.match(html, /function setAppsOpen\(open\)/, 'Das App-Raster braucht einen gemeinsamen Desktop-/Mobil-Schaltzustand');
-assert.match(html, /id="chatForm"/, 'Der Chat braucht einen nativen Formularversand für mobile Browser');
-assert.match(html, /id="chatSend"[^>]+type="submit"|type="submit"[^>]+id="chatSend"/, 'Der Senden-Button muss das Chatformular zuverlässig absenden');
+assert.doesNotMatch(html, /<form[^>]+id="chatForm"/, 'Der mobile Chat darf keinen nativen Formular-Submit auslösen');
+assert.match(html, /id="chatComposer"[^>]+role="form"/, 'Der Chat-Composer muss semantisch als Formular erkennbar bleiben');
+assert.match(html, /id="chatSend"[^>]+type="button"|type="button"[^>]+id="chatSend"/, 'Der Senden-Button darf auf iOS keine Seitennavigation auslösen');
 assert.match(html, /enterkeyhint="send"/, 'Die mobile Tastatur muss eine Senden-Aktion anbieten');
-assert.match(html, /chatForm'\)\.addEventListener\('submit'/, 'Der Versand muss über das Formularereignis laufen');
+assert.match(html, /chatSend'\)\.addEventListener\('click',triggerChatSend\)/, 'Der Senden-Button braucht einen direkten Klick-Handler');
+assert.match(html, /chatIn'\)\.addEventListener\('keydown'/, 'Enter muss weiterhin direkt senden');
+assert.match(html, /function keepChatOpen\(\)/, 'Der Chat muss während des gesamten Sendevorgangs offen bleiben');
 assert.doesNotMatch(html, /popup=yes|window\.open\(/, 'Das neue Cockpit darf keine Browser-Pop-ups öffnen');
 
 for (const state of ['listening', 'thinking', 'speaking']) {
@@ -58,4 +61,4 @@ assert.match(css, /prefers-reduced-motion/, 'Animationen müssen Rücksicht auf 
 assert.match(js, /MutationObserver/, 'Der Avatar muss auf echte Voice-Zustandswechsel reagieren');
 assert.match(js, /openWidget/, 'Daten-Apps müssen sich innerhalb des Cockpits öffnen');
 
-console.log('PASS Cockpit v9.5: IVA-first Bühne, kompakter mobiler Chat, zuverlässiger Formularversand und Apps geprüft.');
+console.log('PASS Cockpit v9.6: IVA-first Bühne, mobiler Chat ohne Seitennavigation, direkter Versand und Apps geprüft.');

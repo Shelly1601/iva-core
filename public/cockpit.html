@@ -6,6 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="IVA">
 <meta name="theme-color" content="#05070e">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <title>IVA · Cockpit</title>
 <style>
   :root{--bg:#05070e;--bg2:#03050a;--panel:rgba(16,24,44,.55);--panel2:rgba(12,18,34,.7);
@@ -172,7 +173,7 @@
   .setup .hint{font-size:11.5px;color:var(--muted);margin-top:12px;text-align:center}
   .footer{text-align:center;color:var(--muted);font-size:11px;margin-top:18px;opacity:.7}
 </style>
-<link rel="stylesheet" href="./cockpit-v9.css?v=9.5">
+<link rel="stylesheet" href="./cockpit-v9.css?v=9.6">
 </head>
 <body>
 <div class="wrap">
@@ -271,15 +272,15 @@
   <section class="chat">
     <div class="head"><span class="o"></span> Chat mit IVA</div>
     <div class="msgs" id="msgs"><div class="bubble sys">Verbinde mich mit deinem Server …</div></div>
-    <form class="ask" id="chatForm">
+    <div class="ask" id="chatComposer" role="form" aria-label="Nachricht an IVA senden">
       <button type="button" class="mic" id="wakeBtn" title="Zuhörmodus mit Wake-Word an/aus (Chrome)" aria-label="Zuhörmodus" aria-pressed="false"><svg class="control-glyph"><use href="#iva-icon-listen"/></svg></button>
       <button type="button" class="mic" id="micBtn" title="Einmal sprechen / Mikrofon sofort ausschalten (Chrome)" aria-label="Mikrofon" aria-pressed="false" disabled><svg class="control-glyph"><use href="#iva-icon-mic"/></svg></button>
       <input id="chatIn" placeholder="Frag IVA … tippen, Mikro, oder „Eva wake up“" enterkeyhint="send" autocomplete="off" disabled>
-      <button type="submit" id="chatSend" disabled>Senden</button>
+      <button type="button" id="chatSend" disabled>Senden</button>
       <button type="button" class="mic" id="ttsBtn" title="Evas Stimme an/aus" aria-label="Evas Stimme"><svg class="control-glyph"><use href="#iva-icon-speaker"/></svg></button>
-    </form>
+    </div>
   </section>
-  <div class="footer">IVA-Cockpit · v9.5 · Living Command Center · live vom Server</div>
+  <div class="footer">IVA-Cockpit · v9.6 · Living Command Center · live vom Server</div>
   <span id="m-mail" hidden></span><span id="m-lead" hidden></span><span id="m-stat" hidden></span>
 </div>
 
@@ -384,7 +385,11 @@
   $('openVoiceLab').addEventListener('click',()=>openToolWindow('/voice-lab','Sprachlabor'));
   $('openControl').addEventListener('click',()=>openToolWindow('/control','Kontrollzentrum'));
   $('openProjects').addEventListener('click',()=>openToolWindow('/projects?id=heat-hero','Projekte'));
-  async function sendChat(viaVoice,voiceTimings={}){cancelTranscriptPreview();const inp=$('chatIn');const t=inp.value.trim();if(!t||chatAbort)return;
+  function keepChatOpen(){
+    document.body.classList.add('chat-open');
+    $('dockChat').classList.add('active');
+  }
+  async function sendChat(viaVoice,voiceTimings={}){keepChatOpen();cancelTranscriptPreview();const inp=$('chatIn');const t=inp.value.trim();if(!t||chatAbort)return;
     const target=workspaceIntent(t);if(target){bubble('user',t);inp.value='';const openOptions={sameTab:true};if(target==='buchhaltung'||target==='chancen'||target==='sprache'||target==='kontrolle'||target==='projekte'||target==='recruiting'||target==='investment'){const url=target==='buchhaltung'?'/accounting':target==='chancen'?'/opportunities':target==='kontrolle'?'/control':target==='projekte'?'/projects?id=heat-hero':target==='recruiting'?'/recruiting':target==='investment'?'/investment':'/voice-lab';openToolWindow(url,({buchhaltung:'Buchhaltung',chancen:'Chancenradar',sprache:'Sprachlabor',kontrolle:'Kontrollzentrum',projekte:'Projekte',recruiting:'Recruiting',investment:'Investment & Portfolio'})[target],openOptions);}else openWorkspace(target,t,openOptions);return;}
     unlockAudio();
     if(viaVoice===true){ beginVoiceTurn(t,voiceTimings); clearVoiceDraft(); setState('thinking'); stopServerCapture({discard:true}); try{if(rec)rec.stop();}catch(e){} }   // Ohr aus, solange IVA denkt+spricht
@@ -415,8 +420,15 @@
       if(e.name==='AbortError'){ if(!b.textContent.trim()||b.textContent==='…') b.textContent='(gestoppt)'; setStatus('on','gestoppt'); resetTTS(); afterSpeak(); }
       else{b.textContent='Fehler: '+e.message+'. Prüf ⚙︎.';setStatus('err','Fehler');resetTTS();afterSpeak();}
     }
-    finally{ if(chatAbort===aborter) chatAbort=null;chat.removeAttribute('aria-busy');send.textContent='Senden';send.disabled=false; }}
-  $('chatForm').addEventListener('submit',event=>{event.preventDefault();sendChat(false);});
+    finally{ if(chatAbort===aborter) chatAbort=null;chat.removeAttribute('aria-busy');send.textContent='Senden';send.disabled=false;keepChatOpen(); }}
+  function triggerChatSend(event){
+    event.preventDefault();
+    event.stopPropagation();
+    keepChatOpen();
+    void sendChat(false);
+  }
+  $('chatSend').addEventListener('click',triggerChatSend);
+  $('chatIn').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey)triggerChatSend(event);});
   document.querySelectorAll('[data-open-workspace]').forEach(btn=>btn.addEventListener('click',()=>openWorkspace(btn.dataset.openWorkspace)));
 
   // ---- Evas Stimme (ElevenLabs) + Gespraechs-Koordination ----
