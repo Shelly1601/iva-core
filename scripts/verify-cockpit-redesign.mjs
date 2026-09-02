@@ -4,6 +4,7 @@ import { readFile, stat } from 'node:fs/promises';
 const html = await readFile(new URL('../public/cockpit.html', import.meta.url), 'utf8');
 const css = await readFile(new URL('../public/cockpit-v9.css', import.meta.url), 'utf8');
 const js = await readFile(new URL('../public/cockpit-v9.js', import.meta.url), 'utf8');
+const server = await readFile(new URL('../index.js', import.meta.url), 'utf8');
 const avatarUrl = new URL('../public/assets/iva-avatar-v4-research.png', import.meta.url);
 const avatar = await readFile(avatarUrl);
 const avatarStat = await stat(avatarUrl);
@@ -49,6 +50,9 @@ assert.match(html, /chatIn'\)\.addEventListener\('keydown'/, 'Enter muss weiterh
 assert.match(html, /function keepChatOpen\(\)/, 'Der Chat muss während des gesamten Sendevorgangs offen bleiben');
 assert.match(html, /\.wrap\{[^}]*z-index:auto/, 'Der mobile Wrapper darf Chat- und App-Ebenen nicht unter dem Backdrop einsperren');
 assert.match(html, /\.hud-stage\{[^}]*z-index:auto/, 'Die mobile Bühne darf interaktive Overlays nicht unter dem Backdrop einsperren');
+assert.match(html, /body\.chat-open \.sheet-backdrop\{opacity:1;pointer-events:none\}/, 'Der Backdrop darf bei offenem Chat keine iOS-Touchs abfangen');
+assert.match(html, /class="chat-build">v9\.7</, 'Der tatsächlich geladene mobile Build muss im Chat sichtbar sein');
+assert.match(server, /cockpit\.html[\s\S]{0,500}Cache-Control[\s\S]{0,100}no-store/, 'Cockpit-HTML darf vom iPhone-PWA nicht als alter Build wiederverwendet werden');
 assert.doesNotMatch(html, /popup=yes|window\.open\(/, 'Das neue Cockpit darf keine Browser-Pop-ups öffnen');
 
 for (const state of ['listening', 'thinking', 'speaking']) {
@@ -63,4 +67,4 @@ assert.match(css, /prefers-reduced-motion/, 'Animationen müssen Rücksicht auf 
 assert.match(js, /MutationObserver/, 'Der Avatar muss auf echte Voice-Zustandswechsel reagieren');
 assert.match(js, /openWidget/, 'Daten-Apps müssen sich innerhalb des Cockpits öffnen');
 
-console.log('PASS Cockpit v9.6: IVA-first Bühne, mobiler Chat ohne Seitennavigation, direkter Versand und Apps geprüft.');
+console.log('PASS Cockpit v9.7: IVA-first Bühne, iOS-sicherer mobiler Chat, direkter Versand und Apps geprüft.');

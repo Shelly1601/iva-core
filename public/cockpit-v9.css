@@ -366,6 +366,7 @@ body.widget-open .widget-drawer { transform: translateX(0); opacity: 1; pointer-
 .chat { min-height: 116px; max-height: 150px; border-radius: 20px; background: rgba(8, 16, 34, .62); }
 .chat .head { padding: 8px 15px; font-size: 11px; }
 .chat .head .o { width: 17px; height: 17px; }
+.chat-build { margin-left: auto; color: var(--cyan); font-size: 9px; letter-spacing: .08em; opacity: .75; }
 .msgs { min-height: 28px; padding: 7px 14px; gap: 7px; }
 .bubble { padding: 6px 10px; font-size: 12px; }
 .ask { width: 100%; min-width: 0; padding: 8px 10px; gap: 7px; }
@@ -467,6 +468,7 @@ body.widget-open .widget-drawer { transform: translateX(0); opacity: 1; pointer-
   .chat .ask input { width: 100%; height: 48px; font-size: 16px; border-radius: 13px; }
   .chat .ask #chatSend { min-width: 82px; min-height: 48px; padding: 0 15px; border-radius: 13px; }
   .chat[aria-busy="true"] .ask #chatSend { opacity: .72; cursor: wait; }
+  body.chat-open .sheet-backdrop { pointer-events: none; }
   .footer { display: none; }
   .sheet-dash .sheet-body { padding: 12px 8px; text-align: center; }
   .sheet-dash .sheet-body h2 { font-size: 17px; }

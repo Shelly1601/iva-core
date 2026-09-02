@@ -3536,8 +3536,15 @@ const automationCatchUpInterval = setInterval(() => {
 }, 15 * 60 * 1000);
 automationCatchUpInterval.unref?.();
 const __dirnameIva = path.dirname(fileURLToPath(import.meta.url));
-app.use(express.static(path.join(__dirnameIva, 'public')));
-app.get('/cockpit', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'cockpit.html')));
+app.use(express.static(path.join(__dirnameIva, 'public'), {
+  setHeaders(res, filePath) {
+    if (filePath.endsWith(`${path.sep}cockpit.html`)) res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
+  },
+}));
+app.get('/cockpit', (_req, res) => {
+  res.set('Cache-Control', 'no-store, max-age=0, must-revalidate');
+  res.sendFile(path.join(__dirnameIva, 'public', 'cockpit.html'));
+});
 app.get('/workspace', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'workspace.html')));
 app.get('/pv-calculator', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'pv-calculator.html')));
 app.get('/pv-schnellrechner', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'pv-calculator.html')));

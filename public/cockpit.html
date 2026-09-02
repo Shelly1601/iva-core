@@ -83,7 +83,8 @@
 
     /* Subtle backdrop — no blur, no dim, core stays clearly visible behind sheets. */
     .sheet-backdrop{display:block;position:fixed;inset:0;background:rgba(3,6,14,.28);opacity:0;pointer-events:none;transition:opacity 220ms ease;z-index:60;backdrop-filter:none}
-    body.chat-open .sheet-backdrop,body.dash-open .sheet-backdrop{opacity:1;pointer-events:auto}
+    body.chat-open .sheet-backdrop{opacity:1;pointer-events:none}
+    body.dash-open .sheet-backdrop{opacity:1;pointer-events:auto}
 
     /* Bottom dock — Chat | Wake | Mic | Widgets | TTS. */
     .dock{display:flex;align-items:stretch;gap:5px;position:fixed;left:0;right:0;bottom:0;padding:8px 8px calc(8px + env(safe-area-inset-bottom));background:linear-gradient(180deg,rgba(5,7,14,0),rgba(5,7,14,.9) 30%,rgba(5,7,14,.98));border-top:1px solid var(--border);z-index:70;backdrop-filter:blur(14px);height:calc(var(--dock-h) + env(safe-area-inset-bottom))}
@@ -173,7 +174,7 @@
   .setup .hint{font-size:11.5px;color:var(--muted);margin-top:12px;text-align:center}
   .footer{text-align:center;color:var(--muted);font-size:11px;margin-top:18px;opacity:.7}
 </style>
-<link rel="stylesheet" href="./cockpit-v9.css?v=9.6">
+<link rel="stylesheet" href="./cockpit-v9.css?v=9.7">
 </head>
 <body>
 <div class="wrap">
@@ -270,7 +271,7 @@
     </aside>
   </main>
   <section class="chat">
-    <div class="head"><span class="o"></span> Chat mit IVA</div>
+    <div class="head"><span class="o"></span> Chat mit IVA <small class="chat-build">v9.7</small></div>
     <div class="msgs" id="msgs"><div class="bubble sys">Verbinde mich mit deinem Server …</div></div>
     <div class="ask" id="chatComposer" role="form" aria-label="Nachricht an IVA senden">
       <button type="button" class="mic" id="wakeBtn" title="Zuhörmodus mit Wake-Word an/aus (Chrome)" aria-label="Zuhörmodus" aria-pressed="false"><svg class="control-glyph"><use href="#iva-icon-listen"/></svg></button>
@@ -280,7 +281,7 @@
       <button type="button" class="mic" id="ttsBtn" title="Evas Stimme an/aus" aria-label="Evas Stimme"><svg class="control-glyph"><use href="#iva-icon-speaker"/></svg></button>
     </div>
   </section>
-  <div class="footer">IVA-Cockpit · v9.6 · Living Command Center · live vom Server</div>
+  <div class="footer">IVA-Cockpit · v9.7 · Living Command Center · live vom Server</div>
   <span id="m-mail" hidden></span><span id="m-lead" hidden></span><span id="m-stat" hidden></span>
 </div>
 
