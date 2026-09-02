@@ -172,7 +172,7 @@
   .setup .hint{font-size:11.5px;color:var(--muted);margin-top:12px;text-align:center}
   .footer{text-align:center;color:var(--muted);font-size:11px;margin-top:18px;opacity:.7}
 </style>
-<link rel="stylesheet" href="/cockpit-v9.css?v=9.2">
+<link rel="stylesheet" href="/cockpit-v9.css?v=9.3">
 </head>
 <body>
 <div class="wrap">
@@ -182,7 +182,7 @@
     </div>
     <div style="display:flex;align-items:center;gap:12px">
       <div class="clock"><div class="t" id="clk">–</div><div class="d" id="date">–</div></div>
-      <button class="toolbtn" id="gear" title="Einstellungen">⚙︎</button>
+      <button class="toolbtn" id="gear" title="Einstellungen" aria-label="Einstellungen"><svg class="control-glyph"><use href="#iva-icon-settings"/></svg></button>
     </div>
   </div>
   <main class="hud-stage">
@@ -192,7 +192,7 @@
       <div class="presence-aura" aria-hidden="true"><i></i><i></i><i></i></div>
       <div class="presence-orbit orbit-one" aria-hidden="true"></div>
       <div class="presence-orbit orbit-two" aria-hidden="true"></div>
-      <img class="iva-avatar" src="/assets/iva-avatar-v3-transparent.png?v=3" alt="IVA als freundliche holografische Assistentin">
+      <img class="iva-avatar" src="/assets/iva-avatar-v4-research.png?v=4" alt="IVA als holografische KI-Wissenschaftlerin mit Analysevisier">
       <div class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
       <button type="button" class="presence-voice" id="presenceVoiceBtn" aria-label="Mit IVA sprechen">
         <span class="presence-state-dot"></span>
@@ -203,27 +203,52 @@
       </div>
     </section>
 
+    <svg class="iva-icon-defs" aria-hidden="true">
+      <symbol id="iva-icon-workflows" viewBox="0 0 24 24"><path d="M4.5 8.5A8 8 0 0 1 18 5l1.5 1.5M19.5 3.8v4h-4M19.5 15.5A8 8 0 0 1 6 19l-1.5-1.5M4.5 20.2v-4h4"/><circle class="dot" cx="12" cy="12" r="2"/></symbol>
+      <symbol id="iva-icon-calendar" viewBox="0 0 24 24"><path d="M5 7.5h14M7.5 4v3.5M16.5 4v3.5M5 5.5h14v14H5zM8 11h2M12 11h4M8 15h4"/><circle class="dot" cx="16" cy="15" r="1.2"/></symbol>
+      <symbol id="iva-icon-todos" viewBox="0 0 24 24"><path d="M4.5 7.5l2 2 3.5-4M12 7.5h7M4.5 14l2 2 3.5-4M12 14h7M12 18.5h5"/></symbol>
+      <symbol id="iva-icon-projects" viewBox="0 0 24 24"><path d="M12 3.5l7.5 5L12 13l-7.5-4.5zM4.5 12l7.5 4.5 7.5-4.5M4.5 15.5L12 20l7.5-4.5"/></symbol>
+      <symbol id="iva-icon-customers" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3"/><path d="M6.5 19c.6-4 2.4-6 5.5-6s4.9 2 5.5 6M3.5 12a8.8 8.8 0 0 0 2 5.5M20.5 12a8.8 8.8 0 0 1-2 5.5"/><circle class="dot" cx="4" cy="9" r="1.1"/><circle class="dot" cx="20" cy="9" r="1.1"/></symbol>
+      <symbol id="iva-icon-advice" viewBox="0 0 24 24"><path d="M5 5.5h14v10H9l-4 3zM8 10h2M14 10h2M10 13h4"/><circle class="dot" cx="12" cy="7.5" r="1"/></symbol>
+      <symbol id="iva-icon-marketing" viewBox="0 0 24 24"><path d="M5 18.5V14M9 18.5v-7M13 18.5V9M17 18.5V6M14 6h3v3M17 6l-6 6"/><circle class="dot" cx="5" cy="11" r="1"/></symbol>
+      <symbol id="iva-icon-leads" viewBox="0 0 24 24"><path d="M4 5h16l-6.5 7v5.5l-3 1.5v-7zM8 8h8"/><circle class="dot" cx="18.5" cy="17.5" r="1.5"/></symbol>
+      <symbol id="iva-icon-mail" viewBox="0 0 24 24"><path d="M4 6h16v12H4zM4.5 7l7.5 6 7.5-6M7 16h4"/><circle class="dot" cx="17" cy="16" r="1"/></symbol>
+      <symbol id="iva-icon-calendly" viewBox="0 0 24 24"><circle cx="12" cy="12.5" r="7.5"/><path d="M12 8v5l3 2M7 4.5l-2 2M17 4.5l2 2"/><circle class="dot" cx="12" cy="12.5" r="1"/></symbol>
+      <symbol id="iva-icon-investment" viewBox="0 0 24 24"><path d="M4 18.5h16M5 16l4-4 3 2 6-7M15 7h3v3"/><circle class="dot" cx="9" cy="12" r="1"/></symbol>
+      <symbol id="iva-icon-recruiting" viewBox="0 0 24 24"><circle cx="10" cy="8" r="3"/><path d="M4.5 18c.6-3.7 2.4-5.6 5.5-5.6 1.8 0 3.2.6 4.1 1.8M17.5 13v7M14 16.5h7"/></symbol>
+      <symbol id="iva-icon-opportunities" viewBox="0 0 24 24"><path d="M12 3.5l1.8 5.1 5.2 1.9-5.2 1.8-1.8 5.2-1.8-5.2L5 10.5l5.2-1.9zM18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></symbol>
+      <symbol id="iva-icon-whatsapp" viewBox="0 0 24 24"><path d="M5 5.5h14v10H9l-4 3zM8 9.5h8M8 12.5h5"/><circle class="dot" cx="17" cy="12.5" r="1"/></symbol>
+      <symbol id="iva-icon-accounting" viewBox="0 0 24 24"><path d="M6 4h12v16H6zM8.5 7.5h7M8.5 16.5h7M13.5 10.5c-.6-.7-1.3-1-2-1-1.5 0-2.5 1-2.5 2.5s1 2.5 2.5 2.5c.8 0 1.5-.3 2-1M8 11.5h4.5M8 13h4"/></symbol>
+      <symbol id="iva-icon-voice" viewBox="0 0 24 24"><path d="M4 13v-2M7 16V8M10 19V5M13 16V8M16 14v-4M19 12v0"/><circle class="dot" cx="19" cy="12" r="1.2"/></symbol>
+      <symbol id="iva-icon-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4zM8 9h8M8 12.5h5"/></symbol>
+      <symbol id="iva-icon-listen" viewBox="0 0 24 24"><path d="M15.5 15.5c-1 1.8-2.1 3.2-3.8 3.2-2.5 0-3.2-1.9-3.2-4.1V9.2A4.5 4.5 0 0 1 13 4.7a4 4 0 0 1 4 4c0 2.6-1.8 3.5-3.2 4.5-.8.5-1.2 1.1-1.2 2"/><path d="M11 9.3a2 2 0 0 1 2-2c1.1 0 1.9.8 1.9 1.8 0 1.3-1.2 1.9-2.1 2.5"/></symbol>
+      <symbol id="iva-icon-mic" viewBox="0 0 24 24"><rect x="9" y="4" width="6" height="11" rx="3"/><path d="M6 11.5a6 6 0 0 0 12 0M12 17.5V21M8.5 21h7"/></symbol>
+      <symbol id="iva-icon-speaker" viewBox="0 0 24 24"><path d="M4 10h4l5-4v12l-5-4H4zM16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/></symbol>
+      <symbol id="iva-icon-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6"/><rect x="14" y="4" width="6" height="6"/><rect x="4" y="14" width="6" height="6"/><rect x="14" y="14" width="6" height="6"/></symbol>
+      <symbol id="iva-icon-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.5 1.5M16.5 16.5L18 18M18 6l-1.5 1.5M7.5 16.5L6 18"/><circle cx="12" cy="12" r="7"/></symbol>
+      <symbol id="iva-icon-stop" viewBox="0 0 24 24"><path d="M8 8h8v8H8z"/><circle cx="12" cy="12" r="9"/></symbol>
+    </svg>
     <nav class="home-apps" id="homeApps" aria-label="IVA Apps">
       <a class="app-tile app-workflows" id="workflowEntry" href="/control" aria-label="Aktuelle Workflows im Kontrollzentrum öffnen">
-        <span class="app-squircle">↻<b class="app-live-badge" id="appWorkflowBadge">0</b></span><span class="app-name">Workflows</span>
+        <span class="app-module"><svg class="app-glyph"><use href="#iva-icon-workflows"/></svg><i class="module-pulse"></i><b class="app-live-badge" id="appWorkflowBadge">0</b></span><span class="app-name">Workflows</span>
         <span class="workflow-mini"><b id="cockpitWorkflowRunning">0</b> aktiv · <b id="cockpitWorkflowWaiting">0</b> warten · <b id="cockpitWorkflowBlocked">0</b> blockiert</span>
         <span id="cockpitWorkflowUpdated" hidden>Echte Live-Daten werden geladen …</span>
       </a>
-      <button type="button" class="app-tile" data-widget="calendar"><span class="app-squircle app-calendar">📅<b class="app-count" id="c-cal">–</b></span><span class="app-name">Kalender</span></button>
-      <button type="button" class="app-tile" data-widget="todos"><span class="app-squircle app-todos">✓<b class="app-count" id="c-todo">–</b></span><span class="app-name">To-dos</span></button>
-      <button type="button" class="app-tile" id="openProjects"><span class="app-squircle app-projects">◇</span><span class="app-name">Projekte</span></button>
-      <button type="button" class="app-tile" data-open-workspace="kunde"><span class="app-squircle app-customers">♙</span><span class="app-name">Kunden</span></button>
-      <button type="button" class="app-tile" data-open-workspace="beratung"><span class="app-squircle app-advice">✦</span><span class="app-name">Beratung</span></button>
-      <button type="button" class="app-tile" id="openMarketing"><span class="app-squircle app-marketing">↗</span><span class="app-name">Marketing</span></button>
-      <button type="button" class="app-tile" data-widget="leads"><span class="app-squircle app-leads">🔥<b class="app-count" id="c-lead">–</b></span><span class="app-name">Leads</span></button>
-      <button type="button" class="app-tile" data-widget="mail"><span class="app-squircle app-mail">✉<b class="app-count" id="c-mail">–</b></span><span class="app-name">Mails</span></button>
-      <button type="button" class="app-tile" data-widget="calendly"><span class="app-squircle app-calendly">◷<b class="app-count" id="c-cly">–</b></span><span class="app-name">Calendly</span></button>
-      <button type="button" class="app-tile" id="openInvestment"><span class="app-squircle app-investment">⌁</span><span class="app-name">Investment</span></button>
-      <button type="button" class="app-tile" id="openRecruiting"><span class="app-squircle app-recruiting">◎</span><span class="app-name">Recruiting</span></button>
-      <button type="button" class="app-tile" id="openOpportunities"><span class="app-squircle app-opportunities">⚡</span><span class="app-name">Chancen</span></button>
-      <button type="button" class="app-tile" id="openWhatsApp"><span class="app-squircle app-whatsapp">◉</span><span class="app-name">WhatsApp</span></button>
-      <button type="button" class="app-tile" id="openAccounting"><span class="app-squircle app-accounting">€</span><span class="app-name">Buchhaltung</span></button>
-      <button type="button" class="app-tile" id="openVoiceLab"><span class="app-squircle app-voice">≋</span><span class="app-name">Sprachlabor</span></button>
+      <button type="button" class="app-tile app-calendar" data-widget="calendar"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-calendar"/></svg><i class="module-pulse"></i><b class="app-count" id="c-cal">–</b></span><span class="app-name">Kalender</span></button>
+      <button type="button" class="app-tile app-todos" data-widget="todos"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-todos"/></svg><i class="module-pulse"></i><b class="app-count" id="c-todo">–</b></span><span class="app-name">To-dos</span></button>
+      <button type="button" class="app-tile app-projects" id="openProjects"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-projects"/></svg><i class="module-pulse"></i></span><span class="app-name">Projekte</span></button>
+      <button type="button" class="app-tile app-customers" data-open-workspace="kunde"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-customers"/></svg><i class="module-pulse"></i></span><span class="app-name">Kunden</span></button>
+      <button type="button" class="app-tile app-advice" data-open-workspace="beratung"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-advice"/></svg><i class="module-pulse"></i></span><span class="app-name">Beratung</span></button>
+      <button type="button" class="app-tile app-marketing" id="openMarketing"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-marketing"/></svg><i class="module-pulse"></i></span><span class="app-name">Marketing</span></button>
+      <button type="button" class="app-tile app-leads" data-widget="leads"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-leads"/></svg><i class="module-pulse"></i><b class="app-count" id="c-lead">–</b></span><span class="app-name">Leads</span></button>
+      <button type="button" class="app-tile app-mail" data-widget="mail"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-mail"/></svg><i class="module-pulse"></i><b class="app-count" id="c-mail">–</b></span><span class="app-name">Mails</span></button>
+      <button type="button" class="app-tile app-calendly" data-widget="calendly"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-calendly"/></svg><i class="module-pulse"></i><b class="app-count" id="c-cly">–</b></span><span class="app-name">Calendly</span></button>
+      <button type="button" class="app-tile app-investment" id="openInvestment"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-investment"/></svg><i class="module-pulse"></i></span><span class="app-name">Investment</span></button>
+      <button type="button" class="app-tile app-recruiting" id="openRecruiting"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-recruiting"/></svg><i class="module-pulse"></i></span><span class="app-name">Recruiting</span></button>
+      <button type="button" class="app-tile app-opportunities" id="openOpportunities"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-opportunities"/></svg><i class="module-pulse"></i></span><span class="app-name">Chancen</span></button>
+      <button type="button" class="app-tile app-whatsapp" id="openWhatsApp"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-whatsapp"/></svg><i class="module-pulse"></i></span><span class="app-name">WhatsApp</span></button>
+      <button type="button" class="app-tile app-accounting" id="openAccounting"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-accounting"/></svg><i class="module-pulse"></i></span><span class="app-name">Buchhaltung</span></button>
+      <button type="button" class="app-tile app-voice" id="openVoiceLab"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-voice"/></svg><i class="module-pulse"></i></span><span class="app-name">Sprachlabor</span></button>
       <button type="button" id="openControl" hidden>Kontrollzentrum</button>
     </nav>
 
@@ -242,11 +267,11 @@
     <div class="head"><span class="o"></span> Chat mit IVA</div>
     <div class="msgs" id="msgs"><div class="bubble sys">Verbinde mich mit deinem Server …</div></div>
     <div class="ask">
-      <button class="mic" id="wakeBtn" title="Zuhörmodus mit Wake-Word an/aus (Chrome)" aria-pressed="false">👂</button>
-      <button class="mic" id="micBtn" title="Einmal sprechen / Mikrofon sofort ausschalten (Chrome)" aria-pressed="false" disabled>🎙</button>
+      <button class="mic" id="wakeBtn" title="Zuhörmodus mit Wake-Word an/aus (Chrome)" aria-label="Zuhörmodus" aria-pressed="false"><svg class="control-glyph"><use href="#iva-icon-listen"/></svg></button>
+      <button class="mic" id="micBtn" title="Einmal sprechen / Mikrofon sofort ausschalten (Chrome)" aria-label="Mikrofon" aria-pressed="false" disabled><svg class="control-glyph"><use href="#iva-icon-mic"/></svg></button>
       <input id="chatIn" placeholder="Frag IVA … tippen, Mikro, oder „Eva wake up“" disabled>
       <button id="chatSend" disabled>Senden</button>
-      <button class="mic" id="ttsBtn" title="Evas Stimme an/aus">🔊</button>
+      <button class="mic" id="ttsBtn" title="Evas Stimme an/aus" aria-label="Evas Stimme"><svg class="control-glyph"><use href="#iva-icon-speaker"/></svg></button>
     </div>
   </section>
   <div class="footer">IVA-Cockpit · v9 · Living Command Center · live vom Server</div>
@@ -259,14 +284,14 @@
   <div class="sheet-body" id="sheetDashBody"><h2>Deine IVA Apps</h2><p>Alle Bereiche liegen kompakt auf der Startseite. Tippe dort auf ein Icon.</p></div>
 </aside>
 <nav class="dock" id="dock" aria-label="Steuerung">
-  <button type="button" class="dock-btn" id="dockChat"><span>💬</span><span class="lbl">Chat</span></button>
+  <button type="button" class="dock-btn" id="dockChat"><svg class="control-glyph"><use href="#iva-icon-chat"/></svg><span class="lbl">Chat</span></button>
   <span class="dock-slot" id="dockWake"></span>
   <span class="dock-slot" id="dockMic"></span>
-  <button type="button" class="dock-btn" id="dockWidgets"><span>⌘</span><span class="lbl">Apps</span></button>
-  <a class="dock-btn" id="dockWorkflows" href="/control" aria-label="Aktuelle Workflows öffnen"><span class="workflow-dock-icon">↻<b class="workflow-dock-badge" id="dockWorkflowBadge">0</b></span><span class="lbl">Workflows</span></a>
+  <button type="button" class="dock-btn" id="dockWidgets"><svg class="control-glyph"><use href="#iva-icon-grid"/></svg><span class="lbl">Apps</span></button>
+  <a class="dock-btn" id="dockWorkflows" href="/control" aria-label="Aktuelle Workflows öffnen"><span class="workflow-dock-icon"><svg class="control-glyph"><use href="#iva-icon-workflows"/></svg><b class="workflow-dock-badge" id="dockWorkflowBadge">0</b></span><span class="lbl">Workflows</span></a>
   <span class="dock-slot" id="dockTts"></span>
 </nav>
-<button type="button" class="stop-iva" id="stopIvaBtn" title="IVA sofort stoppen" aria-label="IVA sofort stoppen">⏹</button>
+<button type="button" class="stop-iva" id="stopIvaBtn" title="IVA sofort stoppen" aria-label="IVA sofort stoppen"><svg class="control-glyph"><use href="#iva-icon-stop"/></svg></button>
 
 <div class="overlay" id="overlay">
   <div class="setup">
@@ -596,7 +621,7 @@
       const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(result.error||'HTTP '+response.status);
       const text=String(result.text||'').trim();
       if(!text){setStatus('on','Nichts verstanden · bitte noch einmal');if(shouldListen())setTimeout(resumeVoiceInput,250);return;}
-      if(awake&&isStopPhrase(text)){awake=false;setStatus('on','👂 warte auf „Eva wake up"');setTimeout(resumeVoiceInput,180);return;}
+      if(awake&&isStopPhrase(text)){awake=false;setStatus('on','Zuhörbereit · warte auf „Eva wake up"');setTimeout(resumeVoiceInput,180);return;}
       if(manualMicOn){manualMicOn=false;$('micBtn').classList.remove('rec');$('micBtn').setAttribute('aria-pressed','false');}
       queueTranscriptForSend(text,{endpointMs:Math.round(capture.endpointAt-capture.startedAt),transcriptionMs:Math.round(performance.now()-started)});
     }catch(error){setStatus('err','Transkription fehlgeschlagen');bubble('sys','Ich konnte die Aufnahme nicht transkribieren: '+error.message);if(shouldListen())setTimeout(resumeVoiceInput,350);}
@@ -655,7 +680,7 @@
   }
   function toggleWake(){
     if(wakeOn){stopListening();return;}
-    const wakeRecognition=ensureRec();if(!wakeRecognition)return;clearVoiceDraft();manualMicOn=false;wakeOn=true;awake=false;$('micBtn').classList.remove('rec');$('micBtn').setAttribute('aria-pressed','false');$('wakeBtn').classList.add('on');$('wakeBtn').setAttribute('aria-pressed','true');unlockAudio();if(!isBusyState())setState('listening');setStatus('on','👂 warte auf „Eva wake up"');startRec();
+    const wakeRecognition=ensureRec();if(!wakeRecognition)return;clearVoiceDraft();manualMicOn=false;wakeOn=true;awake=false;$('micBtn').classList.remove('rec');$('micBtn').setAttribute('aria-pressed','false');$('wakeBtn').classList.add('on');$('wakeBtn').setAttribute('aria-pressed','true');unlockAudio();if(!isBusyState())setState('listening');setStatus('on','Zuhörbereit · warte auf „Eva wake up"');startRec();
   }
   $('micBtn').addEventListener('click',toggleMic);
   $('wakeBtn').addEventListener('click',toggleWake);
@@ -804,22 +829,34 @@
     thinking: {amp:0.14, rot:0.55, glow:44, stop:'#f4fffb'},
     speaking: {amp:0.18, rot:0.42, glow:52, stop:'#eafffb'}
   };
-  const INNER=[{l:'Briefing',i:'✦',c:CY,st:'live'},{l:'Posteingang',i:'✉',c:BL,st:'build'},{l:'Vertrieb',i:'↗',c:BL,st:'build'},{l:'Termine',i:'◷',c:BL,st:'build'},{l:'Content',i:'◇',c:BL,st:'build'},{l:'Assistenz',i:'◎',c:BL,st:'build'}];
-  const OUTER=[{l:'Recherche',i:'⌕',c:SL,st:'plan'},{l:'Outreach',i:'↝',c:SL,st:'plan'},{l:'Zahlen',i:'∑',c:SL,st:'plan'},{l:'Voice',i:'≋',c:SL,st:'plan'},{l:'Rechner',i:'⌘',c:SL,st:'plan'}];
-  function seed(a,rf,sz){a.forEach((x,i)=>{x.a0=i/a.length*6.283+(Math.random()-.5)*.4;x.rf=rf*(0.9+Math.random()*.2);x.ph=Math.random()*6.283;x.sz=sz;x.off=(Math.random()-.5)*70;x.pk=Math.random();x.sp=(Math.random()-.5)*.05+.035;x.rot=Math.random()*6.283;});}
-  seed(INNER,0.26,15);seed(OUTER,0.42,12);
+  const INNER=[{l:'Briefing',g:0,c:CY,st:'live'},{l:'Posteingang',g:1,c:BL,st:'build'},{l:'Vertrieb',g:2,c:BL,st:'build'},{l:'Termine',g:3,c:BL,st:'build'},{l:'Content',g:4,c:BL,st:'build'},{l:'Assistenz',g:5,c:BL,st:'build'}];
+  const OUTER=[{l:'Recherche',g:6,c:SL,st:'plan'},{l:'Outreach',g:7,c:SL,st:'plan'},{l:'Zahlen',g:8,c:SL,st:'plan'},{l:'Voice',g:9,c:SL,st:'plan'},{l:'Rechner',g:10,c:SL,st:'plan'}];
+  function seed(a,rf,sz){a.forEach((x,i)=>{x.a0=i/a.length*6.283+(Math.random()-.5)*.32;x.rf=rf*(0.9+Math.random()*.2);x.ph=Math.random()*6.283;x.sz=sz;x.off=(Math.random()-.5)*70;x.pk=Math.random();x.sp=(Math.random()-.5)*.05+.035;x.rot=Math.random()*6.283;});}
+  seed(INNER,0.27,18);seed(OUTER,0.43,14);
   function hexPath(x,y,R,rot){ctx.beginPath();for(let i=0;i<6;i++){const a=rot+i/6*6.283,px=x+Math.cos(a)*R,py=y+Math.sin(a)*R;i?ctx.lineTo(px,py):ctx.moveTo(px,py);}ctx.closePath();}
   function glow(x,y,r,col,stop){const g=ctx.createRadialGradient(x,y,0,x,y,r);g.addColorStop(0,stop||'#fff');g.addColorStop(.32,col);g.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.fill();}
-  function cell(a,t){const R=a.sz*(1+Math.sin(t*2+a.ph)*.06),dim=a.st==='plan',rot=a.rot+t*.15;
-    ctx.globalAlpha=dim?.3:.75;ctx.strokeStyle=a.c;ctx.lineWidth=1.4;hexPath(a.x,a.y,R,rot);ctx.stroke();
-    ctx.globalAlpha=dim?.16:.4;ctx.setLineDash([2,4]);hexPath(a.x,a.y,R*.6,-rot*1.3);ctx.stroke();ctx.setLineDash([]);
-    ctx.globalAlpha=1;glow(a.x,a.y,R*(dim?.7:1.05),a.c);
-    ctx.globalAlpha=dim?.45:.92;ctx.fillStyle='#e8ffff';ctx.font='700 '+Math.max(9,Math.round(R*.72))+'px -apple-system,Segoe UI,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(a.i||'·',a.x,a.y+1);ctx.textBaseline='alphabetic';ctx.globalAlpha=1;
-    if(a.st==='live'){const rp=(t*.5+a.ph)%1;ctx.globalAlpha=.5*(1-rp);ctx.strokeStyle=a.c;ctx.lineWidth=1.4;hexPath(a.x,a.y,R+rp*22,rot);ctx.stroke();ctx.globalAlpha=1;}}
+  function neuralMark(a,R,t){ctx.save();ctx.translate(a.x,a.y);ctx.rotate(-a.rot*.18);ctx.strokeStyle=a.c;ctx.lineWidth=1.15;ctx.globalAlpha=a.st==='plan'?.48:.95;
+    for(let j=0;j<3;j++){const ang=a.g*.61+j*2.094,inner=R*.14,outer=R*(.46+(j%2)*.12);const x1=Math.cos(ang)*inner,y1=Math.sin(ang)*inner,x2=Math.cos(ang)*outer,y2=Math.sin(ang)*outer;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.lineTo(x2+Math.cos(ang+.8)*R*.18,y2+Math.sin(ang+.8)*R*.18);ctx.stroke();ctx.fillStyle=a.c;ctx.beginPath();ctx.arc(x2+Math.cos(ang+.8)*R*.18,y2+Math.sin(ang+.8)*R*.18,1.35,0,7);ctx.fill();}
+    ctx.beginPath();ctx.arc(0,0,R*.16,0,7);ctx.stroke();ctx.fillStyle='#dffffb';ctx.beginPath();ctx.arc(0,0,1.4+Math.sin(t*2+a.ph)*.35,0,7);ctx.fill();ctx.restore();}
+  function cell(a,t){const R=a.sz*(1+Math.sin(t*1.7+a.ph)*.045),dim=a.st==='plan',rot=a.rot+t*.12;
+    ctx.globalAlpha=dim?.28:.78;ctx.fillStyle='rgba(2,12,27,.68)';hexPath(a.x,a.y,R,rot);ctx.fill();ctx.strokeStyle=a.c;ctx.lineWidth=1.15;ctx.stroke();
+    ctx.globalAlpha=dim?.18:.45;ctx.setLineDash([1.5,3.5]);ctx.beginPath();ctx.arc(a.x,a.y,R*1.26,rot,rot+Math.PI*1.45);ctx.stroke();ctx.setLineDash([]);
+    for(let j=0;j<8;j++){const q=rot+j*Math.PI/4,x1=a.x+Math.cos(q)*R*1.12,y1=a.y+Math.sin(q)*R*1.12,x2=a.x+Math.cos(q)*R*1.28,y2=a.y+Math.sin(q)*R*1.28;ctx.globalAlpha=dim?.16:.34;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();}
+    ctx.globalAlpha=1;glow(a.x,a.y,R*(dim?.62:.88),a.c);neuralMark(a,R,t);
+    if(a.st==='live'){const rp=(t*.42+a.ph)%1;ctx.globalAlpha=.46*(1-rp);ctx.strokeStyle=a.c;ctx.lineWidth=1.1;ctx.beginPath();ctx.arc(a.x,a.y,R+rp*25,0,7);ctx.stroke();ctx.globalAlpha=1;}}
   function link(cx,cy,a,t){const mx=(cx+a.x)/2+a.off,my=(cy+a.y)/2-a.off*.5,dim=a.st==='plan';
-    ctx.globalAlpha=dim?.1:.22;ctx.strokeStyle=a.c;ctx.lineWidth=1;ctx.setLineDash(dim?[3,6]:[]);
-    ctx.beginPath();ctx.moveTo(cx,cy);ctx.quadraticCurveTo(mx,my,a.x,a.y);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;
+    ctx.globalAlpha=dim?.08:.2;ctx.strokeStyle=a.c;ctx.lineWidth=.9;ctx.setLineDash(dim?[2,7]:[]);
+    ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(mx-18,cy+(a.y-cy)*.34);ctx.lineTo(mx+18,a.y-(a.y-cy)*.18);ctx.lineTo(a.x,a.y);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;
     if(dim)return;for(let k=0;k<3;k++){const p=((t*.32+a.pk+k/3)%1),q=1-p;const px=q*q*cx+2*q*p*mx+p*p*a.x,py=q*q*cy+2*q*p*my+p*p*a.y;glow(px,py,4.2,a.c);}}
+  function blueprint(cx,cy,m,t){const R=Math.min(m*.42,275);ctx.save();ctx.globalCompositeOperation='lighter';
+    for(let i=0;i<5;i++){const rr=R*(.38+i*.155);ctx.globalAlpha=.055+i*.012;ctx.strokeStyle=i%2?BL:CY;ctx.lineWidth=.8;ctx.setLineDash(i%2?[2,8]:[18,9]);ctx.beginPath();ctx.arc(cx,cy,rr,t*(i%2?.05:-.035)+i*.72,t*(i%2?.05:-.035)+i*.72+Math.PI*1.62);ctx.stroke();}
+    ctx.setLineDash([]);for(let i=0;i<48;i++){const a=i/48*6.283+t*.018,ri=R*(i%6===0?.92:.96),ro=R*(i%6===0?1.03:1);ctx.globalAlpha=i%6===0?.18:.075;ctx.strokeStyle=i%3?BL:CY;ctx.beginPath();ctx.moveTo(cx+Math.cos(a)*ri,cy+Math.sin(a)*ri);ctx.lineTo(cx+Math.cos(a)*ro,cy+Math.sin(a)*ro);ctx.stroke();}
+    for(let i=0;i<12;i++){const a=i/12*6.283+.18,r1=R*.54,r2=R*(.86+(i%3)*.07),x1=cx+Math.cos(a)*r1,y1=cy+Math.sin(a)*r1,x2=cx+Math.cos(a)*r2,y2=cy+Math.sin(a)*r2;ctx.globalAlpha=.065;ctx.strokeStyle=i%2?CY:BL;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo((x1+x2)/2,y1);ctx.lineTo((x1+x2)/2,y2);ctx.lineTo(x2,y2);ctx.stroke();ctx.fillStyle=i%2?CY:BL;ctx.beginPath();ctx.arc(x2,y2,1.3,0,7);ctx.fill();}
+    ctx.restore();}
+  function dataVeil(t,side){const dir=side<0?1:-1,edge=side<0?0:W;ctx.save();ctx.globalCompositeOperation='lighter';
+    for(let band=0;band<8;band++){const grad=ctx.createLinearGradient(0,0,0,H);grad.addColorStop(0,'rgba(40,128,220,0)');grad.addColorStop(.32,band%2?'rgba(79,157,255,.075)':'rgba(34,230,214,.07)');grad.addColorStop(.75,'rgba(82,186,255,.055)');grad.addColorStop(1,'rgba(20,90,180,0)');ctx.strokeStyle=grad;ctx.lineWidth=band%3===0?1.2:.7;ctx.beginPath();for(let y=-20;y<=H+20;y+=14){const depth=18+band*18+Math.sin(y*.016+t*.55+band)*22+Math.sin(y*.035-t*.3+band*.7)*9,x=edge+dir*depth;y===-20?ctx.moveTo(x,y):ctx.lineTo(x,y);}ctx.stroke();}
+    for(let i=0;i<18;i++){const y=(i/18*H+t*18*(i%3+1))%(H+40)-20,depth=24+(i%7)*21+Math.sin(t+i)*18,x=edge+dir*depth;ctx.globalAlpha=.2+(i%4)*.08;glow(x,y,i%5===0?3.2:1.8,i%2?BL:CY);}
+    ctx.restore();ctx.globalAlpha=1;}
   // ---- Core 2.0 seeds. Counts capped on high-DPR mobile to protect frame rate. ----
   const HIGH_DPR=(window.devicePixelRatio||1)>2;
   const ARC_COUNT=HIGH_DPR?18:26;
@@ -878,8 +915,8 @@
     }
     return CORE_R;
   }
-  function lbl(a){ctx.font='600 11px -apple-system,Segoe UI,sans-serif';const tx=a.l+(a.st==='plan'?' ·soon':''),w=ctx.measureText(tx).width;
-    ctx.globalAlpha=.55;ctx.fillStyle='#05070e';ctx.fillRect(a.x-w/2-4,a.y+a.sz+6,w+8,15);ctx.globalAlpha=1;ctx.fillStyle=a.st==='plan'?'#93a6c2':'#e9f1fb';ctx.fillText(tx,a.x,a.y+a.sz+17);}
+  function lbl(a){ctx.font='600 8.5px ui-monospace,SFMono-Regular,Menlo,monospace';const tx=a.l.toUpperCase(),status=a.st==='live'?'LIVE':a.st==='plan'?'PLAN':'READY',w=Math.max(ctx.measureText(tx).width,ctx.measureText(status).width);
+    ctx.globalAlpha=.6;ctx.fillStyle='rgba(1,7,17,.78)';ctx.fillRect(a.x-w/2-7,a.y+a.sz+8,w+14,23);ctx.strokeStyle=a.c;ctx.lineWidth=.5;ctx.strokeRect(a.x-w/2-7,a.y+a.sz+8,w+14,23);ctx.globalAlpha=1;ctx.fillStyle=a.st==='plan'?'#8297b4':'#d9faff';ctx.fillText(tx,a.x,a.y+a.sz+18);ctx.globalAlpha=a.st==='plan'?.42:.68;ctx.fillStyle=a.c;ctx.font='500 5.5px ui-monospace,SFMono-Regular,Menlo,monospace';ctx.fillText('● '+status,a.x,a.y+a.sz+27);ctx.globalAlpha=1;}
   // ---- Kern-Level fuer Phase 0.5 (synthetisch) / Phase 4 (Audio) ----
   // State-basierte Amplitude 0..1. Phase 4 tauscht die Quelle via IvaCore.setLevelSource(fn)
   // ohne die Zeichen-Logik anzufassen.
@@ -902,6 +939,7 @@
   function loop(){if(!running){netLoopAlive=false;return;}t+=0.006;const cx=W/2,cy=H/2,m=Math.min(W,H),XS=1.4;
     const state=document.body.dataset.state||'idle';const level=CoreLevel.get(t,state);const cfg=CORE_CFG[state]||CORE_CFG.idle;
     ctx.globalCompositeOperation='source-over';ctx.clearRect(0,0,W,H);
+    blueprint(cx,cy,m,t);dataVeil(t,-1);dataVeil(t,1);
     stars.forEach(s=>{ctx.globalAlpha=s.a*(0.6+0.4*Math.sin(t*2+s.x));ctx.fillStyle='#7fb0e6';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,7);ctx.fill();});ctx.globalAlpha=1;
     const ALL=[...OUTER,...INNER];ALL.forEach(a=>{const ang=a.a0+t*a.sp,R=a.rf*m+Math.sin(t*1.1+a.ph)*7;a.x=cx+Math.cos(ang)*R*XS;a.y=cy+Math.sin(ang)*R;});
     ctx.globalCompositeOperation='lighter';ctx.textAlign='center';
