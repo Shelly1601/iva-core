@@ -172,7 +172,7 @@
   .setup .hint{font-size:11.5px;color:var(--muted);margin-top:12px;text-align:center}
   .footer{text-align:center;color:var(--muted);font-size:11px;margin-top:18px;opacity:.7}
 </style>
-<link rel="stylesheet" href="/cockpit-v9.css?v=9.3">
+<link rel="stylesheet" href="./cockpit-v9.css?v=9.4">
 </head>
 <body>
 <div class="wrap">
@@ -192,7 +192,7 @@
       <div class="presence-aura" aria-hidden="true"><i></i><i></i><i></i></div>
       <div class="presence-orbit orbit-one" aria-hidden="true"></div>
       <div class="presence-orbit orbit-two" aria-hidden="true"></div>
-      <img class="iva-avatar" src="/assets/iva-avatar-v4-research.png?v=4" alt="IVA als holografische KI-Wissenschaftlerin mit Analysevisier">
+      <img class="iva-avatar" src="./assets/iva-avatar-v4-research.png?v=4" alt="IVA als holografische KI-Wissenschaftlerin mit Analysevisier">
       <div class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
       <button type="button" class="presence-voice" id="presenceVoiceBtn" aria-label="Mit IVA sprechen">
         <span class="presence-state-dot"></span>
@@ -228,7 +228,7 @@
       <symbol id="iva-icon-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.5 1.5M16.5 16.5L18 18M18 6l-1.5 1.5M7.5 16.5L6 18"/><circle cx="12" cy="12" r="7"/></symbol>
       <symbol id="iva-icon-stop" viewBox="0 0 24 24"><path d="M8 8h8v8H8z"/><circle cx="12" cy="12" r="9"/></symbol>
     </svg>
-    <nav class="home-apps" id="homeApps" aria-label="IVA Apps">
+    <nav class="home-apps" id="homeApps" aria-label="IVA Apps" aria-hidden="true">
       <a class="app-tile app-workflows" id="workflowEntry" href="/control" aria-label="Aktuelle Workflows im Kontrollzentrum öffnen">
         <span class="app-module"><svg class="app-glyph"><use href="#iva-icon-workflows"/></svg><i class="module-pulse"></i><b class="app-live-badge" id="appWorkflowBadge">0</b></span><span class="app-name">Workflows</span>
         <span class="workflow-mini"><b id="cockpitWorkflowRunning">0</b> aktiv · <b id="cockpitWorkflowWaiting">0</b> warten · <b id="cockpitWorkflowBlocked">0</b> blockiert</span>
@@ -251,6 +251,11 @@
       <button type="button" class="app-tile app-voice" id="openVoiceLab"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-voice"/></svg><i class="module-pulse"></i></span><span class="app-name">Sprachlabor</span></button>
       <button type="button" id="openControl" hidden>Kontrollzentrum</button>
     </nav>
+    <button type="button" class="apps-launcher" id="desktopAppsButton" aria-controls="homeApps" aria-expanded="false">
+      <svg class="control-glyph"><use href="#iva-icon-grid"/></svg>
+      <span>Apps</span>
+      <i aria-hidden="true"></i>
+    </button>
 
     <aside class="widget-drawer" id="widgetDrawer" aria-hidden="true" aria-label="IVA Übersicht">
       <div class="widget-drawer-head"><div><small>IVA LIVE</small><h2 id="widgetTitle">Übersicht</h2></div><button type="button" id="widgetClose" aria-label="Übersicht schließen">×</button></div>
@@ -274,7 +279,7 @@
       <button class="mic" id="ttsBtn" title="Evas Stimme an/aus" aria-label="Evas Stimme"><svg class="control-glyph"><use href="#iva-icon-speaker"/></svg></button>
     </div>
   </section>
-  <div class="footer">IVA-Cockpit · v9 · Living Command Center · live vom Server</div>
+  <div class="footer">IVA-Cockpit · v9.4 · Living Command Center · live vom Server</div>
   <span id="m-mail" hidden></span><span id="m-lead" hidden></span><span id="m-stat" hidden></span>
 </div>
 
@@ -287,7 +292,7 @@
   <button type="button" class="dock-btn" id="dockChat"><svg class="control-glyph"><use href="#iva-icon-chat"/></svg><span class="lbl">Chat</span></button>
   <span class="dock-slot" id="dockWake"></span>
   <span class="dock-slot" id="dockMic"></span>
-  <button type="button" class="dock-btn" id="dockWidgets"><svg class="control-glyph"><use href="#iva-icon-grid"/></svg><span class="lbl">Apps</span></button>
+  <button type="button" class="dock-btn" id="dockWidgets" aria-controls="homeApps" aria-expanded="false"><svg class="control-glyph"><use href="#iva-icon-grid"/></svg><span class="lbl">Apps</span></button>
   <a class="dock-btn" id="dockWorkflows" href="/control" aria-label="Aktuelle Workflows öffnen"><span class="workflow-dock-icon"><svg class="control-glyph"><use href="#iva-icon-workflows"/></svg><b class="workflow-dock-badge" id="dockWorkflowBadge">0</b></span><span class="lbl">Workflows</span></a>
   <span class="dock-slot" id="dockTts"></span>
 </nav>
@@ -832,7 +837,7 @@
   const INNER=[{l:'Briefing',g:0,c:CY,st:'live'},{l:'Posteingang',g:1,c:BL,st:'build'},{l:'Vertrieb',g:2,c:BL,st:'build'},{l:'Termine',g:3,c:BL,st:'build'},{l:'Content',g:4,c:BL,st:'build'},{l:'Assistenz',g:5,c:BL,st:'build'}];
   const OUTER=[{l:'Recherche',g:6,c:SL,st:'plan'},{l:'Outreach',g:7,c:SL,st:'plan'},{l:'Zahlen',g:8,c:SL,st:'plan'},{l:'Voice',g:9,c:SL,st:'plan'},{l:'Rechner',g:10,c:SL,st:'plan'}];
   function seed(a,rf,sz){a.forEach((x,i)=>{x.a0=i/a.length*6.283+(Math.random()-.5)*.32;x.rf=rf*(0.9+Math.random()*.2);x.ph=Math.random()*6.283;x.sz=sz;x.off=(Math.random()-.5)*70;x.pk=Math.random();x.sp=(Math.random()-.5)*.05+.035;x.rot=Math.random()*6.283;});}
-  seed(INNER,0.27,18);seed(OUTER,0.43,14);
+  seed(INNER,0.28,26);seed(OUTER,0.44,20);
   function hexPath(x,y,R,rot){ctx.beginPath();for(let i=0;i<6;i++){const a=rot+i/6*6.283,px=x+Math.cos(a)*R,py=y+Math.sin(a)*R;i?ctx.lineTo(px,py):ctx.moveTo(px,py);}ctx.closePath();}
   function glow(x,y,r,col,stop){const g=ctx.createRadialGradient(x,y,0,x,y,r);g.addColorStop(0,stop||'#fff');g.addColorStop(.32,col);g.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.fill();}
   function neuralMark(a,R,t){ctx.save();ctx.translate(a.x,a.y);ctx.rotate(-a.rot*.18);ctx.strokeStyle=a.c;ctx.lineWidth=1.15;ctx.globalAlpha=a.st==='plan'?.48:.95;
@@ -915,7 +920,7 @@
     }
     return CORE_R;
   }
-  function lbl(a){ctx.font='600 8.5px ui-monospace,SFMono-Regular,Menlo,monospace';const tx=a.l.toUpperCase(),status=a.st==='live'?'LIVE':a.st==='plan'?'PLAN':'READY',w=Math.max(ctx.measureText(tx).width,ctx.measureText(status).width);
+  function lbl(a){ctx.font='600 9.5px ui-monospace,SFMono-Regular,Menlo,monospace';const tx=a.l.toUpperCase(),status=a.st==='live'?'LIVE':a.st==='plan'?'PLAN':'READY',w=Math.max(ctx.measureText(tx).width,ctx.measureText(status).width);
     ctx.globalAlpha=.6;ctx.fillStyle='rgba(1,7,17,.78)';ctx.fillRect(a.x-w/2-7,a.y+a.sz+8,w+14,23);ctx.strokeStyle=a.c;ctx.lineWidth=.5;ctx.strokeRect(a.x-w/2-7,a.y+a.sz+8,w+14,23);ctx.globalAlpha=1;ctx.fillStyle=a.st==='plan'?'#8297b4':'#d9faff';ctx.fillText(tx,a.x,a.y+a.sz+18);ctx.globalAlpha=a.st==='plan'?.42:.68;ctx.fillStyle=a.c;ctx.font='500 5.5px ui-monospace,SFMono-Regular,Menlo,monospace';ctx.fillText('● '+status,a.x,a.y+a.sz+27);ctx.globalAlpha=1;}
   // ---- Kern-Level fuer Phase 0.5 (synthetisch) / Phase 4 (Audio) ----
   // State-basierte Amplitude 0..1. Phase 4 tauscht die Quelle via IvaCore.setLevelSource(fn)
@@ -968,16 +973,28 @@
     ask.insertBefore($('wakeBtn'),chatIn);
     ask.insertBefore($('micBtn'),chatIn);
     ask.appendChild($('ttsBtn'));
-    document.body.classList.remove('chat-open','dash-open');
+    document.body.classList.remove('chat-open','dash-open','apps-open');
     $('dockChat').classList.remove('active');
     $('dockWidgets').classList.remove('active');
+    $('homeApps').setAttribute('aria-hidden','true');
+    $('desktopAppsButton').setAttribute('aria-expanded','false');
+    $('dockWidgets').setAttribute('aria-expanded','false');
   }
   function applyLayout(){ if(mqMobile.matches) toMobile(); else toDesktop(); }
   applyLayout();
   mqMobile.addEventListener('change',applyLayout);
-  function closeSheets(){ document.body.classList.remove('chat-open','dash-open'); $('dockChat').classList.remove('active'); $('dockWidgets').classList.remove('active'); }
+  function setAppsOpen(open){
+    document.body.classList.toggle('apps-open',open);
+    $('homeApps').setAttribute('aria-hidden',String(!open));
+    $('desktopAppsButton').setAttribute('aria-expanded',String(open));
+    $('dockWidgets').setAttribute('aria-expanded',String(open));
+    $('dockWidgets').classList.toggle('active',open);
+  }
+  function closeSheets(){ document.body.classList.remove('chat-open','dash-open'); $('dockChat').classList.remove('active'); setAppsOpen(false); }
   $('dockChat').addEventListener('click',()=>{ const open=document.body.classList.contains('chat-open'); closeSheets(); if(!open){ document.body.classList.add('chat-open'); $('dockChat').classList.add('active'); $('chatIn').focus(); } });
-  $('dockWidgets').addEventListener('click',()=>{ const open=document.body.classList.contains('dash-open'); closeSheets(); if(!open){ document.body.classList.add('dash-open'); $('dockWidgets').classList.add('active'); } });
+  $('dockWidgets').addEventListener('click',()=>{ const open=document.body.classList.contains('apps-open'); closeSheets(); if(!open)setAppsOpen(true); });
+  $('desktopAppsButton').addEventListener('click',()=>{ const open=document.body.classList.contains('apps-open'); closeSheets(); if(!open)setAppsOpen(true); });
+  $('homeApps').addEventListener('click',e=>{ if(e.target.closest('.app-tile'))setAppsOpen(false); });
   $('sheetBackdrop').addEventListener('click',closeSheets);
   document.addEventListener('keydown',e=>{ if(e.key==='Escape'){closeSheets();closeTodoDetails();} });
 
@@ -985,6 +1002,6 @@
   // und alle Zeichen-Funktionen (loop, resizeNet, burst, cell, link, glow, hexPath) definiert sind.
   bootCanvas();
 </script>
-<script src="/cockpit-v9.js"></script>
+<script src="./cockpit-v9.js"></script>
 </body>
 </html>

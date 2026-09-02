@@ -1,4 +1,4 @@
-/* IVA v9 · Living Command Center
+/* IVA v9.4 · Living Command Center
    The existing cockpit logic remains intact; this layer turns the start page into
    a calm, avatar-first app launcher instead of a wall of dashboard cards. */
 
@@ -59,7 +59,7 @@ body {
   z-index: 3;
   left: 50%;
   top: 28px;
-  bottom: 168px;
+  bottom: 56px;
   width: min(500px, 42vw);
   transform: translateX(-50%);
   display: flex;
@@ -193,9 +193,9 @@ body[data-state="speaking"] .voice-wave i:nth-child(4) { animation-delay: -.62s;
   position: absolute;
   z-index: 12;
   left: 50%;
-  bottom: 11px;
+  bottom: 70px;
   width: min(1160px, calc(100% - 44px));
-  transform: translateX(-50%);
+  transform: translate(-50%, 30px) scale(.96);
   display: grid;
   grid-template-columns: repeat(8, minmax(70px, 1fr));
   gap: 5px 7px;
@@ -207,9 +207,50 @@ body[data-state="speaking"] .voice-wave i:nth-child(4) { animation-delay: -.62s;
     linear-gradient(180deg, rgba(7, 22, 40, .72), rgba(3, 10, 22, .88));
   box-shadow: 0 18px 52px rgba(0, 0, 0, .34), inset 0 0 28px rgba(65, 181, 229, .035);
   backdrop-filter: blur(20px) saturate(1.12);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform-origin: 50% 100%;
+  transition: transform .32s cubic-bezier(.2, .8, .2, 1), opacity .2s ease, visibility 0s linear .32s;
+}
+body.apps-open .home-apps {
+  transform: translate(-50%, 0) scale(1);
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition-delay: 0s;
 }
 .home-apps::before { content: "IVA MODULE ARRAY  //  16 ONLINE"; position: absolute; top: 6px; left: 18px; color: rgba(130, 231, 247, .48); font: 600 6.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .2em; }
 .home-apps::after { content: ""; position: absolute; top: 12px; left: 18px; right: 18px; height: 1px; background: linear-gradient(90deg, rgba(34, 230, 214, .25), transparent 44%, transparent 58%, rgba(79, 157, 255, .2)); }
+.apps-launcher {
+  position: absolute;
+  z-index: 14;
+  left: 50%;
+  bottom: 14px;
+  min-width: 118px;
+  height: 43px;
+  padding: 0 17px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: #aeeff7;
+  border: 1px solid rgba(104, 213, 238, .36);
+  clip-path: polygon(12px 0, calc(100% - 12px) 0, 100% 12px, 100% calc(100% - 12px), calc(100% - 12px) 100%, 12px 100%, 0 calc(100% - 12px), 0 12px);
+  background: linear-gradient(180deg, rgba(8, 28, 49, .88), rgba(3, 12, 26, .94));
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .34), inset 0 0 18px rgba(34, 230, 214, .055), 0 0 16px rgba(34, 230, 214, .08);
+  font: 700 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color .2s ease, color .2s ease, box-shadow .2s ease;
+}
+.apps-launcher:hover,
+.apps-launcher:focus-visible,
+.apps-launcher[aria-expanded="true"] { color: #e4fffc; border-color: rgba(34, 230, 214, .78); box-shadow: 0 10px 30px rgba(0, 0, 0, .38), inset 0 0 22px rgba(34, 230, 214, .1), 0 0 20px rgba(34, 230, 214, .16); outline: none; }
+.apps-launcher i { width: 7px; height: 7px; margin-left: 2px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: translateY(-2px) rotate(45deg); transition: transform .24s ease; }
+.apps-launcher[aria-expanded="true"] i { transform: translateY(2px) rotate(225deg); }
 .iva-icon-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
 .control-glyph { width: 19px; height: 19px; overflow: visible; fill: none; stroke: currentColor; stroke-width: 1.35; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 5px currentColor); }
 .toolbtn { display: grid; place-items: center; }
@@ -236,7 +277,19 @@ body[data-state="speaking"] .voice-wave i:nth-child(4) { animation-delay: -.62s;
   justify-content: flex-start;
   gap: 5px;
   font: inherit;
+  opacity: 0;
+  transform: translateY(18px) scale(.84);
+  transition: transform .28s cubic-bezier(.18, .84, .22, 1), opacity .2s ease;
 }
+body.apps-open .app-tile { opacity: 1; transform: translateY(0) scale(1); }
+body.apps-open .app-tile:nth-child(1), body.apps-open .app-tile:nth-child(9) { transition-delay: .035s; }
+body.apps-open .app-tile:nth-child(2), body.apps-open .app-tile:nth-child(10) { transition-delay: .06s; }
+body.apps-open .app-tile:nth-child(3), body.apps-open .app-tile:nth-child(11) { transition-delay: .085s; }
+body.apps-open .app-tile:nth-child(4), body.apps-open .app-tile:nth-child(12) { transition-delay: .11s; }
+body.apps-open .app-tile:nth-child(5), body.apps-open .app-tile:nth-child(13) { transition-delay: .135s; }
+body.apps-open .app-tile:nth-child(6), body.apps-open .app-tile:nth-child(14) { transition-delay: .16s; }
+body.apps-open .app-tile:nth-child(7), body.apps-open .app-tile:nth-child(15) { transition-delay: .185s; }
+body.apps-open .app-tile:nth-child(8), body.apps-open .app-tile:nth-child(16) { transition-delay: .21s; }
 .app-tile:hover .app-module,
 .app-tile:focus-visible .app-module { transform: translateY(-4px) scale(1.06); border-color: rgba(var(--module-rgb), .76); box-shadow: 0 12px 24px rgba(0, 0, 0, .34), 0 0 25px rgba(var(--module-rgb), .28), inset 0 0 20px rgba(var(--module-rgb), .1); }
 .app-tile:hover .app-module::before,
@@ -332,7 +385,7 @@ body.widget-open .widget-drawer { transform: translateX(0); opacity: 1; pointer-
   .hud-stage::before, .hud-stage::after { display: none; }
   .hud-label { top: calc(env(safe-area-inset-top) + 58px); font-size: 8px; letter-spacing: .31em; }
   .brand h1::after { display: none; }
-  .iva-presence { position: fixed; top: calc(env(safe-area-inset-top) + 68px); bottom: calc(var(--dock-h) + env(safe-area-inset-bottom) + 238px); width: min(96vw, 480px); }
+  .iva-presence { position: fixed; top: calc(env(safe-area-inset-top) + 68px); bottom: calc(var(--dock-h) + env(safe-area-inset-bottom) + 18px); width: min(96vw, 480px); }
   .iva-avatar { inset: 0 0 20px; height: calc(100% - 8px); object-position: 50% 52%; }
   .presence-aura { width: min(78vw, 390px); }
   .presence-orbit { width: 86%; }
@@ -360,7 +413,12 @@ body.widget-open .widget-drawer { transform: translateX(0); opacity: 1; pointer-
     gap: 4px 1px;
     padding: 17px 5px 6px;
     border-radius: 5px;
+    z-index: 66;
+    max-height: min(56dvh, 470px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
+  .apps-launcher { display: none; }
   .app-tile { height: 50px; gap: 2px; }
   .app-module { width: 34px; height: 34px; }
   .app-glyph { width: 18px; height: 18px; }
@@ -380,7 +438,8 @@ body.widget-open .widget-drawer { transform: translateX(0); opacity: 1; pointer-
     transform: translateY(calc(100% + 30px));
   }
   body.widget-open .widget-drawer { transform: translateY(0); }
-  body.widget-open .sheet-backdrop { display: block; opacity: 1; pointer-events: auto; }
+  body.widget-open .sheet-backdrop,
+  body.apps-open .sheet-backdrop { display: block; opacity: 1; pointer-events: auto; }
 
   .chat { height: 58dvh; max-height: 58dvh; min-height: 0; }
   .chat .head { padding: 11px 15px; }
@@ -394,11 +453,11 @@ body.widget-open .widget-drawer { transform: translateX(0); opacity: 1; pointer-
 
 @media (max-width: 560px) {
   .home-apps { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .iva-presence { bottom: calc(var(--dock-h) + env(safe-area-inset-bottom) + 230px); }
+  .iva-presence { bottom: calc(var(--dock-h) + env(safe-area-inset-bottom) + 14px); }
 }
 
 @media (max-height: 720px) and (max-width: 560px) {
-  .iva-presence { top: calc(env(safe-area-inset-top) + 59px); bottom: calc(var(--dock-h) + env(safe-area-inset-bottom) + 218px); }
+  .iva-presence { top: calc(env(safe-area-inset-top) + 59px); bottom: calc(var(--dock-h) + env(safe-area-inset-bottom) + 10px); }
   .home-apps { padding-top: 5px; padding-bottom: 4px; }
   .app-tile { height: 47px; }
   .app-module { width: 31px; height: 31px; }
@@ -406,5 +465,5 @@ body.widget-open .widget-drawer { transform: translateX(0); opacity: 1; pointer-
 
 @media (prefers-reduced-motion: reduce) {
   .iva-avatar, .presence-aura i, .presence-orbit, .voice-wave i, .mini-iva-face i, .module-pulse { animation: none !important; }
-  .app-module, .app-module::before, .widget-drawer { transition: none !important; }
+  .app-module, .app-module::before, .app-tile, .home-apps, .apps-launcher i, .widget-drawer { transition: none !important; }
 }

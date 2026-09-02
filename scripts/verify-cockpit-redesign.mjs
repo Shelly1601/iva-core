@@ -17,12 +17,15 @@ assert.ok(avatarStat.size > 100_000, 'IVA-Avatar darf kein leerer Platzhalter se
 assert.equal(avatar[25], 6, 'IVA-Avatar muss einen echten RGBA-Alphakanal statt eines schwarzen Bildhintergrunds besitzen');
 
 assert.match(html, /id="ivaPresence"/);
-assert.match(html, /src="\/assets\/iva-avatar-v4-research\.png\?v=4"/);
+assert.match(html, /src="\.\/assets\/iva-avatar-v4-research\.png\?v=4"/);
 assert.match(html, /KI-Wissenschaftlerin mit Analysevisier/, 'IVA braucht den abgestimmten wissenschaftlichen Research-Look');
 assert.doesNotMatch(html, /Laborkittel/i, 'Die verworfene Laborkittel-Variante darf nicht mehr eingebunden sein');
 assert.match(html, /id="presenceVoiceBtn"/);
 assert.match(html, /class="mini-iva"/, 'Der kleine IVA-Bildschirmagent muss erhalten bleiben');
 assert.match(html, /id="homeApps"/);
+assert.match(html, /id="homeApps"[^>]+aria-hidden="true"/, 'Das App-Raster muss standardmäßig verborgen sein');
+assert.match(html, /id="desktopAppsButton"[^>]+aria-expanded="false"/, 'Desktop braucht einen eindeutigen Apps-Schalter');
+assert.match(html, /id="dockWidgets"[^>]+aria-controls="homeApps"[^>]+aria-expanded="false"/, 'Der mobile Apps-Schalter muss dasselbe Raster steuern');
 assert.match(html, /id="workflowEntry" href="\/control"/);
 assert.match(html, /id="widgetDrawer"/);
 assert.match(html, /data-widget-panel="todos"/);
@@ -35,14 +38,18 @@ assert.doesNotMatch(html, /[💬👂🎙🔊📅🔥]/u, 'Emoji-Appsymbole dürf
 assert.match(html, /function blueprint\(/, 'Der Hintergrund braucht die wissenschaftliche Neural-Kreisarchitektur');
 assert.match(html, /function dataVeil\(/, 'Der Hintergrund braucht fließende Daten- und Partikelbahnen');
 assert.match(html, /function neuralMark\(/, 'Die schwebenden Module brauchen eigene neuronale Glyphen');
+assert.match(html, /seed\(INNER,0\.28,26\);seed\(OUTER,0\.44,20\)/, 'Die schwebenden Bereiche müssen deutlich größer als zuvor gerendert werden');
+assert.match(html, /function setAppsOpen\(open\)/, 'Das App-Raster braucht einen gemeinsamen Desktop-/Mobil-Schaltzustand');
 assert.doesNotMatch(html, /popup=yes|window\.open\(/, 'Das neue Cockpit darf keine Browser-Pop-ups öffnen');
 
 for (const state of ['listening', 'thinking', 'speaking']) {
   assert.match(css, new RegExp(`data-state="${state}"`), `Der Avatar braucht einen sichtbaren Zustand für ${state}`);
 }
 assert.match(css, /grid-template-columns:\s*repeat\(4/, 'Das App-Raster muss auf kleinen Handys vier Spalten nutzen');
+assert.match(css, /body\.apps-open \.home-apps/, 'Das App-Raster darf erst nach dem Apps-Klick sichtbar werden');
+assert.match(css, /body\.apps-open \.app-tile:nth-child/, 'Die App-Module müssen gestaffelt hochploppen');
 assert.match(css, /prefers-reduced-motion/, 'Animationen müssen Rücksicht auf reduzierte Bewegung nehmen');
 assert.match(js, /MutationObserver/, 'Der Avatar muss auf echte Voice-Zustandswechsel reagieren');
 assert.match(js, /openWidget/, 'Daten-Apps müssen sich innerhalb des Cockpits öffnen');
 
-console.log('PASS Cockpit v9.3: Research-IVA, technisches Iconalphabet, Neural-HUD, Datenbahnen, Mascot und interne Navigation geprüft.');
+console.log('PASS Cockpit v9.4: IVA-first Bühne, aufklappbare Apps, größere Flugmodule und interne Navigation geprüft.');
