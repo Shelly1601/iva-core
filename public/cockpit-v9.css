@@ -60,22 +60,19 @@ body {
   display: flex;
   justify-content: center;
   align-items: flex-end;
-  isolation: auto;
+  isolation: isolate;
   pointer-events: none;
 }
 
 .iva-avatar {
   position: absolute;
   z-index: 3;
-  inset: 7% auto auto 50%;
-  translate: -50% 0;
-  width: auto;
+  inset: 7% 0 34px;
+  translate: none;
+  width: 100%;
   height: calc(100% - 34px);
-  object-fit: fill;
+  object-fit: contain;
   object-position: 50% 58%;
-  mix-blend-mode: screen;
-  -webkit-mask-image: radial-gradient(ellipse at 50% 48%, #000 55%, rgba(0, 0, 0, .98) 69%, rgba(0, 0, 0, .72) 82%, transparent 100%);
-  mask-image: radial-gradient(ellipse at 50% 48%, #000 55%, rgba(0, 0, 0, .98) 69%, rgba(0, 0, 0, .72) 82%, transparent 100%);
   filter: saturate(1.06) contrast(1.06) drop-shadow(0 0 30px rgba(34, 230, 214, .28));
   animation: iva-breathe 5.8s ease-in-out infinite;
   transform-origin: 50% 72%;
@@ -318,7 +315,7 @@ body.widget-open .widget-drawer { transform: translateX(0); opacity: 1; pointer-
   .hud-label { top: calc(env(safe-area-inset-top) + 58px); font-size: 8px; letter-spacing: .31em; }
   .brand h1::after { display: none; }
   .iva-presence { position: fixed; top: calc(env(safe-area-inset-top) + 68px); bottom: calc(var(--dock-h) + env(safe-area-inset-bottom) + 238px); width: min(96vw, 480px); }
-  .iva-avatar { inset: 0 auto auto 50%; height: calc(100% - 8px); object-position: 50% 52%; }
+  .iva-avatar { inset: 0 0 20px; height: calc(100% - 8px); object-position: 50% 52%; }
   .presence-aura { width: min(78vw, 390px); }
   .presence-orbit { width: 86%; }
   .orbit-two { width: 104%; }
