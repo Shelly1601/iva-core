@@ -47,11 +47,11 @@
     /* Break the desktop container chain: no wrap flex, no grid, no shared padding. */
     html,body{height:100dvh}
     body{padding:0;min-height:100dvh;overflow:hidden}
-    .wrap{max-width:none;margin:0;padding:0;gap:0;min-height:0;display:block}
+    .wrap{max-width:none;margin:0;padding:0;gap:0;min-height:0;display:block;z-index:auto}
     .footer{display:none}
 
     /* Fullscreen canvas layer — its own fixed host, not a grid track. */
-    .hud-stage{position:fixed;inset:0;display:block;grid-template-columns:none;grid-template-rows:none;gap:0;padding:0;margin:0;overflow:hidden;min-height:0;height:100dvh;width:100%;z-index:0}
+    .hud-stage{position:fixed;inset:0;display:block;grid-template-columns:none;grid-template-rows:none;gap:0;padding:0;margin:0;overflow:hidden;min-height:0;height:100dvh;width:100%;z-index:auto}
     .hud-col{display:none}
     #net{position:absolute;inset:0;width:100%;height:100%;z-index:0}
     .hud-label{position:fixed;top:calc(env(safe-area-inset-top) + 62px);left:50%;transform:translateX(-50%);margin:0;font-size:10px;letter-spacing:.42em;z-index:5;pointer-events:none}

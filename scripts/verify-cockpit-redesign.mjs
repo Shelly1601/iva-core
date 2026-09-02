@@ -47,6 +47,8 @@ assert.match(html, /enterkeyhint="send"/, 'Die mobile Tastatur muss eine Senden-
 assert.match(html, /chatSend'\)\.addEventListener\('click',triggerChatSend\)/, 'Der Senden-Button braucht einen direkten Klick-Handler');
 assert.match(html, /chatIn'\)\.addEventListener\('keydown'/, 'Enter muss weiterhin direkt senden');
 assert.match(html, /function keepChatOpen\(\)/, 'Der Chat muss während des gesamten Sendevorgangs offen bleiben');
+assert.match(html, /\.wrap\{[^}]*z-index:auto/, 'Der mobile Wrapper darf Chat- und App-Ebenen nicht unter dem Backdrop einsperren');
+assert.match(html, /\.hud-stage\{[^}]*z-index:auto/, 'Die mobile Bühne darf interaktive Overlays nicht unter dem Backdrop einsperren');
 assert.doesNotMatch(html, /popup=yes|window\.open\(/, 'Das neue Cockpit darf keine Browser-Pop-ups öffnen');
 
 for (const state of ['listening', 'thinking', 'speaking']) {
