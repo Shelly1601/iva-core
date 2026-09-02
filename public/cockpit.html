@@ -172,6 +172,7 @@
   .setup .hint{font-size:11.5px;color:var(--muted);margin-top:12px;text-align:center}
   .footer{text-align:center;color:var(--muted);font-size:11px;margin-top:18px;opacity:.7}
 </style>
+<link rel="stylesheet" href="/cockpit-v9.css">
 </head>
 <body>
 <div class="wrap">
@@ -185,18 +186,56 @@
     </div>
   </div>
   <main class="hud-stage">
-    <div class="hud-label">IVA · COMMAND CENTER</div>
+    <div class="hud-label">IVA · LIVING COMMAND CENTER</div>
     <canvas id="net"></canvas>
-    <aside class="hud-col hud-left" id="colLeft">
-      <a class="card workflow-entry" id="workflowEntry" href="/control" aria-label="Aktuelle Workflows im Kontrollzentrum öffnen"><div class="workflow-entry-head"><h3><span class="ic">↻</span> Aktuelle Workflows</h3><span class="workflow-entry-link">Kontrollzentrum →</span></div><div class="workflow-counts"><div class="workflow-count"><b id="cockpitWorkflowRunning">0</b><span>laufend</span></div><div class="workflow-count waiting"><b id="cockpitWorkflowWaiting">0</b><span>wartend</span></div><div class="workflow-count blocked"><b id="cockpitWorkflowBlocked">0</b><span>blockiert</span></div></div><div class="workflow-update" id="cockpitWorkflowUpdated">Echte Live-Daten werden geladen …</div></a>
-      <div class="card"><h3><span class="ic">📅</span> Termine <span class="cnt" id="c-cal">–</span></h3><div id="d-cal"><div class="muted">—</div></div></div>
-      <div class="card"><h3><span class="ic">🔥</span> Leads <span class="cnt" id="c-lead">–</span></h3><div id="d-lead"><div class="muted">—</div></div></div>
-      <div class="card"><h3><span class="ic">✉️</span> Postfächer <span class="cnt" id="c-mail">–</span></h3><div id="d-mail"><div class="muted">—</div></div></div>
-    </aside>
-    <aside class="hud-col hud-right" id="colRight">
-      <div class="card"><h3><span class="ic">🗓</span> Calendly <span class="cnt" id="c-cly">–</span></h3><div id="d-cly"><div class="muted">—</div></div></div>
-      <div class="card"><h3><span class="ic">✓</span> To-dos <span class="cnt" id="c-todo">–</span><button type="button" class="todo-add-toggle" id="todoAddToggle" title="Neues To-do" aria-label="Neues To-do hinzufügen" aria-expanded="false">+</button></h3><form class="todo-add-form" id="todoAddForm" hidden><input id="todoAddInput" maxlength="300" placeholder="Neues To-do …" aria-label="Neues To-do"><button type="submit">Hinzufügen</button></form><div id="d-todo"><div class="muted">—</div></div></div>
-      <div class="card"><h3><span class="ic">↗</span> Arbeitsbereiche</h3><div class="workspace-actions"><button id="openProjects">Projekte</button><button id="openControl">Kontrollzentrum</button><button data-open-workspace="beratung">Beratung</button><button data-open-workspace="kunde">Kunden</button><button id="openInvestment">Investment</button><button id="openMarketing">Marketing</button><button id="openRecruiting">Recruiting</button><button id="openOpportunities">Chancenradar</button><button id="openWhatsApp">WhatsApp</button><button id="openAccounting">Buchhaltung</button><button id="openVoiceLab">Sprachlabor</button></div></div>
+    <section class="iva-presence" id="ivaPresence" aria-label="IVA, dein persönlicher KI-Assistent">
+      <div class="presence-aura" aria-hidden="true"><i></i><i></i><i></i></div>
+      <div class="presence-orbit orbit-one" aria-hidden="true"></div>
+      <div class="presence-orbit orbit-two" aria-hidden="true"></div>
+      <img class="iva-avatar" src="/assets/iva-avatar-v1.png" alt="IVA als freundliche holografische Assistentin">
+      <div class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <button type="button" class="presence-voice" id="presenceVoiceBtn" aria-label="Mit IVA sprechen">
+        <span class="presence-state-dot"></span>
+        <span><strong id="presenceState">IVA ist bereit</strong><small id="presenceHint">Antippen und sprechen</small></span>
+      </button>
+      <div class="mini-iva" aria-label="Der kleine IVA-Bildschirmagent bleibt an Bord">
+        <span class="mini-iva-face"><i></i><i></i><b></b></span><small>CORE</small>
+      </div>
+    </section>
+
+    <nav class="home-apps" id="homeApps" aria-label="IVA Apps">
+      <a class="app-tile app-workflows" id="workflowEntry" href="/control" aria-label="Aktuelle Workflows im Kontrollzentrum öffnen">
+        <span class="app-squircle">↻<b class="app-live-badge" id="appWorkflowBadge">0</b></span><span class="app-name">Workflows</span>
+        <span class="workflow-mini"><b id="cockpitWorkflowRunning">0</b> aktiv · <b id="cockpitWorkflowWaiting">0</b> warten · <b id="cockpitWorkflowBlocked">0</b> blockiert</span>
+        <span id="cockpitWorkflowUpdated" hidden>Echte Live-Daten werden geladen …</span>
+      </a>
+      <button type="button" class="app-tile" data-widget="calendar"><span class="app-squircle app-calendar">📅<b class="app-count" id="c-cal">–</b></span><span class="app-name">Kalender</span></button>
+      <button type="button" class="app-tile" data-widget="todos"><span class="app-squircle app-todos">✓<b class="app-count" id="c-todo">–</b></span><span class="app-name">To-dos</span></button>
+      <button type="button" class="app-tile" id="openProjects"><span class="app-squircle app-projects">◇</span><span class="app-name">Projekte</span></button>
+      <button type="button" class="app-tile" data-open-workspace="kunde"><span class="app-squircle app-customers">♙</span><span class="app-name">Kunden</span></button>
+      <button type="button" class="app-tile" data-open-workspace="beratung"><span class="app-squircle app-advice">✦</span><span class="app-name">Beratung</span></button>
+      <button type="button" class="app-tile" id="openMarketing"><span class="app-squircle app-marketing">↗</span><span class="app-name">Marketing</span></button>
+      <button type="button" class="app-tile" data-widget="leads"><span class="app-squircle app-leads">🔥<b class="app-count" id="c-lead">–</b></span><span class="app-name">Leads</span></button>
+      <button type="button" class="app-tile" data-widget="mail"><span class="app-squircle app-mail">✉<b class="app-count" id="c-mail">–</b></span><span class="app-name">Mails</span></button>
+      <button type="button" class="app-tile" data-widget="calendly"><span class="app-squircle app-calendly">◷<b class="app-count" id="c-cly">–</b></span><span class="app-name">Calendly</span></button>
+      <button type="button" class="app-tile" id="openInvestment"><span class="app-squircle app-investment">⌁</span><span class="app-name">Investment</span></button>
+      <button type="button" class="app-tile" id="openRecruiting"><span class="app-squircle app-recruiting">◎</span><span class="app-name">Recruiting</span></button>
+      <button type="button" class="app-tile" id="openOpportunities"><span class="app-squircle app-opportunities">⚡</span><span class="app-name">Chancen</span></button>
+      <button type="button" class="app-tile" id="openWhatsApp"><span class="app-squircle app-whatsapp">◉</span><span class="app-name">WhatsApp</span></button>
+      <button type="button" class="app-tile" id="openAccounting"><span class="app-squircle app-accounting">€</span><span class="app-name">Buchhaltung</span></button>
+      <button type="button" class="app-tile" id="openVoiceLab"><span class="app-squircle app-voice">≋</span><span class="app-name">Sprachlabor</span></button>
+      <button type="button" id="openControl" hidden>Kontrollzentrum</button>
+    </nav>
+
+    <aside class="widget-drawer" id="widgetDrawer" aria-hidden="true" aria-label="IVA Übersicht">
+      <div class="widget-drawer-head"><div><small>IVA LIVE</small><h2 id="widgetTitle">Übersicht</h2></div><button type="button" id="widgetClose" aria-label="Übersicht schließen">×</button></div>
+      <div class="widget-panels">
+        <section class="widget-panel" data-widget-panel="calendar"><div id="d-cal"><div class="muted">—</div></div></section>
+        <section class="widget-panel" data-widget-panel="leads"><div id="d-lead"><div class="muted">—</div></div></section>
+        <section class="widget-panel" data-widget-panel="mail"><div id="d-mail"><div class="muted">—</div></div></section>
+        <section class="widget-panel" data-widget-panel="calendly"><div id="d-cly"><div class="muted">—</div></div></section>
+        <section class="widget-panel" data-widget-panel="todos"><div class="todo-panel-head"><span>Offene Aufgaben</span><button type="button" class="todo-add-toggle" id="todoAddToggle" title="Neues To-do" aria-label="Neues To-do hinzufügen" aria-expanded="false">+</button></div><form class="todo-add-form" id="todoAddForm" hidden><input id="todoAddInput" maxlength="300" placeholder="Neues To-do …" aria-label="Neues To-do"><button type="submit">Hinzufügen</button></form><div id="d-todo"><div class="muted">—</div></div></section>
+      </div>
     </aside>
   </main>
   <section class="chat">
@@ -210,20 +249,20 @@
       <button class="mic" id="ttsBtn" title="Evas Stimme an/aus">🔊</button>
     </div>
   </section>
-  <div class="footer">IVA-Cockpit · v8 · Command Center · live vom Server</div>
+  <div class="footer">IVA-Cockpit · v9 · Living Command Center · live vom Server</div>
   <span id="m-mail" hidden></span><span id="m-lead" hidden></span><span id="m-stat" hidden></span>
 </div>
 
 <div class="sheet-backdrop" id="sheetBackdrop"></div>
-<aside class="sheet-dash" id="sheetDash" aria-label="Widgets">
+<aside class="sheet-dash" id="sheetDash" aria-label="IVA Apps">
   <div class="sheet-handle"></div>
-  <div class="sheet-body" id="sheetDashBody"></div>
+  <div class="sheet-body" id="sheetDashBody"><h2>Deine IVA Apps</h2><p>Alle Bereiche liegen kompakt auf der Startseite. Tippe dort auf ein Icon.</p></div>
 </aside>
 <nav class="dock" id="dock" aria-label="Steuerung">
   <button type="button" class="dock-btn" id="dockChat"><span>💬</span><span class="lbl">Chat</span></button>
   <span class="dock-slot" id="dockWake"></span>
   <span class="dock-slot" id="dockMic"></span>
-  <button type="button" class="dock-btn" id="dockWidgets"><span>▦</span><span class="lbl">Widgets</span></button>
+  <button type="button" class="dock-btn" id="dockWidgets"><span>⌘</span><span class="lbl">Apps</span></button>
   <a class="dock-btn" id="dockWorkflows" href="/control" aria-label="Aktuelle Workflows öffnen"><span class="workflow-dock-icon">↻<b class="workflow-dock-badge" id="dockWorkflowBadge">0</b></span><span class="lbl">Workflows</span></a>
   <span class="dock-slot" id="dockTts"></span>
 </nav>
@@ -274,6 +313,7 @@
     $('cockpitWorkflowRunning').textContent=dashboard.counts.running;
     $('cockpitWorkflowWaiting').textContent=dashboard.counts.waiting;
     $('cockpitWorkflowBlocked').textContent=dashboard.counts.blocked;
+    $('appWorkflowBadge').textContent=dashboard.counts.running+dashboard.counts.waiting+dashboard.counts.blocked;
     $('dockWorkflowBadge').textContent=dashboard.counts.running+dashboard.counts.waiting+dashboard.counts.blocked;
     $('dockWorkflows').setAttribute('aria-label',`${dashboard.counts.running} laufend, ${dashboard.counts.waiting} wartend, ${dashboard.counts.blocked} blockiert – aktuelle Workflows öffnen`);
     const generated=dashboard.generatedAt?new Date(dashboard.generatedAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}):'gerade';
@@ -295,29 +335,10 @@
   }
   function bubble(cls,text){const d=document.createElement('div');d.className='bubble '+cls;d.textContent=text;$('msgs').appendChild(d);$('msgs').scrollTop=$('msgs').scrollHeight;return d;}
   function workspaceIntent(text){const s=String(text||'').toLowerCase();if(!/(öffne|oeffne|geh|gehe|wechsel|möchte|moechte|will)/.test(s))return null;if(/projekte|projektbereich|heat hero projekt/.test(s))return'projekte';if(/kontrollzentrum|agentenzentrale|freigaben|connector-status/.test(s))return'kontrolle';if(/sprachlabor|sprachtraining|voice lab/.test(s))return'sprache';if(/investment|saxo|portfolio|depotbestand|watchlist/.test(s))return'investment';if(/recruiting|recruiter|kandidaten|bewerber/.test(s))return'recruiting';if(/chancenradar|chancen-agent|chancen agent|businessideen|einkommensideen/.test(s))return'chancen';if(/buchhaltung|belege|rechnungen/.test(s))return'buchhaltung';if(/kunden|kundenmaske|kundenakte/.test(s))return'kunde';if(/energieplaner|energieplanung|energieberatung|wärmepumpenplaner|waermepumpenplaner/.test(s))return'energie';if(/beratungsmodus|beratung/.test(s))return'beratung';return null;}
-  let toolWindowCounter=0;
-  function openToolWindow(url,label='Arbeitsbereich',{sameTab=false}={}){
-    if(sameTab){
-      bubble('sys',`${label} wird jetzt hier geöffnet.`);
-      setTimeout(()=>location.assign(url),60);
-      return 'same-tab';
-    }
-    const availableWidth=Math.max(360,Number(screen.availWidth)||innerWidth||1280);
-    const availableHeight=Math.max(540,Number(screen.availHeight)||innerHeight||900);
-    const width=Math.min(1480,Math.max(980,Math.round(availableWidth*.86)),availableWidth);
-    const height=Math.min(980,Math.max(720,Math.round(availableHeight*.9)),availableHeight);
-    const left=Math.max(0,Math.round((availableWidth-width)/2));
-    const top=Math.max(0,Math.round((availableHeight-height)/2));
-    const name='ivaToolWindow'+Date.now()+(toolWindowCounter++);
-    const features=`popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`;
-    const win=window.open(url,name,features);
-    if(!win){
-      bubble('sys',`Pop-up blockiert – ${label} wird deshalb hier geöffnet.`);
-      setTimeout(()=>location.assign(url),60);
-      return 'same-tab';
-    }
-    try{win.opener=null;win.focus();}catch{}
-    return 'popup';
+  function openToolWindow(url,label='Arbeitsbereich',options={}){
+    bubble('sys',`${label} wird jetzt hier geöffnet.`);
+    setTimeout(()=>location.assign(url),60);
+    return 'same-tab';
   }
   function openWorkspace(mode,prompt='',options={}){
     let url=mode==='kunde'?'/customers':mode==='energie'?'/advice?group=energy':'/advice';
@@ -334,7 +355,7 @@
   $('openControl').addEventListener('click',()=>openToolWindow('/control','Kontrollzentrum'));
   $('openProjects').addEventListener('click',()=>openToolWindow('/projects?id=heat-hero','Projekte'));
   async function sendChat(viaVoice,voiceTimings={}){cancelTranscriptPreview();const inp=$('chatIn');const t=inp.value.trim();if(!t)return;
-    const target=workspaceIntent(t);if(target){bubble('user',t);inp.value='';let opened=false;const openOptions={sameTab:viaVoice===true};if(target==='buchhaltung'||target==='chancen'||target==='sprache'||target==='kontrolle'||target==='projekte'||target==='recruiting'||target==='investment'){const url=target==='buchhaltung'?'/accounting':target==='chancen'?'/opportunities':target==='kontrolle'?'/control':target==='projekte'?'/projects?id=heat-hero':target==='recruiting'?'/recruiting':target==='investment'?'/investment':'/voice-lab';opened=openToolWindow(url,({buchhaltung:'Buchhaltung',chancen:'Chancenradar',sprache:'Sprachlabor',kontrolle:'Kontrollzentrum',projekte:'Projekte',recruiting:'Recruiting',investment:'Investment & Portfolio'})[target],openOptions);}else opened=openWorkspace(target,t,openOptions);if(opened==='popup')bubble('sys',({beratung:'Beratungsmodus',kunde:'Kundenbereich',energie:'Beratung · Energie & Versorgung',buchhaltung:'Buchhaltung',chancen:'Chancenradar',sprache:'Sprachlabor',kontrolle:'Kontrollzentrum',projekte:'Projekte',recruiting:'Recruiting',investment:'Investment & Portfolio'})[target]+' wurde in einem neuen Fenster geöffnet. Das Cockpit bleibt hier geöffnet.');return;}
+    const target=workspaceIntent(t);if(target){bubble('user',t);inp.value='';const openOptions={sameTab:true};if(target==='buchhaltung'||target==='chancen'||target==='sprache'||target==='kontrolle'||target==='projekte'||target==='recruiting'||target==='investment'){const url=target==='buchhaltung'?'/accounting':target==='chancen'?'/opportunities':target==='kontrolle'?'/control':target==='projekte'?'/projects?id=heat-hero':target==='recruiting'?'/recruiting':target==='investment'?'/investment':'/voice-lab';openToolWindow(url,({buchhaltung:'Buchhaltung',chancen:'Chancenradar',sprache:'Sprachlabor',kontrolle:'Kontrollzentrum',projekte:'Projekte',recruiting:'Recruiting',investment:'Investment & Portfolio'})[target],openOptions);}else openWorkspace(target,t,openOptions);return;}
     unlockAudio();
     if(viaVoice===true){ beginVoiceTurn(t,voiceTimings); clearVoiceDraft(); setState('thinking'); stopServerCapture({discard:true}); try{if(rec)rec.stop();}catch(e){} }   // Ohr aus, solange IVA denkt+spricht
     bubble('user',t);inp.value='';const b=bubble('iva','…');
@@ -783,8 +804,8 @@
     thinking: {amp:0.14, rot:0.55, glow:44, stop:'#f4fffb'},
     speaking: {amp:0.18, rot:0.42, glow:52, stop:'#eafffb'}
   };
-  const INNER=[{l:'Briefing',c:CY,st:'live'},{l:'Posteingang',c:BL,st:'build'},{l:'Vertrieb',c:BL,st:'build'},{l:'Termine',c:BL,st:'build'},{l:'Content',c:BL,st:'build'},{l:'Assistenz',c:BL,st:'build'}];
-  const OUTER=[{l:'Recherche',c:SL,st:'plan'},{l:'Outreach',c:SL,st:'plan'},{l:'Zahlen',c:SL,st:'plan'},{l:'Voice',c:SL,st:'plan'},{l:'Rechner',c:SL,st:'plan'}];
+  const INNER=[{l:'Briefing',i:'✦',c:CY,st:'live'},{l:'Posteingang',i:'✉',c:BL,st:'build'},{l:'Vertrieb',i:'↗',c:BL,st:'build'},{l:'Termine',i:'◷',c:BL,st:'build'},{l:'Content',i:'◇',c:BL,st:'build'},{l:'Assistenz',i:'◎',c:BL,st:'build'}];
+  const OUTER=[{l:'Recherche',i:'⌕',c:SL,st:'plan'},{l:'Outreach',i:'↝',c:SL,st:'plan'},{l:'Zahlen',i:'∑',c:SL,st:'plan'},{l:'Voice',i:'≋',c:SL,st:'plan'},{l:'Rechner',i:'⌘',c:SL,st:'plan'}];
   function seed(a,rf,sz){a.forEach((x,i)=>{x.a0=i/a.length*6.283+(Math.random()-.5)*.4;x.rf=rf*(0.9+Math.random()*.2);x.ph=Math.random()*6.283;x.sz=sz;x.off=(Math.random()-.5)*70;x.pk=Math.random();x.sp=(Math.random()-.5)*.05+.035;x.rot=Math.random()*6.283;});}
   seed(INNER,0.26,15);seed(OUTER,0.42,12);
   function hexPath(x,y,R,rot){ctx.beginPath();for(let i=0;i<6;i++){const a=rot+i/6*6.283,px=x+Math.cos(a)*R,py=y+Math.sin(a)*R;i?ctx.lineTo(px,py):ctx.moveTo(px,py);}ctx.closePath();}
@@ -793,6 +814,7 @@
     ctx.globalAlpha=dim?.3:.75;ctx.strokeStyle=a.c;ctx.lineWidth=1.4;hexPath(a.x,a.y,R,rot);ctx.stroke();
     ctx.globalAlpha=dim?.16:.4;ctx.setLineDash([2,4]);hexPath(a.x,a.y,R*.6,-rot*1.3);ctx.stroke();ctx.setLineDash([]);
     ctx.globalAlpha=1;glow(a.x,a.y,R*(dim?.7:1.05),a.c);
+    ctx.globalAlpha=dim?.45:.92;ctx.fillStyle='#e8ffff';ctx.font='700 '+Math.max(9,Math.round(R*.72))+'px -apple-system,Segoe UI,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(a.i||'·',a.x,a.y+1);ctx.textBaseline='alphabetic';ctx.globalAlpha=1;
     if(a.st==='live'){const rp=(t*.5+a.ph)%1;ctx.globalAlpha=.5*(1-rp);ctx.strokeStyle=a.c;ctx.lineWidth=1.4;hexPath(a.x,a.y,R+rp*22,rot);ctx.stroke();ctx.globalAlpha=1;}}
   function link(cx,cy,a,t){const mx=(cx+a.x)/2+a.off,my=(cy+a.y)/2-a.off*.5,dim=a.st==='plan';
     ctx.globalAlpha=dim?.1:.22;ctx.strokeStyle=a.c;ctx.lineWidth=1;ctx.setLineDash(dim?[3,6]:[]);
@@ -902,18 +924,12 @@
     $('dockWake').appendChild($('wakeBtn'));
     $('dockMic').appendChild($('micBtn'));
     $('dockTts').appendChild($('ttsBtn'));
-    const body=$('sheetDashBody');
-    body.appendChild($('colLeft'));
-    body.appendChild($('colRight'));
   }
   function toDesktop(){
     const ask=document.querySelector('.ask'), chatIn=$('chatIn');
     ask.insertBefore($('wakeBtn'),chatIn);
     ask.insertBefore($('micBtn'),chatIn);
     ask.appendChild($('ttsBtn'));
-    const stage=document.querySelector('.hud-stage');
-    stage.appendChild($('colLeft'));
-    stage.appendChild($('colRight'));
     document.body.classList.remove('chat-open','dash-open');
     $('dockChat').classList.remove('active');
     $('dockWidgets').classList.remove('active');
@@ -931,5 +947,6 @@
   // und alle Zeichen-Funktionen (loop, resizeNet, burst, cell, link, glow, hexPath) definiert sind.
   bootCanvas();
 </script>
+<script src="/cockpit-v9.js"></script>
 </body>
 </html>

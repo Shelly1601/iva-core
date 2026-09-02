@@ -26,10 +26,9 @@ try {
   const customersSource = await fs.readFile(new URL('../public/customers.html', import.meta.url), 'utf8');
   assert.ok(!cockpitSource.includes('data-open-workspace="energie"'), 'Energie darf im Cockpit kein doppelter Arbeitsbereich sein');
   assert.match(cockpitSource, /function openToolWindow\(/);
-  assert.match(cockpitSource, /popup=yes/);
+  assert.doesNotMatch(cockpitSource, /popup=yes|window\.open\(/, 'Arbeitsbereiche dürfen keine neuen Browserfenster mehr erzeugen');
+  assert.match(cockpitSource, /location\.assign\(url\)/, 'Arbeitsbereiche müssen geordnet im selben Fenster öffnen');
   assert.match(cockpitSource, /\/advice\?group=energy/);
-  assert.match(cockpitSource, /Das Cockpit bleibt hier geöffnet/);
-  assert.ok(!cockpitSource.includes("if(!win)location.href="), 'Ein blockiertes Fenster darf das Cockpit nicht ersetzen');
   assert.match(adviceSource, /params\.get\('group'\)/);
   assert.ok(!customersSource.includes('/workspace?mode=energie'), 'Energie muss aus der Kundenansicht über Beratung starten');
 
@@ -47,7 +46,7 @@ try {
   assert.equal(found.sources[0].status, 'pending-review');
 
   await assert.rejects(() => knowledge.addAdviceKnowledgeSource({ title: 'Unsicher', url: 'javascript:alert(1)' }), /HTTP/);
-  console.log('PASS Beratung: 12 Module, Energie nur über Beratung, Cockpit bleibt bei Arbeitsfenstern erhalten, DIN-Trennung, Quellenbibliothek und Connector-Basis');
+  console.log('PASS Beratung: 12 Module, Energie nur über Beratung, Arbeitsbereiche ohne Browser-Pop-ups, DIN-Trennung, Quellenbibliothek und Connector-Basis');
 } finally {
   await fs.rm(temp, { recursive: true, force: true });
 }

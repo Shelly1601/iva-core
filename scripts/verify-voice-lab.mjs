@@ -27,7 +27,7 @@ const cockpitSource = await fs.readFile(new URL('../public/cockpit.html', import
 const voiceLabSource = await fs.readFile(new URL('../public/voice-lab.html', import.meta.url), 'utf8');
 const voiceLabScript = await fs.readFile(new URL('../public/voice-lab.js', import.meta.url), 'utf8');
 const transcriptionSource = await fs.readFile(new URL('../voice-lab/transcribe.js', import.meta.url), 'utf8');
-const cockpitScript = cockpitSource.match(/<script>([\s\S]*)<\/script>/)?.[1] || '';
+const cockpitScript = cockpitSource.match(/<script>([\s\S]*?)<\/script>/)?.[1] || '';
 assert.doesNotThrow(() => new Function(cockpitScript), 'Cockpit-Script muss syntaktisch gültig sein');
 assert.doesNotThrow(() => new Function(voiceLabScript), 'Sprachlabor-Script muss syntaktisch gültig sein');
 
@@ -86,8 +86,8 @@ assert.match(cockpitSource, /navigator\.mediaDevices\?\.getUserMedia/, 'Cockpit 
 assert.match(cockpitSource, /\/api\/voice\/transcribe/, 'Cockpit und Sprachlabor müssen dieselbe Transkriptionsroute verwenden');
 assert.match(cockpitSource, /if\(manualMicOn\|\|awake\)startServerCapture\(\);else startRec\(\);/, 'Nur das Wake-Word darf Browser-SpeechRecognition verwenden');
 assert.match(cockpitSource, /queueTranscriptForSend/, 'Transkript muss vor dem automatischen Senden sichtbar korrigierbar sein');
-assert.match(cockpitSource, /location\.assign\(url\)/, 'Blockierte Pop-ups brauchen Same-Tab-Fallback');
-assert.match(cockpitSource, /openOptions=\{sameTab:viaVoice===true\}/, 'Sprachbefehle öffnen Arbeitsbereiche ohne Pop-up-Abhängigkeit');
+assert.match(cockpitSource, /location\.assign\(url\)/, 'Arbeitsbereiche müssen im selben Tab geöffnet werden');
+assert.match(cockpitSource, /openOptions=\{sameTab:true\}/, 'Sprachbefehle müssen Arbeitsbereiche ebenfalls ohne Pop-up öffnen');
 assert.doesNotMatch(cockpitSource, /Bitte Pop-ups für IVA erlauben/);
 assert.match(transcriptionSource, /Eigennamen, Firmennamen, Fachbegriffe/);
 assert.match(voiceLabSource, /id="pauseRecording"/);
