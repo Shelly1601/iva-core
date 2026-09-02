@@ -4,7 +4,7 @@ import { readFile, stat } from 'node:fs/promises';
 const html = await readFile(new URL('../public/cockpit.html', import.meta.url), 'utf8');
 const css = await readFile(new URL('../public/cockpit-v9.css', import.meta.url), 'utf8');
 const js = await readFile(new URL('../public/cockpit-v9.js', import.meta.url), 'utf8');
-const avatarUrl = new URL('../public/assets/iva-avatar-v1.png', import.meta.url);
+const avatarUrl = new URL('../public/assets/iva-avatar-v2-labcoat.png', import.meta.url);
 const avatar = await readFile(avatarUrl);
 const avatarStat = await stat(avatarUrl);
 
@@ -13,7 +13,8 @@ assert.equal(avatar.subarray(1, 4).toString('ascii'), 'PNG', 'IVA-Avatar muss al
 assert.ok(avatarStat.size > 100_000, 'IVA-Avatar darf kein leerer Platzhalter sein');
 
 assert.match(html, /id="ivaPresence"/);
-assert.match(html, /src="\/assets\/iva-avatar-v1\.png"/);
+assert.match(html, /src="\/assets\/iva-avatar-v2-labcoat\.png\?v=2"/);
+assert.match(html, /professionellen Laborkittel/, 'IVA muss im Arbeitscockpit professionell gekleidet beschrieben sein');
 assert.match(html, /id="presenceVoiceBtn"/);
 assert.match(html, /class="mini-iva"/, 'Der kleine IVA-Bildschirmagent muss erhalten bleiben');
 assert.match(html, /id="homeApps"/);
