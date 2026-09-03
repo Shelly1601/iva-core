@@ -1049,7 +1049,7 @@
   $('dockChat').addEventListener('click',()=>{ const open=document.body.classList.contains('chat-open'); closeSheets(); if(!open){ document.body.classList.add('chat-open'); $('dockChat').classList.add('active'); $('chatIn').focus(); } });
   $('dockWidgets').addEventListener('click',()=>{ const open=document.body.classList.contains('apps-open'); closeSheets(); if(!open)setAppsOpen(true); });
   $('desktopAppsButton').addEventListener('click',()=>{ const open=document.body.classList.contains('apps-open'); closeSheets(); if(!open)setAppsOpen(true); });
-  $('homeApps').addEventListener('click',e=>{ if(e.target.closest('.app-tile'))setAppsOpen(false); });
+  $('homeApps').addEventListener('click',e=>{ if(e.target.closest('.app-tile'))setTimeout(()=>setAppsOpen(false),0); });
   $('sheetBackdrop').addEventListener('click',closeSheets);
   document.addEventListener('keydown',e=>{ if(e.key==='Escape'){closeSheets();closeTodoDetails();} });
 

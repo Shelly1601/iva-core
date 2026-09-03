@@ -54,6 +54,7 @@ assert.match(html, /body\.chat-open \.sheet-backdrop\{opacity:1;pointer-events:n
 assert.match(html, /class="chat-build">v9\.9</, 'Der tatsächlich geladene mobile Build muss im Chat sichtbar sein');
 assert.match(html, /id="openKnowledge" href="\/knowledge"/, 'Die persönliche Wissensdatenbank braucht einen robusten direkten Cockpit-App-Link');
 assert.match(html, /id="iva-icon-knowledge"/, 'Die Wissensdatenbank braucht ein eigenständiges IVA-Symbol');
+assert.match(html, /homeApps'\)\.addEventListener\('click',[^\n]+setTimeout/, 'Das App-Raster darf direkte Links nicht vor ihrer Navigation ausblenden');
 assert.match(html, /id="ivaMouth"/, 'IVA braucht eine eigene sichtbare Mundebene');
 assert.match(html, /id="evaAudio"[^>]+playsinline/, 'iOS braucht eine dauerhaft eingebundene Inline-Audioinstanz');
 assert.match(html, /function animateIvaMouth\(now\)/, 'Die Mundbewegung muss an den laufenden Sprachzustand gekoppelt sein');
