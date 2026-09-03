@@ -471,8 +471,8 @@ body.widget-open .widget-drawer { transform: translateX(0); opacity: 1; pointer-
     transform: translateY(calc(100% + 30px));
   }
   body.widget-open .widget-drawer { transform: translateY(0); }
-  body.widget-open .sheet-backdrop,
-  body.apps-open .sheet-backdrop { display: block; opacity: 1; pointer-events: auto; }
+  body.widget-open .sheet-backdrop { display: block; opacity: 1; pointer-events: auto; }
+  body.apps-open .sheet-backdrop { display: block; opacity: 1; pointer-events: none; }
 
   .chat {
     left: max(8px, env(safe-area-inset-left));

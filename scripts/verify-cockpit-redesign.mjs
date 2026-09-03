@@ -69,6 +69,7 @@ for (const state of ['listening', 'thinking', 'speaking']) {
 }
 assert.match(css, /grid-template-columns:\s*repeat\(4/, 'Das App-Raster muss auf kleinen Handys vier Spalten nutzen');
 assert.match(css, /body\.apps-open \.home-apps/, 'Das App-Raster darf erst nach dem Apps-Klick sichtbar werden');
+assert.match(css, /body\.apps-open \.sheet-backdrop \{[^}]*pointer-events: none/, 'Der mobile Backdrop darf Touchs auf App-Kacheln nicht abfangen');
 assert.match(css, /body\.apps-open \.app-tile:nth-child/, 'Die App-Module müssen gestaffelt hochploppen');
 assert.match(css, /grid-template-columns:\s*minmax\(0, 1fr\) auto/, 'Die mobile Eingabe muss den Senden-Button innerhalb des Viewports halten');
 assert.match(css, /\.chat \.ask input \{ width: 100%; height: 48px/, 'Das mobile Eingabefeld braucht eine sichere Touch-Größe');
