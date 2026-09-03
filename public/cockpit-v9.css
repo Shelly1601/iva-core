@@ -250,7 +250,7 @@ body.apps-open .home-apps {
   pointer-events: auto;
   transition-delay: 0s;
 }
-.home-apps::before { content: "IVA MODULE ARRAY  //  16 ONLINE"; position: absolute; top: 6px; left: 18px; color: rgba(130, 231, 247, .48); font: 600 6.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .2em; }
+.home-apps::before { content: "IVA MODULE ARRAY  //  17 ONLINE"; position: absolute; top: 6px; left: 18px; color: rgba(130, 231, 247, .48); font: 600 6.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .2em; }
 .home-apps::after { content: ""; position: absolute; top: 12px; left: 18px; right: 18px; height: 1px; background: linear-gradient(90deg, rgba(34, 230, 214, .25), transparent 44%, transparent 58%, rgba(79, 157, 255, .2)); }
 .apps-launcher {
   position: absolute;
@@ -312,7 +312,7 @@ body.apps-open .home-apps {
   transition: transform .28s cubic-bezier(.18, .84, .22, 1), opacity .2s ease;
 }
 body.apps-open .app-tile { opacity: 1; transform: translateY(0) scale(1); }
-body.apps-open .app-tile:nth-child(1), body.apps-open .app-tile:nth-child(9) { transition-delay: .035s; }
+body.apps-open .app-tile:nth-child(1), body.apps-open .app-tile:nth-child(9), body.apps-open .app-tile:nth-child(17) { transition-delay: .035s; }
 body.apps-open .app-tile:nth-child(2), body.apps-open .app-tile:nth-child(10) { transition-delay: .06s; }
 body.apps-open .app-tile:nth-child(3), body.apps-open .app-tile:nth-child(11) { transition-delay: .085s; }
 body.apps-open .app-tile:nth-child(4), body.apps-open .app-tile:nth-child(12) { transition-delay: .11s; }
@@ -354,6 +354,7 @@ body.apps-open .app-tile:nth-child(8), body.apps-open .app-tile:nth-child(16) { 
 .app-calendar { --module-accent: #ff9b8d; --module-rgb: 255, 155, 141; }
 .app-todos, .app-advice, .app-whatsapp { --module-accent: #58ead4; --module-rgb: 88, 234, 212; }
 .app-projects, .app-recruiting { --module-accent: #a68bff; --module-rgb: 166, 139, 255; }
+.app-knowledge { --module-accent: #65dfa6; --module-rgb: 101, 223, 166; }
 .app-customers, .app-mail, .app-calendly, .app-accounting { --module-accent: #6eb8ff; --module-rgb: 110, 184, 255; }
 .app-marketing { --module-accent: #dd91ff; --module-rgb: 221, 145, 255; }
 .app-leads { --module-accent: #ffaf72; --module-rgb: 255, 175, 114; }

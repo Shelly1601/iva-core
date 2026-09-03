@@ -174,7 +174,7 @@
   .setup .hint{font-size:11.5px;color:var(--muted);margin-top:12px;text-align:center}
   .footer{text-align:center;color:var(--muted);font-size:11px;margin-top:18px;opacity:.7}
 </style>
-<link rel="stylesheet" href="./cockpit-v9.css?v=9.8">
+<link rel="stylesheet" href="./cockpit-v9.css?v=9.9">
 </head>
 <body>
 <div class="wrap">
@@ -211,6 +211,7 @@
       <symbol id="iva-icon-calendar" viewBox="0 0 24 24"><path d="M5 7.5h14M7.5 4v3.5M16.5 4v3.5M5 5.5h14v14H5zM8 11h2M12 11h4M8 15h4"/><circle class="dot" cx="16" cy="15" r="1.2"/></symbol>
       <symbol id="iva-icon-todos" viewBox="0 0 24 24"><path d="M4.5 7.5l2 2 3.5-4M12 7.5h7M4.5 14l2 2 3.5-4M12 14h7M12 18.5h5"/></symbol>
       <symbol id="iva-icon-projects" viewBox="0 0 24 24"><path d="M12 3.5l7.5 5L12 13l-7.5-4.5zM4.5 12l7.5 4.5 7.5-4.5M4.5 15.5L12 20l7.5-4.5"/></symbol>
+      <symbol id="iva-icon-knowledge" viewBox="0 0 24 24"><path d="M5 5.5c2.7-.8 5-.2 7 1.6v12c-2-1.8-4.3-2.4-7-1.6zM19 5.5c-2.7-.8-5-.2-7 1.6v12c2-1.8 4.3-2.4 7-1.6zM8 9h1.8M8 12h1.8M14.2 9H16M14.2 12H16"/><circle class="dot" cx="12" cy="4" r="1.2"/></symbol>
       <symbol id="iva-icon-customers" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3"/><path d="M6.5 19c.6-4 2.4-6 5.5-6s4.9 2 5.5 6M3.5 12a8.8 8.8 0 0 0 2 5.5M20.5 12a8.8 8.8 0 0 1-2 5.5"/><circle class="dot" cx="4" cy="9" r="1.1"/><circle class="dot" cx="20" cy="9" r="1.1"/></symbol>
       <symbol id="iva-icon-advice" viewBox="0 0 24 24"><path d="M5 5.5h14v10H9l-4 3zM8 10h2M14 10h2M10 13h4"/><circle class="dot" cx="12" cy="7.5" r="1"/></symbol>
       <symbol id="iva-icon-marketing" viewBox="0 0 24 24"><path d="M5 18.5V14M9 18.5v-7M13 18.5V9M17 18.5V6M14 6h3v3M17 6l-6 6"/><circle class="dot" cx="5" cy="11" r="1"/></symbol>
@@ -240,6 +241,7 @@
       <button type="button" class="app-tile app-calendar" data-widget="calendar"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-calendar"/></svg><i class="module-pulse"></i><b class="app-count" id="c-cal">–</b></span><span class="app-name">Kalender</span></button>
       <button type="button" class="app-tile app-todos" data-widget="todos"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-todos"/></svg><i class="module-pulse"></i><b class="app-count" id="c-todo">–</b></span><span class="app-name">To-dos</span></button>
       <button type="button" class="app-tile app-projects" id="openProjects"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-projects"/></svg><i class="module-pulse"></i></span><span class="app-name">Projekte</span></button>
+      <button type="button" class="app-tile app-knowledge" id="openKnowledge"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-knowledge"/></svg><i class="module-pulse"></i></span><span class="app-name">Wissen</span></button>
       <button type="button" class="app-tile app-customers" data-open-workspace="kunde"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-customers"/></svg><i class="module-pulse"></i></span><span class="app-name">Kunden</span></button>
       <button type="button" class="app-tile app-advice" data-open-workspace="beratung"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-advice"/></svg><i class="module-pulse"></i></span><span class="app-name">Beratung</span></button>
       <button type="button" class="app-tile app-marketing" id="openMarketing"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-marketing"/></svg><i class="module-pulse"></i></span><span class="app-name">Marketing</span></button>
@@ -272,7 +274,7 @@
     </aside>
   </main>
   <section class="chat">
-    <div class="head"><span class="o"></span> Chat mit IVA <small class="chat-build">v9.8</small></div>
+    <div class="head"><span class="o"></span> Chat mit IVA <small class="chat-build">v9.9</small></div>
     <div class="msgs" id="msgs"><div class="bubble sys">Verbinde mich mit deinem Server …</div></div>
     <div class="ask" id="chatComposer" role="form" aria-label="Nachricht an IVA senden">
       <button type="button" class="mic" id="wakeBtn" title="Zuhörmodus mit Wake-Word an/aus (Chrome)" aria-label="Zuhörmodus" aria-pressed="false"><svg class="control-glyph"><use href="#iva-icon-listen"/></svg></button>
@@ -282,7 +284,7 @@
       <button type="button" class="mic" id="ttsBtn" title="Evas Stimme an/aus" aria-label="Evas Stimme"><svg class="control-glyph"><use href="#iva-icon-speaker"/></svg></button>
     </div>
   </section>
-  <div class="footer">IVA-Cockpit · v9.8 · Living Command Center · live vom Server</div>
+  <div class="footer">IVA-Cockpit · v9.9 · Living Command Center · live vom Server</div>
   <span id="m-mail" hidden></span><span id="m-lead" hidden></span><span id="m-stat" hidden></span>
 </div>
 
@@ -368,7 +370,7 @@
     api('/api/voice-lab/evaluations',{method:'POST',body:JSON.stringify({source:'cockpit',transcript:turn.transcript,answer:turn.answer,timings:turn.timings})}).catch(()=>{});
   }
   function bubble(cls,text){const d=document.createElement('div');d.className='bubble '+cls;d.textContent=text;$('msgs').appendChild(d);$('msgs').scrollTop=$('msgs').scrollHeight;return d;}
-  function workspaceIntent(text){const s=String(text||'').toLowerCase();if(!/(öffne|oeffne|geh|gehe|wechsel|möchte|moechte|will)/.test(s))return null;if(/projekte|projektbereich|heat hero projekt/.test(s))return'projekte';if(/kontrollzentrum|agentenzentrale|freigaben|connector-status/.test(s))return'kontrolle';if(/sprachlabor|sprachtraining|voice lab/.test(s))return'sprache';if(/investment|saxo|portfolio|depotbestand|watchlist/.test(s))return'investment';if(/recruiting|recruiter|kandidaten|bewerber/.test(s))return'recruiting';if(/chancenradar|chancen-agent|chancen agent|businessideen|einkommensideen/.test(s))return'chancen';if(/buchhaltung|belege|rechnungen/.test(s))return'buchhaltung';if(/kunden|kundenmaske|kundenakte/.test(s))return'kunde';if(/energieplaner|energieplanung|energieberatung|wärmepumpenplaner|waermepumpenplaner/.test(s))return'energie';if(/beratungsmodus|beratung/.test(s))return'beratung';return null;}
+  function workspaceIntent(text){const s=String(text||'').toLowerCase();if(!/(öffne|oeffne|geh|gehe|wechsel|möchte|moechte|will)/.test(s))return null;if(/wissensdatenbank|wissensbasis|meine[ns]? wissen|kurse?/.test(s))return'wissen';if(/projekte|projektbereich|heat hero projekt/.test(s))return'projekte';if(/kontrollzentrum|agentenzentrale|freigaben|connector-status/.test(s))return'kontrolle';if(/sprachlabor|sprachtraining|voice lab/.test(s))return'sprache';if(/investment|saxo|portfolio|depotbestand|watchlist/.test(s))return'investment';if(/recruiting|recruiter|kandidaten|bewerber/.test(s))return'recruiting';if(/chancenradar|chancen-agent|chancen agent|businessideen|einkommensideen/.test(s))return'chancen';if(/buchhaltung|belege|rechnungen/.test(s))return'buchhaltung';if(/kunden|kundenmaske|kundenakte/.test(s))return'kunde';if(/energieplaner|energieplanung|energieberatung|wärmepumpenplaner|waermepumpenplaner/.test(s))return'energie';if(/beratungsmodus|beratung/.test(s))return'beratung';return null;}
   function openToolWindow(url,label='Arbeitsbereich',options={}){
     bubble('sys',`${label} wird jetzt hier geöffnet.`);
     setTimeout(()=>location.assign(url),60);
@@ -388,12 +390,13 @@
   $('openVoiceLab').addEventListener('click',()=>openToolWindow('/voice-lab','Sprachlabor'));
   $('openControl').addEventListener('click',()=>openToolWindow('/control','Kontrollzentrum'));
   $('openProjects').addEventListener('click',()=>openToolWindow('/projects?id=heat-hero','Projekte'));
+  $('openKnowledge').addEventListener('click',()=>openToolWindow('/knowledge','Wissensdatenbank'));
   function keepChatOpen(){
     document.body.classList.add('chat-open');
     $('dockChat').classList.add('active');
   }
   async function sendChat(viaVoice,voiceTimings={}){keepChatOpen();cancelTranscriptPreview();const inp=$('chatIn');const t=inp.value.trim();if(!t||chatAbort)return;
-    const target=workspaceIntent(t);if(target){bubble('user',t);inp.value='';const openOptions={sameTab:true};if(target==='buchhaltung'||target==='chancen'||target==='sprache'||target==='kontrolle'||target==='projekte'||target==='recruiting'||target==='investment'){const url=target==='buchhaltung'?'/accounting':target==='chancen'?'/opportunities':target==='kontrolle'?'/control':target==='projekte'?'/projects?id=heat-hero':target==='recruiting'?'/recruiting':target==='investment'?'/investment':'/voice-lab';openToolWindow(url,({buchhaltung:'Buchhaltung',chancen:'Chancenradar',sprache:'Sprachlabor',kontrolle:'Kontrollzentrum',projekte:'Projekte',recruiting:'Recruiting',investment:'Investment & Portfolio'})[target],openOptions);}else openWorkspace(target,t,openOptions);return;}
+    const target=workspaceIntent(t);if(target){bubble('user',t);inp.value='';const openOptions={sameTab:true};if(target==='buchhaltung'||target==='chancen'||target==='sprache'||target==='kontrolle'||target==='projekte'||target==='recruiting'||target==='investment'||target==='wissen'){const url=target==='buchhaltung'?'/accounting':target==='chancen'?'/opportunities':target==='kontrolle'?'/control':target==='projekte'?'/projects?id=heat-hero':target==='recruiting'?'/recruiting':target==='investment'?'/investment':target==='wissen'?'/knowledge':'/voice-lab';openToolWindow(url,({buchhaltung:'Buchhaltung',chancen:'Chancenradar',sprache:'Sprachlabor',kontrolle:'Kontrollzentrum',projekte:'Projekte',recruiting:'Recruiting',investment:'Investment & Portfolio',wissen:'Wissensdatenbank'})[target],openOptions);}else openWorkspace(target,t,openOptions);return;}
     unlockAudio();
     if(viaVoice===true){ beginVoiceTurn(t,voiceTimings); clearVoiceDraft(); setState('thinking'); stopServerCapture({discard:true}); try{if(rec)rec.stop();}catch(e){} }   // Ohr aus, solange IVA denkt+spricht
     bubble('user',t);inp.value='';const b=bubble('iva','…'),send=$('chatSend'),chat=document.querySelector('.chat');

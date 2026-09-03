@@ -30,7 +30,7 @@ assert.match(html, /id="dockWidgets"[^>]+aria-controls="homeApps"[^>]+aria-expan
 assert.match(html, /id="workflowEntry" href="\/control"/);
 assert.match(html, /id="widgetDrawer"/);
 assert.match(html, /data-widget-panel="todos"/);
-assert.ok((html.match(/class="app-tile/g) || []).length >= 16, 'Die Startseite braucht ein vollständiges kompaktes App-Raster');
+assert.ok((html.match(/class="app-tile/g) || []).length >= 17, 'Die Startseite braucht ein vollständiges kompaktes App-Raster');
 assert.ok((html.match(/<symbol id="iva-icon-/g) || []).length >= 16, 'Jedes IVA-Modul braucht ein eigenes technisches SVG-Symbol');
 assert.ok((html.match(/class="app-module"/g) || []).length >= 16, 'Das Cockpit braucht das eigenständige eckige IVA-Modulsystem');
 assert.doesNotMatch(html, /app-squircle/, 'Apple-artige Squircles dürfen im IVA-Modulraster nicht zurückkehren');
@@ -51,7 +51,10 @@ assert.match(html, /function keepChatOpen\(\)/, 'Der Chat muss während des gesa
 assert.match(html, /\.wrap\{[^}]*z-index:auto/, 'Der mobile Wrapper darf Chat- und App-Ebenen nicht unter dem Backdrop einsperren');
 assert.match(html, /\.hud-stage\{[^}]*z-index:auto/, 'Die mobile Bühne darf interaktive Overlays nicht unter dem Backdrop einsperren');
 assert.match(html, /body\.chat-open \.sheet-backdrop\{opacity:1;pointer-events:none\}/, 'Der Backdrop darf bei offenem Chat keine iOS-Touchs abfangen');
-assert.match(html, /class="chat-build">v9\.8</, 'Der tatsächlich geladene mobile Build muss im Chat sichtbar sein');
+assert.match(html, /class="chat-build">v9\.9</, 'Der tatsächlich geladene mobile Build muss im Chat sichtbar sein');
+assert.match(html, /id="openKnowledge"/, 'Die persönliche Wissensdatenbank braucht eine eigene Cockpit-App');
+assert.match(html, /id="iva-icon-knowledge"/, 'Die Wissensdatenbank braucht ein eigenständiges IVA-Symbol');
+assert.match(html, /openToolWindow\('\/knowledge','Wissensdatenbank'\)/, 'Die Wissen-App muss aus dem Cockpit erreichbar sein');
 assert.match(html, /id="ivaMouth"/, 'IVA braucht eine eigene sichtbare Mundebene');
 assert.match(html, /id="evaAudio"[^>]+playsinline/, 'iOS braucht eine dauerhaft eingebundene Inline-Audioinstanz');
 assert.match(html, /function animateIvaMouth\(now\)/, 'Die Mundbewegung muss an den laufenden Sprachzustand gekoppelt sein');
@@ -73,4 +76,4 @@ assert.match(css, /prefers-reduced-motion/, 'Animationen müssen Rücksicht auf 
 assert.match(js, /MutationObserver/, 'Der Avatar muss auf echte Voice-Zustandswechsel reagieren');
 assert.match(js, /openWidget/, 'Daten-Apps müssen sich innerhalb des Cockpits öffnen');
 
-console.log('PASS Cockpit v9.8: iOS-Folgeaudio, pegelgekoppelte Mundbewegung, mobiler Chat und Apps geprüft.');
+console.log('PASS Cockpit v9.9: Wissens-App, iOS-Folgeaudio, Mundbewegung, mobiler Chat und Apps geprüft.');
