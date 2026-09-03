@@ -52,9 +52,8 @@ assert.match(html, /\.wrap\{[^}]*z-index:auto/, 'Der mobile Wrapper darf Chat- u
 assert.match(html, /\.hud-stage\{[^}]*z-index:auto/, 'Die mobile Bühne darf interaktive Overlays nicht unter dem Backdrop einsperren');
 assert.match(html, /body\.chat-open \.sheet-backdrop\{opacity:1;pointer-events:none\}/, 'Der Backdrop darf bei offenem Chat keine iOS-Touchs abfangen');
 assert.match(html, /class="chat-build">v9\.9</, 'Der tatsächlich geladene mobile Build muss im Chat sichtbar sein');
-assert.match(html, /id="openKnowledge"/, 'Die persönliche Wissensdatenbank braucht eine eigene Cockpit-App');
+assert.match(html, /id="openKnowledge" href="\/knowledge"/, 'Die persönliche Wissensdatenbank braucht einen robusten direkten Cockpit-App-Link');
 assert.match(html, /id="iva-icon-knowledge"/, 'Die Wissensdatenbank braucht ein eigenständiges IVA-Symbol');
-assert.match(html, /openToolWindow\('\/knowledge','Wissensdatenbank'\)/, 'Die Wissen-App muss aus dem Cockpit erreichbar sein');
 assert.match(html, /id="ivaMouth"/, 'IVA braucht eine eigene sichtbare Mundebene');
 assert.match(html, /id="evaAudio"[^>]+playsinline/, 'iOS braucht eine dauerhaft eingebundene Inline-Audioinstanz');
 assert.match(html, /function animateIvaMouth\(now\)/, 'Die Mundbewegung muss an den laufenden Sprachzustand gekoppelt sein');

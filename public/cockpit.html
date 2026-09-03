@@ -241,7 +241,7 @@
       <button type="button" class="app-tile app-calendar" data-widget="calendar"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-calendar"/></svg><i class="module-pulse"></i><b class="app-count" id="c-cal">–</b></span><span class="app-name">Kalender</span></button>
       <button type="button" class="app-tile app-todos" data-widget="todos"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-todos"/></svg><i class="module-pulse"></i><b class="app-count" id="c-todo">–</b></span><span class="app-name">To-dos</span></button>
       <button type="button" class="app-tile app-projects" id="openProjects"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-projects"/></svg><i class="module-pulse"></i></span><span class="app-name">Projekte</span></button>
-      <button type="button" class="app-tile app-knowledge" id="openKnowledge"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-knowledge"/></svg><i class="module-pulse"></i></span><span class="app-name">Wissen</span></button>
+      <a class="app-tile app-knowledge" id="openKnowledge" href="/knowledge"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-knowledge"/></svg><i class="module-pulse"></i></span><span class="app-name">Wissen</span></a>
       <button type="button" class="app-tile app-customers" data-open-workspace="kunde"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-customers"/></svg><i class="module-pulse"></i></span><span class="app-name">Kunden</span></button>
       <button type="button" class="app-tile app-advice" data-open-workspace="beratung"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-advice"/></svg><i class="module-pulse"></i></span><span class="app-name">Beratung</span></button>
       <button type="button" class="app-tile app-marketing" id="openMarketing"><span class="app-module"><svg class="app-glyph"><use href="#iva-icon-marketing"/></svg><i class="module-pulse"></i></span><span class="app-name">Marketing</span></button>
@@ -390,7 +390,6 @@
   $('openVoiceLab').addEventListener('click',()=>openToolWindow('/voice-lab','Sprachlabor'));
   $('openControl').addEventListener('click',()=>openToolWindow('/control','Kontrollzentrum'));
   $('openProjects').addEventListener('click',()=>openToolWindow('/projects?id=heat-hero','Projekte'));
-  $('openKnowledge').addEventListener('click',()=>openToolWindow('/knowledge','Wissensdatenbank'));
   function keepChatOpen(){
     document.body.classList.add('chat-open');
     $('dockChat').classList.add('active');
