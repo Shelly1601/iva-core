@@ -36,7 +36,7 @@ assert.doesNotThrow(() => new Function(js));
 assert.match(html, /id="entryForm"/);
 assert.match(html, /accept="application\/pdf,text\/plain,text\/markdown/);
 assert.match(html, /Dein eigener Wissensspeicher/);
-assert.match(cockpit, /id="openKnowledge" href="\/knowledge"/);
+assert.match(cockpit, /id="openKnowledge" href="\/knowledge" onclick="event\.stopPropagation\(\)"/);
 for (const endpoint of ["/api/knowledge/status", "/api/knowledge',", "/api/knowledge/:id", "/api/knowledge/:id/document"]) assert.match(server, new RegExp(endpoint.replace(/[/:]/g, match => `\\${match}`)));
 assert.match(server, /searchPersonalKnowledgeBase/);
 assert.match(server, /addPersonalKnowledge/);
