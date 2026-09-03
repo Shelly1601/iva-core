@@ -88,6 +88,10 @@ assert.match(cockpitSource, /if\(manualMicOn\|\|awake\)startServerCapture\(\);el
 assert.match(cockpitSource, /queueTranscriptForSend/, 'Transkript muss vor dem automatischen Senden sichtbar korrigierbar sein');
 assert.match(cockpitSource, /location\.assign\(url\)/, 'Arbeitsbereiche müssen im selben Tab geöffnet werden');
 assert.match(cockpitSource, /openOptions=\{sameTab:true\}/, 'Sprachbefehle müssen Arbeitsbereiche ebenfalls ohne Pop-up öffnen');
+assert.match(cockpitSource, /const evaAudio=\$\('evaAudio'\)/, 'Cockpit muss dieselbe eingebundene Audioinstanz für jede Antwort wiederverwenden');
+assert.match(cockpitSource, /evaAudio\.load\(\)/, 'Jede neue TTS-Antwort muss die Audioquelle auf iOS explizit laden');
+assert.match(cockpitSource, /await evaAudio\.play\(\)/, 'TTS-Wiedergabe muss kontrolliert gestartet werden');
+assert.match(cockpitSource, /new Promise\(next=>setTimeout\(next,80\)\)/, 'iOS-Audiostarts brauchen einen kontrollierten Wiederholungsversuch');
 assert.doesNotMatch(cockpitSource, /Bitte Pop-ups für IVA erlauben/);
 assert.match(transcriptionSource, /Eigennamen, Firmennamen, Fachbegriffe/);
 assert.match(voiceLabSource, /id="pauseRecording"/);

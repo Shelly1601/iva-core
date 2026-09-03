@@ -83,6 +83,38 @@ body {
   transform-origin: 50% 72%;
 }
 
+.iva-mouth {
+  --mouth-scale: .12;
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  top: 39.2%;
+  width: 12.8%;
+  aspect-ratio: 3.6 / 1;
+  transform: translate(-50%, -50%) scaleY(var(--mouth-scale));
+  transform-origin: 50% 50%;
+  border-radius: 45% 45% 52% 52%;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 50% 43%, rgba(255, 244, 239, .88) 0 12%, transparent 15%),
+    radial-gradient(ellipse at 50% 52%, #16060b 0 43%, #5f2636 51%, #a85b68 65%, rgba(189, 103, 113, .2) 73%, transparent 77%);
+  box-shadow: inset 0 -2px 3px rgba(255, 157, 166, .38), 0 1px 2px rgba(8, 2, 8, .32);
+  transition: opacity .08s linear;
+}
+.iva-mouth::after {
+  content: "";
+  position: absolute;
+  left: 17%;
+  right: 17%;
+  bottom: 5%;
+  height: 35%;
+  border-radius: 50%;
+  background: linear-gradient(180deg, rgba(227, 132, 144, .72), rgba(113, 42, 57, .22));
+}
+.iva-mouth.active { opacity: .96; }
+
 @keyframes iva-breathe {
   0%, 100% { transform: translateY(1px) scale(1); filter: saturate(1.02) contrast(1.05) drop-shadow(0 0 25px rgba(34, 230, 214, .22)); }
   50% { transform: translateY(-5px) scale(1.012); filter: saturate(1.12) contrast(1.07) drop-shadow(0 0 40px rgba(34, 230, 214, .35)); }
@@ -388,6 +420,7 @@ body.widget-open .widget-drawer { transform: translateX(0); opacity: 1; pointer-
   .brand h1::after { display: none; }
   .iva-presence { position: fixed; top: calc(env(safe-area-inset-top) + 68px); bottom: calc(var(--dock-h) + env(safe-area-inset-bottom) + 18px); width: min(96vw, 480px); }
   .iva-avatar { inset: 0 0 20px; height: calc(100% - 8px); object-position: 50% 52%; }
+  .iva-mouth { top: 40.1%; width: 13.6%; }
   .presence-aura { width: min(78vw, 390px); }
   .presence-orbit { width: 86%; }
   .orbit-two { width: 104%; }

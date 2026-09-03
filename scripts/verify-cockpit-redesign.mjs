@@ -51,7 +51,13 @@ assert.match(html, /function keepChatOpen\(\)/, 'Der Chat muss während des gesa
 assert.match(html, /\.wrap\{[^}]*z-index:auto/, 'Der mobile Wrapper darf Chat- und App-Ebenen nicht unter dem Backdrop einsperren');
 assert.match(html, /\.hud-stage\{[^}]*z-index:auto/, 'Die mobile Bühne darf interaktive Overlays nicht unter dem Backdrop einsperren');
 assert.match(html, /body\.chat-open \.sheet-backdrop\{opacity:1;pointer-events:none\}/, 'Der Backdrop darf bei offenem Chat keine iOS-Touchs abfangen');
-assert.match(html, /class="chat-build">v9\.7</, 'Der tatsächlich geladene mobile Build muss im Chat sichtbar sein');
+assert.match(html, /class="chat-build">v9\.8</, 'Der tatsächlich geladene mobile Build muss im Chat sichtbar sein');
+assert.match(html, /id="ivaMouth"/, 'IVA braucht eine eigene sichtbare Mundebene');
+assert.match(html, /id="evaAudio"[^>]+playsinline/, 'iOS braucht eine dauerhaft eingebundene Inline-Audioinstanz');
+assert.match(html, /function animateIvaMouth\(now\)/, 'Die Mundbewegung muss an den laufenden Sprachzustand gekoppelt sein');
+assert.match(html, /sampleSpeechLevel\(\)/, 'Die Mundöffnung muss den echten Audiopegel verwenden');
+assert.match(html, /audioCtx\?\.state==='suspended'/, 'Der iOS-Audiokontext muss für weitere Antworten erneut aktiviert werden');
+assert.match(html, /dataset\.ttsPlayCount/, 'Aufeinanderfolgende Audio-Starts müssen im Live-Test verifizierbar sein');
 assert.match(server, /cockpit\.html[\s\S]{0,500}Cache-Control[\s\S]{0,100}no-store/, 'Cockpit-HTML darf vom iPhone-PWA nicht als alter Build wiederverwendet werden');
 assert.doesNotMatch(html, /popup=yes|window\.open\(/, 'Das neue Cockpit darf keine Browser-Pop-ups öffnen');
 
@@ -67,4 +73,4 @@ assert.match(css, /prefers-reduced-motion/, 'Animationen müssen Rücksicht auf 
 assert.match(js, /MutationObserver/, 'Der Avatar muss auf echte Voice-Zustandswechsel reagieren');
 assert.match(js, /openWidget/, 'Daten-Apps müssen sich innerhalb des Cockpits öffnen');
 
-console.log('PASS Cockpit v9.7: IVA-first Bühne, iOS-sicherer mobiler Chat, direkter Versand und Apps geprüft.');
+console.log('PASS Cockpit v9.8: iOS-Folgeaudio, pegelgekoppelte Mundbewegung, mobiler Chat und Apps geprüft.');

@@ -174,7 +174,7 @@
   .setup .hint{font-size:11.5px;color:var(--muted);margin-top:12px;text-align:center}
   .footer{text-align:center;color:var(--muted);font-size:11px;margin-top:18px;opacity:.7}
 </style>
-<link rel="stylesheet" href="./cockpit-v9.css?v=9.7">
+<link rel="stylesheet" href="./cockpit-v9.css?v=9.8">
 </head>
 <body>
 <div class="wrap">
@@ -195,6 +195,7 @@
       <div class="presence-orbit orbit-one" aria-hidden="true"></div>
       <div class="presence-orbit orbit-two" aria-hidden="true"></div>
       <img class="iva-avatar" src="./assets/iva-avatar-v4-research.png?v=4" alt="IVA als holografische KI-Wissenschaftlerin mit Analysevisier">
+      <div class="iva-mouth" id="ivaMouth" aria-hidden="true"></div>
       <div class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
       <button type="button" class="presence-voice" id="presenceVoiceBtn" aria-label="Mit IVA sprechen">
         <span class="presence-state-dot"></span>
@@ -271,7 +272,7 @@
     </aside>
   </main>
   <section class="chat">
-    <div class="head"><span class="o"></span> Chat mit IVA <small class="chat-build">v9.7</small></div>
+    <div class="head"><span class="o"></span> Chat mit IVA <small class="chat-build">v9.8</small></div>
     <div class="msgs" id="msgs"><div class="bubble sys">Verbinde mich mit deinem Server …</div></div>
     <div class="ask" id="chatComposer" role="form" aria-label="Nachricht an IVA senden">
       <button type="button" class="mic" id="wakeBtn" title="Zuhörmodus mit Wake-Word an/aus (Chrome)" aria-label="Zuhörmodus" aria-pressed="false"><svg class="control-glyph"><use href="#iva-icon-listen"/></svg></button>
@@ -281,7 +282,7 @@
       <button type="button" class="mic" id="ttsBtn" title="Evas Stimme an/aus" aria-label="Evas Stimme"><svg class="control-glyph"><use href="#iva-icon-speaker"/></svg></button>
     </div>
   </section>
-  <div class="footer">IVA-Cockpit · v9.7 · Living Command Center · live vom Server</div>
+  <div class="footer">IVA-Cockpit · v9.8 · Living Command Center · live vom Server</div>
   <span id="m-mail" hidden></span><span id="m-lead" hidden></span><span id="m-stat" hidden></span>
 </div>
 
@@ -299,6 +300,7 @@
   <span class="dock-slot" id="dockTts"></span>
 </nav>
 <button type="button" class="stop-iva" id="stopIvaBtn" title="IVA sofort stoppen" aria-label="IVA sofort stoppen"><svg class="control-glyph"><use href="#iva-icon-stop"/></svg></button>
+<audio id="evaAudio" preload="auto" playsinline aria-hidden="true"></audio>
 
 <div class="overlay" id="overlay">
   <div class="setup">
@@ -443,7 +445,8 @@
   document.body.dataset.state=state;
   function isBusyState(){ return state==='thinking' || state==='speaking'; }
   function setState(next){ if(state===next) return; state=next; document.body.dataset.state=next; }
-  const evaAudio=new Audio(); let audioReady=false;
+  const evaAudio=$('evaAudio'); let audioReady=false;
+  evaAudio.playsInline=true;
   // AudioContext + Analyser fuer den echten Audio-Level (Phase 4). Werden beim ersten
   // unlockAudio() eingerichtet (User-Gesture noetig fuer AudioContext + Autoplay-Policy).
   let audioCtx=null, analyser=null, freqBuf=null;
@@ -462,18 +465,38 @@
       audioCtx.resume().catch(()=>{});
       // Waehrend 'speaking' echter Audio-RMS 0..1 (Time-Domain, um 128 zentriert),
       // sonst null -> CoreLevel faellt auf synthetisch zurueck.
-      if(window.IvaCore) window.IvaCore.setLevelSource((now,state)=>{
-        if(state!=='speaking'||!analyser) return null;
-        analyser.getByteTimeDomainData(freqBuf);
-        let sq=0; for(let i=0;i<freqBuf.length;i++){ const v=freqBuf[i]-128; sq+=v*v; }
-        return Math.min(1, (Math.sqrt(sq/freqBuf.length)/128)*3);
-      });
+      if(window.IvaCore) window.IvaCore.setLevelSource((now,currentState)=>currentState==='speaking'?sampleSpeechLevel():null);
     }catch(e){ console.error('AudioContext-Setup fehlgeschlagen:', e); }
   }
-  function unlockAudio(){ if(audioReady)return; audioReady=true;
-    try{ evaAudio.src='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
-      evaAudio.play().catch(()=>{}); }catch(e){}
-    setupAudioAnalyser(); }
+  function sampleSpeechLevel(){
+    if(!analyser||!freqBuf) return null;
+    analyser.getByteTimeDomainData(freqBuf);
+    let sq=0; for(let i=0;i<freqBuf.length;i++){const v=freqBuf[i]-128;sq+=v*v;}
+    return Math.min(1,(Math.sqrt(sq/freqBuf.length)/128)*3);
+  }
+  const SILENT_AUDIO='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
+  function unlockAudio(){
+    audioReady=true;
+    setupAudioAnalyser();
+    if(audioCtx?.state==='suspended') audioCtx.resume().catch(()=>{});
+    if(!ttsOn||ttsPlaying) return;
+    try{
+      evaAudio.onended=null;evaAudio.onerror=null;evaAudio.src=SILENT_AUDIO;evaAudio.load();
+      evaAudio.play().then(()=>{if(evaAudio.src.startsWith('data:audio/wav')){evaAudio.pause();evaAudio.currentTime=0;}}).catch(()=>{});
+    }catch(e){}
+  }
+  function animateIvaMouth(now){
+    const mouth=$('ivaMouth');
+    if(mouth){
+      const speaking=state==='speaking';
+      let level=speaking?sampleSpeechLevel():0;
+      if(speaking&&(!Number.isFinite(level)||level<.025)) level=.24+Math.abs(Math.sin(now/92))*.42+Math.abs(Math.sin(now/47))*.16;
+      mouth.classList.toggle('active',speaking);
+      mouth.style.setProperty('--mouth-scale',speaking?String(.38+Math.min(1,level)*1.25):'.12');
+    }
+    requestAnimationFrame(animateIvaMouth);
+  }
+  requestAnimationFrame(animateIvaMouth);
   function afterSpeak(){ finishVoiceTurn(); setState(shouldListen()?'listening':'idle'); if(shouldListen()) resumeVoiceInput(); }
   // ---- TTS-Queue: satzweise Wiedergabe waehrend Claude streamt (Phase 2) ----
   // Trigger fuer "Satz abgeschlossen":
@@ -583,10 +606,25 @@
     return new Promise((resolve)=>{
       const url=URL.createObjectURL(new Blob([buf],{type:'audio/mpeg'}));
       evaAudio.src=url;
-      const done=()=>{ try{ URL.revokeObjectURL(url); }catch(e){} resolve(); };
+      evaAudio.load();
+      let settled=false;
+      const done=()=>{if(settled)return;settled=true;evaAudio.onended=null;evaAudio.onerror=null;try{URL.revokeObjectURL(url);}catch(e){}resolve();};
       evaAudio.onended=done;
+      evaAudio.onerror=done;
       setState('speaking');
-      evaAudio.play().catch(done);
+      const start=async()=>{
+        try{
+          if(audioCtx?.state==='suspended') await audioCtx.resume();
+          await evaAudio.play();
+        }catch(firstError){
+          if(audioCtx?.state==='suspended') await audioCtx.resume().catch(()=>{});
+          await new Promise(next=>setTimeout(next,80));
+          await evaAudio.play();
+        }
+        const count=Number(document.body.dataset.ttsPlayCount||0)+1;
+        document.body.dataset.ttsPlayCount=String(count);
+      };
+      start().catch(()=>{setStatus('err','Stimme blockiert');done();});
     });
   }
   $('ttsBtn').addEventListener('click',()=>{ttsOn=!ttsOn;$('ttsBtn').classList.toggle('off',!ttsOn);if(!ttsOn){ttsQueue=[];ttsBuffer='';ttsFinished=true;clearTimeout(ttsStableTimer);try{evaAudio.pause();}catch(e){}afterSpeak();}});
