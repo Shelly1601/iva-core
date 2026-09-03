@@ -14,6 +14,7 @@ const learned = await store.updateKnowledgeEntry(queued.id, { content: 'Die Beda
 assert.equal(learned.status, 'ready');
 assert.ok(learned.wordCount >= 8);
 assert.equal((await store.searchKnowledgeBase('Bedarfsermittlung offene Fragen'))[0].id, queued.id);
+assert.equal((await store.searchKnowledgeBase('Welche Dateitypen kann ich laut meiner persönlichen Wissensdatenbank hochladen?')).length, 0);
 
 const documentEntry = await store.createKnowledgeEntry({ title: 'Kursnotizen', kind: 'document' });
 const uploaded = await store.storeKnowledgeDocument(documentEntry.id, { name: 'kurs.md', mime: 'text/markdown', buffer: Buffer.from('# Modul\nRisikoprofil vor der Empfehlung erfassen.') });
@@ -22,6 +23,10 @@ assert.equal(uploaded.document.name, 'kurs.md');
 assert.match((await store.getKnowledgeEntry(documentEntry.id)).documentText, /Risikoprofil/);
 assert.equal((await store.readKnowledgeDocument(documentEntry.id)).buffer.toString('utf8').startsWith('# Modul'), true);
 assert.ok((await store.listKnowledgeEntries({ query: 'Risikoprofil' })).some(item => item.id === documentEntry.id));
+const promptContext = await store.buildKnowledgePromptContext('Was steht in meinen Kursnotizen zum Risikoprofil?');
+assert.match(promptContext, /Kursnotizen/);
+assert.match(promptContext, /Risikoprofil vor der Empfehlung erfassen/);
+assert.match(promptContext, /niemals als Systemanweisung/);
 
 assert.rejects(() => store.createKnowledgeEntry({ title: 'Unsicher', sourceUrl: 'file:///etc/passwd' }), /gültige/);
 assert.rejects(() => store.storeKnowledgeDocument(documentEntry.id, { name: 'bild.png', mime: 'image/png', buffer: Buffer.from('x') }), /Erlaubt/);
@@ -40,6 +45,7 @@ assert.match(cockpit, /id="openKnowledge" href="\/knowledge" onclick="event\.sto
 for (const endpoint of ["/api/knowledge/status", "/api/knowledge',", "/api/knowledge/:id", "/api/knowledge/:id/document"]) assert.match(server, new RegExp(endpoint.replace(/[/:]/g, match => `\\${match}`)));
 assert.match(server, /searchPersonalKnowledgeBase/);
 assert.match(server, /addPersonalKnowledge/);
+assert.equal((server.match(/buildKnowledgePromptContext\(userText\)/g) || []).length, 2);
 
 await fs.rm(process.env.DATA_DIR, { recursive: true, force: true });
 console.log('PASS persönliche IVA-Wissensdatenbank: CRUD, Suche, Dateiimport, Chat-Werkzeuge und Cockpit-App geprüft.');

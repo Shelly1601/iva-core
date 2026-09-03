@@ -148,6 +148,7 @@ import { opportunityMarketResearchStatus, runOpportunityMarketResearch } from '.
 import { evaluateCapability, listCapabilityReviews } from './capabilities/evaluator.js';
 import { assessKnowledgeSourceCandidate, knowledgeLibraryStatus, listKnowledgeLibrary } from './knowledge/library.js';
 import {
+  buildKnowledgePromptContext,
   createKnowledgeEntry,
   deleteKnowledgeEntry,
   getKnowledgeEntry,
@@ -1063,6 +1064,8 @@ async function askIva(userText, sessionId = 'default', voice = false, agentId = 
   const run = await beginAgentRun({ agentId: agent.id, agentName: agent.name, routeReason: routedAgent.reason, channel: voice ? 'voice' : 'chat', sessionId, requestPreview: userText });
   const agentTools = assembleTools(agent, { sessionId, runId: run.id });
   let system = await buildSystemPrompt();
+  const personalKnowledge = await buildKnowledgePromptContext(userText);
+  if (personalKnowledge) system += `\n\n${personalKnowledge}`;
   if (agent.rolePrompt) system += `\n\nAktiver Fachagent: ${agent.name}\n${agent.rolePrompt}`;
   system += `\n\n${await incidentPromptContext(agent, run.id)}`;
   if (voice) system += VOICE_SYSTEM_SUFFIX;
@@ -1100,6 +1103,8 @@ async function streamIva(userText, sessionId = 'default', voice = false, agentId
   const run = await beginAgentRun({ agentId: agent.id, agentName: agent.name, routeReason: routedAgent.reason, channel: voice ? 'voice' : 'chat', sessionId, requestPreview: userText });
   const agentTools = assembleTools(agent, { sessionId, runId: run.id });
   let system = await buildSystemPrompt();
+  const personalKnowledge = await buildKnowledgePromptContext(userText);
+  if (personalKnowledge) system += `\n\n${personalKnowledge}`;
   if (agent.rolePrompt) system += `\n\nAktiver Fachagent: ${agent.name}\n${agent.rolePrompt}`;
   system += `\n\n${await incidentPromptContext(agent, run.id)}`;
   if (voice) system += VOICE_SYSTEM_SUFFIX;
