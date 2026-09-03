@@ -201,6 +201,7 @@ const scoutSource = await fs.readFile(new URL('../opportunities/scout.js', impor
 const skillSource = await fs.readFile(new URL('../skills/opportunities.js', import.meta.url), 'utf8');
 const indexSource = await fs.readFile(new URL('../index.js', import.meta.url), 'utf8');
 assert.match(html, /Marktanalyse & Quellenradar/);
+assert.match(html, /Nach deinem Ja übernimmt IVA die komplette Chance in eine Projektakte/);
 assert.match(html, /Links prüfen & automatisch einsortieren/);
 assert.match(html, /id="linkUrls"/);
 assert.match(html, /höchstens zehn|Bis zu zehn/);
