@@ -566,6 +566,25 @@ function normalizeFile(file = {}) {
   };
 }
 
+function normalizeProjectOrigin(origin, fallback = {}) {
+  const source = origin && typeof origin === 'object' ? origin : fallback;
+  if (source?.type !== 'opportunity-radar') return null;
+  return {
+    type: 'opportunity-radar', opportunityId: clean(source.opportunityId, 100),
+    score: Math.max(0, Math.min(100, Number(source.score) || 0)), title: clean(source.title, 240),
+    summary: clean(source.summary, 3000), customer: clean(source.customer, 1000), offer: clean(source.offer, 1600),
+    monetization: clean(source.monetization, 1600), aiLeverage: clean(source.aiLeverage, 1800),
+    firstValidation: clean(source.firstValidation, 1800), evidence: clean(source.evidence, 3000),
+    evidenceLimits: clean(source.evidenceLimits, 2200), risks: clean(source.risks, 2200),
+    setupHours: Math.max(0, Number(source.setupHours) || 0), ongoingHoursPerWeek: Math.max(0, Number(source.ongoingHoursPerWeek) || 0),
+    initialBudgetEur: Math.max(0, Number(source.initialBudgetEur) || 0),
+    sources: (Array.isArray(source.sources) ? source.sources : []).map(item => ({
+      url: normalizeWebsiteUrl(item?.url), account: clean(item?.account, 160), signal: clean(item?.signal, 700),
+    })).filter(item => item.url || item.signal).slice(0, 12),
+    createdAt: iso(source.createdAt),
+  };
+}
+
 function seedProjects() {
   return [clone(HEAT_HERO_PROJECT), clone(DEWARMTE_PROJECT)];
 }
@@ -667,6 +686,7 @@ function normalizeProject(input = {}, fallback = {}) {
     category: clean(input.category || fallback.category, 240),
     websiteUrl: normalizeWebsiteUrl(input.websiteUrl ?? fallback.websiteUrl),
     instagramUrl: normalizeInstagramUrl(input.instagramUrl ?? fallback.instagramUrl),
+    origin: normalizeProjectOrigin(input.origin, fallback.origin),
     logo: normalizeLogo(input.logo ?? fallback.logo),
     status: PROJECT_STATUSES.has(input.status) ? input.status : (PROJECT_STATUSES.has(fallback.status) ? fallback.status : 'planned'),
     description: clean((useFallbackSpec ? fallback.description : input.description) || fallback.description, 5000),

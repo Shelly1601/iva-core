@@ -153,6 +153,8 @@ function normalizedOpportunity(input = {}, existing = {}) {
     initialBudgetEur: Math.max(0, finite(input.initialBudgetEur, existing.initialBudgetEur || 0)),
     revenueClaim: clean(input.revenueClaim ?? existing.revenueClaim, 500),
     recommendedAgent: clean(input.recommendedAgent ?? existing.recommendedAgent, 80) || 'marketing',
+    projectId: clean(input.projectId ?? existing.projectId, 100),
+    projectCreatedAt: clean(input.projectCreatedAt ?? existing.projectCreatedAt, 80),
     ratings: { ...(existing.ratings || {}), ...(input.ratings || {}) },
     sources,
     sourceRunId: clean(input.sourceRunId ?? existing.sourceRunId, 80),
@@ -355,10 +357,13 @@ export async function prepareOpportunityHandoff(opportunityId) {
     if (!opportunity) throw new Error('Chance nicht gefunden');
     const now = new Date().toISOString();
     const shortId = opportunity.id.replace(/^opp_/, '').slice(-6).toUpperCase();
+    const existing = data.handoffs.find(item => item.opportunityId === opportunityId && item.status === 'awaiting-confirmation');
+    if (existing) return { ...existing, question: existing.question || `„${opportunity.title}“ hat Potenzial. Möchtest du daraus direkt eine Projektakte erstellen?` };
     const handoff = {
       id: id('handoff'), opportunityId, title: opportunity.title,
       targetAgent: opportunity.recommendedAgent || 'marketing', status: 'awaiting-confirmation',
-      confirmation: `Ja, Chancenidee ${shortId} umsetzen`,
+      confirmation: `Ja, Projekt aus Chancenidee ${shortId} erstellen`,
+      question: `„${opportunity.title}“ hat Potenzial. Möchtest du daraus direkt eine Projektakte erstellen?`,
       brief: { summary: opportunity.summary, firstValidation: opportunity.firstValidation, budgetCapEur: opportunity.initialBudgetEur, setupHours: opportunity.setupHours },
       createdAt: now, updatedAt: now,
     };
@@ -367,6 +372,24 @@ export async function prepareOpportunityHandoff(opportunityId) {
     opportunity.status = 'selected';
     opportunity.updatedAt = now;
     return { ...handoff };
+  });
+}
+
+export async function linkOpportunityProject(opportunityId, projectId, projectCreatedAt = new Date().toISOString()) {
+  return mutate(async data => {
+    const opportunity = data.opportunities.find(item => item.id === opportunityId);
+    if (!opportunity) throw new Error('Chance nicht gefunden');
+    const now = new Date().toISOString();
+    opportunity.status = 'selected';
+    opportunity.projectId = clean(projectId, 100);
+    opportunity.projectCreatedAt = clean(projectCreatedAt, 80) || now;
+    opportunity.updatedAt = now;
+    for (const handoff of data.handoffs.filter(item => item.opportunityId === opportunityId && item.status === 'awaiting-confirmation')) {
+      handoff.status = 'completed';
+      handoff.projectId = opportunity.projectId;
+      handoff.updatedAt = now;
+    }
+    return { ...opportunity };
   });
 }
 

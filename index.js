@@ -145,6 +145,7 @@ import { formatWeeklyPitch, scoreOpportunity } from './opportunities/score.js';
 import { opportunityRadarStatus, runOpportunityScout } from './opportunities/scout.js';
 import { checkOpportunityLink } from './opportunities/link-check.js';
 import { opportunityMarketResearchStatus, runOpportunityMarketResearch } from './opportunities/market-research.js';
+import { createProjectFromOpportunity } from './opportunities/project-handoff.js';
 import { evaluateCapability, listCapabilityReviews } from './capabilities/evaluator.js';
 import { assessKnowledgeSourceCandidate, knowledgeLibraryStatus, listKnowledgeLibrary } from './knowledge/library.js';
 import {
@@ -868,6 +869,7 @@ Tool-Nutzung:
 - Bevor du aus einem Reel, Profil, fremden Tool oder einer spontanen Idee eine neue IVA-Funktion oder einen neuen Agenten empfiehlst, MUSST du assessCapability aufrufen. Pruefe echten Zusatznutzen, bestehende Abdeckung, offiziellen Nachweis, Rechte, Kosten, Datenschutz und Sicherheitsfolgen. Ergebnis "integrate-existing" bedeutet: keinen neuen Agenten bauen. "needs-verification" oder "watch" bedeutet: noch nicht integrieren. Fremden Code, geschuetzte Texte oder Designs niemals kopieren; nur eigenstaendig implementierte Funktionsmuster uebernehmen.
 - Live-Daten oder Aktion nötig (Kalender, Mails, Leads, Todos, Kampagnen, Bilder, Qonekto/blau direkt): Tool sofort aufrufen. Nie "hätte ich Zugriff auf…", nie "soll ich mal nachsehen?" — machen und dann zusammenfassen.
 - Wenn Nadine nach Wissen aus ihren eigenen Kursen, Dokumenten, Notizen oder hinterlegten Quellen fragt, immer searchPersonalKnowledgeBase aufrufen und nur belegte Treffer verwenden. Wenn sie ausdrücklich sagt, dass IVA sich einen von ihr gelieferten Text merken oder aneignen soll, addPersonalKnowledge aufrufen. Ein bloßer Link ohne Text oder Datei ist nur vorgemerkt und darf niemals als bereits gelernt dargestellt werden.
+- Wenn du im Chancenradar eine konkrete Idee mit starkem Potenzial empfiehlst, rufe prepareOpportunityHandoff auf und frage direkt, ob daraus eine Projektakte entstehen soll. Nach Nadines ausdrücklichem Ja rufe createProjectFromOpportunity mit confirmed=true auf. Die erzeugte Projektakte enthält die Ausgangschance und einzeln fertigstellbare Workflows für Validierung, Marke, Landingpage, Instagram, Meta, LinkedIn, Content, Publishing und Analytics. Will Nadine danach eines dieser Arbeitspakete fertigstellen oder einen Kanal verbinden, ermittle mit listOpportunityProjects die genaue Projekt- und Workflow-ID und rufe nach ihrem ausdrücklichen Auftrag finishOpportunityProjectWorkflow mit confirmed=true auf.
 - Eine Anmeldeseite, eine abgelaufene Sitzung oder eine erneute Authentifizierungsaufforderung ist kein Abbruchgrund. Bei jedem von Nadine freigegebenen System selbstständig die bereits vorhandenen Zugangsdaten und, falls erforderlich, den eingerichteten Authenticator aus dem sicheren lokalen beziehungsweise verbundenen Kontext verwenden, anmelden und die Aufgabe fortsetzen. Nadine nicht erneut nach bekannten Zugangsdaten oder einer normalen Anmeldung fragen. Passwörter und Einmalcodes niemals anzeigen, kopieren, in Prompts oder Dateien speichern oder protokollieren. Erst ein tatsächlich erschienener CAPTCHA, eine technisch erzwungene externe Bestätigung, eine Kontosperre oder nach einem konkreten Anmeldeversuch ausdrücklich abgelehnte beziehungsweise im sicheren Kontext technisch nicht verfügbare Zugangsdaten sind ein echter Blocker; diesen präzise benennen.
 - Alle beauftragten Rechneraktionen laufen standardmäßig auf dem iMac über denselben zentralen IVA-Gerätekanal, unabhängig von Handy, Telegram, Sprache oder MacBook als Eingang. Das MacBook bleibt Nadines Arbeitsgerät. Eine erneute Bestätigung des Ausführungsortes ist nicht nötig. Der konkrete Auftrag autorisiert seine üblichen Zwischenschritte; fremde Daten ändern, Geld ausgeben oder extern kommunizieren nur im ausdrücklich beauftragten Rahmen. Das Wort "oben" bedeutet bei Nadine immer den iMac. Wenn eine normale freigegebene Aktion "oben" oder "auf dem iMac" passieren soll, darf sie niemals auf dem MacBook ausgeführt werden. Für eine direkt unterstützte Geräteaktion sendCommandToImac verwenden. Passt keine engere Geräteaktion, aber Nadine hat eine gewöhnliche lokale iMac-Aktion ausdrücklich beauftragt, runTaskOnImac verwenden. Für Panasonic, Bosch, Pipedrive, Airtable oder Planbar bei Bedarf ensureImacPortalLogin verwenden: normale Wiederanmeldungen sind von Nadine dauerhaft freigegeben und brauchen keine neue Rückfrage; Zugangsdaten bleiben im lokalen macOS-Schlüsselbund, Panasonic-2FA wird ohne Zwischenablage direkt aus dem fest freigegebenen Ente-Auth-Eintrag eingesetzt. Erst CAPTCHA, Kontosperre, externe Bestätigung, ausdrücklich abgelehnte oder lokal nicht vorhandene Zugangsdaten sind ein echter Login-Blocker. Für ausdrücklich beauftragte IVA-Code-, App- oder Systemänderungen stattdessen startIvaBuild verwenden; dieses Werkzeug übergibt den vollständigen Auftrag kontrolliert an Codex. Niemals so tun, als sei ein nur eingereihter Befehl bereits ausgeführt; anschließend den passenden Befehls- beziehungsweise Codex-Auftragsstatus prüfen. Keine Zugangsdaten und keine beliebigen Dateipfade an den Gerätekanal übergeben.
 - CRM-Namen aus Sprache oder freier Texteingabe können falsch geschrieben beziehungsweise transkribiert sein. Vor jeder CRM-Auskunft oder -Aktion zu einer namentlich genannten Person findHeatHeroLeads mit der gelieferten Schreibweise aufrufen. Das Werkzeug durchsucht Schreibvarianten. Bei matchStatus "unique" ausschließlich den gespeicherten CRM-Namen und die gespeicherte ID verwenden. Bei "ambiguous" mit höchstens drei Kandidaten nachfragen, welcher gemeint ist. Bei "not-found" genau eine Frage stellen: wie der Nachname geschrieben wird. Niemals einen ähnlich klingenden Namen stillschweigend auswählen. Bei anderen CRM-Projekten ohne eigenen Resolver gilt mindestens dieselbe Rückfragepflicht, bis der gespeicherte Vollname eindeutig ist.
@@ -948,7 +950,7 @@ const ALL_SKILLS = {
   research:  researchSkill({ askArchitect }),
   workspaces: workspacesSkill({ workspaces }),
   advice:    adviceSkill({ publicAdviceCatalog, listAdviceKnowledge }),
-  opportunities: opportunitiesSkill({ listOpportunities, runOpportunityScout, checkOpportunityLink, runOpportunityMarketResearch, listOpportunityWatchSources, prepareOpportunityHandoff }),
+  opportunities: opportunitiesSkill({ listOpportunities, runOpportunityScout, checkOpportunityLink, runOpportunityMarketResearch, listOpportunityWatchSources, prepareOpportunityHandoff, createProjectFromOpportunity, listOpportunityProjects, finishOpportunityProjectWorkflow }),
   accounting: accountingSkill({ listAccountingEntities, listAccountingDocuments, getAccountingDocument, accountingSummary }),
   energyTariffs: energyTariffsSkill({ workspaces, energyTariffStatus, prepareWorkspaceEnergyTariffRequest }),
   selfImprovement: selfImprovementSkill({ savePronunciationCorrection, saveCommunicationPreference, captureImprovementRequest, listVoiceLearning }),
@@ -3244,6 +3246,10 @@ app.post('/api/opportunities/:id/handoff', async (req, res) => {
   try { res.status(201).json(await prepareOpportunityHandoff(req.params.id)); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
+app.post('/api/opportunities/:id/project', async (req, res) => {
+  try { res.status(201).json(await createProjectFromOpportunity(req.params.id, { confirmed: req.body?.confirmed === true })); }
+  catch (e) { res.status(/nicht gefunden/i.test(e.message) ? 404 : 400).json({ error: e.message }); }
+});
 
 // --- WhatsApp: mehrere Bot-Profile, sicherer Testchat und Schaden-Eingang ---
 app.get('/api/whatsapp/status', (_req, res) => {
@@ -3555,6 +3561,25 @@ async function prepareProjectWorkflowWithIva(projectId, workflowId) {
     commandId: command.id,
     message: `„${workflow.name}“ wurde als vollständiger Fertigstellungsauftrag an IVA/Codex übergeben.`,
   };
+}
+
+async function listOpportunityProjects() {
+  return (await listProjects()).filter(project => project.origin?.type === 'opportunity-radar').map(project => ({
+    id: project.id,
+    name: project.name,
+    status: project.status,
+    opportunityId: project.origin.opportunityId,
+    opportunityScore: project.origin.score,
+    workflows: (project.automations || []).map(item => ({ id: item.id, name: item.name, status: item.status, enabled: item.enabled, nextStep: item.nextStep })),
+  }));
+}
+
+async function finishOpportunityProjectWorkflow(projectId, workflowId, { confirmed = false } = {}) {
+  if (confirmed !== true) throw new Error('Bitte die Fertigstellung dieses Arbeitspakets zuerst ausdrücklich beauftragen.');
+  const project = await getProject(projectId);
+  if (project?.origin?.type !== 'opportunity-radar') throw new Error('Chancen-Projektakte nicht gefunden.');
+  if (!(project.automations || []).some(item => item.id === workflowId)) throw new Error('Arbeitspaket in dieser Chancen-Projektakte nicht gefunden.');
+  return prepareProjectWorkflowWithIva(project.id, workflowId);
 }
 
 app.get('/api/integration-checkup', async (_req, res) => {

@@ -107,6 +107,11 @@ check('Zusätzliche Planbar-Kürzel lassen sich speichern', updatedHeat.customer
 const project = await createProject({ name: 'Testprojekt', category: 'Test', description: 'Projektakte testen', websiteUrl: 'beispiel.de', instagramUrl: '@beispiel.marke' });
 check('Neues Projekt erhält sichere ID', /^[a-z0-9-]+$/i.test(project.id));
 check('Website und Instagram werden als Markenprofil normalisiert', project.websiteUrl === 'https://beispiel.de/' && project.instagramUrl === 'https://www.instagram.com/beispiel.marke');
+const radarProject = await createProject({ name: 'Radarprojekt', origin: { type: 'opportunity-radar', opportunityId: 'opp-test', score: 82, title: 'Radarprojekt', sourceUrl: '', sources: [{ url: 'https://example.com/chance', account: 'chance', signal: 'Beleg' }] } });
+check('Chancenradar-Herkunft bleibt vollständig in der Projektakte', radarProject.origin?.opportunityId === 'opp-test' && radarProject.origin?.score === 82 && radarProject.origin?.sources?.[0]?.url === 'https://example.com/chance');
+const updatedRadarProject = await updateProject(radarProject.id, { description: 'Weiter bearbeitet' });
+check('Chancenradar-Herkunft überlebt spätere Projektupdates', updatedRadarProject.origin?.opportunityId === 'opp-test');
+await deleteProject(radarProject.id);
 const logoInjection = await updateProject(project.id, { logo: { name: 'falsch.png', mime: 'image/png', storageName: '../../falsch.png' } });
 check('Projektupdate kann kein internes Logo einschleusen', logoInjection.logo === null);
 const logoBuffer = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
@@ -166,6 +171,7 @@ check('DeWarmte akzeptiert optionalen Freitext und eine zusätzliche PDF', js.in
 check('DeWarmte weist die dreitägige Löschung der Zusatzdaten aus', js.includes('nach drei Tagen automatisch gelöscht') && dewarmte?.automations.some(item => item.id === 'dewarmte-link-to-material-pdf' && /drei Tagen/.test(item.safety)));
 check('DeWarmte-Jobliste verknüpft fertige PDF mit echtem Download', js.includes('data-download-file') && js.includes('downloadFile') && js.includes('job.file?.name'));
 check('Markenprofil mit Logo, Website und Instagram ist bedienbar', html.includes('Markenprofil bearbeiten') && html.includes('projectWebsite') && html.includes('projectInstagram') && html.includes('projectLogo') && js.includes('/logo') && js.includes('projectLogo(project)'));
+check('Chancenradar-Projekte zeigen Potenzial, Belege und Rücklink', js.includes('Aus dem Chancenradar übernommen') && js.includes('opportunityOriginSection') && js.includes('Zurück zum Chancenradar'));
 check('Kunde terminieren steht oben mit Kundenname und KW-Auswahl bereit', html.includes('.workflow-launcher') && js.includes('Kunde terminieren') && js.includes('scheduleCustomerName') && js.includes('scheduleWeek') && js.includes('/customer-scheduling-requests'));
 check('Kunde terminieren startet direkt und erklärt die Fünf-Tage-Kapazität', js.includes('Jetzt terminieren') && js.includes('direkt an den Planbar-Workflow') && js.includes('vollständig freien fünf Tagen'));
 check('Kundentypen, Kürzelverwaltung und Enter-Ersatzplatz sind bedienbar', js.includes('schedulePartner') && js.includes('schedulePartnerPrefixes') && js.includes('saveCustomerSchedulingPartners') && js.includes('scheduleAllowFreeResourceFallback') && js.includes('ENTER-Block'));

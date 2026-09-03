@@ -173,6 +173,16 @@ function brandSection(project) {
   return `<section class="brand-card">${projectLogo(project, true)}<div class="brand-info"><div class="eyebrow">Markenprofil</div><h2>${esc(project.name)}</h2><div class="muted brand-hint">${esc(project.description || 'Logo, Website und Social-Profil machen das Projekt auf einen Blick erkennbar.')}</div><div class="brand-links">${website}${instagram}</div></div><button class="btn brand-action" id="editBrand">Marke bearbeiten</button></section>`;
 }
 
+function opportunityOriginSection(project) {
+  const origin = project.origin;
+  if (origin?.type !== 'opportunity-radar') return '';
+  const money = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(origin.initialBudgetEur || 0);
+  const sources = (origin.sources || []).map((source, index) => source.url
+    ? `<a class="brand-link" href="${esc(source.url)}" target="_blank" rel="noopener">↗ ${esc(source.account ? '@' + source.account.replace(/^@/, '') : `Quelle ${index + 1}`)}</a>`
+    : '').join('');
+  return `<section class="card opportunity-origin"><div class="section-head"><div><div class="eyebrow">Aus dem Chancenradar übernommen</div><h2>${esc(origin.title || project.name)}</h2><div class="muted">Die vollständige Ausgangsidee bleibt als Entscheidungsgrundlage in der Projektakte.</div></div><span class="opportunity-score">${esc(origin.score)} / 100</span></div><div class="origin-facts"><div><small>Aufbau</small><b>${esc(origin.setupHours)} Std.</b></div><div><small>Laufend</small><b>${esc(origin.ongoingHoursPerWeek)} Std./Woche</b></div><div><small>Startbudget</small><b>${esc(money)}</b></div></div><div class="origin-grid"><div><b>Chance und Angebot</b><p>${esc(origin.summary)}</p><p>${esc(origin.offer || origin.monetization)}</p></div><div><b>Erster belastbarer Test</b><p>${esc(origin.firstValidation)}</p></div><div><b>Belege</b><p>${esc(origin.evidence || 'Noch weiter zu belegen.')}</p>${origin.evidenceLimits ? `<small>Grenzen: ${esc(origin.evidenceLimits)}</small>` : ''}</div><div><b>Risiken</b><p>${esc(origin.risks || 'Keine besonderen Risiken hinterlegt.')}</p></div></div>${sources ? `<div class="brand-links">${sources}</div>` : ''}<a class="btn" href="/opportunities">Zurück zum Chancenradar</a></section>`;
+}
+
 function folderTree(project) {
   const folders = project.folders || [];
   const renderChildren = (parentId, depth = 0) => folders
@@ -319,7 +329,7 @@ function render() {
   $('title').textContent = project.name;
   $('description').textContent = project.description || 'Projektakte für Ideen, Absprachen und Dokumente.';
   const objective = project.objective || project.description;
-  $('content').innerHTML = `${customerSchedulingSection(project)}${dewarmteLinkPdfSection(project)}${brandSection(project)}${notesSection(project)}${objective ? `<section class="hero"><div class="eyebrow">Zielbild</div><h2>${esc(objective)}</h2></section>` : ''}${archiveSection(project)}${operationalSections(project)}`;
+  $('content').innerHTML = `${customerSchedulingSection(project)}${dewarmteLinkPdfSection(project)}${brandSection(project)}${opportunityOriginSection(project)}${notesSection(project)}${objective ? `<section class="hero"><div class="eyebrow">Zielbild</div><h2>${esc(objective)}</h2></section>` : ''}${archiveSection(project)}${operationalSections(project)}`;
   collapseProjectSections();
   if ($('customerSchedulingForm')) $('customerSchedulingForm').insertAdjacentHTML('afterend', `<section id="schedulingHistory" class="capacity-overview">${schedulingHistory(project)}</section>`);
   if ($('customerSchedulingForm')) {

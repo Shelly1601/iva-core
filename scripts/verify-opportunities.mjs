@@ -21,6 +21,7 @@ const {
   updateOpportunitySettings,
   upsertOpportunity,
 } = await import('../opportunities/store.js');
+const { createProjectFromOpportunity, opportunityProjectBlueprint } = await import('../opportunities/project-handoff.js');
 const { opportunityRadarStatus, scrapeInstagramHashtags } = await import('../opportunities/scout.js');
 const { checkOpportunityLink, normalizeLinkCheckMode } = await import('../opportunities/link-check.js');
 const { opportunityMarketResearchStatus, runOpportunityMarketResearch } = await import('../opportunities/market-research.js');
@@ -57,8 +58,24 @@ assert.match(pitch, /startet aber nichts ungefragt/);
 
 const handoff = await prepareOpportunityHandoff(stored.id);
 assert.equal(handoff.status, 'awaiting-confirmation');
-assert.match(handoff.confirmation, /^Ja, Chancenidee .+ umsetzen$/);
+assert.match(handoff.confirmation, /^Ja, Projekt aus Chancenidee .+ erstellen$/);
+assert.match(handoff.question, /Möchtest du daraus direkt eine Projektakte erstellen/);
+assert.equal((await prepareOpportunityHandoff(stored.id)).id, handoff.id, 'Projektfrage muss idempotent bleiben');
 assert.equal((await opportunityRadarCounts()).pendingHandoffs, 1);
+const blueprint = opportunityProjectBlueprint({ ...stored, score: scoring.score });
+assert.ok(blueprint.automations.some(item => item.id === 'connect-instagram'));
+assert.ok(blueprint.automations.some(item => item.id === 'connect-meta'));
+assert.ok(blueprint.automations.some(item => item.id === 'connect-linkedin'));
+assert.ok(blueprint.automations.some(item => item.id === 'build-content-system'));
+await assert.rejects(() => createProjectFromOpportunity(stored.id), /ausdrücklich bestätigen/);
+const projectResult = await createProjectFromOpportunity(stored.id, { confirmed: true });
+assert.equal(projectResult.created, true);
+assert.equal(projectResult.project.origin.opportunityId, stored.id);
+assert.equal(projectResult.project.automations.length, 8);
+assert.equal((await opportunityRadarCounts()).pendingHandoffs, 0);
+const repeatedProjectResult = await createProjectFromOpportunity(stored.id, { confirmed: true });
+assert.equal(repeatedProjectResult.created, false);
+assert.equal(repeatedProjectResult.project.id, projectResult.project.id);
 
 assert.equal(normalizeLinkCheckMode('Für IVA Integration testen'), 'iva-integration');
 assert.equal(normalizeLinkCheckMode('Für Business checken'), 'business');
@@ -181,6 +198,8 @@ assert.deepEqual(opportunityMarketResearchStatus().missing, ['TAVILY_API_KEY']);
 const html = await fs.readFile(new URL('../public/opportunities.html', import.meta.url), 'utf8');
 const js = await fs.readFile(new URL('../public/opportunities.js', import.meta.url), 'utf8');
 const scoutSource = await fs.readFile(new URL('../opportunities/scout.js', import.meta.url), 'utf8');
+const skillSource = await fs.readFile(new URL('../skills/opportunities.js', import.meta.url), 'utf8');
+const indexSource = await fs.readFile(new URL('../index.js', import.meta.url), 'utf8');
 assert.match(html, /Marktanalyse & Quellenradar/);
 assert.match(html, /Links prüfen & automatisch einsortieren/);
 assert.match(html, /id="linkUrls"/);
@@ -190,6 +209,13 @@ assert.match(js, /Business-Chance/);
 assert.match(js, /IVA-Erweiterung/);
 assert.match(js, /\/api\/opportunities\/market-research/);
 assert.match(js, /Regelmäßig beobachten/);
+assert.match(js, /Ja, Projektakte erstellen/);
+assert.match(js, /\/api\/opportunities\/\$\{encodeURIComponent\(button\.dataset\.confirmProject\)\}\/project/);
+assert.match(js, /\/projects\?id=/);
+assert.match(skillSource, /finishOpportunityProjectWorkflow/);
+assert.match(skillSource, /listOpportunityProjects/);
+assert.match(indexSource, /async function finishOpportunityProjectWorkflow/);
+assert.match(indexSource, /listOpportunityProjects die genaue Projekt- und Workflow-ID/);
 assert.match(scoutSource, /watch-account/);
 assert.match(scoutSource, /watch-web/);
 assert.match(scoutSource, /curatedRotation/);

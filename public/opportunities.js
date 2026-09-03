@@ -70,7 +70,7 @@ function opportunityCard(item) {
     <div class="section"><b>7-Tage-Test</b><p>${esc(item.firstValidation || 'noch festzulegen')}</p></div>
     <div class="section"><b>Belege & Grenzen</b><p>${esc(item.evidence || 'noch nicht ausreichend belegt')}</p>${item.evidenceLimits ? `<p class="muted">Grenze: ${esc(item.evidenceLimits)}</p>` : ''}<div class="sources">${sourceLinks(item)}</div></div>
     ${item.risks ? `<div class="notice"><b>Haken:</b> ${esc(item.risks)}</div>` : ''}
-    <div class="actions"><button class="btn" data-action="watch">Beobachten</button><button class="btn" data-action="validate">7-Tage-Test</button><button class="btn danger" data-action="rejected">Verwerfen</button><button class="btn primary" data-action="handoff">Umsetzung vorbereiten</button></div><div class="handoff-result"></div>
+    <div class="actions"><button class="btn" data-action="watch">Beobachten</button><button class="btn" data-action="validate">7-Tage-Test</button><button class="btn danger" data-action="rejected">Verwerfen</button>${item.projectId ? `<a class="btn primary" href="/projects?id=${encodeURIComponent(item.projectId)}">Projekt öffnen</a>` : `<button class="btn primary" data-action="handoff">${high ? 'Hat Potenzial · Projekt erstellen?' : 'Projekt aus Idee erstellen?'}</button>`}</div><div class="handoff-result"></div>
   </article>`;
 }
 
@@ -263,12 +263,26 @@ $('opportunityList').addEventListener('click', async event => {
   try {
     if (button.dataset.action === 'handoff') {
       const handoff = await api(`/api/opportunities/${encodeURIComponent(id)}/handoff`, { method: 'POST', body: '{}' });
-      card.querySelector('.handoff-result').innerHTML = `<div class="confirm">Vorbereitet für ${esc(handoff.targetAgent)}. Zum tatsächlichen Start bestätige später exakt:<br>${esc(handoff.confirmation)}</div>`;
+      card.querySelector('.handoff-result').innerHTML = `<div class="confirm"><b>${esc(handoff.question)}</b><div class="actions"><button class="btn primary" data-confirm-project="${esc(id)}">Ja, Projektakte erstellen</button><button class="btn" data-dismiss-project>Nein, noch nicht</button></div></div>`;
     } else {
       await api(`/api/opportunities/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ status: button.dataset.action }) });
       await loadAll({ fill: false });
     }
   } catch (error) { card.querySelector('.handoff-result').textContent = error.message; } finally { setBusy(button, false); }
+});
+
+$('opportunityList').addEventListener('click', async event => {
+  const dismiss = event.target.closest('[data-dismiss-project]');
+  if (dismiss) { dismiss.closest('.handoff-result').innerHTML = ''; return; }
+  const button = event.target.closest('[data-confirm-project]');
+  if (!button) return;
+  const card = button.closest('[data-id]');
+  setBusy(button, true, 'Projektakte wird erstellt …');
+  try {
+    const result = await api(`/api/opportunities/${encodeURIComponent(button.dataset.confirmProject)}/project`, { method: 'POST', body: JSON.stringify({ confirmed: true }) });
+    card.querySelector('.handoff-result').innerHTML = `<div class="confirm"><b>${result.created ? 'Projektakte erstellt.' : 'Projektakte war bereits vorhanden.'}</b><br>Validierung, Marke, Landingpage, Instagram, Meta, LinkedIn, Content, Publishing und Analytics liegen jetzt als einzelne Arbeitspakete bereit.<div class="actions"><a class="btn primary" href="/projects?id=${encodeURIComponent(result.project.id)}">Projekt jetzt öffnen</a></div></div>`;
+    await loadAll({ fill: false });
+  } catch (error) { card.querySelector('.handoff-result').textContent = error.message; setBusy(button, false); }
 });
 
 $('ivaHelper').addEventListener('click', () => location.href = '/cockpit');

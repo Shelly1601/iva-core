@@ -1,7 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 
-export function opportunitiesSkill({ listOpportunities, runOpportunityScout, checkOpportunityLink, runOpportunityMarketResearch, listOpportunityWatchSources, prepareOpportunityHandoff }) {
+export function opportunitiesSkill({ listOpportunities, runOpportunityScout, checkOpportunityLink, runOpportunityMarketResearch, listOpportunityWatchSources, prepareOpportunityHandoff, createProjectFromOpportunity, listOpportunityProjects, finishOpportunityProjectWorkflow }) {
   return {
     listOpportunities: tool({
       description: 'Listet IVAs quellengepruefte Chancenideen, nach Potenzial-Score sortiert. Scores sind Priorisierung, keine Einkommensgarantie.',
@@ -38,11 +38,29 @@ export function opportunitiesSkill({ listOpportunities, runOpportunityScout, che
       execute: async () => ({ sources: await listOpportunityWatchSources() }),
     }),
     prepareOpportunityHandoff: tool({
-      description: 'Bereitet fuer eine ausgewaehlte Chancenidee die Uebergabe an Marketing-, Kurs-, Web- oder Sales-Agent vor. Startet noch keine Umsetzung; gibt eine exakte Bestaetigungsformel zurueck.',
+      description: 'Bereitet für eine aussichtsreiche Chancenidee die Projekterstellung vor und fragt Nadine, ob daraus direkt eine Projektakte entstehen soll. Erstellt noch kein Projekt.',
       parameters: z.object({ opportunityId: z.string() }),
       execute: async ({ opportunityId }) => await prepareOpportunityHandoff(opportunityId),
+    }),
+    createProjectFromOpportunity: tool({
+      description: 'Erstellt nach Nadines ausdrücklichem Ja aus einer Chancenidee eine vollständige, idempotente Projektakte mit Validierung, Marke, Landingpage, Instagram, Meta, LinkedIn, Content, Publishing und Analytics als einzeln fertigstellbaren Workflows.',
+      parameters: z.object({ opportunityId: z.string(), confirmed: z.boolean().describe('true nur nach Nadines ausdrücklicher Zustimmung zur Projekterstellung') }),
+      execute: async ({ opportunityId, confirmed }) => await createProjectFromOpportunity(opportunityId, { confirmed }),
+    }),
+    listOpportunityProjects: tool({
+      description: 'Listet die aus dem Chancenradar erstellten Projektakten und ihre einzeln fertigstellbaren Workflows. Verwenden, wenn Nadine an einer Chancenidee weiterarbeiten oder einen Kanal, Content beziehungsweise eine Projektphase fertig machen will.',
+      parameters: z.object({}),
+      execute: async () => ({ projects: await listOpportunityProjects() }),
+    }),
+    finishOpportunityProjectWorkflow: tool({
+      description: 'Startet für genau einen Workflow einer Chancen-Projektakte den vollständigen IVA/Codex-Fertigstellungsauftrag über den iMac. Verwenden, wenn Nadine ausdrücklich „mach das fertig“, „connecte Instagram/Meta/LinkedIn“ oder gleichbedeutend sagt.',
+      parameters: z.object({
+        projectId: z.string(), workflowId: z.string(),
+        confirmed: z.boolean().describe('true nur wenn Nadine die Fertigstellung dieses Arbeitspakets ausdrücklich beauftragt hat'),
+      }),
+      execute: async ({ projectId, workflowId, confirmed }) => await finishOpportunityProjectWorkflow(projectId, workflowId, { confirmed }),
     }),
   };
 }
 
-export const opportunitiesSkillMeta = { id: 'opportunities', toolNames: ['listOpportunities', 'runOpportunityScout', 'checkOpportunityLink', 'researchOpportunityMarket', 'listOpportunityWatchSources', 'prepareOpportunityHandoff'] };
+export const opportunitiesSkillMeta = { id: 'opportunities', toolNames: ['listOpportunities', 'runOpportunityScout', 'checkOpportunityLink', 'researchOpportunityMarket', 'listOpportunityWatchSources', 'prepareOpportunityHandoff', 'createProjectFromOpportunity', 'listOpportunityProjects', 'finishOpportunityProjectWorkflow'] };
