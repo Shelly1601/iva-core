@@ -492,7 +492,7 @@
       let level=speaking?sampleSpeechLevel():0;
       if(speaking&&(!Number.isFinite(level)||level<.025)) level=.24+Math.abs(Math.sin(now/92))*.42+Math.abs(Math.sin(now/47))*.16;
       mouth.classList.toggle('active',speaking);
-      mouth.style.setProperty('--mouth-scale',speaking?String(.38+Math.min(1,level)*1.25):'.12');
+      mouth.style.setProperty('--mouth-scale',speaking?String(.18+Math.min(1,level)*.75):'.06');
     }
     requestAnimationFrame(animateIvaMouth);
   }

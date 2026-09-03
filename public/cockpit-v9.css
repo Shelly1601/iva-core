@@ -84,36 +84,34 @@ body {
 }
 
 .iva-mouth {
-  --mouth-scale: .12;
+  --mouth-scale: .06;
   position: absolute;
   z-index: 5;
   left: 50%;
-  top: 39.2%;
-  width: 12.8%;
-  aspect-ratio: 3.6 / 1;
+  top: 39%;
+  width: 8.4%;
+  aspect-ratio: 5.2 / 1;
   transform: translate(-50%, -50%) scaleY(var(--mouth-scale));
   transform-origin: 50% 50%;
-  border-radius: 45% 45% 52% 52%;
+  border-radius: 50%;
   opacity: 0;
   overflow: hidden;
   pointer-events: none;
-  background:
-    radial-gradient(ellipse at 50% 43%, rgba(255, 244, 239, .88) 0 12%, transparent 15%),
-    radial-gradient(ellipse at 50% 52%, #16060b 0 43%, #5f2636 51%, #a85b68 65%, rgba(189, 103, 113, .2) 73%, transparent 77%);
-  box-shadow: inset 0 -2px 3px rgba(255, 157, 166, .38), 0 1px 2px rgba(8, 2, 8, .32);
+  background: radial-gradient(ellipse at 50% 48%, rgba(23, 5, 11, .86) 0 36%, rgba(91, 31, 45, .68) 48%, rgba(183, 94, 108, .28) 61%, transparent 73%);
+  box-shadow: inset 0 -1px 1px rgba(250, 149, 164, .2);
   transition: opacity .08s linear;
 }
 .iva-mouth::after {
   content: "";
   position: absolute;
-  left: 17%;
-  right: 17%;
-  bottom: 5%;
-  height: 35%;
+  left: 22%;
+  right: 22%;
+  bottom: 8%;
+  height: 24%;
   border-radius: 50%;
-  background: linear-gradient(180deg, rgba(227, 132, 144, .72), rgba(113, 42, 57, .22));
+  background: linear-gradient(180deg, rgba(235, 142, 157, .48), rgba(113, 42, 57, .12));
 }
-.iva-mouth.active { opacity: .96; }
+.iva-mouth.active { opacity: .7; }
 
 @keyframes iva-breathe {
   0%, 100% { transform: translateY(1px) scale(1); filter: saturate(1.02) contrast(1.05) drop-shadow(0 0 25px rgba(34, 230, 214, .22)); }
@@ -420,7 +418,7 @@ body.widget-open .widget-drawer { transform: translateX(0); opacity: 1; pointer-
   .brand h1::after { display: none; }
   .iva-presence { position: fixed; top: calc(env(safe-area-inset-top) + 68px); bottom: calc(var(--dock-h) + env(safe-area-inset-bottom) + 18px); width: min(96vw, 480px); }
   .iva-avatar { inset: 0 0 20px; height: calc(100% - 8px); object-position: 50% 52%; }
-  .iva-mouth { top: 40.1%; width: 13.6%; }
+  .iva-mouth { top: 39.7%; width: 8.8%; }
   .presence-aura { width: min(78vw, 390px); }
   .presence-orbit { width: 86%; }
   .orbit-two { width: 104%; }
