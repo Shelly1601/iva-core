@@ -12,6 +12,18 @@ const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const IVA_NOTE_SIGNATURE = '(Notiz von Nadine via KI)';
 const DEAL_CUSTOM_FIELD_KEYS = Object.values(PIPEDRIVE_LAYOUT.dealFields).map(field => field.key).join(',');
 export const PIPEDRIVE_WRITE_CONFIRMATION = 'Pipedrive schreiben';
+export const PIPEDRIVE_FUNDING_REQUIRED_FIELDS = Object.freeze([
+  Object.freeze({ key: 'customerEmail', label: 'E-Mail' }),
+  Object.freeze({ key: 'phoneNumber', label: 'Telefonnummer' }),
+  Object.freeze({ key: 'plant', label: 'Anlage' }),
+  Object.freeze({ key: 'orderNumber', label: 'Auftragsnummer' }),
+]);
+
+export function missingPipedriveFundingRequiredFields(snapshot = {}) {
+  return PIPEDRIVE_FUNDING_REQUIRED_FIELDS
+    .filter(field => !clean(snapshot?.[field.key], 500))
+    .map(field => field.label);
+}
 
 const STANDARD_EDITABLE_DEAL_FIELDS = Object.freeze({
   title: Object.freeze({ apiKey: 'title', name: 'Deal-Titel', type: 'text' }),
@@ -430,8 +442,8 @@ export async function getPipedriveDealBundle(id, { customFieldKeys = DEAL_CUSTOM
   const personId = deal.person_id?.value || deal.person_id || null;
   const organizationId = deal.org_id?.value || deal.org_id || null;
   const [person, organization, notes, files, activities] = await Promise.all([
-    personId ? pipedriveRequest(`/api/v2/persons/${encodeURIComponent(personId)}`).then(result => result.data).catch(() => null) : null,
-    organizationId ? pipedriveRequest(`/api/v2/organizations/${encodeURIComponent(organizationId)}`).then(result => result.data).catch(() => null) : null,
+    personId ? pipedriveRequest(`/api/v2/persons/${encodeURIComponent(personId)}`).then(result => result.data) : null,
+    organizationId ? pipedriveRequest(`/api/v2/organizations/${encodeURIComponent(organizationId)}`).then(result => result.data) : null,
     pipedriveRequest(`/api/v1/notes?deal_id=${dealId}&start=0&limit=500`).then(result => result.data || []),
     pipedriveRequest(`/api/v1/deals/${dealId}/files?start=0&limit=500`).then(result => result.data || []),
     pipedriveRequest(`/api/v2/activities?deal_id=${dealId}&limit=500`).then(result => result.data || []),
@@ -440,8 +452,13 @@ export async function getPipedriveDealBundle(id, { customFieldKeys = DEAL_CUSTOM
 }
 
 function primaryEmail(record) {
-  const emails = Array.isArray(record?.email) ? record.email : [];
+  const emails = Array.isArray(record?.emails) ? record.emails : Array.isArray(record?.email) ? record.email : [];
   return clean(emails.find(item => item?.primary && item?.value)?.value || emails.find(item => item?.value)?.value, 500) || null;
+}
+
+function primaryPhone(record) {
+  const phones = Array.isArray(record?.phones) ? record.phones : Array.isArray(record?.phone) ? record.phone : [];
+  return clean(phones.find(item => item?.primary && item?.value)?.value || phones.find(item => item?.value)?.value, 200) || null;
 }
 
 function fundingNoteEvidence(note) {
@@ -488,7 +505,14 @@ export async function getPipedriveFundingSnapshot(id) {
     const definition = field(...names);
     return definition ? deal?.custom_fields?.[definition.key] ?? deal?.[definition.key] ?? null : null;
   };
-  const enumLabel = (rawValue, definition) => definition?.options?.find(option => String(option.id) === String(rawValue))?.label || rawValue || null;
+  const enumLabel = (rawValue, definition) => {
+    if (rawValue && typeof rawValue === 'object') {
+      const embeddedLabel = clean(rawValue.label || rawValue.name, 500);
+      if (embeddedLabel) return embeddedLabel;
+      rawValue = rawValue.id ?? rawValue.value ?? null;
+    }
+    return definition?.options?.find(option => String(option.id) === String(rawValue))?.label || rawValue || null;
+  };
   const stageName = structure.stages.find(stage => String(stage.id) === String(deal.stage_id))?.name || String(deal.stage_id || '');
   const customerName = clean(deal.person_name || person?.name, 500) || null;
   const title = clean(deal.title, 1000);
@@ -519,7 +543,7 @@ export async function getPipedriveFundingSnapshot(id) {
     customerEmail: clean(value('E-Mail', 'E-Mail-Adresse', 'Email'), 500) || primaryEmail(person),
     orderNumber: clean(value('Auftragsnummer', 'Angebotsnummer', 'Angebotsnummer (sevdesk)'), 200) || titleOrderNumber,
     customerNumber: clean(value('Kundennummer', 'Kunden-Nr.'), 200) || null,
-    phoneNumber: clean(value('Telefonnummer', 'Telefon', 'Mobilnummer'), 200) || null,
+    phoneNumber: clean(value('Telefonnummer', 'Telefon', 'Mobilnummer'), 200) || primaryPhone(person),
     plant: clean(enumLabel(value('Anlage'), plantField), 500) || null,
     incomeBonusRequested,
     location,
@@ -695,6 +719,10 @@ export async function markPipedriveFundingDealWonApi({ dealId, approvalFileName,
   }
   const before = await getPipedriveFundingSnapshot(id);
   if (!['förderung beantragen', 'förderung beantragt'].includes(clean(before.stage).toLocaleLowerCase('de-DE'))) throw new Error(`Deal ${id} steht nicht eindeutig in „Förderung beantragt“.`);
+  const missingRequiredFields = missingPipedriveFundingRequiredFields(before);
+  if (missingRequiredFields.length) {
+    throw new Error(`Deal ${id} ist vor dem Übergang nach Montage unvollständig: ${missingRequiredFields.join(', ')}. Fehlende Werte müssen zuerst belegbasiert ergänzt und erneut gelesen werden.`);
+  }
   if (before.files.filter(name => path.basename(name) === fileName).length !== 1) throw new Error(`Das KfW-Zusageschreiben „${fileName}“ ist im Deal nicht genau einmal vorhanden.`);
   const current = (await pipedriveRequest(`/api/v2/deals/${id}`)).data || {};
   const alreadyPresent = clean(current.status).toLowerCase() === 'won';

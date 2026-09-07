@@ -83,8 +83,15 @@ try {
   assert.match(cliSource, /listPipedriveDealsByStageName/);
   assert.doesNotMatch(cliSource.match(/import \{[\s\S]*?\} from '\.\/chrome-pipedrive\.mjs';/)?.[0] || '', /downloadPipedriveDealFiles|uploadPipedriveDealFiles|transitionPipedriveFundingStage|markPipedriveFundingDealWon/,
     'Pipedrive-Lesen, Dateiübertragung und Phasenstatus dürfen im CLI nicht mehr aus dem Chrome-Modul kommen');
-  assert.match(codexTaskSource, /list-pipedrive-stage "Montage terminieren"/);
-  assert.match(codexTaskSource, /keine Pipedrive-Browser-Tabs/);
+  assert.match(codexTaskSource, /list-pipedrive-stage "Förderung beantragt"/);
+  assert.match(codexTaskSource, /list-pipedrive-stage "Montage einplanen"/);
+  assert.match(codexTaskSource, /Ein Deal in Förderung beantragt darf unvollständig nicht auf Gewonnen gesetzt werden/);
+  assert.match(codexTaskSource, /Browser\/UI ist nur der dokumentierte Reparaturweg/);
+  const pipedriveApiSource = await readFile(new URL('../integrations/pipedrive.js', import.meta.url), 'utf8');
+  assert.match(pipedriveApiSource, /missingPipedriveFundingRequiredFields\(before\)/,
+    'der API-Schreibweg muss den Gewonnen-Übergang bei fehlenden Pflichtfeldern sperren');
+  assert.match(pipedriveApiSource, /E-Mail.*Telefonnummer.*Anlage.*Auftragsnummer/s,
+    'die Pflichtfeldsperre muss alle vier Montage-Stammdaten umfassen');
   const fundingNoteSource = pipedriveSource.slice(
     pipedriveSource.indexOf('export async function createPipedriveFundingRequestNote'),
     pipedriveSource.indexOf('async function readPipedriveApiBatchAsync'),

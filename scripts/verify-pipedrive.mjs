@@ -16,7 +16,14 @@ process.env.PIPEDRIVE_WRITE_ENABLED = 'false';
 const { PIPEDRIVE_LAYOUT } = await import('../integrations/pipedrive-layout.js');
 const pipelines = Object.values(PIPEDRIVE_LAYOUT.pipelines).map(item => ({ id: item.id, name: item.name, active: true }));
 const stages = Object.values(PIPEDRIVE_LAYOUT.stages).map(item => ({ id: item.id, pipeline_id: item.pipelineId, name: item.name, active_flag: true }));
-const dealFields = Object.values(PIPEDRIVE_LAYOUT.dealFields).map(item => ({ id: item.id, key: item.key, name: item.name, field_type: 'varchar', active_flag: true }));
+const dealFields = Object.values(PIPEDRIVE_LAYOUT.dealFields).map(item => ({
+  id: item.id,
+  key: item.key,
+  name: item.name,
+  field_type: item.name === 'Anlage' ? 'enum' : 'varchar',
+  active_flag: true,
+  ...(item.name === 'Anlage' ? { options: [{ id: 42, label: 'Vaillant 5 kW' }] } : {}),
+}));
 let notes = [];
 let files = [{ id: 44, name: 'Angebot.pdf' }];
 let dealStage = 20;
@@ -29,11 +36,13 @@ let dealValues = {
   custom_fields: {
     [PIPEDRIVE_LAYOUT.dealFields.orderNumber.key]: 'HH-100',
     [PIPEDRIVE_LAYOUT.dealFields.installationWeek.key]: null,
+    [PIPEDRIVE_LAYOUT.dealFields.plant.key]: { id: 42, label: 'Vaillant 5 kW' },
   },
 };
 let tokenRefreshes = 0;
 let lastApiTokenQuery = '';
 let lastDealCustomFields = '';
+let failPersonFetch = false;
 
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, options = {}) => {
@@ -83,7 +92,15 @@ globalThis.fetch = async (input, options = {}) => {
     return ok({ id: 123, ...dealValues, stage_id: dealStage });
   }
   if (url.pathname === '/api/v2/deals/123') return ok({ id: 123, ...dealValues, stage_id: dealStage, person_id: 5, org_id: 7 });
-  if (url.pathname === '/api/v2/persons/5') return ok({ id: 5, name: 'Max Muster' });
+  if (url.pathname === '/api/v2/persons/5') {
+    if (failPersonFetch) return json({ success: false, error: 'rate limited' }, 429);
+    return ok({
+      id: 5,
+      name: 'Max Muster',
+      emails: [{ value: 'kunde@example.test', primary: true }],
+      phones: [{ value: '+4912345', primary: true }],
+    });
+  }
   if (url.pathname === '/api/v2/organizations/7') return ok({ id: 7, name: 'Muster GmbH' });
   if (url.pathname === '/api/v1/notes' && String(options.method || 'GET').toUpperCase() === 'POST') {
     const body = JSON.parse(String(options.body || '{}'));
@@ -114,6 +131,7 @@ const {
   getPipedriveStructure,
   listPipedriveFundingBoard,
   listPipedriveDeals,
+  missingPipedriveFundingRequiredFields,
   pipedriveRequest,
   pipedriveStatus,
   pipedriveWebhookStatus,
@@ -171,9 +189,22 @@ try {
   assert.equal(fundingBoard.stages['Angebot veröffentlicht'][0].id, '123');
   const fundingSnapshot = await getPipedriveFundingSnapshot(123);
   assert.equal(fundingSnapshot.customerName, 'Max Muster');
+  assert.equal(fundingSnapshot.customerEmail, 'kunde@example.test');
+  assert.equal(fundingSnapshot.phoneNumber, '+4912345');
   assert.equal(fundingSnapshot.orderNumber, 'HH-100');
+  assert.equal(fundingSnapshot.plant, 'Vaillant 5 kW');
   assert.equal(fundingSnapshot.fileRecords[0].id, '44');
   assert.equal(fundingSnapshot.source, 'iva-core-pipedrive-api');
+  assert.deepEqual(missingPipedriveFundingRequiredFields({
+    customerEmail: 'kunde@example.test', phoneNumber: '+4912345', plant: 'Vaillant 5 kW', orderNumber: 'HH-100',
+  }), []);
+  assert.deepEqual(missingPipedriveFundingRequiredFields({
+    customerEmail: '', phoneNumber: null, plant: '  ', orderNumber: 'HH-100',
+  }), ['E-Mail', 'Telefonnummer', 'Anlage']);
+  failPersonFetch = true;
+  await assert.rejects(getPipedriveFundingSnapshot(123), /rate limited/,
+    'ein technischer Kontaktabruf-Fehler darf nicht als leere Kundendaten erscheinen');
+  failPersonFetch = false;
   const downloaded = await downloadPipedriveDealFile({ dealId: 123, fileId: 44 });
   assert.equal(downloaded.buffer.toString(), '%PDF-pipedrive-test');
 

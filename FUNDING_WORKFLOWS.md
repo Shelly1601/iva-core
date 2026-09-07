@@ -68,9 +68,10 @@ Beim ersten produktiven Lauf werden alle Deals der Zielphasen und alle sichtbare
 ## Förderung 3 – KfW-Zusagen prüfen
 
 1. Alle Deals in `Förderung beantragt` prüfen.
-2. Nur ein eindeutig lesbares offizielles KfW-Zusageschreiben im richtigen Deal akzeptieren. Allgemeine KfW-Mails, Antragsbestätigungen oder Zugangsdaten sind keine Zusage.
-3. Deal über `Gewonnen` und das anschließende Speichern bestätigen.
-4. Status erneut lesen. Erwartetes Ergebnis ist `Gewonnen` beziehungsweise die daraus ausgelöste Phase `Montage einplanen`. Bei abweichendem Ergebnis keine Wiederholung auf Verdacht, sondern konkreten Blocker melden.
+2. **Harte Pflichtfeldsperre vor dem Statuswechsel:** E-Mail, Telefonnummer, Anlage und Auftragsnummer müssen im Quell-Deal vorhanden und erneut gelesen sein. Fehlende Kontaktdaten ausschließlich aus der TMB, die Anlage ausschließlich aus dem unterschriebenen Angebot ergänzen. Bei Vaillant außerdem Plus-/Pro-Angaben aus Angebot und Notizen prüfen und im Ergebnis festhalten. Widersprüche niemals erraten.
+3. Nur ein eindeutig lesbares offizielles KfW-Zusageschreiben im richtigen Deal akzeptieren. Allgemeine KfW-Mails, Antragsbestätigungen oder Zugangsdaten sind keine Zusage.
+4. Deal erst nach bestandener Pflichtfeldsperre über `Gewonnen` und das anschließende Speichern bestätigen.
+5. Status erneut lesen. Erwartetes Ergebnis ist `Gewonnen` beziehungsweise die daraus ausgelöste Phase `Montage einplanen`. Den von der Pipedrive-Automation erzeugten offenen Zieldeal anschließend auf dieselben Pflichtfelder zurücklesen. Nicht übernommene leere Werte aus denselben verifizierten Belegen ergänzen und nochmals lesen. Bei abweichendem oder unklarem Ergebnis keine Wiederholung auf Verdacht, sondern konkreten Blocker melden.
 
 ## Tagesbericht
 

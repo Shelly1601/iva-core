@@ -3412,7 +3412,7 @@ const automationRunner = createAutomationOrchestrator({
   'montage-required-fields-morning': createProjectWorkflowAutomationHandler({
     projectId: 'heat-hero',
     workflowId: 'montage-required-fields-morning',
-    displayName: 'Montage-Pflichtfelder morgens prüfen',
+    displayName: 'Pipedrive-Pflichtfelder vor Montage prüfen',
     getProject,
     deviceAgentStatus,
     enqueueDeviceCommand,
