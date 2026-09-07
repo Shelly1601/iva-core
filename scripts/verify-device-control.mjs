@@ -263,7 +263,15 @@ try {
     /keine zwei fortlaufenden Railway-Heartbeats/,
     'ein einzelner oder stehengebliebener Heartbeat darf die Installation nicht grün melden',
   );
-  const { buildCodexPrompt, codexJobIdForRequest, codexTaskPolicy, inferProjectWorkflowStatus, startProjectWorkflowTask } = await import('../local-mac-helper/codex-tasks.mjs');
+  const {
+    buildCodexPrompt,
+    classifyCodexTaskBlocker,
+    codexJobIdForRequest,
+    codexTaskPolicy,
+    inferProjectWorkflowStatus,
+    shouldResumeCodexTaskAfterTermination,
+    startProjectWorkflowTask,
+  } = await import('../local-mac-helper/codex-tasks.mjs');
   const stableJobId = codexJobIdForRequest('same-command');
   assert.equal(codexJobIdForRequest('same-command'), stableJobId);
   assert.match(stableJobId, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
@@ -277,6 +285,26 @@ try {
   assert.match(preventionPrompt, /1234567890abcdef12345678/);
   assert.match(preventionPrompt, /incident-resolve/);
   assert.match(preventionPrompt, /niemals blind wiederholen/i);
+  assert.match(preventionPrompt, /Verbindliche Ausführungspriorität/);
+  assert.match(preventionPrompt, /Vollausführungsauftrag/);
+  assert.equal(classifyCodexTaskBlocker('Status: technisch blockiert\nChrome-Tab nicht erreichbar.'), 'recoverable_technical');
+  assert.equal(classifyCodexTaskBlocker('Status: technisch blockiert\nCAPTCHA verlangt eine externe Bestätigung.'), 'external');
+  assert.equal(classifyCodexTaskBlocker('Status: fachlich blockiert\nZwei Angebote widersprechen sich.'), 'business');
+  assert.equal(shouldResumeCodexTaskAfterTermination({
+    request: { mode: 'operational' },
+    state: { recoveryAttempts: 0 },
+    resultText: 'Status: technisch blockiert\nBrowser-Verbindung verloren.',
+  }), true, 'ein technischer Endbericht muss als idempotente Fortsetzung weiterlaufen');
+  assert.equal(shouldResumeCodexTaskAfterTermination({
+    request: { mode: 'operational' },
+    state: { recoveryAttempts: 0 },
+    resultText: 'Status: blockiert\nCAPTCHA verlangt Nadines Bestätigung.',
+  }), false, 'echte externe Sperren werden nicht automatisch umgangen');
+  assert.equal(shouldResumeCodexTaskAfterTermination({
+    request: { mode: 'project-workflow', planbar: { customerName: 'Fixture' } },
+    state: { recoveryAttempts: 0, planbarProgress: { reservation: { verified: true } } },
+    resultText: 'Status: technisch blockiert\nBrowser-Verbindung verloren.',
+  }), false, 'eine mögliche Planbar-Schreibaktion wird nicht generisch wiederholt');
   assert.equal(codexPolicy.arbitraryWorkspace, false);
   assert.equal(codexPolicy.sandbox, 'workspace-write');
   assert.equal(path.isAbsolute(codexPolicy.workspace), true);
@@ -387,7 +415,10 @@ try {
   assert.match(codexTaskSource, /delete childEnv\.IVA_MAC_WAKE_GUARD_ACTIVE/);
   assert.match(codexTaskSource, /request\.mode === 'operational'/);
   assert.match(codexTaskSource, /materializeIcloudWorkspace/);
+  assert.match(codexTaskSource, /automatische idempotente Fortsetzung/);
   assert.doesNotMatch(codexTaskSource, /'--sandbox'[^\n]+?'--approve-for-me'/, 'Codex CLI erlaubt --sandbox nicht zusammen mit --approve-for-me');
+  const indexSource = await readFile(new URL('../index.js', import.meta.url), 'utf8');
+  assert.match(indexSource, /Verbindliche Ausführungspriorität: Wenn Nadine eine Aktion oder einen Workflow ausdrücklich beauftragt/);
   const centralInstallerSource = await readFile(new URL('../local-mac-helper/install-central-runtime.mjs', import.meta.url), 'utf8');
   assert.match(centralInstallerSource, /requiredRelease: DEVICE_AGENT_RELEASE/, 'Bundle-Schema und Agent-Release-ID bleiben getrennt');
   assert.equal(inferProjectWorkflowStatus('Status: **fachlich blockiert**.\n\nGrund: Pflichtdaten fehlen.'), 'blocked');

@@ -52,6 +52,8 @@ const CODEX_CANDIDATES = Object.freeze([
   '/Applications/ChatGPT.app/Contents/Resources/codex',
   '/Applications/Codex.app/Contents/Resources/codex',
 ]);
+const HARD_EXTERNAL_BLOCKER_PATTERN = /\b(?:captcha|konto(?:sperre|\s+gesperrt)|account\s+(?:is\s+)?locked|technisch\s+erzwungene?\s+(?:externe?\s+)?(?:best[aä]tigung|freigabe)|(?:externe?\s+)?(?:best[aä]tigung|freigabe)\s+(?:durch\s+)?nadine|fehlende\s+(?:oder\s+verweigerte\s+)?(?:berechtigung|befugnis)|(?:zugangsdaten|credentials?)\s+(?:sind\s+)?(?:nicht\s+verf[uü]gbar|abgelehnt)|recht(?:e[ns]?|er)\s+(?:display|bildschirm).{0,100}\b(?:fehlt|nicht\s+(?:angeschlossen|verf[uü]gbar|erkennbar|nutzbar)|physisch\s+nicht)|(?:irreversible|unumkehrbare)\s+(?:aktion|entscheidung).{0,100}\b(?:au[sß]erhalb|ohne)\b)/i;
+const TECHNICAL_FAILURE_PATTERN = /(?:status|ergebnis)\s*:\s*(?:\*\*)?technisch\s+blockiert\b|technischer\s+blocker\s*:|\b(?:browser|chrome|tab|fenster|ui|accessibility|apple\s*script|automation|steuerung|verbindungs?(?:fehler|abbruch)?|netzwerk|network|reload|seite\s+(?:neu\s+)?laden|sitzung|session|login|anmeldung|datei|icloud|resource\s+deadlock|eagain|edeadlk|etimedout|econn\w+|timeout|tool(?:-|\s)?fehler|worker|prozess\s+unterbrochen|mcp|railway\s+(?:nicht\s+)?erreichbar)\b/i;
 
 function clean(value, max = 500) {
   return String(value || '').replace(/\u0000/g, '').trim().slice(0, max);
@@ -316,6 +318,44 @@ ${lessonText}
 - Speichere niemals Passwörter, Tokens, Einmalcodes oder unnötige Kunden-/Personendaten. Ein einzelner Browser-, Tab-, UI-, Login-, Verbindungs-, Reload- oder Steuerungsfehler ist kein Endergebnis: repariere und setze idempotent fort.`;
 }
 
+function commandCompletionMandate() {
+  return `Verbindliche Ausführungspriorität (hat Vorrang vor optionalen Prüfungen und Nebenaufgaben):
+- Jede ausdrückliche Handlungsanweisung von Nadine ist ein Vollausführungsauftrag. Arbeite zuerst auf das konkret beauftragte fachliche Ergebnis hin; ein vorbereiteter, eingereihter oder nur teilweise bearbeiteter Auftrag ist nicht erledigt.
+- Nur unmittelbar notwendige Prüfungen aus dem beauftragten Workflow dürfen dem Zielschritt vorausgehen. Starte keine optionalen Bestands-, Forecast-, Präfix- oder Nebenprüfungen, solange ausdrücklich benannte Fälle offen sind.
+- Browser-, Tab-, Fenster-, UI-, Login-, Verbindungs-, Reload-, Datei-, Tool- oder Steuerungsfehler sind Reparaturaufgaben, kein Abschluss. Prüfe bei einem unklaren Schreib- oder Sendeausgang zuerst den sichtbaren Zielzustand, repariere Sitzung, Tab, Fenster, Verbindung oder zugelassenen Helfer und setze am ersten noch nicht verifizierten Schritt idempotent fort. Niemals blind wiederholen.
+- „Status: blockiert“ ist ausschließlich bei einem echten äußeren Hindernis zulässig: CAPTCHA, Kontosperre, zwingende externe Bestätigung, abgelehnte oder sicher nicht verfügbare Zugangsdaten, fehlende Berechtigung, physisch nicht verfügbarer rechter Bildschirm oder eine irreversible Aktion außerhalb des Auftrags. Unklare Fachunterlagen werden nicht geraten; dokumentiere den einzelnen Fall und bearbeite alle übrigen unabhängigen Fälle weiter.
+- Beende den Auftrag nur nach sichtbarer Soll-/Ist-Prüfung des beauftragten Ergebnisses. Technische Zwischenfehler werden intern protokolliert und gelöst, nicht als Endergebnis an Nadine delegiert.`;
+}
+
+export function classifyCodexTaskBlocker(message = '') {
+  const text = String(message || '');
+  if (!text.trim()) return '';
+  if (HARD_EXTERNAL_BLOCKER_PATTERN.test(text)) return 'external';
+  if (TECHNICAL_FAILURE_PATTERN.test(text)) return 'recoverable_technical';
+  return inferProjectWorkflowStatus(text) === 'blocked' ? 'business' : '';
+}
+
+export function shouldResumeCodexTaskAfterTermination({
+  request = {},
+  state = {},
+  resultText = '',
+  structuredResult = null,
+  exitCode = 0,
+  timedOut = false,
+} = {}) {
+  const evidence = [resultText, structuredResult?.summary, state?.error, state?.detail]
+    .filter(Boolean)
+    .join('\n');
+  const blocker = classifyCodexTaskBlocker(evidence);
+  if (blocker === 'external' || blocker === 'business') return false;
+  if (Number(state?.recoveryAttempts || 0) >= CODEX_TASK_MAX_RECOVERY_ATTEMPTS) return false;
+  // A potentially written Planbar reservation has a dedicated receipt and must
+  // never be restarted generically. Its workflow resumes only after checking
+  // that receipt, preventing an accidental second appointment or message.
+  if (request?.planbar && state?.planbarProgress?.reservation?.verified) return false;
+  return blocker === 'recoverable_technical' || timedOut || exitCode !== 0;
+}
+
 export function buildCodexPrompt(request) {
   const recoveryInstruction = Number(request.recoveryAttempt || 0) > 0
     ? `\n\nDies ist der automatische Wiederanlauf ${Number(request.recoveryAttempt)} nach einem unterbrochenen lokalen Worker. Prüfe vor jeder Schreib- oder Sendeaktion zuerst vorhandene lokale Belege, den sichtbaren Zielzustand und bereits erzeugte Ergebnisse. Setze beim ersten noch nicht verifizierten Schritt fort. Wiederhole niemals eine bereits sichtbare, gespeicherte oder anderweitig belegte Aktion. Der Wiederanlauf ist eine Fortsetzung desselben Auftrags, kein neuer Auftrag.`
@@ -326,10 +366,11 @@ export function buildCodexPrompt(request) {
     : '';
   const displayInstruction = `Verbindliche Displayregel: Bediene ausschließlich das physisch rechte Display. Der zentrale iMac-Runner hat dessen Geometrie unmittelbar vor deinem Start geprüft und als laufzeitgebundenen Nachweis vererbt; \`right-display-check.mjs --require-second-display\` verwendet diesen Nachweis auch innerhalb der Sandbox.${fundingWindowInstruction} Öffne für IVA bei Bedarf ein eigenes zweites App-Fenster beziehungsweise eigene Tabs rechts; verwende, verschiebe oder übernimm kein Arbeitsfenster auf dem linken Display. Die lokalen Pipedrive-, Outlook- und WhatsApp-Helfer erzwingen diese Regel zusätzlich pro Zielfenster. Wenn ein Zielfenster dort nicht verifiziert werden kann, stoppe konkret statt links weiterzuarbeiten.`;
   const incidentInstruction = incidentMemoryInstructions(request);
+  const completionMandate = commandCompletionMandate();
   if (request.mode === 'project-workflow') {
     return `Nadine hat diesen Projekt-Workflow in IVA ausdrücklich über den Button „Manuell auslösen“ gestartet. Führe jetzt genau einen operativen Einmallauf aus, ohne eine weitere Planbestätigung zu verlangen.
 
-Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.md vollständig. ${runtimeInstruction} ${displayInstruction} Dies ist kein Bauauftrag: ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts. Führe nur den unten genannten Workflow mit seinen dokumentierten Quellen, Sicherheitsregeln, Verifikationen, Zeitlimits, Protokollen und Rückfallwegen aus. Normale erneute Anmeldungen erledigst du mit den vorhandenen sicheren Zugangsdaten selbstständig. Bei CAPTCHA, Kontosperre, technisch erzwungener externer Bestätigung oder einem fachlichen Sicherheits-Gate stoppst du mit dem konkreten Blocker. Erfinde keinen Erfolg.
+Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.md vollständig. ${runtimeInstruction} ${displayInstruction} Dies ist kein Bauauftrag: ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts. Führe nur den unten genannten Workflow mit seinen dokumentierten Quellen, Sicherheitsregeln, Verifikationen, Zeitlimits, Protokollen und Rückfallwegen aus. Normale erneute Anmeldungen erledigst du mit den vorhandenen sicheren Zugangsdaten selbstständig. Bei CAPTCHA, Kontosperre oder technisch erzwungener externer Bestätigung stoppst du mit dem konkreten Blocker. Bei einem fachlichen Sicherheits-Gate rate nicht: lasse den betroffenen Fall unverändert und bearbeite alle übrigen unabhängigen Fälle weiter. Erfinde keinen Erfolg.
 
 Manueller Einmallauf:
 ${request.prompt}${recoveryInstruction}
@@ -337,9 +378,11 @@ ${request.planbar ? planbarReceiptInstructions(request) : ''}
 
 ${workflowResultInstructions(request)}
 
+${completionMandate}
+
 ${incidentInstruction}
 
-Beende den Ergebnisbericht mit einer eigenen Zeile „Status: erfolgreich“ nur nach tatsächlicher Prüfung des Ergebnisses, sonst „Status: blockiert“ und dem konkreten Grund.
+Beende den Ergebnisbericht mit einer eigenen Zeile „Status: erfolgreich“ nur nach tatsächlicher Prüfung des Ergebnisses. „Status: blockiert“ ist nur für den im Ausführungsmandat definierten echten äußeren Blocker zulässig; einen behebbaren technischen Fehler reparierst du und setzt fort.
 
 ${request.acceptanceCriteria?.length ? `Abnahmekriterien:\n${request.acceptanceCriteria.map(item => `- ${item}`).join('\n')}` : ''}`.trim();
   }
@@ -350,10 +393,12 @@ Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.
 
 Der autoritative Arbeitsordner liegt in iCloud. Bei „Resource deadlock avoided“, EAGAIN, EDEADLK oder kurzzeitig nicht lesbaren Dateien stößt du zuerst den lokalen iCloud-Download an und wiederholst den lesenden Zugriff; behandle das nicht vorschnell als fehlende Datei. Melde ausschließlich das tatsächlich verifizierte Ergebnis oder einen konkreten Blocker und erfinde keinen Erfolg.
 
-Beende den Ergebnisbericht mit einer eigenen Zeile „Status: erfolgreich“ nur nach tatsächlicher Prüfung des Ergebnisses, sonst „Status: blockiert“ und dem konkreten Grund.
+Beende den Ergebnisbericht mit einer eigenen Zeile „Status: erfolgreich“ nur nach tatsächlicher Prüfung des Ergebnisses. „Status: blockiert“ ist nur für den im Ausführungsmandat definierten echten äußeren Blocker zulässig; einen behebbaren technischen Fehler reparierst du und setzt fort.
 
 Operativer Auftrag:
 ${request.prompt}${recoveryInstruction}
+
+${completionMandate}
 
 ${incidentInstruction}
 
@@ -377,6 +422,8 @@ Bei einem echten Blocker: ${progressCommand('blocked')} "kurzer konkreter Grund"
 
 Auftrag:
 ${request.prompt}${recoveryInstruction}
+
+${completionMandate}
 
 ${incidentInstruction}
 
@@ -968,6 +1015,67 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
     ? inferProjectWorkflowStatus(resultText)
     : '';
   const structuredStatus = request.resultProtocol === 1 ? resolveProjectWorkflowResultStatus(structuredResult) : '';
+  const resumeAfterTechnicalFailure = shouldResumeCodexTaskAfterTermination({
+    request,
+    state: { ...current, planbarProgress },
+    resultText,
+    structuredResult,
+    exitCode,
+    timedOut,
+  });
+  if (resumeAfterTechnicalFailure) {
+    const recoveryAttempts = Number(current.recoveryAttempts || 0) + 1;
+    const incident = await recordLocalIncident({
+      ...incidentContext,
+      error: 'Behebbarer technischer Abbruch erkannt; derselbe Auftrag wird idempotent fortgesetzt.',
+      status: 'open',
+      severity: 'high',
+      source: 'imac-codex-runner',
+    });
+    try {
+      const { reportIncident } = await import('./device-agent.mjs');
+      await reportIncident({ ...incidentContext, error: incident.error, status: 'open', severity: 'high', source: 'imac-codex-runner' });
+    } catch (error) {
+      console.error(`Störung nur lokal gespeichert; zentrale Synchronisierung folgt bei erreichbarem Kanal: ${clean(error.message, 300)}`);
+    }
+    // The previous worker holds the atomic claim. Archive it before starting the
+    // same job again; the continuation prompt requires target-state readback.
+    await archiveExecutionClaim(paths, Date.now());
+    let recoveryState = await writeState(paths, {
+      ...current,
+      planbarProgress,
+      workflowProof,
+      jobId,
+      title: request.title,
+      requestId: request.requestId,
+      status: 'queued',
+      phase: 'recovering',
+      progress: Math.max(1, Number(current.progress) || 0),
+      recoveryAttempts,
+      workerPid: null,
+      childPid: null,
+      error: '',
+      detail: `Behebbarer technischer Abbruch erkannt; automatische idempotente Fortsetzung ${recoveryAttempts} von ${CODEX_TASK_MAX_RECOVERY_ATTEMPTS} wird gestartet.`,
+      resultPreview,
+      createdAt: request.createdAt,
+      updatedAt: completedAt,
+      workspace: REPO_ROOT,
+    });
+    await reportTaskState(request, recoveryState, resultPreview);
+    try {
+      await startCodexTask(request);
+    } catch (error) {
+      // Keep the job queued. The durable task synchronizer can still launch the
+      // same idempotent continuation after a transient spawn failure.
+      recoveryState = await writeState(paths, {
+        ...recoveryState,
+        detail: 'Die automatische Fortsetzung ist vorgemerkt und wird nach einem vorübergehenden Startfehler erneut gestartet.',
+        updatedAt: new Date().toISOString(),
+      });
+      await reportTaskState(request, recoveryState, resultPreview);
+    }
+    return recoveryState;
+  }
   const status = request.planbar && planbarProgress?.status !== 'completed'
     ? (planbarProgress?.reservation?.verified ? 'incomplete' : 'blocked')
     : timedOut
