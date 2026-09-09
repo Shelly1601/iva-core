@@ -282,7 +282,8 @@ async function updateFromCentralRuntime() {
   if (imacUiIsBusy()) return false; // Finish the current UI task before switching releases.
   // Only the central launchd installation follows the atomic current symlink.
   // A legacy fixed-path installation must first use install-central-runtime.mjs.
-  if (!LOCAL_HELPER_DIR.includes(`${path.sep}central${path.sep}releases${path.sep}`)) return false;
+  const centralRuntimePath = `${path.sep}runtime${path.sep}central${path.sep}`;
+  if (!LOCAL_HELPER_DIR.includes(centralRuntimePath)) return false;
   lastCentralUpdateAt = Date.now();
   const { fetchCentralRuntimeBundle, imacDeviceAgentMetadata } = await loadDeviceAgent();
   const bundle = await fetchCentralRuntimeBundle();
