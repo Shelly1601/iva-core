@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +11,7 @@ try {
   const { deviceCommandNeedsImmediateUiLock } = await import('../local-mac-helper/device-agent.mjs');
   assert.equal(deviceCommandNeedsImmediateUiLock('project.workflow.run'), false, 'Workflow-Starts müssen ohne UI-Sperre eingereiht werden; der Worker wartet selbst auf den freien iMac');
   assert.equal(deviceCommandNeedsImmediateUiLock('app.open'), true, 'Direkte App-Bedienung bleibt UI-gesperrt');
+  assert.equal(deviceCommandNeedsImmediateUiLock('knowledge.import.start'), true, 'Kursanmeldung wird sichtbar und ausschließlich unter der rechten UI-Sperre geprüft');
   console.log('Device-Control: Store laden …');
   const {
     IVA_IMAC_DEVICE_ID,
@@ -60,7 +62,8 @@ try {
     release: 'test-v2',
     workspace: '/Users/nadine/Library/Mobile Documents/com~apple~CloudDocs/IVA-Assistent/iva-core',
     iCloudAuthoritative: true,
-    allowedActions: ['agent.status', 'computer.status', 'funding.monitor.status', 'funding.legacy-monitor.suspend', 'project.workflow.run', 'planbar.search.refresh', 'planbar.customer.schedule', 'portal.login', 'portal.credentials.status', 'codex.task.start', 'codex.task.status', 'app.open'],
+    allowedActions: ['agent.status', 'computer.status', 'funding.monitor.status', 'funding.legacy-monitor.suspend', 'project.workflow.run', 'planbar.search.refresh', 'planbar.customer.schedule', 'portal.login', 'portal.credentials.status', 'knowledge.import.start', 'codex.task.start', 'codex.task.status', 'app.open'],
+    credentialEnvelope: { version: 1, algorithm: 'RSA-OAEP-256+A256GCM', publicKey: 'QUJD', fingerprint: '0123456789abcdef01234567' },
   };
   await assert.rejects(
     recordDeviceAgentHeartbeat({ deviceId: IVA_IMAC_DEVICE_ID, ...imacMetadata, hostname: 'MacBook-Air-von-Nadine.local' }),
@@ -700,6 +703,35 @@ try {
   assert.equal(planbarDispatch.action, 'planbar.customer.schedule');
   assert.equal(planbarDispatch.payload.week, 39);
   assert.equal((await planbarTools.listPlanbarCustomerTypes.execute({})).customerTypes[0].prefix, 'HH');
+
+  console.log('Device-Control: verschlüsselten Wissensimport und automatische Reparatur prüfen …');
+  const courseUrl = 'https://www.skool.com/beispiel/about';
+  const courseProfileId = `course-${crypto.createHash('sha256').update('www.skool.com').digest('hex').slice(0, 18)}`;
+  const encryptedEnvelope = { version: 1, algorithm: 'RSA-OAEP-256+A256GCM', wrappedKey: 'QUJD', iv: 'QUJD', ciphertext: 'QUJD' };
+  const knowledgePayload = {
+    importId: crypto.randomUUID(), entryId: crypto.randomUUID(), title: 'Vertriebscoaching', sourceUrl: courseUrl,
+    mode: 'iva-drive', accessMode: 'existing', archiveFolderUrl: 'https://drive.google.com/drive/folders/test',
+    credentialProfileId: courseProfileId, credentialEnvelope: encryptedEnvelope, attempt: 1, requestId: 'knowledge-import-test:1',
+  };
+  const knowledgeCommand = await enqueueDeviceCommand({ action: 'knowledge.import.start', requestedBy: 'test', payload: knowledgePayload });
+  assert.equal((await enqueueDeviceCommand({ action: 'knowledge.import.start', requestedBy: 'duplicate', payload: knowledgePayload })).id, knowledgeCommand.id);
+  let knowledgeClaim = null;
+  for (let index = 0; index < 40; index += 1) {
+    const candidate = await claimNextDeviceCommand(IVA_IMAC_DEVICE_ID, imacMetadata);
+    if (!candidate || candidate.id === knowledgeCommand.id) { knowledgeClaim = candidate; break; }
+    await completeDeviceCommand({ deviceId: IVA_IMAC_DEVICE_ID, commandId: candidate.id, leaseToken: candidate.leaseToken, ok: true, result: { testDrain: true }, agentMetadata: imacMetadata });
+  }
+  assert.ok(knowledgeClaim, 'der Wissensimport bleibt nach älteren Testbefehlen abholbar');
+  assert.equal(knowledgeClaim.id, knowledgeCommand.id);
+  const retryingKnowledge = await completeDeviceCommand({
+    deviceId: IVA_IMAC_DEVICE_ID, commandId: knowledgeCommand.id, leaseToken: knowledgeClaim.leaseToken,
+    ok: false, error: 'Chrome tab disconnected', agentMetadata: imacMetadata,
+  });
+  assert.equal(retryingKnowledge.status, 'queued');
+  assert.equal(retryingKnowledge.failureStage, 'automatic-recovery');
+  const publicKnowledge = (await listDeviceCommands({ deviceId: IVA_IMAC_DEVICE_ID })).find(item => item.id === knowledgeCommand.id);
+  assert.deepEqual(publicKnowledge.payload.credentialEnvelope, { encrypted: true, version: 1 });
+  assert.equal(JSON.stringify(publicKnowledge).includes('wrappedKey'), false);
   console.log('PASS IVA Device Control: ausgehender Gerätekanal, Lease-Schutz und enge Aktions-Positivliste.');
 } finally {
   await rm(root, { recursive: true, force: true });

@@ -45,6 +45,7 @@ const ALLOWED_ACTIONS = Object.freeze([
   'planbar.search.refresh',
   'portal.credentials.status',
   'portal.login',
+  'knowledge.import.start',
   'project.workflow.run',
 ]);
 

@@ -8,7 +8,7 @@ import {
   generateTotp,
   readCredentialField,
 } from '../local-mac-helper/credential-broker.mjs';
-import { ensurePortalLogin, portalAuthPolicy } from '../local-mac-helper/portal-auth.mjs';
+import { ensurePortalLogin, ensurePortalProfileLogin, portalAuthPolicy } from '../local-mac-helper/portal-auth.mjs';
 import { macWakeGuardPolicy } from '../local-mac-helper/mac-wake-guard.mjs';
 
 const noWakeGuard = async task => task();
@@ -134,6 +134,23 @@ const captchaLogin = await ensurePortalLogin('pipedrive', {
 });
 assert.equal(captchaLogin.status, 'blocked');
 assert.equal(captchaLogin.blocker, 'captcha');
+const courseProfile = {
+  id: 'course-0123456789abcdef01', name: 'Skool-Kurs', loginUrl: 'https://www.skool.com/beispiel',
+  allowedHosts: ['www.skool.com'], requiredFields: ['username', 'password'], optionalFields: ['totp'],
+};
+const courseTransport = fakeTransport([
+  { authenticated: false, usernameVisible: true, passwordVisible: true },
+  { authenticated: true },
+]);
+const courseLogin = await ensurePortalProfileLogin(courseProfile, {
+  transport: courseTransport,
+  wakeGuard: noWakeGuard,
+  keychainStatus: async () => ({ configured: { username: true, password: true, totp: false } }),
+  readSecret: async (_service, field) => field === 'username' ? 'user' : 'pass',
+});
+assert.equal(courseLogin.status, 'authenticated');
+assert.equal(courseLogin.credentialsSubmitted, true);
+await assert.rejects(() => ensurePortalProfileLogin({ ...courseProfile, allowedHosts: ['evil.test'] }, { wakeGuard: noWakeGuard }), /nicht sicher/);
 await assert.rejects(() => ensurePortalLogin('unbekannt', { wakeGuard: noWakeGuard }), /nicht.*freigegeben/);
 
 console.log('PASS IVA-Schlüsselbund: fünf Portalprofile, sichere Statusausgabe, TOTP und autonome Login-Orchestrierung.');

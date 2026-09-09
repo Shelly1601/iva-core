@@ -387,11 +387,16 @@ Beende den Ergebnisbericht mit einer eigenen Zeile „Status: erfolgreich“ nur
 ${request.acceptanceCriteria?.length ? `Abnahmekriterien:\n${request.acceptanceCriteria.map(item => `- ${item}`).join('\n')}` : ''}`.trim();
   }
   if (request.mode === 'operational') {
+    const operationalProgressCommand = `node ${JSON.stringify(MODULE_PATH)} operational-progress ${request.jobId} <prozent-1-bis-99> "<phase>" "<kurzer Ist-Stand>"`;
     return `Nadine hat diese konkrete Aktion ausdrücklich zur Ausführung auf ihrem iMac beauftragt. Führe sie jetzt genau dort aus, ohne eine weitere Planbestätigung zu verlangen.
 
 Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.md vollständig. ${runtimeInstruction} ${displayInstruction} Dies ist ein operativer iMac-Auftrag und kein IVA-Bauauftrag: Ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts, außer der Auftrag verlangt selbst ausdrücklich eine Code- oder Systemänderung. Versende keine E-Mail und führe keine andere externe Kommunikation aus, sofern sie im Auftrag nicht eindeutig freigegeben ist. Verwende bei lokalen WhatsApp-Aufträgen ausschließlich die native WhatsApp-App. Wiederhole eine Aktion niemals allein deshalb, weil der Erfolgsnachweis verzögert oder uneindeutig ist.
 
 Der autoritative Arbeitsordner liegt in iCloud. Bei „Resource deadlock avoided“, EAGAIN, EDEADLK oder kurzzeitig nicht lesbaren Dateien stößt du zuerst den lokalen iCloud-Download an und wiederholst den lesenden Zugriff; behandle das nicht vorschnell als fehlende Datei. Melde ausschließlich das tatsächlich verifizierte Ergebnis oder einen konkreten Blocker und erfinde keinen Erfolg.
+
+Melde während des Laufs den echten, niemals rückwärts laufenden Arbeitsfortschritt. Nutze nach der Inventarisierung und danach regelmäßig anhand tatsächlich erledigter Fälle beziehungsweise Lektionen:
+${operationalProgressCommand}
+99 Prozent sind erst nach inhaltlicher Fertigstellung und vor der letzten sichtbaren Verifikation zulässig; 100 Prozent setzt ausschließlich der Runner nach erfolgreichem Abschluss.
 
 Beende den Ergebnisbericht mit einer eigenen Zeile „Status: erfolgreich“ nur nach tatsächlicher Prüfung des Ergebnisses. „Status: blockiert“ ist nur für den im Ausführungsmandat definierten echten äußeren Blocker zulässig; einen behebbaren technischen Fehler reparierst du und setzt fort.
 
@@ -912,6 +917,26 @@ export async function updateCodexTaskProgress(jobId, phase, detail = '') {
   return updated;
 }
 
+export async function updateOperationalTaskProgress(jobId, progress, phase = '', detail = '') {
+  const paths = jobPaths(jobId);
+  const state = await readJson(paths.state);
+  const request = await readJson(paths.request);
+  if (!['operational', 'project-workflow'].includes(request.mode)) throw new Error('Prozentfortschritt ist nur für operative IVA-Aufträge zulässig.');
+  const nextProgress = Math.max(1, Math.min(99, Math.round(Number(progress) || 0)));
+  if (nextProgress < Number(state.progress || 0)) throw new Error('Der operative Fortschritt darf nicht zurückgesetzt werden.');
+  const updated = await writeState(paths, {
+    ...state,
+    status: 'running',
+    phase: clean(phase, 80) || state.phase || 'running',
+    progress: nextProgress,
+    detail: clean(detail, 1000) || state.detail || 'Operativer IVA-Auftrag läuft.',
+    error: '',
+    updatedAt: new Date().toISOString(),
+  });
+  await reportTaskState(request, updated);
+  return updated;
+}
+
 export function inferProjectWorkflowStatus(lastMessage = '') {
   const text = String(lastMessage || '');
   return /(?:^|\n)\s*(?:(?:Status|Ergebnis)\s*:\s*(?:\*\*)?\s*)?(?:(?:fachlich|technisch)\s+)?blockiert\b/i.test(text)
@@ -1341,6 +1366,9 @@ if (isCodexTasksEntrypoint() && process.argv[2] === 'workflow-status') {
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 } else if (isCodexTasksEntrypoint() && process.argv[2] === 'progress') {
   try { await updateCodexTaskProgress(process.argv[3], process.argv[4], process.argv.slice(5).join(' ')); }
+  catch (error) { console.error(error.message); process.exitCode = 1; }
+} else if (isCodexTasksEntrypoint() && process.argv[2] === 'operational-progress') {
+  try { await updateOperationalTaskProgress(process.argv[3], process.argv[4], process.argv[5], process.argv.slice(6).join(' ')); }
   catch (error) { console.error(error.message); process.exitCode = 1; }
 } else if (isCodexTasksEntrypoint() && process.argv[2] === 'incident-open') {
   try { console.log(JSON.stringify(await recordIncidentFromCli({ jobId: process.argv[3], system: process.argv[4], action: process.argv[5], step: process.argv[6], error: process.argv.slice(7).join(' ') }))); }

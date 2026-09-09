@@ -160,6 +160,16 @@ import {
   storeKnowledgeDocument,
   updateKnowledgeEntry,
 } from './knowledge/store.js';
+import {
+  completeKnowledgeImport,
+  createKnowledgeImport,
+  getKnowledgeImport,
+  knowledgeImportPolicy,
+  listKnowledgeImports,
+  markKnowledgeImportDispatched,
+  mergeKnowledgeImportStatus,
+  updateKnowledgeImport,
+} from './knowledge/imports.js';
 import { createCandidateSearchPlan, createInterviewGuide, screenResumeAgainstCriteria } from './recruiting/assistant.js';
 import {
   createRecruitingCandidate,
@@ -1583,6 +1593,40 @@ app.post('/device-agent/:deviceId/operational-runs', async (req, res) => {
     res.status(201).json(run);
   }
   catch (error) { res.status(400).json({ error: error.message }); }
+});
+
+app.post('/device-agent/:deviceId/knowledge-imports/:importId/complete', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try {
+    const job = await getKnowledgeImport(req.params.importId);
+    if (!job) return res.status(404).json({ error: 'Wissensimport nicht gefunden.' });
+    const content = String(req.body?.content || '').replace(/\u0000/g, '').trim().slice(0, 250_000);
+    if (content.length < 80) throw new Error('Die zusammengeführte Wissensfassung ist noch unvollständig.');
+    const completedLessons = Math.max(0, Number(req.body?.completedLessons) || 0);
+    const totalLessons = Math.max(0, Number(req.body?.totalLessons) || 0);
+    if (totalLessons > 0 && completedLessons < totalLessons) throw new Error(`Der Kursimport ist noch nicht vollständig (${completedLessons}/${totalLessons} Lektionen).`);
+    let archiveFolderUrl = String(req.body?.archiveFolderUrl || '').trim().slice(0, 1800);
+    if (job.mode === 'iva-drive') {
+      let archiveUrl;
+      try { archiveUrl = new URL(archiveFolderUrl); } catch { throw new Error('Die Google-Drive-Lernakte wurde noch nicht belegt.'); }
+      if (archiveUrl.protocol !== 'https:' || archiveUrl.hostname !== 'drive.google.com' || !/^\/drive\/folders\//.test(archiveUrl.pathname)) {
+        throw new Error('Die Google-Drive-Lernakte wurde noch nicht mit einem gültigen Ordner belegt.');
+      }
+      archiveFolderUrl = archiveUrl.toString();
+    } else archiveFolderUrl = '';
+    const previous = await getKnowledgeEntry(job.entryId);
+    if (!previous) throw new Error('Der zugehörige IVA-Wissenseintrag fehlt.');
+    const entry = await updateKnowledgeEntry(job.entryId, {
+      content,
+      notes: String(req.body?.notes || previous.notes || '').slice(0, 12_000),
+      tags: [...new Set([...(previous.tags || []), ...(Array.isArray(req.body?.tags) ? req.body.tags : [])])].slice(0, 24),
+    });
+    const summary = String(req.body?.summary || `${completedLessons || totalLessons || 1} Lektionen aufgenommen.`).slice(0, 1800);
+    const completed = await completeKnowledgeImport(job.id, { summary, detail: summary, archiveFolderUrl });
+    res.status(201).json({ import: completed, entry: { id: entry.id, status: entry.status, wordCount: entry.wordCount }, secretValuesReturned: false });
+  } catch (error) { res.status(409).json({ error: error.message }); }
 });
 
 app.post('/device-agent/:deviceId/planbar-capacity', async (req, res) => {
@@ -3079,7 +3123,84 @@ app.post('/api/knowledge-library/assess', (req, res) => {
 });
 
 // --- Persönliche Wissensdatenbank: eigene Texte, Kurse und Dokumente ---
+async function hydratedKnowledgeImports(limit = 30) {
+  const [imports, runs, commands] = await Promise.all([
+    listKnowledgeImports({ limit }),
+    listAgentRuns({ limit: 500 }),
+    listDeviceCommands({ deviceId: IVA_IMAC_DEVICE_ID, limit: 500 }),
+  ]);
+  return imports.map(item => mergeKnowledgeImportStatus(item, {
+    run: runs.find(run => run.workflowId === `knowledge-import:${item.id}`) || null,
+    command: commands.find(command => command.id === item.commandId) || null,
+  }));
+}
+
 app.get('/api/knowledge/status', async (_req, res) => res.json(await knowledgeBaseStatus()));
+app.get('/api/knowledge/import-capabilities', async (_req, res) => {
+  const device = await deviceAgentStatus();
+  const policy = knowledgeImportPolicy();
+  res.set('Cache-Control', 'no-store').json({
+    ready: device.online === true && device.attested === true && device.dispatchReady === true
+      && device.allowedActions?.includes('knowledge.import.start') && Boolean(device.credentialEnvelope?.publicKey),
+    device: { online: device.online === true, attested: device.attested === true, dispatchReady: device.dispatchReady === true },
+    credentialEnvelope: device.credentialEnvelope || null,
+    policy,
+  });
+});
+app.get('/api/knowledge/imports', async (req, res) => {
+  try { res.set('Cache-Control', 'no-store').json({ imports: await hydratedKnowledgeImports(req.query?.limit || 30) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/knowledge/imports', async (req, res) => {
+  let item = null;
+  try {
+    const body = req.body || {};
+    const entry = await createKnowledgeEntry({
+      title: body.title,
+      kind: 'course',
+      category: body.category,
+      sourceUrl: body.sourceUrl,
+      sourceOwner: body.sourceOwner || 'licensed',
+      tags: body.tags,
+      notes: body.notes || 'Automatischer IVA-Kursimport wurde gestartet.',
+    });
+    item = await createKnowledgeImport({ ...body, entryId: entry.id });
+    const command = await enqueueDeviceCommand({
+      deviceId: IVA_IMAC_DEVICE_ID,
+      action: 'knowledge.import.start',
+      requestedBy: 'iva-knowledge-ui',
+      requestText: `Wissen aufnehmen: ${item.title}`,
+      payload: {
+        ...item,
+        credentialEnvelope: body.credentialEnvelope || null,
+        attempt: 1,
+        requestId: `knowledge-import:${item.id}:1`,
+      },
+    });
+    item = await markKnowledgeImportDispatched(item.id, command.id);
+    res.status(202).json({ import: mergeKnowledgeImportStatus(item, { command }), entry });
+  } catch (e) {
+    if (item?.id) await updateKnowledgeImport(item.id, { status: 'failed', phase: 'Fortsetzung bereit', detail: 'Die iMac-Übergabe konnte noch nicht gestartet werden. Der gespeicherte Auftrag kann ohne Doppelanlage fortgesetzt werden.' }).catch(() => null);
+    res.status(400).json({ error: e.message });
+  }
+});
+app.post('/api/knowledge/imports/:id/resume', async (req, res) => {
+  try {
+    const item = await getKnowledgeImport(req.params.id);
+    if (!item) return res.status(404).json({ error: 'Wissensimport nicht gefunden.' });
+    if (item.status === 'completed') return res.status(409).json({ error: 'Dieser Wissensimport ist bereits abgeschlossen.' });
+    const attempt = Number(item.attempts || 0) + 1;
+    const command = await enqueueDeviceCommand({
+      deviceId: IVA_IMAC_DEVICE_ID,
+      action: 'knowledge.import.start',
+      requestedBy: 'iva-knowledge-ui-resume',
+      requestText: `Wissensimport fortsetzen: ${item.title}`,
+      payload: { ...item, credentialEnvelope: req.body?.credentialEnvelope || null, attempt, requestId: `knowledge-import:${item.id}:${attempt}` },
+    });
+    const updated = await markKnowledgeImportDispatched(item.id, command.id);
+    res.status(202).json({ import: mergeKnowledgeImportStatus(updated, { command }) });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 app.get('/api/knowledge', async (req, res) => res.json({ entries: await listKnowledgeEntries({ query: String(req.query?.query || ''), status: String(req.query?.status || ''), kind: String(req.query?.kind || ''), limit: req.query?.limit }) }));
 app.get('/api/knowledge/:id', async (req, res) => {
   const item = await getKnowledgeEntry(req.params.id);
@@ -3618,7 +3739,7 @@ automationCatchUpInterval.unref?.();
 const __dirnameIva = path.dirname(fileURLToPath(import.meta.url));
 app.use(express.static(path.join(__dirnameIva, 'public'), {
   setHeaders(res, filePath) {
-    if (filePath.endsWith(`${path.sep}cockpit.html`)) res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
+    if ([`${path.sep}cockpit.html`, `${path.sep}knowledge.html`, `${path.sep}knowledge.js`].some(suffix => filePath.endsWith(suffix))) res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
   },
 }));
 app.get('/cockpit', (_req, res) => {

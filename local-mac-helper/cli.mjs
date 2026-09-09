@@ -72,6 +72,7 @@ import {
   credentialBrokerStatus,
 } from './credential-broker.mjs';
 import { ensurePortalLogin, portalAuthPolicy } from './portal-auth.mjs';
+import { courseCredentialStatus, ensureCourseLogin } from './course-credentials.mjs';
 import { completeFundingMail } from './funding-mail-completion.mjs';
 import { ensureAppWindowOnRightDisplay, requireRightDisplayWorkspace } from './display-workspace.mjs';
 import { beginDewarmteDelivery, finishDewarmteDelivery } from './dewarmte-delivery-state.mjs';
@@ -114,6 +115,8 @@ async function main() {
     return console.log(JSON.stringify(await configureCredentialFieldInteractive(filePath, confirmation), null, 2));
   }
   if (command === 'portal-login') return console.log(JSON.stringify(await ensurePortalLogin(filePath), null, 2));
+  if (command === 'course-credential-status') return console.log(JSON.stringify(await courseCredentialStatus(filePath), null, 2));
+  if (command === 'course-login') return console.log(JSON.stringify(await ensureCourseLogin(filePath), null, 2));
   if (command === 'manufacturer-lead-readiness') {
     const config = await loadManufacturerLeadConfig(filePath);
     return console.log(JSON.stringify(getManufacturerLeadReadiness(config), null, 2));
@@ -390,6 +393,8 @@ async function main() {
   node local-mac-helper/cli.mjs credential-status [panasonic|bosch|pipedrive|airtable|planbar]
   node local-mac-helper/cli.mjs credential-setup <portal> <username|password|totp> --commit
   node local-mac-helper/cli.mjs portal-login <panasonic|bosch|pipedrive|airtable|planbar>
+  node local-mac-helper/cli.mjs course-credential-status <course-profil-id>
+  node local-mac-helper/cli.mjs course-login <course-profil-id>
   node local-mac-helper/cli.mjs manufacturer-lead-readiness [konfiguration.json]
   node local-mac-helper/cli.mjs manufacturer-lead-classify "Adresse" [konfiguration.json]
   node local-mac-helper/cli.mjs manufacturer-operation-record /pfad/ergebnis.json --commit

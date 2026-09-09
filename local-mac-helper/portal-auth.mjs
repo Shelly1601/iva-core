@@ -15,6 +15,26 @@ const DEFAULT_WAIT_MS = 2_500;
 const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
 function profileFor(value) {
+  if (value && typeof value === 'object') {
+    let loginUrl;
+    try { loginUrl = new URL(String(value.loginUrl || '')); }
+    catch { throw new Error('Der Kurszugang hat keine gültige HTTPS-Anmeldeseite.'); }
+    const allowedHosts = [...new Set((Array.isArray(value.allowedHosts) ? value.allowedHosts : [])
+      .map(host => String(host || '').trim().toLowerCase()).filter(host => /^[a-z0-9.-]+$/.test(host)))];
+    if (loginUrl.protocol !== 'https:' || loginUrl.username || loginUrl.password || !allowedHosts.includes(loginUrl.hostname.toLowerCase())) {
+      throw new Error('Der Kurszugang ist nicht sicher an seine HTTPS-Domain gebunden.');
+    }
+    return Object.freeze({
+      id: String(value.id || '').trim().toLowerCase(),
+      name: String(value.name || loginUrl.hostname).trim().slice(0, 220),
+      loginUrl: loginUrl.toString(),
+      allowedHosts,
+      requiredFields: Array.isArray(value.requiredFields) ? value.requiredFields : ['username', 'password'],
+      optionalFields: Array.isArray(value.optionalFields) ? value.optionalFields : ['totp'],
+      externalAuthenticator: null,
+      loginMode: 'course-keychain',
+    });
+  }
   const id = String(value || '').trim().toLowerCase();
   const profile = IVA_CREDENTIAL_SERVICES[id];
   if (!profile) throw new Error('Dieses Portal ist nicht für die automatische IVA-Anmeldung freigegeben.');
@@ -104,6 +124,7 @@ function probeJavascript(serviceId) {
     if (${JSON.stringify(serviceId)} === 'pipedrive') authenticated = host === 'simplegategmbh.pipedrive.com' && !/^\\/auth\\/login/i.test(path) && !password;
     if (${JSON.stringify(serviceId)} === 'airtable') authenticated = host === 'airtable.com' && !/\\/(?:login|signin)(?:\\/|$)/i.test(path) && !password;
     if (${JSON.stringify(serviceId)} === 'planbar') authenticated = host === 'heathero-partner-a.planbar365.com' && !/\\/(?:login|signin)(?:\\/|$)/i.test(path) && !password;
+    if (!['panasonic','bosch','pipedrive','airtable','planbar'].includes(${JSON.stringify(serviceId)})) authenticated = !username && !password && !totp && !ssoStart && !/\\/(?:login|signin|auth)(?:\\/|$)/i.test(path);
     return JSON.stringify({
       host,
       path: String(path || '/').slice(0, 160),
@@ -317,6 +338,10 @@ export async function ensurePortalLogin(serviceId, options = {}) {
   const coreOptions = { ...options };
   delete coreOptions.wakeGuard;
   return wakeGuard(() => ensurePortalLoginCore(serviceId, coreOptions), { maxSeconds: 180, sleepDisplays: true });
+}
+
+export async function ensurePortalProfileLogin(profile, options = {}) {
+  return ensurePortalLogin(profile, options);
 }
 
 export function portalAuthPolicy() {

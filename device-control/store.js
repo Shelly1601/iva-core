@@ -34,6 +34,7 @@ export const DEVICE_ACTIONS = Object.freeze({
   'project.workflow.run': Object.freeze({ description: 'Einen freigegebenen Projekt-Workflow einmalig manuell starten', mutating: true, requiresAttestedAgent: true }),
   'portal.credentials.status': Object.freeze({ description: 'Nur die Belegung von IVAs lokalem macOS-Schlüsselbund prüfen', mutating: false, requiresAttestedAgent: true }),
   'portal.login': Object.freeze({ description: 'Bei einem vorab freigegebenen Portal mit lokalem Schlüsselbund anmelden', mutating: false, requiresAttestedAgent: true }),
+  'knowledge.import.start': Object.freeze({ description: 'Einen fortsetzbaren Kursimport mit lokalem Login und optionaler Drive-Lernakte starten', mutating: true, requiresAttestedAgent: true }),
   'app.open': Object.freeze({ description: 'Eine freigegebene App auf dem iMac öffnen', mutating: true, requiresAttestedAgent: true }),
   'codex.task.start': Object.freeze({ description: 'Einen ausdrücklich beauftragten IVA-Bau- oder iMac-Operationsauftrag im lokalen Codex starten', mutating: true, requiresAttestedAgent: true }),
   'codex.task.status': Object.freeze({ description: 'Status eines lokalen Codex-Bauauftrags lesen', mutating: false, requiresAttestedAgent: true }),
@@ -75,6 +76,22 @@ function cleanText(value, max = 240) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
+function validateCredentialEnvelope(value) {
+  if (value == null) return null;
+  if (!value || typeof value !== 'object' || Number(value.version) !== 1 || value.algorithm !== 'RSA-OAEP-256+A256GCM') {
+    throw new Error('Der verschlüsselte Zugangsdaten-Umschlag ist ungültig.');
+  }
+  const field = (name, max) => {
+    const text = String(value[name] || '');
+    if (!text || text.length > max || !/^[A-Za-z0-9+/]+={0,2}$/.test(text)) throw new Error('Der verschlüsselte Zugangsdaten-Umschlag ist ungültig.');
+    return text;
+  };
+  if (Object.keys(value).some(key => ['username', 'password', 'totp', 'secret'].includes(key.toLowerCase()))) {
+    throw new Error('Zugangsdaten dürfen den Gerätekanal ausschließlich verschlüsselt passieren.');
+  }
+  return { version: 1, algorithm: value.algorithm, wrappedKey: field('wrappedKey', 800), iv: field('iv', 80), ciphertext: field('ciphertext', 24_000) };
+}
+
 function normalizedHostname(value) {
   return cleanText(value, 160).toLowerCase().replace(/\.local$/, '');
 }
@@ -85,6 +102,19 @@ function isIcloudIvaWorkspace(value) {
 }
 
 function normalizedAgentMetadata(input = {}) {
+  const credentialEnvelope = input.credentialEnvelope && typeof input.credentialEnvelope === 'object'
+    && Number(input.credentialEnvelope.version) === 1
+    && input.credentialEnvelope.algorithm === 'RSA-OAEP-256+A256GCM'
+    && /^[A-Za-z0-9+/]+={0,2}$/.test(String(input.credentialEnvelope.publicKey || ''))
+    && String(input.credentialEnvelope.publicKey || '').length <= 1600
+    && /^[a-f0-9]{24}$/.test(String(input.credentialEnvelope.fingerprint || ''))
+    ? {
+      version: 1,
+      algorithm: input.credentialEnvelope.algorithm,
+      publicKey: String(input.credentialEnvelope.publicKey),
+      fingerprint: String(input.credentialEnvelope.fingerprint),
+    }
+    : null;
   return {
     hostname: normalizedHostname(input.hostname),
     uiBusy: input.uiBusy === true,
@@ -95,6 +125,7 @@ function normalizedAgentMetadata(input = {}) {
     iCloudAuthoritative: input.iCloudAuthoritative === true,
     allowedActions: [...new Set((Array.isArray(input.allowedActions) ? input.allowedActions : [])
       .map(value => cleanText(value, 100)).filter(value => DEVICE_ACTIONS[value]))].sort(),
+    credentialEnvelope,
   };
 }
 
@@ -241,6 +272,32 @@ function validatePayload(action, payload = {}) {
     }
     return { service };
   }
+  if (action === 'knowledge.import.start') {
+    const importId = cleanText(payload.importId, 80);
+    const entryId = cleanText(payload.entryId, 80);
+    const title = cleanText(payload.title, 240);
+    const credentialProfileId = cleanText(payload.credentialProfileId, 80).toLowerCase();
+    let sourceUrl;
+    try { sourceUrl = new URL(cleanText(payload.sourceUrl, 1800)); } catch { throw new Error('Ungültige Kursadresse.'); }
+    if (!/^[a-f0-9-]{36}$/i.test(importId) || !/^[a-f0-9-]{36}$/i.test(entryId) || !title) throw new Error('Der Wissensimport ist unvollständig.');
+    if (sourceUrl.protocol !== 'https:' || sourceUrl.username || sourceUrl.password) throw new Error('Der Wissensimport benötigt HTTPS.');
+    const expectedProfileId = `course-${crypto.createHash('sha256').update(sourceUrl.hostname.toLowerCase()).digest('hex').slice(0, 18)}`;
+    if (credentialProfileId !== expectedProfileId) throw new Error('Das Kurs-Zugangsprofil passt nicht zur Kursadresse.');
+    const mode = payload.mode === 'iva-drive' ? 'iva-drive' : 'iva-only';
+    return {
+      importId,
+      entryId,
+      title,
+      sourceUrl: sourceUrl.toString(),
+      mode,
+      accessMode: payload.accessMode === 'purchase-needed' ? 'purchase-needed' : 'existing',
+      archiveFolderUrl: mode === 'iva-drive' ? cleanText(payload.archiveFolderUrl, 1800) : '',
+      credentialProfileId,
+      credentialEnvelope: validateCredentialEnvelope(payload.credentialEnvelope),
+      attempt: Math.max(1, Math.min(20, Number(payload.attempt) || 1)),
+      requestId: cleanText(payload.requestId || `knowledge-import:${importId}:${Number(payload.attempt) || 1}`, 160),
+    };
+  }
   if (action === 'app.open') {
     const app = cleanText(payload.app, 80);
     if (!['Microsoft Outlook', 'Google Chrome', 'WhatsApp', 'Codex', 'ChatGPT'].includes(app)) {
@@ -283,6 +340,13 @@ export async function enqueueDeviceCommand({ deviceId = IVA_IMAC_DEVICE_ID, acti
         && ['queued', 'running'].includes(item.status)
         && Date.parse(item.expiresAt) > now.getTime()
         && item.payload?.requestId === normalizedPayload.requestId);
+      if (existing) return { ...existing };
+    }
+    if (actionName === 'knowledge.import.start' && normalizedPayload.requestId) {
+      const existing = store.commands.find(item => item.deviceId === device
+        && item.action === actionName
+        && item.payload?.requestId === normalizedPayload.requestId
+        && Date.parse(item.expiresAt) > now.getTime());
       if (existing) return { ...existing };
     }
     if (actionName === 'planbar.search.refresh') {
@@ -341,7 +405,7 @@ export async function claimNextDeviceCommand(deviceId = IVA_IMAC_DEVICE_ID, agen
         changed = true;
       }
       if (command.status === 'running' && Date.parse(command.leaseExpiresAt || 0) <= now) {
-        const uncertainMutation = DEVICE_ACTIONS[command.action]?.mutating === true;
+        const uncertainMutation = DEVICE_ACTIONS[command.action]?.mutating === true && command.action !== 'knowledge.import.start';
         command.status = uncertainMutation || command.attempts >= 3 ? 'failed' : 'queued';
         if (uncertainMutation) {
           command.error = 'Ausführung nach Verbindungsabbruch unklar. Keine automatische Wiederholung einer schreibenden Aktion; Ergebnis zuerst prüfen.';
@@ -395,14 +459,23 @@ export async function completeDeviceCommand({ deviceId, commandId, leaseToken, o
     command.error = ok === true ? null : cleanText(error, 1000);
     // Ausschließlich attestierte Vorstartfehler: niemals unklare Schreibaktionen,
     // Lease-Verluste oder fachlich blockierte Workflows automatisch wiederholen.
-    if (ok !== true && command.action === 'planbar.customer.schedule' && command.claimedBy
-      && failureStage === 'before_launch' && command.attempts < 3 && Date.parse(command.expiresAt) > Date.now() + 60_000) {
+    const knowledgeExternalBlocker = command.action === 'knowledge.import.start'
+      && /captcha|konto(?:sperre| gesperrt)|account locked|externe best[aä]tigung|purchase|bezahlung|buchung/i.test(String(error || ''));
+    const retryKnowledgeImport = ok !== true && command.action === 'knowledge.import.start' && command.claimedBy
+      && !knowledgeExternalBlocker && command.attempts < 3 && Date.parse(command.expiresAt) > Date.now() + 60_000;
+    const retryPlanbarBeforeLaunch = ok !== true && command.action === 'planbar.customer.schedule' && command.claimedBy
+      && failureStage === 'before_launch' && command.attempts < 3 && Date.parse(command.expiresAt) > Date.now() + 60_000;
+    if (retryPlanbarBeforeLaunch || retryKnowledgeImport) {
       command.status = 'queued';
       command.retryAt = new Date(Date.now() + command.attempts * 15_000).toISOString();
-      command.failureStage = 'before_launch';
+      command.failureStage = command.action === 'knowledge.import.start' ? 'automatic-recovery' : 'before_launch';
       delete command.completedAt;
     } else {
       delete command.retryAt;
+      if (command.action === 'knowledge.import.start' && command.payload?.credentialEnvelope) {
+        delete command.payload.credentialEnvelope;
+        command.credentialsPurgedAt = new Date().toISOString();
+      }
     }
     delete command.leaseToken;
     delete command.leaseExpiresAt;
@@ -434,7 +507,12 @@ export async function listDeviceCommands({ deviceId = IVA_IMAC_DEVICE_ID, limit 
     .filter(command => !deviceId || command.deviceId === deviceId)
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
     .slice(0, Math.max(1, Math.min(MAX_COMMANDS, Number(limit) || 50)))
-    .map(({ leaseToken, ...command }) => command);
+    .map(({ leaseToken, ...command }) => ({
+      ...command,
+      payload: command.payload?.credentialEnvelope
+        ? { ...command.payload, credentialEnvelope: { encrypted: true, version: command.payload.credentialEnvelope.version } }
+        : command.payload,
+    }));
 }
 
 export async function cleanupExpiredDewarmteCommandInputs({ now = Date.now() } = {}) {
