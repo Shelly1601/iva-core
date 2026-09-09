@@ -51,6 +51,8 @@ assert.match(js, /role="progressbar"/);
 assert.match(cockpit, /id="openKnowledge" href="\/knowledge" onclick="event\.stopPropagation\(\)"/);
 for (const endpoint of ["/api/knowledge/status", "/api/knowledge',", "/api/knowledge/:id", "/api/knowledge/:id/document"]) assert.match(server, new RegExp(endpoint.replace(/[/:]/g, match => `\\${match}`)));
 for (const endpoint of ["/api/knowledge/import-capabilities", "/api/knowledge/imports", "/api/knowledge/imports/:id/resume"]) assert.match(server, new RegExp(endpoint.replace(/[/:]/g, match => `\\${match}`)));
+assert.match(server, /\/device-agent\/:deviceId\/runtime\/refresh/);
+assert.match(server, /agent-runtime-refresh:/);
 assert.match(server, /searchPersonalKnowledgeBase/);
 assert.match(server, /addPersonalKnowledge/);
 assert.equal((server.match(/buildKnowledgePromptContext\(userText\)/g) || []).length, 2);

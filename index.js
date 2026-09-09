@@ -1311,6 +1311,36 @@ app.get('/device-agent/:deviceId/runtime', async (req, res) => {
     res.set('Cache-Control', 'no-store').json(await centralRuntimeBundle);
   } catch (error) { res.status(503).json({ error: 'IVA-Laufzeitpaket konnte nicht erstellt werden.' }); }
 });
+app.post('/device-agent/:deviceId/runtime/refresh', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
+  try {
+    centralRuntimeBundle ||= buildCentralRuntimeBundle(new URL('.', import.meta.url).pathname).catch(error => { centralRuntimeBundle = null; throw error; });
+    const bundle = await centralRuntimeBundle;
+    const current = await deviceAgentStatus(req.params.deviceId);
+    if (current.runtimeRevision === bundle.revision && current.allowedActions?.includes('knowledge.import.start') && current.credentialEnvelope?.publicKey) {
+      return res.json({ queued: false, alreadyCurrent: true, revision: bundle.revision });
+    }
+    const requestId = `agent-runtime-refresh:${bundle.revision}`;
+    const command = await enqueueDeviceCommand({
+      deviceId: req.params.deviceId,
+      action: 'codex.task.start',
+      requestedBy: 'imac-runtime-recovery',
+      requestText: 'Zentrale iMac-Laufzeit auf den veröffentlichten Stand aktualisieren',
+      payload: {
+        mode: 'operational',
+        title: 'IVA iMac-Laufzeit aktualisieren',
+        requestId,
+        prompt: `Aktualisiere jetzt ausschließlich die zentrale IVA-iMac-Laufzeit auf den bereits veröffentlichten Railway-Stand. Führe im autoritativen IVA-Core-Workspace auf dem iMac \`node local-mac-helper/install-central-runtime.mjs\` aus. Ändere keinen Quellcode. Prüfe anschließend über den Gerätekanal, dass die Runtime-Revision ${bundle.revision} aktiv ist, die Aktion knowledge.import.start gemeldet wird und der öffentliche Verschlüsselungsschlüssel vorhanden ist. Repariere vorübergehende iCloud-, Netzwerk- oder LaunchAgent-Fehler und setze idempotent fort.`,
+        acceptanceCriteria: [
+          `Die aktive iMac-Runtime meldet Revision ${bundle.revision}.`,
+          'knowledge.import.start und der öffentliche Credential-Envelope-Schlüssel werden im Gerätekanal gemeldet.',
+          'Der iMac-Agent ist online, attestiert und bestätigt die Befehlsabholung.',
+        ],
+      },
+    });
+    res.status(202).json({ queued: true, commandId: command.id, revision: bundle.revision });
+  } catch (error) { res.status(409).json({ error: error.message }); }
+});
 app.get('/device-agent/:deviceId/status', async (req, res) => {
   if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
   res.json(await deviceAgentStatus(req.params.deviceId));
