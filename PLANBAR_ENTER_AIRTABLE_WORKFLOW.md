@@ -54,12 +54,14 @@ Stand: 29. August 2026 - Version 2
 ## Beschreibung wie bei Planbar-Vervollständigung
 
 - Nur die fett gedruckten Überschriften tatsächlich beauftragter Positionen übernehmen; Erläuterungen, Unterzeilen und Preise entfallen.
-- Die Wärmepumpe steht zuerst als `Leistung + Hersteller`; die Modellbezeichnung entfällt.
+- Eine Beschreibung ist nur vollständig, wenn der tatsächliche Anlagenbeleg vorn steht: Wärmepumpe mit `Leistung + Hersteller`, zum Beispiel `10 kW Panasonic`. Reine Feldnotizen, eine Wärmepumpe ohne `kW` oder eine `kW`-Angabe ohne Hersteller sind kein Anlagenbeleg.
+- Bei Bosch ist zusätzlich die im verwendeten korrigierten oder unterschriebenen Angebot eindeutig belegte Modell-/Nummernkennung Pflicht. Bei Vaillant muss ausdrücklich `Plus` oder `Pro` stehen; eine eindeutig spätere dokumentierte Umstellung auf `Pro` hat Vorrang. Die Modellbezeichnung entfällt daher nicht pauschal.
 - Danach folgen die belegten Positionen in Angebotsreihenfolge.
 - Mengenabhängige Zusatzpositionen erhalten belegte Zahl und Einheit. `Stk` wird zu `Stück`, überflüssige Dezimalnullen entfallen.
 - Für genau einen zusätzlichen Heizkreis gilt `Zusätzlicher Heizkreis`, für mehrere zum Beispiel `3 zusätzliche Heizkreise`.
 - Optionale, vollständig gestrichene oder nicht eindeutig ausgewählte Positionen werden ausgelassen.
 - Speicher werden ausschließlich nach dem verwendeten fachlichen Beleg aus dem vorherigen Abschnitt behandelt: nur Warmwasserspeicher bedeutet zusätzlich `Pufferspeicher`; nur Pufferspeicher bedeutet zusätzlich `Warmwasserspeicher`; beide vorhanden bedeutet keine Ergänzung. Fehlen beide und ist keine Variante eindeutig ausgewählt, wird keine Speicherart geraten und keine andere Quelle geöffnet.
+- Bei einem bereits vorhandenen eindeutigen Kundentermin gelten zusätzlich die Regeln `Bestehende Beschreibungen ergänzen statt verlieren` aus `PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md`: nicht widersprüchliche Feldnotizen erhalten, den belegten Anlagenblock vorn ergänzen, nur eine nachweislich falsche primäre Anlage vollständig ersetzen und einen Vermerk wie `geprüft und geändert` gegen eine automatische Komplett-Ersetzung schützen.
 - Eine fehlende eindeutige Auftragsnummer oder eine unleserliche/widersprüchliche beauftragte Position blockiert den Schreibschritt.
 
 ## ENTER-Kunde in Planbar

@@ -5,6 +5,31 @@ import path from 'node:path';
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const STORE_FILE = path.join(DATA_DIR, 'planbar-search-index.json');
 const MAX_APPOINTMENTS = 3000;
+const HEAT_PUMP_MANUFACTURERS = Object.freeze([
+  'Alpha Innotec', 'Buderus', 'Bosch', 'Cuderus', 'Cuderos', 'Daikin',
+  'Dimplex', 'Heliotherm', 'Hitachi', 'iDM', 'Kermi', 'Lambda', 'LG',
+  'Midea', 'Mitsubishi Electric', 'Mitsubishi', 'NIBE', 'Novelan', 'Ochsner',
+  'Panasonic', 'Samsung', 'Solvis', 'Stiebel Eltron', 'Stiebel', 'Tecalor',
+  'Toshiba', 'Vaillant', 'Viessmann', 'Weishaupt', 'Wolf',
+]);
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const HEAT_PUMP_MANUFACTURER_PATTERN = HEAT_PUMP_MANUFACTURERS
+  .slice()
+  .sort((left, right) => right.length - left.length)
+  .map(escapeRegExp)
+  .join('|');
+const HEAT_PUMP_POWER_PATTERN = String.raw`(?:[1-9]\d?(?:[.,]\d+)?)\s*kW`;
+const HEAT_PUMP_LABEL_PATTERN = String.raw`(?:(?:luft[-/ ]?wasser[- ]?)?(?:w[aä]rmepumpe)|wp|(?:heizungs)?anlage|installation)`;
+const PRIMARY_HEAT_PUMP_PATTERN = new RegExp(
+  String.raw`^(?:\s*${HEAT_PUMP_LABEL_PATTERN}\s*[:\-–]?\s*)?${HEAT_PUMP_POWER_PATTERN}\s+(?:${HEAT_PUMP_MANUFACTURER_PATTERN})\b`,
+  'i',
+);
+const ANY_HEAT_PUMP_POWER_PATTERN = new RegExp(String.raw`\b${HEAT_PUMP_POWER_PATTERN}\b`, 'i');
+const ANY_HEAT_PUMP_MANUFACTURER_PATTERN = new RegExp(String.raw`\b(?:${HEAT_PUMP_MANUFACTURER_PATTERN})\b`, 'i');
 
 function clean(value, max = 1000) {
   return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -21,7 +46,16 @@ export function auditPlanbarDescription(value) {
   const description = clean(value, 3000);
   const normalized = normalizedText(description);
   const gaps = [];
-  if (!description) gaps.push('missing-description');
+  if (!description) {
+    gaps.push('missing-description');
+  } else if (!PRIMARY_HEAT_PUMP_PATTERN.test(description)) {
+    const hasPower = ANY_HEAT_PUMP_POWER_PATTERN.test(description);
+    const hasManufacturer = ANY_HEAT_PUMP_MANUFACTURER_PATTERN.test(description);
+    if (hasPower && hasManufacturer) gaps.push('heat-pump-not-first');
+    else if (hasManufacturer) gaps.push('missing-heat-pump-output');
+    else if (hasPower) gaps.push('missing-heat-pump-manufacturer');
+    else gaps.push('missing-installation');
+  }
   if (/\bbosch\b/i.test(description)) {
     const hasBoschIdentifier = /\bbosch\b[\s\S]{0,180}\b(?=[a-z0-9-]*[a-z])(?=[a-z0-9-]*\d)[a-z0-9-]{4,}\b/i.test(description);
     if (!hasBoschIdentifier) gaps.push('bosch-model-number');
@@ -143,7 +177,7 @@ export async function getPlanbarSearchIndex() {
         week: item.week,
         gaps: item.descriptionAudit.gaps,
       })),
-      note: 'Format-Vorfilter; fachliche Vollständigkeit muss weiterhin gegen die eindeutige Dokumentkette geprüft werden.',
+      note: 'Mindestvollständigkeits-Vorfilter: Wärmepumpe mit Leistung und Hersteller sowie Bosch-/Vaillant-Format; die vollständige Fachprüfung bleibt an die eindeutige Dokumentkette gebunden.',
     },
   };
 }
@@ -176,4 +210,10 @@ export async function searchPlanbarAppointments({ query, weeks = 0, fromDate } =
   };
 }
 
-export const planbarSearchInternals = Object.freeze({ addDays, isoWeek, normalizeAppointment, normalizedText });
+export const planbarSearchInternals = Object.freeze({
+  addDays,
+  isoWeek,
+  normalizeAppointment,
+  normalizedText,
+  PRIMARY_HEAT_PUMP_PATTERN,
+});
