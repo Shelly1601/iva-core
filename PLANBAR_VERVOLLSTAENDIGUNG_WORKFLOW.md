@@ -25,7 +25,7 @@
 3. Bei jedem geprüften Kundentermin kontrollieren, ob im Feld `Vorname` genau einmal ein belegtes Partnerpräfix vorangestellt ist. Verbindliche Standardpräfixe sind `HH` für Heat Hero, `EN` für Enter und `DW` für D Warmte.
 4. Fehlt das Präfix oder ist es falsch, darf es nur dann korrigiert werden, wenn der Partner für genau diesen bestehenden Fall eindeutig belegt ist, zum Beispiel durch die aktuelle WhatsApp-Nachricht, die einmalige Übergabeliste, den passenden ENTER-Airtable-Fall oder einen anderen im Lauf sichtbar geöffneten Primärbeleg. Ohne eindeutigen Partnerbeleg keine Präfix-Schätzung; der Fall bleibt unverändert und wird als Blocker gemeldet.
 5. Fehlen bei einem bestehenden Kundentermin Auftragsnummer oder Beschreibung ganz oder teilweise, darf dieser Termin auch ohne neue WhatsApp-Nachricht vervollständigt werden, sofern Kunde und KW eindeutig sind und die unten stehende Dokumentlogik den Fall eindeutig belegt.
-6. Eine Beschreibung ist nicht schon deshalb vollständig, weil sie nicht leer ist. Für jeden echten Kundentermin muss sie gegen die eindeutige Dokumentkette fachlich geprüft werden: Wärmepumpe mit Leistung und Hersteller, bei Bosch zusätzlich die belegte Bosch-Nummer/Modellbezeichnung, bei Vaillant ausdrücklich `Plus` oder `Pro`, anschließend alle wirksam beauftragten Positionen und erforderlichen Speicherangaben nach diesem Workflow. Eine fehlende dieser Pflichtangaben ist eine unvollständige Beschreibung und wird nachgezogen.
+6. Eine Beschreibung ist nicht schon deshalb vollständig, weil sie nicht leer ist. Der zwingende Anlagenbeleg ist ein vorn stehendes Wärmepumpen-Segment mit Leistung und Hersteller, zum Beispiel `10 kW Panasonic` oder `Wärmepumpe: 10 kW Panasonic`; das Wort `Anlage` muss dafür nicht wörtlich stehen. Reine Feldnotizen wie `Kunde kann das Material lagern`, eine bloße Wärmepumpe ohne `kW` oder eine `kW`-Angabe ohne Hersteller gelten genauso als unvollständig wie ein leeres Feld. Danach müssen bei Bosch zusätzlich die belegte Bosch-Nummer/Modellbezeichnung, bei Vaillant ausdrücklich `Plus` oder `Pro`, alle wirksam beauftragten Positionen und erforderlichen Speicherangaben nach diesem Workflow enthalten sein. Eine fehlende Pflichtangabe wird nachgezogen.
 7. Bereits fachlich vollständige und korrekt präfixierte Termine bleiben unverändert.
 
 ## Lesender Formatvergleich mit Nadines Einträgen
@@ -74,6 +74,14 @@
   - Die Breite des vollständigen Transportwegs einschließlich relevanter Türen bleibt zu prüfen. Nur bei eindeutig mehr als **70 cm** an allen Engstellen darf `Kombispeicher` ergänzt werden.
   - Fehlen Standhöhe oder Transportbreite oder sind sie widersprüchlich/mehrdeutig, keine Speicherart raten. Die Speicherangabe bleibt dann offen; der übrige eindeutig belegte Fall wird trotzdem vervollständigt und die fehlende Speicherangabe unter `Manuell prüfen` gemeldet.
 
+## Bestehende Beschreibungen ergänzen statt verlieren
+
+1. Vor jedem Schreiben aus den eindeutigen Quellen eine vollständige `Sollbeschreibung` nach diesem Kapitel bilden und sie gegen den vorhandenen Text vergleichen.
+2. Eine vorhandene, aber unvollständige Beschreibung wird nicht pauschal geleert. Bereits vorhandene, nicht widersprüchliche Arbeitsnotizen bleiben erhalten. Der belegte Wärmepumpen- und Positionsblock wird vorn ergänzt oder eine unvollständige belegte Wärmepumpenangabe wird gezielt vervollständigt; erhaltene Notizen folgen danach, getrennt durch ` | `.
+3. Eine vollständige Neuerstellung der Beschreibung ist nur zulässig, wenn die vorhandene primäre Anlage nachweislich falsch ist: andere Leistung, anderer Hersteller, falsche Bosch-Modell-/Nummernkennung oder falsche Vaillant-Variante gegenüber der maßgeblichen Dokumentkette. Dann darf der widersprüchliche Text durch die `Sollbeschreibung` ersetzt werden.
+4. Enthält der vorhandene Text einen eindeutigen Prüfvermerk wie `geprüft und geändert`, `geprüft/angepasst` oder gleichbedeutend, ist er gegen eine automatische Komplett-Ersetzung geschützt. Nur fehlende, unmittelbar belegte Pflichtangaben dürfen ergänzt werden; einen verbleibenden Widerspruch nicht verdecken oder raten, sondern als fachliche Nachprüfung kennzeichnen.
+5. Eine Notiz, die nur Lagerung, Zugang, Material, Telefonat oder andere Feldhinweise beschreibt, ersetzt niemals den Anlagenbeleg. Sie bleibt Zusatzinformation, bis die belegte Wärmepumpe mit `kW` und Hersteller vorangestellt ist.
+
 ## Mobile Übersicht freier Planbar-Plätze
 
 1. Bei aktivem Projekt-Schalter wird nach dem einmaligen Planbar-Neuladen zusätzlich eine Kapazitätsaufnahme für die kommenden zwölf Kalenderwochen erstellt.
@@ -100,7 +108,7 @@
 3. Vor dem Speichern Kundenname, sichtbare KW, Auftragsnummer, Beschreibung und alle vorgesehenen Stammdatenänderungen nochmals gegen WhatsApp, Pipedrive, Angebot und gegebenenfalls TMB prüfen.
 4. Nach jedem Speichern den Termin beziehungsweise die Kundenansicht erneut öffnen und alle geänderten Zielwerte sichtbar verifizieren. Bei Abweichung keine weiteren Schreibversuche; Fehler dokumentieren.
 5. Ein lokales Laufprotokoll verhindert die erneute Verarbeitung derselben WhatsApp-Nachricht beziehungsweise desselben Kunden-KW-Falls.
-6. Vor Abschluss des Laufs alle echten Kundentermine im geprüften Zeitraum ein zweites Mal anhand der Vollständigkeitsdefinition rücklesen. Der Lauf darf nur dann `completed` melden, wenn jeder Termin entweder fachlich vollständig sichtbar verifiziert oder mit einem echten fallspezifischen externen Hinderungsgrund einzeln offen gehalten ist. Ein technischer Browser-, Tab-, Fenster-, Reload-, Verbindungs- oder Steuerungsfehler wird repariert und idempotent fortgesetzt; er ist kein fachlicher Blocker.
+6. Vor Abschluss des Laufs alle echten Kundentermine im geprüften Zeitraum ein zweites Mal anhand der Vollständigkeitsdefinition rücklesen. Der Lauf darf nur dann `completed` melden, wenn jeder Termin entweder fachlich vollständig sichtbar verifiziert oder mit einem echten fallspezifischen externen Hinderungsgrund einzeln offen gehalten ist. Ein technischer Browser-, Tab-, Fenster-, Reload-, Verbindungs- oder Steuerungsfehler wird repariert und idempotent fortgesetzt; er ist kein fachlicher Blocker und erscheint nicht als Blocker-Benachrichtigung an Nadine.
 
 ## Einmaliger Abschluss-Forecast für Angelos Excel-Listen
 
@@ -113,7 +121,7 @@
 
 ## Detaillierter Ergebnisbericht: E-Mail mit Telegram-Ersatz
 
-Nach jedem Lauf einen detaillierten, nachvollziehbaren Bericht an `n.sell@heat-hero.com` senden – auch bei keinen relevanten Nachrichten, ausgeschaltetem Projekt-Schalter, Blockern oder technischen Fehlern.
+Nach jedem Lauf einen detaillierten, nachvollziehbaren Bericht an `n.sell@heat-hero.com` senden – auch bei keinen relevanten Nachrichten, ausgeschaltetem Projekt-Schalter oder echten fachlichen beziehungsweise externen Hinderungsgründen. Behebbare technische Zwischenfehler werden intern repariert und lösen keine Blocker-Benachrichtigung aus.
 
 Der Bericht enthält:
 
@@ -121,7 +129,7 @@ Der Bericht enthält:
 - die nur lesend erkannten Formatmuster der geprüften `HH`-Beispiele, ohne unnötige Kundendaten;
 - pro Fall Kundenname und KW, verwendete Quellen, eindeutigen Planbar-Treffer, geprüfte Dokumentarten, vorherige und neue Terminwerte, geänderte Kundenstammdatenfelder ohne deren vollständige sensible Inhalte sowie die tatsächlich ausgeführten Klicks/Änderungen;
 - die sichtbare Kontrolle nach dem Speichern und jede Abweichung zwischen Soll und Ist;
-- konkrete Gründe für übersprungene oder blockierte Fälle;
+- konkrete Gründe für übersprungene oder tatsächlich fachlich beziehungsweise extern blockierte Fälle; behobene technische Zwischenfehler werden intern im Fehlergedächtnis geführt und nicht als Blocker-Benachrichtigung ausgegeben;
 - Summen für gefunden, geändert, unverändert, übersprungen und blockiert sowie separat die Zahl der Präfix-Korrekturen und der im Bestandscheck vervollständigten vorhandenen Termine;
 - bei keinen relevanten Nachrichten ausdrücklich `Keine relevanten Nachrichten von gestern`;
 - einen Abschnitt `Manuell prüfen` mit allen Unsicherheiten oder auffälligen Ergebnissen.

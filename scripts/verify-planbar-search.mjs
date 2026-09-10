@@ -13,6 +13,12 @@ const {
 } = await import(`../operations/planbar-search.js?test=${Date.now()}`);
 
 assert.deepEqual(auditPlanbarDescription(''), { completeByFormat: false, gaps: ['missing-description'] });
+assert.deepEqual(auditPlanbarDescription('Kunde kann das Material lagern.'), { completeByFormat: false, gaps: ['missing-installation'] });
+assert.deepEqual(auditPlanbarDescription('Wärmepumpe Panasonic'), { completeByFormat: false, gaps: ['missing-heat-pump-output'] });
+assert.deepEqual(auditPlanbarDescription('10 kW Wärmepumpe'), { completeByFormat: false, gaps: ['missing-heat-pump-manufacturer'] });
+assert.deepEqual(auditPlanbarDescription('Kunde kann das Material lagern; 10 kW Panasonic'), { completeByFormat: false, gaps: ['heat-pump-not-first'] });
+assert.equal(auditPlanbarDescription('10 kW Panasonic, Kombispeicher').completeByFormat, true);
+assert.equal(auditPlanbarDescription('Wärmepumpe: 10 kW Panasonic, Kombispeicher').completeByFormat, true);
 assert.deepEqual(auditPlanbarDescription('7 kW Bosch, Neu-Isolierung'), { completeByFormat: false, gaps: ['bosch-model-number'] });
 assert.equal(auditPlanbarDescription('7 kW Bosch, Bosch Inneneinheit CS6800IAW12E').completeByFormat, true);
 assert.equal(auditPlanbarDescription('7 kW Bosch CS6800iAW 7, Neu-Isolierung').completeByFormat, true);
@@ -33,7 +39,11 @@ const snapshot = await replacePlanbarSearchIndex({
 assert.equal(snapshot.appointmentCount, 3);
 const storedIndex = await getPlanbarSearchIndex();
 assert.equal(storedIndex.appointments.find(item => item.customerName.includes('Schneider')).week, 39);
-assert.equal(storedIndex.descriptionAudit.candidateCount, 0);
+assert.equal(storedIndex.descriptionAudit.candidateCount, 2);
+assert.deepEqual(
+  storedIndex.descriptionAudit.candidates.map(item => item.gaps),
+  [['missing-installation'], ['missing-heat-pump-output']],
+);
 
 const byName = await searchPlanbarAppointments({ query: 'Schneider' });
 assert.equal(byName.count, 1);
@@ -56,12 +66,19 @@ await assert.rejects(() => searchPlanbarAppointments({ query: 'x' }), /mindesten
 const html = await fs.readFile(new URL('../public/projects.html', import.meta.url), 'utf8');
 const js = await fs.readFile(new URL('../public/projects.js', import.meta.url), 'utf8');
 const server = await fs.readFile(new URL('../index.js', import.meta.url), 'utf8');
+const workflow = await fs.readFile(new URL('../PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md', import.meta.url), 'utf8');
+const enterWorkflow = await fs.readFile(new URL('../PLANBAR_ENTER_AIRTABLE_WORKFLOW.md', import.meta.url), 'utf8');
 assert.match(html, /planbar-search/);
 assert.match(js, /Planbar-Suche/);
 assert.match(js, /planbar\.search\.refresh/);
 assert.match(js, /planbar-search\?/);
 assert.match(js, /Der durchsuchte Stand ist veraltet/);
 assert.match(server, /express\.json\(\{[\s\S]*?limit: '2mb'/, 'Planbar-Snapshots passen sicher durch den begrenzten JSON-Parser');
+assert.match(workflow, /zwingende Anlagenbeleg/, 'Die Workflow-Spezifikation verlangt einen tatsächlichen Anlagenbeleg.');
+assert.match(workflow, /Bestehende Beschreibungen ergänzen statt verlieren/, 'Bestehende Feldnotizen dürfen nicht pauschal verloren gehen.');
+assert.match(workflow, /geprüft und geändert/, 'Manuell geprüfte Beschreibungen sind gegen eine automatische Komplett-Ersetzung geschützt.');
+assert.match(enterWorkflow, /Bosch.*Modell/, 'ENTER darf die Bosch-Modellkennung nicht mehr pauschal auslassen.');
+assert.match(enterWorkflow, /Bestehende Beschreibungen ergänzen statt verlieren/, 'ENTER übernimmt dieselbe sichere Ergänzungslogik für vorhandene Kundentermine.');
 
 const { collectFreshPlanbarSearchSnapshot, planbarSearchIndexPayload } = await import(`../local-mac-helper/device-agent.mjs?test=${Date.now()}`);
 let reloads = 0;
