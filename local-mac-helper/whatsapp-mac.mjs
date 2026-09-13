@@ -87,7 +87,7 @@ async function ensureWhatsAppProbe() {
   } catch {}
   if (compile) {
     await mkdir(path.dirname(PROBE_BINARY), { recursive: true, mode: 0o700 });
-    await commandOutput('/usr/bin/swiftc', [PROBE_SOURCE, '-o', PROBE_BINARY]);
+    await commandOutput('/usr/bin/swiftc', ['-sdk', process.env.SDKROOT || '/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk', PROBE_SOURCE, '-o', PROBE_BINARY]);
   }
   return PROBE_BINARY;
 }

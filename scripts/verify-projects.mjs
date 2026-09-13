@@ -44,7 +44,7 @@ check('Automationen sichtbar', heat.automations.length >= 6);
 check('Planbar aktiv', heat.automations.some(item => item.id === 'planbar-weekly-export' && item.status === 'active' && item.enabled));
 check('Planbar-Vervollständigung ist live schaltbar und aktiv', heat.automations.some(item => item.id === 'planbar-completion-morning' && item.toggleAvailable && item.status === 'active' && item.enabled));
 check('Installationsplan-Materialliste ist als aktiver Nur-Lese-Workflow verfügbar', heat.automations.some(item => item.id === 'installation-plan-material-list' && item.toggleAvailable && item.status === 'active' && item.enabled && /nichts.*löschen|Löschung/i.test(item.safety)));
-check('Förderung 1 ist benannt, aktiv und um 05:00 Uhr iMac-gebunden', heat.automations.some(item => item.id === 'funding-monitor' && item.name === 'Förderung 1 – Vollständigkeit & Unterlagen' && item.status === 'active' && item.enabled && /iMac/.test(item.execution)));
+check('Förderung 1 ist benannt, aktiv und um 05:00 Uhr Mac Mini-gebunden', heat.automations.some(item => item.id === 'funding-monitor' && item.name === 'Förderung 1 – Vollständigkeit & Unterlagen' && item.status === 'active' && item.enabled && /Mac Mini/.test(item.execution)));
 check('Förder-Gesamtlauf ist als zentraler geordneter Start sichtbar und aktiv', heat.automations.some(item => item.id === 'funding-daily-sequence' && item.status === 'active' && item.enabled && /1 → 2 → 3/.test(item.name)));
 check('Förderung 2 ist benannt und aktiv', heat.automations.some(item => item.id === 'kfw-funding-amount-morning' && item.name === 'Förderung 2 – Förderhöhe prüfen' && item.status === 'active' && item.enabled));
 check('Förderung 3 ist benannt und aktiv', heat.automations.some(item => item.id === 'kfw-approval-morning' && item.name === 'Förderung 3 – KfW-Zusagen prüfen' && item.status === 'active' && item.enabled));
@@ -152,7 +152,7 @@ const js = await fs.readFile(new URL('../public/projects.js', import.meta.url), 
 const indexSource = await fs.readFile(new URL('../index.js', import.meta.url), 'utf8');
 check('Plus für neue Projektakten vorhanden', html.includes('＋ Neues Projekt') && js.includes("api('/api/projects'"));
 check('Projektseite bietet manuellen Herstellerlauf und verständlichen letzten Status', js.includes("'manufacturer-leads-wattfox'") && js.includes('Letzter Lauf:') && js.includes('/workflow-runs?limit=100'));
-check('Öffentlicher iMac-Schalterstatus enthält den Herstellerlauf', /allowedIds = new Set\([^\n]*manufacturer-leads-wattfox/.test(indexSource));
+check('Öffentlicher Mac Mini-Schalterstatus enthält den Herstellerlauf', /allowedIds = new Set\([^\n]*manufacturer-leads-wattfox/.test(indexSource));
 check('Notizen stehen in der Projektakte bereit', js.includes('Notizen, Ideen & Absprachen') && js.includes('/notes'));
 check('Ordner, Unterordner und Mehrfachupload vorhanden', html.includes('multiple') && js.includes('/folders') && js.includes('parentId'));
 check('Papierkorb löscht nur die Projektakte', js.includes('Projektdateien werden entfernt') && js.includes("method: 'DELETE'"));
@@ -224,7 +224,7 @@ const dewarmteRunning = summarizeDewarmteLinkPdfJobs([{
   projectId: 'dewarmte', workflowId: 'dewarmte-link-to-material-pdf', jobId: dewarmteJobId,
   status: 'running', phase: 'implementing', progress: 30, updatedAt: '2026-08-30T07:02:00Z', resultPreview: 'PDF wird erstellt.',
 }]);
-check('DeWarmte übernimmt den gemeldeten iMac-Livefortschritt', dewarmteRunning[0]?.progress === 30 && dewarmteRunning[0]?.active === true && /Material wird zugeordnet/.test(dewarmteRunning[0]?.phase));
+check('DeWarmte übernimmt den gemeldeten Mac Mini-Livefortschritt', dewarmteRunning[0]?.progress === 30 && dewarmteRunning[0]?.active === true && /Material wird zugeordnet/.test(dewarmteRunning[0]?.phase));
 
 console.log(failures ? `${failures} Fehler` : 'Projektakten erfolgreich verifiziert.');
 process.exit(failures ? 1 : 0);

@@ -29,9 +29,9 @@
 
   function sourceLabel(item, origin) {
     const source = clean(item.source, 140);
-    if (/imac/i.test(source) && /codex/i.test(source)) return 'iMac · Codex';
+    if (/imac|mac[ -]?mini/i.test(source) && /codex/i.test(source)) return 'Mac Mini · Codex';
     if (/codex/i.test(source) || item.type === 'build' || origin === 'build') return 'Codex';
-    if (/imac/i.test(source) || item.type === 'command') return 'iMac';
+    if (/imac|mac[ -]?mini/i.test(source) || item.type === 'command') return 'Mac Mini';
     if (/railway/i.test(source) || item.type === 'automation') return 'IVA Core / Railway';
     if (/iva core/i.test(source)) return 'IVA Core / Railway';
     return source || 'IVA Core / Railway';

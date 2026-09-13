@@ -4,9 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { classifyFundingDocumentName } from './funding-document-extractor.mjs';
+import { assertImacExecutionHost, imacDeviceAgentMetadata } from './device-agent.mjs';
 
 const execFileAsync = promisify(execFile);
-const DEVICE_ID = 'imac-nadine';
+const DEVICE_ID = 'macmini-nadine';
 const KEYCHAIN_SERVICE = 'de.iva.device-agent';
 const DEFAULT_SERVER_URL = 'https://iva-core-production.up.railway.app';
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
@@ -19,17 +20,33 @@ function serverUrl() {
 }
 
 async function token() {
+  assertImacExecutionHost();
   const { stdout } = await execFileAsync('/usr/bin/security', ['find-generic-password', '-a', DEVICE_ID, '-s', KEYCHAIN_SERVICE, '-w'], { timeout: 10_000 });
   const value = String(stdout || '').trim();
-  if (value.length < 32) throw new Error('Das iMac-Gerätetoken fehlt im macOS-Schlüsselbund.');
+  if (value.length < 32) throw new Error('Das Mac Mini-Gerätetoken fehlt im macOS-Schlüsselbund.');
   return value;
 }
 
 async function request(pathname, { method = 'GET', body, binary = false, timeoutMs = 30_000 } = {}) {
+  assertImacExecutionHost();
+  const agent = imacDeviceAgentMetadata();
   const rawBody = Buffer.isBuffer(body);
   const response = await fetch(`${serverUrl()}${pathname}`, {
     method,
-    headers: { Authorization: `Bearer ${await token()}`, ...(rawBody ? { 'Content-Type': 'application/octet-stream' } : body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+    headers: {
+      Authorization: `Bearer ${await token()}`,
+      'X-IVA-Agent-Host': agent.hostname,
+      'X-IVA-Agent-Hardware-Model': agent.hardwareModel,
+      'X-IVA-Agent-Fingerprint': agent.hardwareFingerprint,
+      'X-IVA-Agent-Local-Workspace': String(agent.localWorkspace),
+      'X-IVA-Agent-Ui-Busy': String(agent.uiBusy),
+      'X-IVA-Agent-Protocol': String(agent.protocolVersion),
+      'X-IVA-Agent-Release': agent.release,
+      'X-IVA-Agent-Revision': agent.runtimeRevision,
+      'X-IVA-Agent-Workspace': agent.workspace,
+      'X-IVA-Agent-ICloud': String(agent.iCloudAuthoritative),
+      ...(rawBody ? { 'Content-Type': 'application/octet-stream' } : body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+    },
     body: rawBody ? body : body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
   });

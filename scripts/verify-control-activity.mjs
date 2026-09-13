@@ -44,7 +44,7 @@ try {
   };
   const project = {
     id: 'heat-hero', name: 'Heat Hero',
-    automations: [{ id: 'planbar-weekly-export', name: 'Planbar-Forecast als Excel-Listen', status: 'active', enabled: true, schedule: 'Freitag · 19:00 Uhr', execution: 'iMac', purpose: 'Forecast an Angelo' }],
+    automations: [{ id: 'planbar-weekly-export', name: 'Planbar-Forecast als Excel-Listen', status: 'active', enabled: true, schedule: 'Freitag · 19:00 Uhr', execution: 'Mac Mini', purpose: 'Forecast an Angelo' }],
     runLog: [{
       id: 'planbar-2026-08-23-kw36-45', automationId: 'planbar-weekly-export', executedAt: '2026-08-23T09:59:00.000Z',
       status: 'sent-and-verified', scope: 'KW 36–45 / 2026', attachmentCount: 8,
@@ -92,7 +92,7 @@ try {
   assert.match(browserJs, /Im Gesendet-Ordner verifiziert|proofs/);
   assert.match(browserJs, /Letzter erfolgreicher Nachweis/);
 
-  console.log('PASS Kontrollzentrum-Aktivität: echte Bau-, iMac-, Projekt- und Automationsläufe mit Status, Ergebnis und Angelo-Beleg.');
+  console.log('PASS Kontrollzentrum-Aktivität: echte Bau-, Mac Mini-, Projekt- und Automationsläufe mit Status, Ergebnis und Angelo-Beleg.');
 } finally {
   await rm(root, { recursive: true, force: true });
 }

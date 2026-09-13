@@ -24,7 +24,7 @@ export async function withImacExecutionLock(task, { root = defaultRoot, timeoutM
       let alive = true;
       if (owner?.pid) { try { process.kill(owner.pid, 0); } catch (e) { alive = e.code !== 'ESRCH'; } }
       if ((!owner && age > 10_000) || (owner && !alive)) { await rm(root, { recursive: true, force: true }); continue; }
-      if (Date.now() >= deadline) throw new Error('Der iMac ist noch durch einen anderen Auftrag belegt; es wurde keine zweite UI-Aktion gestartet.');
+      if (Date.now() >= deadline) throw new Error('Der Mac Mini ist noch durch einen anderen Auftrag belegt; es wurde keine zweite UI-Aktion gestartet.');
       await new Promise(resolve => setTimeout(resolve, pollMs));
     }
   }

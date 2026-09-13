@@ -20,13 +20,13 @@ export function schedulingRequestStatus(request, runs = [], commands = []) {
     return { ...base, status: stopped ? (run.status === 'completed' ? 'incomplete' : run.status) : run.status,
       schedulingSummary: stopped
         ? `Noch kein Slot bestätigt. ${run.error || run.resultPreview || run.detail || 'Der Lauf hat keinen Reservierungsnachweis geliefert.'}`
-        : `Terminierung läuft auf dem iMac. ${run.detail || 'Planbar-Slot wird geprüft und gesichert.'}` };
+        : `Terminierung läuft auf dem Mac Mini. ${run.detail || 'Planbar-Slot wird geprüft und gesichert.'}` };
   }
   if (command?.status === 'queued') return { ...base, status: command.retryAt ? 'retrying' : 'queued', schedulingSummary: command.retryAt
     ? 'Der Start wird automatisch erneut versucht. Noch kein Slot bestätigt.'
-    : 'Automatisch an den iMac übergeben; startet, sobald der iMac frei und verbunden ist. Noch kein Slot bestätigt.' };
-  if (command && ['running', 'completed'].includes(command.status)) return { ...base, status: 'starting', schedulingSummary: 'Der iMac startet den Workflow. Noch kein Reservierungsnachweis vorhanden.' };
+    : 'Automatisch an den Mac Mini übergeben; startet, sobald der Mac Mini frei und verbunden ist. Noch kein Slot bestätigt.' };
+  if (command && ['running', 'completed'].includes(command.status)) return { ...base, status: 'starting', schedulingSummary: 'Der Mac Mini startet den Workflow. Noch kein Reservierungsnachweis vorhanden.' };
   if (command) return { ...base, status: command.status, schedulingSummary: `Terminierung nicht bestätigt (${command.status === 'failed' ? 'Start fehlgeschlagen' : command.status === 'expired' ? 'Auftrag abgelaufen' : 'Auftrag gestoppt'}). ${command.error || 'Kein Slot-Nachweis vorhanden.'}` };
   if (request.dispatchPending) return { ...base, status: 'retrying', schedulingSummary: 'Automatische Übergabe wird erneut versucht. Noch kein Slot bestätigt.' };
-  return { ...base, status: 'not_started', schedulingSummary: 'Kein gestarteter iMac-Workflow und kein gesicherter Slot nachgewiesen.' };
+  return { ...base, status: 'not_started', schedulingSummary: 'Kein gestarteter Mac Mini-Workflow und kein gesicherter Slot nachgewiesen.' };
 }

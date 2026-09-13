@@ -80,7 +80,7 @@ function agentEvent(run = {}) {
 }
 
 const DEVICE_NAMES = Object.freeze({
-  'computer.status': 'iMac-Status prüfen',
+  'computer.status': 'Mac Mini-Status prüfen',
   'funding.monitor.status': 'Fördermonitor-Status prüfen',
   'funding.monitor.run': 'Fördermonitor ausführen',
   'funding.reviews.list': 'Förder-Prüfliste lesen',
@@ -89,7 +89,7 @@ const DEVICE_NAMES = Object.freeze({
   'project.workflow.run': 'Projekt-Workflow ausführen',
   'portal.credentials.status': 'Portalzugang prüfen',
   'portal.login': 'Portal-Anmeldung',
-  'app.open': 'App auf dem iMac öffnen',
+  'app.open': 'App auf dem Mac Mini öffnen',
   'codex.task.start': 'IVA-Bauauftrag starten',
 });
 
@@ -112,7 +112,7 @@ function commandEvent(command = {}, commands = []) {
     key: jobId ? `job:${jobId}` : '',
     type: command.action === 'codex.task.start' ? 'build' : command.action === 'project.workflow.run' ? 'workflow' : 'command',
     name,
-    source: 'iMac-Befehl',
+    source: 'Mac Mini-Befehl',
     status,
     summary: detail,
     error: clean(local?.error || command.error, 1000),

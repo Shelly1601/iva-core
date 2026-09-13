@@ -7,7 +7,7 @@ export const DISPLAY_SLEEP_POLICY = Object.freeze({
   minimumIdleSeconds: 60 * 60,
   nightStartHour: 22,
   nightEndHour: 7,
-  timezone: 'local-iMac-time',
+  timezone: 'local-Mac Mini-time',
   activeUserAlwaysProtected: true,
   sleepWhenIdleDuringDay: false,
 });

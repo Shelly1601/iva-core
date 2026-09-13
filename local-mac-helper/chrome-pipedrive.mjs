@@ -409,10 +409,10 @@ ${windowBlocks}
 end tell`, { timeoutMs: 20000 });
 }
 
-export async function activatePipedriveDealTab(dealId, { run = runAppleScript, waitFn = wait, timeoutMs = 12_000 } = {}) {
+export async function activatePipedriveDealTab(dealId, { run = runAppleScript, waitFn = wait, timeoutMs = 12_000, getWorkspace = requireRightDisplayWorkspace } = {}) {
   const id = String(dealId || '').replace(/\D/g, '');
   if (!id) throw new Error('Pipedrive-Deal-ID fehlt.');
-  const workspace = await requireRightDisplayWorkspace();
+  const workspace = await getWorkspace();
   const script = `tell application "Google Chrome"
 repeat with w in windows
   set windowBounds to bounds of w

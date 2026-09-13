@@ -52,7 +52,7 @@ function workflowPhase(status, phase, deliveryMode, hasFile) {
   if (status === 'timed_out') return 'Zeitüberschreitung – Prüfung erforderlich';
   if (hasFile) return deliveryMode === 'email-send' ? 'PDF gespeichert · Mailstatus wird geprüft' : 'PDF ist in der Projektakte gespeichert';
   return ({
-    queued: 'Auftrag angenommen · wartet auf den iMac',
+    queued: 'Auftrag angenommen · wartet auf den Mac Mini',
     running: 'Installationsplan wird lesend geöffnet',
     planning: 'Quelle und Auftragsdaten werden geprüft',
     implementing: 'Material wird zugeordnet und PDF erstellt',
@@ -118,7 +118,7 @@ export function summarizeDewarmteLinkPdfJobs(commands = [], files = [], runs = [
         active: !TERMINAL_STATUSES.has(status),
         detail: file
           ? `${localizedFiles.length === 3 ? 'Alle drei Sprach-PDFs sind fertig' : 'PDF ist fertig'} und ${localizedFiles.length === 3 ? 'liegen' : 'liegt'} in der DeWarmte-Projektakte.${needsAttention && reportedDetail ? ` Weitere Aktion nötig: ${reportedDetail}` : ''}`
-          : (missingResult ? 'Der Lauf meldet Abschluss, aber in der Projektakte fehlen Ergebnis-PDFs.' : (reportedDetail || 'Auftrag wartet auf den iMac.')),
+          : (missingResult ? 'Der Lauf meldet Abschluss, aber in der Projektakte fehlen Ergebnis-PDFs.' : (reportedDetail || 'Auftrag wartet auf den Mac Mini.')),
         deliveryMode,
         recipientEmail: clean(command.payload?.recipientEmail, 320),
         createdAt: clean(command.createdAt, 80),

@@ -474,19 +474,19 @@ async function refreshPlanbarSearch() {
   state.planbarRefreshing = true;
   if (button) { button.disabled = true; button.textContent = 'Planbar wird gelesen …'; }
   try {
-    const queued = await api('/api/devices/imac-nadine/commands', {
+    const queued = await api('/api/devices/macmini-nadine/commands', {
       method: 'POST',
       body: { action: 'planbar.search.refresh', requestedBy: 'projects-planbar-search', requestText: 'Planbar-Suchindex rein lesend aktualisieren' },
     });
     let command = queued.command;
     // The normal live read finishes within seconds. Allow enough time for the
     // verified re-login/reload fallback without abandoning a still-running
-    // iMac command and leaving the visible result on an old index.
+    // Mac Mini command and leaving the visible result on an old index.
     for (let attempt = 0; attempt < 105 && !['completed', 'failed', 'expired', 'canceled'].includes(command.status); attempt += 1) {
       await pause(2000);
-      command = (await api(`/api/devices/imac-nadine/commands/${encodeURIComponent(command.id)}`)).command;
+      command = (await api(`/api/devices/macmini-nadine/commands/${encodeURIComponent(command.id)}`)).command;
     }
-    if (command.status !== 'completed') throw new Error(command.error || 'Der iMac hat die Planbar-Aktualisierung nicht rechtzeitig abgeschlossen.');
+    if (command.status !== 'completed') throw new Error(command.error || 'Der Mac Mini hat die Planbar-Aktualisierung nicht rechtzeitig abgeschlossen.');
     state.planbarRefreshError = '';
     const count = Number(command.result?.appointmentCount || 0);
     showToast(`Planbar aktualisiert: ${count} Kundentermine eingelesen.`);
@@ -557,7 +557,7 @@ async function runOrPrepareWorkflow(button) {
   try {
     const result = await api(`/api/projects/${encodeURIComponent(state.current.id)}/automations/${encodeURIComponent(workflowId)}/${action}`, { method: 'POST' });
     if (action === 'run') {
-      state.workflowRuns = [{ workflowId, status: 'running', startedAt: new Date().toISOString(), summary: result.message || 'An den iMac übergeben.' }, ...state.workflowRuns.filter(run => run.workflowId !== workflowId)];
+      state.workflowRuns = [{ workflowId, status: 'running', startedAt: new Date().toISOString(), summary: result.message || 'An den Mac Mini übergeben.' }, ...state.workflowRuns.filter(run => run.workflowId !== workflowId)];
       render();
       setTimeout(() => { void refreshWorkflowRuns(); }, 8000);
     }

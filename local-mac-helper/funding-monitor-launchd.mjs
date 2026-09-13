@@ -102,7 +102,7 @@ export async function suspendFundingMonitorLaunchAgent() {
   await execFileAsync('/bin/launchctl', ['bootout', guiDomain, plist], { timeout: 10000 }).catch(() => {});
   const status = await fundingMonitorLaunchAgentStatus();
   if (status.loaded) throw new Error('Der veraltete 30-Minuten-Fördermonitor ist nach dem Anhalten weiterhin geladen.');
-  return { suspended: true, loaded: false, plistRetained: true, plist, replacement: 'Railway 05:00 → imac-nadine → Förderung 1 → 2 → 3' };
+  return { suspended: true, loaded: false, plistRetained: true, plist, replacement: 'Railway 05:00 → macmini-nadine → Förderung 1 → 2 → 3' };
 }
 
 export async function readFundingMonitorLogs({ maxCharacters = 12000 } = {}) {

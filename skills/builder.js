@@ -41,17 +41,17 @@ export function builderSkill({ captureImprovementRequest, markImprovementRequest
           commandId: command.id,
           deviceId: command.deviceId,
           status: command.status,
-          message: 'Der vollständige Bauauftrag ist ohne weitere Rückfrageschleife an Codex auf Nadines iMac übergeben.',
+          message: 'Der vollständige Bauauftrag ist ohne weitere Rückfrageschleife an Codex auf Nadines Mac Mini übergeben.',
         };
       },
     }),
     checkIvaBuildDispatch: tool({
-      description: 'Prüft, ob ein an den iMac gesendeter IVA-Bauauftrag lokal von Codex angenommen wurde. Wenn das Ergebnis eine jobId enthält, kann damit anschließend checkIvaBuildTask verwendet werden.',
+      description: 'Prüft, ob ein an den Mac Mini gesendeter IVA-Bauauftrag lokal von Codex angenommen wurde. Wenn das Ergebnis eine jobId enthält, kann damit anschließend checkIvaBuildTask verwendet werden.',
       parameters: z.object({ commandId: z.string().uuid() }),
       execute: async ({ commandId }) => ({ command: await deviceCommandStatus(commandId) }),
     }),
     checkIvaBuildTask: tool({
-      description: 'Prüft den tatsächlichen Status eines bereits gestarteten Codex-Bau- oder operativen iMac-Auftrags. Nur status completed mit resultPreview belegt ein fertiges Ergebnis.',
+      description: 'Prüft den tatsächlichen Status eines bereits gestarteten Codex-Bau- oder operativen Mac Mini-Auftrags. Nur status completed mit resultPreview belegt ein fertiges Ergebnis.',
       parameters: z.object({ jobId: z.string().min(20).max(80) }),
       execute: async ({ jobId }) => {
         if (typeof listAgentRuns === 'function') {

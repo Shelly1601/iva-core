@@ -58,24 +58,24 @@ function taskFromRequest(request, commands) {
   let status = 'queued';
   let phase = 'planning';
   let progress = 5;
-  let detail = 'Auftrag ist erfasst und wartet auf die Übergabe an den iMac.';
+  let detail = 'Auftrag ist erfasst und wartet auf die Übergabe an den Mac Mini.';
   let blocker = '';
   let updatedAt = request.updatedAt || request.createdAt;
 
   if (start?.status === 'queued') {
     progress = 8;
-    detail = 'Übergabe an den iMac ist eingereiht.';
+    detail = 'Übergabe an den Mac Mini ist eingereiht.';
     updatedAt = start.createdAt || updatedAt;
   } else if (start?.status === 'running') {
     status = 'running';
     progress = 9;
-    detail = 'Der iMac nimmt den Bauauftrag gerade an.';
+    detail = 'Der Mac Mini nimmt den Bauauftrag gerade an.';
     updatedAt = start.startedAt || updatedAt;
   } else if (['failed', 'expired'].includes(start?.status)) {
     status = 'blocked';
     phase = 'planning';
     progress = 8;
-    blocker = clean(start.error || (start.status === 'expired' ? 'Die Übergabe an den iMac ist abgelaufen.' : 'Die Übergabe an den iMac ist fehlgeschlagen.'), 1000);
+    blocker = clean(start.error || (start.status === 'expired' ? 'Die Übergabe an den Mac Mini ist abgelaufen.' : 'Die Übergabe an den Mac Mini ist fehlgeschlagen.'), 1000);
     detail = blocker;
     updatedAt = start.completedAt || updatedAt;
   } else if (jobId) {
@@ -252,7 +252,7 @@ export const CURRENT_BUILD_RELEASE = Object.freeze({
   id: 'self-learning-incident-memory-v1',
   title: 'Selbstlernendes Fehlergedächtnis für alle IVA-Läufe',
   summary: 'Technische Störungen werden lokal und zentral dedupliziert, sanitisiert, nach verifizierter Reparatur als Prävention wiederverwendet und im Kontrollzentrum verständlich angezeigt.',
-  detail: 'IVA-Chat, iMac-/Codex-Aufträge, Projekt-Workflows und Railway-Automationen laden passende bewährte Reparaturen vor dem nächsten ähnlichen Lauf. Unklare Schreibaktionen bleiben gegen blinde Wiederholung geschützt.',
+  detail: 'IVA-Chat, Mac Mini-/Codex-Aufträge, Projekt-Workflows und Railway-Automationen laden passende bewährte Reparaturen vor dem nächsten ähnlichen Lauf. Unklare Schreibaktionen bleiben gegen blinde Wiederholung geschützt.',
   implementedAt: '2026-09-02T08:35:00.000Z',
   livePath: '/control',
 });

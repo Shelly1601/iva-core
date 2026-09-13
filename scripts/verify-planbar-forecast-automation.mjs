@@ -21,7 +21,7 @@ function harness({ projectEnabled = true, online = true, commands = {} } = {}) {
   const { handler, queued } = harness({ online: false });
   const result = await handler({ slotKey: 'forecast:weekly:2026-W35', attempt: 1 });
   assert.equal(result.status, 'waiting');
-  assert.equal(queued.length, 0, 'offline iMac must not lose the due slot');
+  assert.equal(queued.length, 0, 'offline Mac Mini must not lose the due slot');
 }
 
 {
@@ -72,7 +72,7 @@ function harness({ projectEnabled = true, online = true, commands = {} } = {}) {
   );
 }
 
-console.log('PASS Planbar-Forecast-Automation verfolgt iMac und Outlook bis zum belegten Endzustand.');
+console.log('PASS Planbar-Forecast-Automation verfolgt Mac Mini und Outlook bis zum belegten Endzustand.');
 
 {
   const commands = {
@@ -97,6 +97,6 @@ console.log('PASS Planbar-Forecast-Automation verfolgt iMac und Outlook bis zum 
   assert.deepEqual(result.workflowMetrics, { checked: 73, changed: 0 });
 }
 
-console.log('PASS Wiederkehrende iMac-Projektworkflows bleiben bis zum lokalen Endstatus offen.');
+console.log('PASS Wiederkehrende Mac Mini-Projektworkflows bleiben bis zum lokalen Endstatus offen.');
 
 await import('./verify-planbar-forecast-delivery.mjs');

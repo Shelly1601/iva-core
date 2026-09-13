@@ -1,4 +1,5 @@
 import os from 'node:os';
+import { isAllowedImacExecutionHost } from './imac-host-guard.mjs';
 
 export const FUNDING_WORKFLOW_NAMES = Object.freeze({
   completeness: 'Förderung 1 – Vollständigkeit & Unterlagen',
@@ -15,7 +16,7 @@ export const FUNDING_WORKFLOW_ORDER = Object.freeze([
 export const FUNDING_WORKFLOW_POLICY = Object.freeze({
   timeZone: 'Europe/Berlin',
   schedule: 'Täglich · 05:00 Uhr',
-  executionHost: 'imac-nadine',
+  executionHost: 'macmini-nadine',
   emailMode: 'draft-only',
   deleteMail: false,
   deletePipedrive: false,
@@ -35,15 +36,13 @@ export const FUNDING_WORKFLOW_POLICY = Object.freeze({
 
 const clean = (value, max = 4000) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
-export function isImacFundingHost(hostname = os.hostname(), expectedHostname = process.env.IVA_IMAC_HOSTNAME) {
-  const actual = clean(hostname, 200).toLocaleLowerCase('de').replace(/\.local$/, '');
-  const expected = clean(expectedHostname, 200).toLocaleLowerCase('de').replace(/\.local$/, '');
-  return expected ? actual === expected : actual.includes('imac');
+export function isImacFundingHost(hostname = os.hostname(), expectedHostname = process.env.IVA_MACMINI_HOSTNAME) {
+  return isAllowedImacExecutionHost(hostname, expectedHostname);
 }
 
-export function assertImacFundingHost(hostname = os.hostname(), expectedHostname = process.env.IVA_IMAC_HOSTNAME) {
+export function assertImacFundingHost(hostname = os.hostname(), expectedHostname = process.env.IVA_MACMINI_HOSTNAME) {
   if (isImacFundingHost(hostname, expectedHostname)) return true;
-  throw new Error(`Förderlauf gesperrt: Ausführung ist ausschließlich auf dem iMac erlaubt (${clean(hostname, 200) || 'unbekannter Host'}).`);
+  throw new Error(`Förderlauf gesperrt: Ausführung ist ausschließlich auf dem Mac Mini erlaubt (${clean(hostname, 200) || 'unbekannter Host'}).`);
 }
 
 export function assertFundingWorkflowOrder(sequence = FUNDING_WORKFLOW_ORDER) {

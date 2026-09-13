@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {EXECUTION_HOSTNAME} from '../local-mac-helper/execution-host-policy.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -108,6 +109,7 @@ assert.equal(withFundingSender({}).from, FUNDING_SENDER_EMAIL);
 let activationAttempts = 0;
 let activationWaits = 0;
 const activation = await activatePipedriveDealTab('7479', {
+  getWorkspace: async () => ({target:{x:0,y:0,width:1920,height:1080}}),
   run: async () => { activationAttempts += 1; return activationAttempts >= 3 ? 'activated' : 'missing'; },
   waitFn: async () => { activationWaits += 1; },
   timeoutMs: 5_000,
@@ -344,7 +346,7 @@ assert.equal(fundingDocumentPipelinePolicy().identityFrontBackCombined, true);
 assert.equal(fundingDocumentPipelinePolicy().differentDocumentTypesRemainSeparate, true);
 assert.deepEqual(FUNDING_WORKFLOW_ORDER, ['completeness', 'amount', 'approval']);
 assert.equal(FUNDING_WORKFLOW_NAMES.completeness, 'Förderung 1 – Vollständigkeit & Unterlagen');
-assert.equal(FUNDING_WORKFLOW_POLICY.executionHost, 'imac-nadine');
+assert.equal(FUNDING_WORKFLOW_POLICY.executionHost, 'macmini-nadine');
 assert.equal(FUNDING_WORKFLOW_POLICY.emailMode, 'draft-only');
 assert.equal(FUNDING_WORKFLOW_POLICY.deletePipedrive, false);
 assert.equal(FUNDING_WORKFLOW_POLICY.deleteManagedLocalCopiesAfterVerifiedReplacement, true);
@@ -359,7 +361,7 @@ assert.match(reusablePipedriveTabs, /make new tab at end of tabs of ivaWindow/);
 assert.match(reusablePipedriveTabs, /set end of createdTabIds to/);
 assert.doesNotMatch(reusablePipedriveTabs, /set ivaWindow to make new window\nset URL of active tab/);
 assert.throws(() => assertFundingWorkflowOrder(['amount', 'completeness', 'approval']), /Reihenfolge/);
-assert.equal(isImacFundingHost('iMac-von-Nadine.local'), true);
+assert.equal(isImacFundingHost(EXECUTION_HOSTNAME), true);
 assert.equal(isImacFundingHost('MacBook-Air-von-Nadine.local'), false);
 assert.deepEqual(buildFundingSheetRow({ customerName: 'Max Mustermann', date: '2026-08-26T12:00:00+02:00' }), {
   Kundename: 'Max Mustermann', Datum: '26.08.2026', Bemerkung: '',

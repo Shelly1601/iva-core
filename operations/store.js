@@ -118,7 +118,7 @@ export async function finishAgentRun(id, input = {}) {
   });
 }
 
-// Lokale Codex-/iMac-Läufe melden ihren echten Zustand über einen stabilen
+// Lokale Codex-/Mac Mini-Läufe melden ihren echten Zustand über einen stabilen
 // externen Schlüssel. Dadurch wird derselbe Lauf vom Start bis zum Ergebnis
 // aktualisiert, statt bei jedem Meilenstein als neuer Chatlauf aufzutauchen.
 export async function upsertExternalAgentRun(input = {}) {

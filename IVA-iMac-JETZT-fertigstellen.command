@@ -6,12 +6,12 @@ commit="b332bdf18ad5eb25eda85f5f60326115133c1f4f"
 archive_sha256="97848c3288d809cdaf2b23f9df9ccad727aa369d663ff8a7ea2ccc2290421231"
 
 model="$(/usr/sbin/sysctl -n hw.model 2>/dev/null || true)"
-if [[ "$model" != iMac* ]]; then
-  print -u2 "FEHLER: Dieser IVA-Abschluss darf nur auf Nadines iMac ausgeführt werden."
+if [[ "$model" != Mac Mini* ]]; then
+  print -u2 "FEHLER: Dieser IVA-Abschluss darf nur auf Nadines Mac Mini ausgeführt werden."
   exit 1
 fi
 if [[ ! -d "$workspace" ]]; then
-  print -u2 "FEHLER: Der verbindliche IVA-iCloud-Ordner wurde auf diesem iMac nicht gefunden."
+  print -u2 "FEHLER: Der verbindliche IVA-iCloud-Ordner wurde auf diesem Mac Mini nicht gefunden."
   exit 1
 fi
 
@@ -19,7 +19,7 @@ case "$(/usr/bin/uname -m)" in
   arm64) node_arch="arm64" ;;
   x86_64) node_arch="x64" ;;
   *)
-    print -u2 "FEHLER: Die Prozessorarchitektur dieses iMac wird nicht unterstützt."
+    print -u2 "FEHLER: Die Prozessorarchitektur dieses Mac Mini wird nicht unterstützt."
     exit 1
     ;;
 esac
@@ -74,4 +74,4 @@ print "4/4 – Dauerverbindung wird umgeschaltet und doppelt geprüft …"
 IVA_DEVICE_WORKSPACE="$workspace" IVA_DEVICE_RUNTIME_SOURCE="$snapshot" \
   "$node_bin" "$snapshot/local-mac-helper/install-imac-device-agent.mjs"
 
-print "FERTIG: IVA läuft dauerhaft lokal auf dem iMac; zwei fortlaufende Railway-Heartbeats wurden bestätigt."
+print "FERTIG: IVA läuft dauerhaft lokal auf dem Mac Mini; zwei fortlaufende Railway-Heartbeats wurden bestätigt."

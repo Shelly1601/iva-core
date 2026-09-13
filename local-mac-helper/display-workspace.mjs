@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { runMacUiBridge } from './macos-ui.mjs';
 
-export const IVA_UI_DISPLAY_POLICY = 'rightmost-external-display';
+export const IVA_UI_DISPLAY_POLICY = 'mac-mini-work-display';
 export const IVA_RIGHT_DISPLAY_ATTESTATION_ENV = 'IVA_RIGHT_DISPLAY_ATTESTATION';
 const MAX_ATTESTATION_LIFETIME_MS = (6 * 60 * 60_000) + (5 * 60_000);
 
@@ -20,15 +20,15 @@ export function resolveRightDisplayWorkspace(input = {}) {
     width: finiteNumber(display.width, 'width'),
     height: finiteNumber(display.height, 'height'),
   })).filter(display => display.width > 0 && display.height > 0);
-  if (displays.length < 2) {
-    throw new Error('IVA-Displayregel blockiert: Das rechte Arbeitsdisplay ist nicht angeschlossen. Links wird nicht ersatzweise gearbeitet.');
+  if (displays.length < 1) {
+    throw new Error('IVA-Displayregel blockiert: Kein Arbeitsdisplay ist verfügbar.');
   }
   const target = [...displays].sort((a, b) => {
     const rightEdge = (b.x + b.width) - (a.x + a.width);
     return rightEdge || b.x - a.x || b.width - a.width;
   })[0];
   const otherDisplays = displays.filter(display => display.id !== target.id);
-  if (!otherDisplays.some(display => target.x >= display.x + display.width)) {
+  if (displays.length > 1 && !otherDisplays.some(display => target.x >= display.x + display.width)) {
     throw new Error('IVA-Displayregel blockiert: Die angeschlossenen Displays sind nicht eindeutig links/rechts angeordnet.');
   }
   const insetX = Math.min(36, Math.max(18, Math.round(target.width * 0.008)));
@@ -69,7 +69,7 @@ export function encodeRightDisplayAttestation(workspace, {
     || expires <= verified || expires - verified > MAX_ATTESTATION_LIFETIME_MS) {
     throw new Error('Ungültige Laufzeit des Rechtsbildschirm-Nachweises.');
   }
-  if (workspace?.policy !== IVA_UI_DISPLAY_POLICY || Number(workspace?.displayCount) < 2
+  if (workspace?.policy !== IVA_UI_DISPLAY_POLICY || Number(workspace?.displayCount) < 1
     || !windowBoundsInsideRightDisplay([
       workspace?.bounds?.left,
       workspace?.bounds?.top,
@@ -131,7 +131,7 @@ export function resolveRightDisplayAttestation(encoded, { now = Date.now() } = {
       ? payload.preparedBundleIdentifiers : []).map(value => String(value || '').trim())
       .filter(value => /^[a-z0-9.-]{3,160}$/i.test(value))),
   });
-  if (workspace.displayCount < 2 || workspace.target.width <= 0 || workspace.target.height <= 0
+  if (workspace.displayCount < 1 || workspace.target.width <= 0 || workspace.target.height <= 0
     || !windowBoundsInsideRightDisplay([
       workspace.bounds.left,
       workspace.bounds.top,
@@ -166,7 +166,7 @@ export async function requireRightDisplayWorkspace({
   wakeFn = wakeDisplaysForVerification,
   attestation = process.env[IVA_RIGHT_DISPLAY_ATTESTATION_ENV],
 } = {}) {
-  // The trusted iMac runner checks CoreGraphics before it starts a sandboxed
+  // The trusted Mac Mini runner checks CoreGraphics before it starts a sandboxed
   // Codex task. Reuse that task-scoped result inside the child: sandboxed
   // processes can otherwise receive a false one-display snapshot even while
   // the external screen and the real desktop session are both available.

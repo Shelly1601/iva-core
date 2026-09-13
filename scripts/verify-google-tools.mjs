@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import {generateText,streamText,tool} from 'ai';
+import {z} from 'zod';
+import {googleSchemaRequest,createGoogleSchemaFetch,googleRateLimitFetch} from '../core/google-schema-transport.js';
+import {prepareIvaTool} from '../core/tool-discovery.js';
+const validatedTool=definition=>prepareIvaTool(tool(definition));
+const body=googleSchemaRequest({tools:[{functionDeclarations:[{name:'check',parameters:{type:'object',properties:{confirmed:{type:'boolean',enum:[true]},pair:{type:'array',items:[{type:'string'},{type:'number'}]},value:{type:['string','number'],nullable:true}}}}]}]});
+const declaration=body.tools[0].functionDeclarations[0];
+assert.equal(declaration.parameters,undefined);
+assert.deepEqual(declaration.parametersJsonSchema.properties.confirmed.enum,[true]);
+assert.deepEqual(declaration.parametersJsonSchema.properties.value.anyOf,[{type:['string','number']},{type:'null'}]);
+const signedParts=[{functionCall:{name:'check',args:{confirmed:true},id:'provider-id'},thoughtSignature:'fixture-signature'}];
+let requests=[];
+const transport=createGoogleSchemaFetch(async (_url,init)=>{requests.push(JSON.parse(init.body));return Response.json({candidates:[{content:{parts:signedParts}}]})});
+await transport('https://example.test',{body:JSON.stringify({contents:[{role:'user',parts:[{text:'test'}]}]})});
+await transport('https://example.test',{body:JSON.stringify({contents:[{role:'model',parts:[{functionCall:{name:'check',args:{confirmed:true}}}]}]})});
+assert.deepEqual(requests[1].contents[0].parts,signedParts,'Original signature, provider ID and part position survive SDK conversion');
+const independent=createGoogleSchemaFetch(async (_url,init)=>{assert.equal(JSON.parse(init.body).contents[0].parts[0].thoughtSignature,undefined);return Response.json({})});
+await independent('https://example.test',{body:JSON.stringify({contents:[{role:'model',parts:[{functionCall:{name:'check',args:{confirmed:true}}}]}]})});
+let rateCalls=0;const waits=[],bodies=[];
+const retried=await googleRateLimitFetch(async (_url,init)=>{rateCalls++;bodies.push(init.body);return rateCalls===1?Response.json({error:{details:[{retryDelay:'3.5s'},{violations:[{quotaId:'RequestsPerMinute'}]}]}},{status:429}):Response.json({ok:true})},'https://example.test',{body:'same signed tool result'},{wait:async ms=>waits.push(ms)});
+assert.equal(retried.status,200);assert.equal(rateCalls,2);assert.deepEqual(waits,[3750]);assert.equal(bodies[0],bodies[1]);
+const daily=await googleRateLimitFetch(async()=>Response.json({error:{details:[{retryDelay:'60s'},{violations:[{quotaId:'RequestsPerDay'}]}]}},{status:429}),'https://example.test',{}, {wait:async()=>assert.fail('Daily quota must not loop')});
+assert.equal(daily.status,429);
+if(process.env.IVA_TEST_MODEL){
+ process.env.IVA_MODEL_CHAT=process.env.IVA_TEST_MODEL;
+ const {chooseModel}=await import('../core/router.js');
+ let calls=0;
+ const result=await generateText({model:chooseModel({task:'chat'}).model,maxSteps:3,prompt:'Rufe genau einmal check mit confirmed=true, pair=["IVA", 1] und value=null auf. Antworte danach mit dem erhaltenen receipt.',tools:{check:validatedTool({description:'Harmloser lokaler Transporttest ohne Geschäftswirkung.',parameters:z.object({confirmed:z.literal(true),pair:z.tuple([z.string(),z.number()]),value:z.union([z.string(),z.number()]).nullable()}),execute:async()=>{calls++;return{receipt:'IVA-TOOL-OK'}}})}});
+ assert.equal(calls,1);assert.match(result.text,/IVA-TOOL-OK/);console.log('Live model and validated tool round trip passed: '+process.env.IVA_TEST_MODEL);
+ let streamedCalls=0;
+ const stream=streamText({model:chooseModel({task:'chat'}).model,maxSteps:3,prompt:'Rufe genau einmal check ohne optionalNote auf und gib dann dessen receipt wieder.',tools:{check:validatedTool({description:'Harmloser Test ohne Geschäftswirkung.',parameters:z.object({optionalNote:z.string().optional()}),execute:async()=>{streamedCalls++;return{receipt:'IVA-STREAM-OK'}}})}});
+ let streamedText='';for await(const text of stream.textStream)streamedText+=text;
+ assert.equal(streamedCalls,1);assert.match(streamedText,/IVA-STREAM-OK/);console.log('Live streaming tool round trip passed');
+}
+console.log('Google schema transport passed');

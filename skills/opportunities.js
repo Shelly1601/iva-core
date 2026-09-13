@@ -53,7 +53,7 @@ export function opportunitiesSkill({ listOpportunities, runOpportunityScout, che
       execute: async () => ({ projects: await listOpportunityProjects() }),
     }),
     finishOpportunityProjectWorkflow: tool({
-      description: 'Startet für genau einen Workflow einer Chancen-Projektakte den vollständigen IVA/Codex-Fertigstellungsauftrag über den iMac. Verwenden, wenn Nadine ausdrücklich „mach das fertig“, „connecte Instagram/Meta/LinkedIn“ oder gleichbedeutend sagt.',
+      description: 'Startet für genau einen Workflow einer Chancen-Projektakte den vollständigen IVA/Codex-Fertigstellungsauftrag über den Mac Mini. Verwenden, wenn Nadine ausdrücklich „mach das fertig“, „connecte Instagram/Meta/LinkedIn“ oder gleichbedeutend sagt.',
       parameters: z.object({
         projectId: z.string(), workflowId: z.string(),
         confirmed: z.boolean().describe('true nur wenn Nadine die Fertigstellung dieses Arbeitspakets ausdrücklich beauftragt hat'),

@@ -139,9 +139,9 @@ function renderAudit(){
 }
 function renderImacStatus(){
   const agent=state.deviceAgent||{};
-  const label=!agent.online?'iMac nicht verbunden':agent.uiBusy?'iMac arbeitet – weitere Aufträge warten':agent.dispatchReady?'iMac bereit':'iMac verbunden – Befehlsabholung wird geprüft';
+  const label=!agent.online?'Mac Mini nicht verbunden':agent.uiBusy?'Mac Mini arbeitet – weitere Aufträge warten':agent.dispatchReady?'Mac Mini bereit':'Mac Mini verbunden – Befehlsabholung wird geprüft';
   const el=$('imacStatus');
-  if(el)el.innerHTML=`<b>${esc(label)}</b><div class="meta">Handy · MacBook · Telegram → IVA-Core → iMac · ${esc(agent.release||'Version unbekannt')}${agent.runtimeRevision?' · '+esc(agent.runtimeRevision.slice(0,12)):''}</div><div class="meta">${esc(agent.detail||'')} · Letzter Abruf: ${fmt(agent.lastPolledAt)}</div>`;
+  if(el)el.innerHTML=`<b>${esc(label)}</b><div class="meta">Nur dieser Mac Mini · iMac und MacBook gesperrt · Cockpit → IVA-Core → Mac Mini · ${esc(agent.release||'Version unbekannt')}${agent.runtimeRevision?' · '+esc(agent.runtimeRevision.slice(0,12)):''}</div><div class="meta">${esc(agent.detail||'')} · Letzter Abruf: ${fmt(agent.lastPolledAt)}</div>`;
 }
 function render(){ renderImacStatus(); renderWorkflowDashboard(); renderBuildProgress(); renderMetrics(); renderIncidents(); renderAutomations(); renderAgents(); renderConnectors(); renderApprovals(); renderRuns(); renderBacklog(); renderAudit(); }
 function makeCollapsible(){ document.querySelectorAll('.main>section.card,.main>section.grid>.card').forEach(card=>{ const heading=card.querySelector(':scope>h2'); if(!heading)return; const subtitle=heading.nextElementSibling?.classList?.contains('muted')?heading.nextElementSibling:null; const details=document.createElement('details'); details.className=card.className+' disclosure'; details.style.cssText=card.style.cssText; const summary=document.createElement('summary'); summary.innerHTML=`<div><span>${esc(heading.textContent)}</span>${subtitle?`<small>${esc(subtitle.textContent)}</small>`:''}</div>`; const body=document.createElement('div'); body.className='disclosure-body'; [...card.children].forEach(child=>{ if(child!==heading&&child!==subtitle)body.appendChild(child); }); details.append(summary,body); card.replaceWith(details); }); }

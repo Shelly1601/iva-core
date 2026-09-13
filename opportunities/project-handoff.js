@@ -12,7 +12,7 @@ function workflow(id, name, purpose, nextStep) {
     status: 'planned',
     enabled: false,
     schedule: 'Noch festzulegen',
-    execution: 'IVA/Codex · bevorzugt über den zentralen iMac-Kanal',
+    execution: 'IVA/Codex · bevorzugt über den zentralen Mac Mini-Kanal',
     purpose,
     safety: 'Zugänge sicher verbinden; nichts veröffentlichen, versenden oder kostenpflichtig schalten, bevor der jeweilige Auftrag und erforderliche Freigaben vorliegen.',
     nextStep,

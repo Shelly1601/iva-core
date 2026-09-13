@@ -15,6 +15,8 @@ import fs from 'fs/promises';
 import fsSync from 'node:fs';
 import { anthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createGoogleSchemaFetch, googleRateLimitFetch } from './google-schema-transport.js';
+import { createOpenAI } from '@ai-sdk/openai';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const USAGE_FILE = DATA_DIR + '/model-usage.json';
@@ -26,6 +28,8 @@ const MODELS = {
   'anthropic:claude-sonnet-4-6':          { provider: 'anthropic', id: 'claude-sonnet-4-6',          eurPerMTokIn: 2.75, eurPerMTokOut: 13.80 },
   'anthropic:claude-haiku-4-5-20251001':  { provider: 'anthropic', id: 'claude-haiku-4-5-20251001',  eurPerMTokIn: 0.75, eurPerMTokOut:  3.68 },
   'google:gemini-3.6-flash':              { provider: 'google',    id: 'gemini-3.6-flash',           eurPerMTokIn: 0.09, eurPerMTokOut:  0.37 },
+  // Approximate EUR display values; Groq lists USD 0.15 / 0.60 per million.
+  'groq:openai/gpt-oss-120b':             { provider: 'groq', id: 'openai/gpt-oss-120b', eurPerMTokIn: 0.14, eurPerMTokOut: 0.55 },
 };
 
 // Task-Profile: 1:1 die heute im Code verwendeten Modelle. KEIN Verhaltens-
@@ -57,12 +61,10 @@ const TASK_SAFETY = {
   'marketing-intelligence': 'creative',
 };
 
-// Provider-Instanzen einmal cachen (Gemini braucht expliziten Key).
-let _googleClient = null;
+// Gemini bekommt einen eigenen Transport pro Modellaufruf, damit die
+// Signaturen mehrstufiger Werkzeugaufrufe innerhalb ihrer Sitzung bleiben.
 function googleClient() {
-  if (_googleClient) return _googleClient;
-  _googleClient = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY });
-  return _googleClient;
+  return createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY, fetch: createGoogleSchemaFetch() });
 }
 
 // Env-Overrides pro Task-Profil: IVA_MODEL_CHAT, IVA_MODEL_ROUTE, ...
@@ -120,6 +122,7 @@ export function chooseModel({ task }) {
   let model;
   if (cfg.provider === 'anthropic') model = anthropic(cfg.id);
   else if (cfg.provider === 'google') model = googleClient()(cfg.id);
+  else if (cfg.provider === 'groq') model = createOpenAI({apiKey:process.env.GROQ_API_KEY,baseURL:'https://api.groq.com/openai/v1',compatibility:'compatible',fetch:(url,init)=>googleRateLimitFetch(fetch,url,init)}).chat(cfg.id,{structuredOutputs:false});
   else throw new Error(`Router: unbekannter Provider "${cfg.provider}"`);
   return {
     task,

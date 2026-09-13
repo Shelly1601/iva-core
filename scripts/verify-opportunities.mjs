@@ -123,7 +123,7 @@ await assert.rejects(() => checkOpportunityLink({ url: 'https://example.com/bloc
 }), /absichtlich nicht erreichbar/);
 const linkChecks = await listOpportunityLinkChecks({ limit: 10 });
 assert.equal(linkChecks.length, 4);
-assert.equal(linkChecks[0].status, 'failed');
+assert.equal(linkChecks.find(item => item.url === 'https://example.com/blocked').status, 'failed');
 assert.equal((await opportunityRadarCounts()).linkChecks, 4);
 
 const marketAnalysis = await runOpportunityMarketResearch({ topic: 'Betriebliche Krankenversicherung', keywords: ['Mitarbeiterbindung', 'Benefits'], region: 'DACH', language: 'Deutsch' }, {

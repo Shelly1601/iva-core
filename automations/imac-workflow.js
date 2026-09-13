@@ -6,7 +6,7 @@ function waiting(summary, result = {}) {
 
 function commandFailure(command, label) {
   const detail = command?.error || command?.cancelReason || `Status ${command?.status || 'unbekannt'}`;
-  return new Error(`${label} auf dem iMac fehlgeschlagen: ${detail}`);
+  return new Error(`${label} auf dem Mac Mini fehlgeschlagen: ${detail}`);
 }
 
 export function createPlanbarForecastAutomationHandler({
@@ -14,7 +14,7 @@ export function createPlanbarForecastAutomationHandler({
   deviceAgentStatus,
   enqueueDeviceCommand,
   deviceCommandStatus,
-  deviceId = 'imac-nadine',
+  deviceId = 'macmini-nadine',
 } = {}) {
   return async ({ slotKey, attempt, previousResult = {} }) => {
     const project = await getProject('heat-hero');
@@ -33,7 +33,7 @@ export function createPlanbarForecastAutomationHandler({
     if (!commandId) {
       const imac = await deviceAgentStatus();
       if (imac.online !== true || imac.dispatchReady !== true) {
-        return waiting('Planbar-Forecast wartet auf den erreichbaren, attestierten iMac.', { commandId, jobId, statusCommandId });
+        return waiting('Planbar-Forecast wartet auf den erreichbaren, attestierten Mac Mini.', { commandId, jobId, statusCommandId });
       }
       const command = await enqueueDeviceCommand({
         deviceId,
@@ -53,9 +53,9 @@ export function createPlanbarForecastAutomationHandler({
     }
 
     const command = await deviceCommandStatus(commandId);
-    if (!command) throw new Error('Der iMac-Auftrag des Planbar-Forecasts ist nicht mehr auffindbar.');
+    if (!command) throw new Error('Der Mac Mini-Auftrag des Planbar-Forecasts ist nicht mehr auffindbar.');
     if (['queued', 'running'].includes(command.status)) {
-      return waiting('Planbar-Forecast wurde an den iMac übergeben und wartet auf den lokalen Start.', { commandId, jobId, statusCommandId });
+      return waiting('Planbar-Forecast wurde an den Mac Mini übergeben und wartet auf den lokalen Start.', { commandId, jobId, statusCommandId });
     }
     if (command.status !== 'completed') throw commandFailure(command, 'Planbar-Forecast');
 
@@ -73,12 +73,12 @@ export function createPlanbarForecastAutomationHandler({
     }
 
     jobId = command.result?.jobId || jobId;
-    if (!jobId) throw new Error('Der iMac hat weder einen verifizierten Versand noch eine lokale Forecast-Auftrags-ID gemeldet.');
+    if (!jobId) throw new Error('Der Mac Mini hat weder einen verifizierten Versand noch eine lokale Forecast-Auftrags-ID gemeldet.');
 
     if (statusCommandId) {
       const statusCommand = await deviceCommandStatus(statusCommandId);
       if (statusCommand && ['queued', 'running'].includes(statusCommand.status)) {
-        return waiting('Der Planbar-Forecast läuft auf dem iMac; der Endstatus wird weiter verfolgt.', { commandId, jobId, statusCommandId });
+        return waiting('Der Planbar-Forecast läuft auf dem Mac Mini; der Endstatus wird weiter verfolgt.', { commandId, jobId, statusCommandId });
       }
       if (statusCommand?.status === 'completed') {
         const local = statusCommand.result || {};
@@ -106,7 +106,7 @@ export function createPlanbarForecastAutomationHandler({
       requestedBy: 'automation-planbar-weekly-export',
       requestText: `Endstatus des Planbar-Forecasts prüfen (${slotKey})`,
     });
-    return waiting('Der Planbar-Forecast läuft auf dem iMac; der Versand wird bis zum Outlook-Nachweis verfolgt.', {
+    return waiting('Der Planbar-Forecast läuft auf dem Mac Mini; der Versand wird bis zum Outlook-Nachweis verfolgt.', {
       commandId,
       jobId,
       statusCommandId: statusCommand.id,
@@ -124,7 +124,7 @@ export function createProjectWorkflowAutomationHandler({
   deviceAgentStatus,
   enqueueDeviceCommand,
   deviceCommandStatus,
-  deviceId = 'imac-nadine',
+  deviceId = 'macmini-nadine',
 } = {}) {
   return async ({ slotKey, attempt, previousResult = {} }) => {
     const project = await getProject(projectId);
@@ -144,7 +144,7 @@ export function createProjectWorkflowAutomationHandler({
       const imac = await deviceAgentStatus();
       const missingActions = requiredAllowedActions.filter(action => !imac.allowedActions?.includes(action));
       if (imac.online !== true || imac.dispatchReady !== true || missingActions.length) {
-        return waiting(`${displayName} wartet auf den erreichbaren, passenden iMac-Agenten.`, { commandId, jobId, statusCommandId });
+        return waiting(`${displayName} wartet auf den erreichbaren, passenden Mac Mini-Agenten.`, { commandId, jobId, statusCommandId });
       }
       const command = await enqueueDeviceCommand({
         deviceId,
@@ -164,18 +164,18 @@ export function createProjectWorkflowAutomationHandler({
     }
 
     const command = await deviceCommandStatus(commandId);
-    if (!command) throw new Error(`Der iMac-Auftrag „${displayName}“ ist nicht mehr auffindbar.`);
+    if (!command) throw new Error(`Der Mac Mini-Auftrag „${displayName}“ ist nicht mehr auffindbar.`);
     if (['queued', 'running'].includes(command.status)) {
-      return waiting(`${displayName} wurde an den iMac übergeben und wartet auf den lokalen Start.`, { commandId, jobId, statusCommandId });
+      return waiting(`${displayName} wurde an den Mac Mini übergeben und wartet auf den lokalen Start.`, { commandId, jobId, statusCommandId });
     }
     if (command.status !== 'completed') throw commandFailure(command, displayName);
     jobId = command.result?.jobId || jobId;
-    if (!jobId) throw new Error(`Der iMac hat für „${displayName}“ keine lokale Auftrags-ID gemeldet.`);
+    if (!jobId) throw new Error(`Der Mac Mini hat für „${displayName}“ keine lokale Auftrags-ID gemeldet.`);
 
     if (statusCommandId) {
       const statusCommand = await deviceCommandStatus(statusCommandId);
       if (statusCommand && ['queued', 'running'].includes(statusCommand.status)) {
-        return waiting(`${displayName} läuft auf dem iMac; der Endstatus wird weiter verfolgt.`, { commandId, jobId, statusCommandId });
+        return waiting(`${displayName} läuft auf dem Mac Mini; der Endstatus wird weiter verfolgt.`, { commandId, jobId, statusCommandId });
       }
       if (statusCommand?.status === 'completed') {
         const local = statusCommand.result || {};
@@ -187,7 +187,7 @@ export function createProjectWorkflowAutomationHandler({
               workflowOutcome: local.workflowOutcome || 'completed',
               workflowSteps: Array.isArray(local.workflowSteps) ? local.workflowSteps : [],
               workflowMetrics: local.workflowMetrics || null,
-              summary: local.resultPreview || local.detail || `${displayName} wurde auf dem iMac vollständig abgeschlossen.`,
+              summary: local.resultPreview || local.detail || `${displayName} wurde auf dem Mac Mini vollständig abgeschlossen.`,
             };
           }
           throw new Error(local.error || local.detail || `Der lokale Workflow endete mit Status ${local.status}.`);
@@ -203,7 +203,7 @@ export function createProjectWorkflowAutomationHandler({
       requestedBy: `automation-${workflowId}`,
       requestText: `Endstatus prüfen: ${displayName} (${slotKey})`,
     });
-    return waiting(`${displayName} läuft auf dem iMac und wird bis zum Endzustand verfolgt.`, {
+    return waiting(`${displayName} läuft auf dem Mac Mini und wird bis zum Endzustand verfolgt.`, {
       commandId,
       jobId,
       statusCommandId: statusCommand.id,

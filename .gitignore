@@ -7,3 +7,6 @@ data/
 output/
 outputs/
 tmp/
+.iva-task-queue/
+.iva-runtime-home/
+.railway/

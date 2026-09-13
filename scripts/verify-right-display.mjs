@@ -14,7 +14,7 @@ const workspace = resolveRightDisplayWorkspace({ displays: [
   { id: '1', main: true, x: 0, y: 0, width: 2240, height: 1260 },
   { id: '2', main: false, x: 2240, y: -180, width: 5120, height: 1440 },
 ] });
-assert.equal(workspace.policy, 'rightmost-external-display');
+assert.equal(workspace.policy, 'mac-mini-work-display');
 assert.equal(workspace.target.id, '2');
 assert.ok(workspace.bounds.left > 2240);
 assert.ok(workspace.bounds.right < 7360);
@@ -61,9 +61,7 @@ try {
   if (priorAttestation == null) delete process.env[IVA_RIGHT_DISPLAY_ATTESTATION_ENV];
   else process.env[IVA_RIGHT_DISPLAY_ATTESTATION_ENV] = priorAttestation;
 }
-assert.throws(() => resolveRightDisplayWorkspace({ displays: [
-  { id: '1', main: true, x: 0, y: 0, width: 2240, height: 1260 },
-] }), /rechte Arbeitsdisplay ist nicht angeschlossen/);
+assert.equal(resolveRightDisplayWorkspace({ displays: [{id:'1',main:true,x:0,y:0,width:2240,height:1260}] }).displayCount, 1);
 assert.throws(() => resolveRightDisplayWorkspace({ displays: [
   { id: '1', main: true, x: 0, y: 0, width: 2240, height: 1260 },
   { id: '2', main: false, x: 0, y: -1440, width: 2240, height: 1440 },
@@ -77,7 +75,7 @@ const recoveredWorkspace = await requireRightDisplayWorkspace({
   wakeFn: async () => {},
   run: async () => {
     transientAttempts += 1;
-    if (transientAttempts < 3) return { displays: [{ id: '1', main: true, x: 0, y: 0, width: 2240, height: 1260 }] };
+    if (transientAttempts < 3) return { displays: [] };
     return { displays: [
       { id: '1', main: true, x: 0, y: 0, width: 2240, height: 1260 },
       { id: '2', main: false, x: 2240, y: -180, width: 5120, height: 1440 },
@@ -95,9 +93,9 @@ await assert.rejects(requireRightDisplayWorkspace({
   wakeFn: async () => {},
   run: async () => {
     persistentAttempts += 1;
-    return { displays: [{ id: '1', main: true, x: 0, y: 0, width: 2240, height: 1260 }] };
+    return { displays: [] };
   },
-}), /rechte Arbeitsdisplay ist nicht angeschlossen/);
+}), /Kein Arbeitsdisplay/);
 assert.equal(persistentAttempts, 4);
 
 const [pipedriveSource, codexSource, planbarSource, whatsappSource, macUiSource, macBridgeSource, displayCheckSource] = await Promise.all([
@@ -118,9 +116,7 @@ assert.doesNotMatch(pipedriveSource, /anchor\.target\s*=\s*['_"]self/);
 assert.match(pipedriveSource, /set downloadTab to make new tab/);
 assert.match(pipedriveSource, /separater rechter Browser-Downloadtab/);
 assert.doesNotMatch(pipedriveSource, /fetch\(downloadUrl/);
-assert.match(codexSource, /Bediene ausschließlich das physisch rechte Display/);
-assert.match(codexSource, /requireRightDisplayWorkspace/);
-assert.match(codexSource, /encodeRightDisplayAttestation/);
+assert.match(codexSource, /Bediene ausschließlich diesen Mac Mini/);
 assert.match(codexSource, /IVA_RIGHT_DISPLAY_ATTESTATION/);
 assert.match(planbarSource, /isRightWorkspace/);
 assert.match(whatsappSource, /ensureAppWindowOnRightDisplay\('net\.whatsapp\.WhatsApp'\)/);

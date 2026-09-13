@@ -4,22 +4,22 @@ set -euo pipefail
 workspace="$HOME/Library/Mobile Documents/com~apple~CloudDocs/IVA-Assistent/iva-core"
 
 model="$(/usr/sbin/sysctl -n hw.model 2>/dev/null || true)"
-if [[ "$model" != iMac* ]]; then
-  print -u2 "FEHLER: Dieser einmalige IVA-Start darf nur auf Nadines iMac ausgeführt werden."
+if [[ "$model" != Mac Mini* ]]; then
+  print -u2 "FEHLER: Dieser einmalige IVA-Start darf nur auf Nadines Mac Mini ausgeführt werden."
   exit 1
 fi
 
 if [[ ! -d "$workspace" ]]; then
-  print -u2 "FEHLER: Der verbindliche IVA-iCloud-Ordner wurde auf diesem iMac nicht gefunden."
+  print -u2 "FEHLER: Der verbindliche IVA-iCloud-Ordner wurde auf diesem Mac Mini nicht gefunden."
   exit 1
 fi
 
 print "IVA-DIREKTSTART B332BDF – Förderungslaufzeit, iCloud-Einzeldatei-Retry und lokale Dauerverbindung werden eingerichtet."
 
 # Holt bei Bedarf die bereits in iCloud veröffentlichte Agent-Version lokal auf
-# den iMac. Die Downloads laufen im Hintergrund, damit das Fenster nie wieder
+# den Mac Mini. Die Downloads laufen im Hintergrund, damit das Fenster nie wieder
 # scheinbar ohne Rückmeldung hängen bleibt.
-print "IVA lädt die aktuelle iMac-Komponente aus iCloud …"
+print "IVA lädt die aktuelle Mac Mini-Komponente aus iCloud …"
 /usr/bin/brctl download "$workspace/local-mac-helper" >/dev/null 2>&1 &!
 /usr/bin/brctl download "$workspace/local-mac-helper/install-imac-device-agent.mjs" >/dev/null 2>&1 &!
 /usr/bin/brctl download "$workspace/local-mac-helper/device-agent.mjs" >/dev/null 2>&1 &!
@@ -39,7 +39,7 @@ for attempt in {1..60}; do
 done
 
 if ! /usr/bin/grep -q "imac-local-v4" "$workspace/local-mac-helper/device-agent.mjs" 2>/dev/null; then
-  print -u2 "FEHLER: Die aktuelle IVA-Agent-Version ist auf diesem iMac noch nicht aus iCloud geladen worden."
+  print -u2 "FEHLER: Die aktuelle IVA-Agent-Version ist auf diesem Mac Mini noch nicht aus iCloud geladen worden."
   exit 1
 fi
 
@@ -57,7 +57,7 @@ if [[ -z "$node_bin" ]]; then
     arm64) node_arch="arm64" ;;
     x86_64) node_arch="x64" ;;
     *)
-      print -u2 "FEHLER: Die Prozessorarchitektur dieses iMac wird nicht unterstützt."
+      print -u2 "FEHLER: Die Prozessorarchitektur dieses Mac Mini wird nicht unterstützt."
       exit 1
       ;;
   esac
@@ -124,4 +124,4 @@ print "IVA richtet jetzt die vollständig lokale Dauerverbindung ein …"
 IVA_DEVICE_WORKSPACE="$workspace" IVA_DEVICE_RUNTIME_SOURCE="$bootstrap_source" \
   "$node_bin" "$bootstrap_source/local-mac-helper/install-imac-device-agent.mjs"
 
-print "IVA ist jetzt dauerhaft mit diesem iMac und dem zentralen iCloud-Ordner verbunden. Zwei fortlaufende Railway-Heartbeats wurden bestätigt."
+print "IVA ist jetzt dauerhaft mit diesem Mac Mini und dem zentralen iCloud-Ordner verbunden. Zwei fortlaufende Railway-Heartbeats wurden bestätigt."

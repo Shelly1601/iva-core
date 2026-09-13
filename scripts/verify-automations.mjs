@@ -31,7 +31,7 @@ check('Förder-Tageslauf ist täglich um 05:00 Uhr aktiv', fundingSequence?.enab
 check('Förder-Tageslauf benennt die feste Reihenfolge', /1 → 2 → 3/.test(fundingSequence?.name || ''));
 const planbarForecast = initial.find(item => item.id === 'planbar-weekly-export');
 check('Planbar-Forecast ist zentral freitags um 18:00 Uhr aktiv', planbarForecast?.enabled === true && planbarForecast.cron === '0 18 * * 5');
-check('Alle angesetzten täglichen iMac-Projektworkflows sind zentral terminiert', [
+check('Alle angesetzten täglichen Mac Mini-Projektworkflows sind zentral terminiert', [
   ['funding-daily-sequence', '0 5 * * *'],
   ['montage-required-fields-morning', '0 7 * * *'],
   ['planbar-completion-morning', '0 8 * * *'],
@@ -80,14 +80,14 @@ let waitingCalls = 0;
 const waitingRunner = createAutomationOrchestrator({
   'planbar-weekly-export': async ({ previousResult }) => {
     waitingCalls += 1;
-    if (!previousResult.commandId) return { status: 'waiting', commandId: 'forecast-command', summary: 'iMac läuft.' };
+    if (!previousResult.commandId) return { status: 'waiting', commandId: 'forecast-command', summary: 'Mac Mini läuft.' };
     return { commandId: previousResult.commandId, sentFolderVerified: true, summary: 'Outlook-Gesendet verifiziert.' };
   },
 });
 const waitingFirst = await waitingRunner.runAutomation('planbar-weekly-export', { now: fixedNow, slotKey: 'test:forecast-waiting' });
 const waitingResumed = await waitingRunner.runAutomation('planbar-weekly-export', { now: fixedNow, slotKey: 'test:forecast-waiting' });
 const waitingDuplicate = await waitingRunner.runAutomation('planbar-weekly-export', { now: fixedNow, slotKey: 'test:forecast-waiting' });
-check('Ein wartender iMac-Lauf wird nach Serverzyklen fortgesetzt und erst mit Endnachweis abgeschlossen', waitingFirst.run?.status === 'waiting'
+check('Ein wartender Mac Mini-Lauf wird nach Serverzyklen fortgesetzt und erst mit Endnachweis abgeschlossen', waitingFirst.run?.status === 'waiting'
   && waitingResumed.run?.status === 'completed' && waitingResumed.run?.result?.sentFolderVerified === true
   && waitingDuplicate.reason === 'duplicate' && waitingCalls === 2);
 

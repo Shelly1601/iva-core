@@ -5,7 +5,7 @@ import { deviceAgentStatus, enqueueDeviceCommand, listDeviceCommands } from '../
 import { listAgentRuns } from '../operations/store.js';
 import { PLANBAR_CAPACITY_TASK_TITLE } from '../local-mac-helper/planbar-browser-capacity.mjs';
 
-export const PUBLIC_SCHEDULING_RELEASE = 'imac-central-v8';
+export const PUBLIC_SCHEDULING_RELEASE = 'macmini-central-v1';
 export const PUBLIC_SCHEDULING_PATH = '/heat-hero/termin';
 export const PUBLIC_SCHEDULING_API = '/heat-hero-termin-api';
 const MAX_AGE = 5 * 60_000;
@@ -225,7 +225,7 @@ export function createPublicScheduling({
         if (previous.publicPayloadHash !== payloadHash) throw failure('Diese Anfrage wurde bereits übermittelt. Bitte für eine neue Anfrage die Seite neu öffnen.', 409);
         return ACK;
       }
-      // This only accepts a non-binding request. The existing iMac workflow
+      // This only accepts a non-binding request. The existing Mac Mini workflow
       // MUST reload Planbar before reserving and prove that fresh source check.
       // The public form may submit only while its verified proposal is fresh;
       // the later reservation still performs its independent operational read.

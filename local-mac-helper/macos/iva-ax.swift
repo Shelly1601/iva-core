@@ -257,8 +257,8 @@ func activeDisplayRecords() -> [[String: Any]] {
 
 func rightDisplayFrame() throws -> CGRect {
     let records = activeDisplayRecords()
-    guard records.count >= 2 else {
-        throw HelperError.message("IVA-Displayregel blockiert: Das rechte Arbeitsdisplay ist nicht angeschlossen.")
+    guard records.count >= 1 else {
+        throw HelperError.message("IVA-Displayregel blockiert: Kein Arbeitsdisplay ist verfügbar.")
     }
     let frames = records.compactMap { record -> CGRect? in
         guard let x = record["x"] as? CGFloat, let y = record["y"] as? CGFloat,
@@ -266,7 +266,7 @@ func rightDisplayFrame() throws -> CGRect {
         return CGRect(x: x, y: y, width: width, height: height)
     }
     guard let target = frames.max(by: { $0.maxX == $1.maxX ? $0.minX < $1.minX : $0.maxX < $1.maxX }),
-          frames.contains(where: { $0 != target && target.minX >= $0.maxX }) else {
+          (frames.count == 1 || frames.contains(where: { $0 != target && target.minX >= $0.maxX })) else {
         throw HelperError.message("IVA-Displayregel blockiert: Die Displays sind nicht eindeutig links/rechts angeordnet.")
     }
     return target

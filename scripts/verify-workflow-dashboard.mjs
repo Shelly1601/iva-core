@@ -14,13 +14,13 @@ const stale = new Date(now - STALE_AFTER_MS - 1).toISOString();
 const snapshot = {
   generatedAt: recent,
   activity: [
-    { id: 'run-live', jobId: 'job-live', name: 'Cockpit bauen', source: 'iMac · Codex', status: 'running', phase: 'testing', progress: 54, summary: 'Tests laufen.', updatedAt: recent },
-    { id: 'run-stale', name: 'Alter Lauf', source: 'iMac-Befehl', status: 'running', phase: 'running', progress: 70, summary: 'Seit langem ohne Signal.', updatedAt: stale },
+    { id: 'run-live', jobId: 'job-live', name: 'Cockpit bauen', source: 'Mac Mini · Codex', status: 'running', phase: 'testing', progress: 54, summary: 'Tests laufen.', updatedAt: recent },
+    { id: 'run-stale', name: 'Alter Lauf', source: 'Mac Mini-Befehl', status: 'running', phase: 'running', progress: 70, summary: 'Seit langem ohne Signal.', updatedAt: stale },
     { id: 'run-queued', name: 'Wartender Lauf', source: 'IVA Core', status: 'queued', summary: 'Eingereiht.', updatedAt: recent },
     { id: 'run-blocked', name: 'Fachlich blockiert', source: 'Railway-Automation', status: 'blocked', error: 'CAPTCHA verlangt externe Bestätigung.', updatedAt: recent },
     { id: 'run-failed', name: 'Technischer Fehler', source: 'Railway-Automation', status: 'failed', error: 'Temporärer Verbindungsfehler.', updatedAt: recent },
     { id: 'run-failed-duplicate', name: 'Technischer Fehler', source: 'Railway-Automation', status: 'failed', error: 'Temporärer Verbindungsfehler.', updatedAt: '2026-09-02T11:58:30.000Z' },
-    { id: 'run-old-blocker', name: 'Alter Blocker', source: 'iMac', status: 'blocked', detail: 'CAPTCHA verlangt externe Bestätigung.', updatedAt: '2026-08-30T10:00:00.000Z' },
+    { id: 'run-old-blocker', name: 'Alter Blocker', source: 'Mac Mini', status: 'blocked', detail: 'CAPTCHA verlangt externe Bestätigung.', updatedAt: '2026-08-30T10:00:00.000Z' },
     { id: 'run-generic-blocker', name: 'Unklarer Blocker', source: 'Codex', status: 'blocked', blocker: 'Der Workflow endete mit einem fachlichen oder technischen Blocker.', updatedAt: recent },
     { id: 'run-done', name: 'Erledigter Lauf', source: 'IVA Core', status: 'completed', summary: 'Ergebnis geprüft.', updatedAt: recent },
   ],
@@ -33,7 +33,7 @@ const snapshot = {
 const dashboard = buildWorkflowDashboard(snapshot, { now });
 assert.equal(dashboard.counts.running, 1, 'Nur frische echte Läufe dürfen als laufend zählen');
 assert.equal(dashboard.running[0].title, 'Cockpit bauen');
-assert.equal(dashboard.running[0].source, 'iMac · Codex');
+assert.equal(dashboard.running[0].source, 'Mac Mini · Codex');
 assert.equal(dashboard.running[0].phase, 'Tests');
 assert.equal(dashboard.running[0].progress, 54);
 assert.ok(dashboard.waiting.some(item => item.id === 'run-stale' && item.stale), 'Veraltete Läufe müssen aus „laufend“ entfernt werden');

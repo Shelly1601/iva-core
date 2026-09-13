@@ -85,7 +85,7 @@ await Promise.all(Array.from({length:6},()=>refreshing.refresh(refreshing.issueT
 assert.equal(refreshes,1,'Mehrere Besucher erzeugen nur eine parallele Planbar-Aktualisierung');
 assert.equal(coalesced[0].action,'planbar.search.refresh','Öffentliche Force-Refreshes erzeugen ausschließlich den direkten Lesebefehl');
 assert.deepEqual(coalesced[0].payload,undefined,'Der direkte Read benötigt keinen Browser-Worker-Prompt');
-assert.equal((await refreshing.availability(refreshing.issueToken())).phase,'queued','Wartender iMac wird als Warteschlange gemeldet');
+assert.equal((await refreshing.availability(refreshing.issueToken())).phase,'queued','Wartender Mac Mini wird als Warteschlange gemeldet');
 coalesced[0].status='running';
 assert.equal((await refreshing.availability(refreshing.issueToken())).phase,'checking','Laufende Planbar-Prüfung wird getrennt gemeldet');
 coalesced[0].status='failed';
@@ -111,9 +111,9 @@ assert.equal((await workerAware.availability(workerAware.issueToken())).status,'
 const lateVisitor=createPublicScheduling({now:()=>time,project:async()=>({planbarCapacity:{...capacity,pageRefreshedAt:new Date(time-60000).toISOString(),updatedAt:new Date(time-10000).toISOString()}}),commands:async()=>coalesced,runs:async()=>capacityRuns});
 assert.equal((await lateVisitor.availability(lateVisitor.issueToken())).status,'ready','Später hinzugekommene Besucher verwenden dasselbe noch frische Ergebnis');
 const fastPath=createPublicScheduling({now:()=>time,project:async()=>({planbarCapacity:{...capacity,pageRefreshedAt:new Date(time-60000).toISOString(),updatedAt:new Date(time-10000).toISOString()}}),
-  agentStatus:async()=>{throw new Error('iMac darf schnellen Anzeigeweg nicht blockieren');},commands:async()=>{throw new Error('Keine Warteschlange im schnellen Anzeigeweg');},runs:async()=>{throw new Error('Keine Jobabfrage im schnellen Anzeigeweg');},enqueue:async()=>{throw new Error('Kein unnötiger Browserauftrag');}});
-assert.equal((await fastPath.refresh(fastPath.issueToken())).status,'ready','Frischer Cache benötigt weder iMac noch neue Queue-/Jobabfrage');
-await assert.rejects(fastPath.refresh(fastPath.issueToken(),{force:true}),/iMac darf/,'Explizites Aktualisieren überspringt den Cache');
+  agentStatus:async()=>{throw new Error('Mac Mini darf schnellen Anzeigeweg nicht blockieren');},commands:async()=>{throw new Error('Keine Warteschlange im schnellen Anzeigeweg');},runs:async()=>{throw new Error('Keine Jobabfrage im schnellen Anzeigeweg');},enqueue:async()=>{throw new Error('Kein unnötiger Browserauftrag');}});
+assert.equal((await fastPath.refresh(fastPath.issueToken())).status,'ready','Frischer Cache benötigt weder Mac Mini noch neue Queue-/Jobabfrage');
+await assert.rejects(fastPath.refresh(fastPath.issueToken(),{force:true}),/Mac Mini darf/,'Explizites Aktualisieren überspringt den Cache');
 const oldAgent = createPublicScheduling({agentStatus:async()=>({online:true,dispatchReady:true,release:'imac-central-v5'})});
 await assert.rejects(oldAgent.refresh(oldAgent.issueToken()),/nicht erreichbar/);
 
@@ -273,7 +273,7 @@ const mail={messageId:'fixture-mail',from:'n.sell@heat-hero.com',recipientHash:'
 await tasks.recordPlanbarTaskProgress(jobId,{...complete,confirmationMail:mail},{report});
 assert.equal((await tasks.getCodexTaskStatus(jobId)).planbarProgress.confirmationMail.verified,true);
 
-// Isolated HTTP test: no business system, email, keychain or real iMac job.
+// Isolated HTTP test: no business system, email, keychain or real Mac Mini job.
 const app=express();app.use(express.json());
 const httpNow=Date.parse('2026-08-28T09:00:00Z');
 let httpCapacity=structuredClone(capacity);const httpCommands=[];
@@ -377,4 +377,4 @@ ids.refreshWeeks.click();await flush();
 assert.equal(ids.refreshWeeks.dataset.state,'error');assert.equal(ids.submit.disabled,true);assert.match(ids.availabilityStatus.textContent,/Aktualisierung fehlgeschlagen/);
 assert.match(ids.error.textContent,/nicht erreichbar/,'Der echte Fetch-Fehlerpfad wird sichtbar behandelt');
 assert(thanks.includes('Angaben ohne Gewähr')&&thanks.includes('innerhalb der nächsten Stunde')&&thanks.includes('noch keine verbindliche Terminbestätigung'));
-console.log('PASS öffentlicher Heat-Hero-Terminlink: Auto-/Force-Refresh bis zum neuen Snapshot, Kapazitätskarten, Auswahlzustände, echter Fehlerpfad, iMac-Übergabe, Datenschutz und HTTP-Schutz. Keine echten Kundentermine oder Nachrichten.');
+console.log('PASS öffentlicher Heat-Hero-Terminlink: Auto-/Force-Refresh bis zum neuen Snapshot, Kapazitätskarten, Auswahlzustände, echter Fehlerpfad, Mac Mini-Übergabe, Datenschutz und HTTP-Schutz. Keine echten Kundentermine oder Nachrichten.');

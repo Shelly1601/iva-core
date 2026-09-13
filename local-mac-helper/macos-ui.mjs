@@ -93,7 +93,7 @@ export async function ensureMacUiBridge() {
   const temporaryDigest = `${BINARY_DIGEST}.${randomUUID()}.tmp`;
   try {
     if (await isCurrent()) return BINARY;
-    await run('/usr/bin/swiftc', [SOURCE, '-o', temporaryBinary], {
+    await run('/usr/bin/swiftc', ['-sdk', process.env.SDKROOT || '/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk', SOURCE, '-o', temporaryBinary], {
       timeoutMs: SWIFT_COMPILE_TIMEOUT_MS,
       terminateProcessGroup: true,
     });

@@ -19,12 +19,12 @@ function successfulSuspension(command) {
 }
 
 export function fundingRuntimeUpdatePrompt() {
-  return `Aktualisiere ausschließlich die lokale IVA-Gerätelaufzeit auf diesem iMac aus dem bereits synchronisierten autoritativen iCloud-Workspace.
+  return `Aktualisiere ausschließlich die lokale IVA-Gerätelaufzeit auf diesem Mac Mini aus dem bereits synchronisierten autoritativen iCloud-Workspace.
 
 Arbeitsordner: /Users/nadine/Library/Mobile Documents/com~apple~CloudDocs/IVA-Assistent/iva-core
 
-1. Prüfe, dass der Hostname ein iMac ist und dass genau dieser iCloud-Arbeitsordner aktiv ist.
-2. Führe genau einmal das bereits veröffentlichte, SHA-256-geprüfte Direktpaket aus: zsh IVA-iMac-JETZT-fertigstellen.command
+1. Prüfe, dass der Hostname ein Mac Mini ist und dass genau dieser iCloud-Arbeitsordner aktiv ist.
+2. Führe genau einmal das bereits veröffentlichte, SHA-256-geprüfte Direktpaket aus: zsh IVA-Mac Mini-JETZT-fertigstellen.command
 3. Warte den vollständigen Abschluss dieses Befehls ab. Er lädt die fest gepinnte Laufzeit direkt aus GitHub und verwendet iCloud nicht als Laufzeitquelle.
 4. Verifiziere das ausgegebene Installationsergebnis: zwei fortlaufende Railway-Heartbeats, Laufzeitmodus local und die Aktionsliste enthält funding.legacy-monitor.suspend.
 
@@ -37,17 +37,17 @@ export async function reconcileFundingImacRuntime({
   listCommands,
 } = {}) {
   if (typeof getStatus !== 'function' || typeof enqueue !== 'function' || typeof listCommands !== 'function') {
-    throw new Error('Für den iMac-Laufzeitabgleich fehlen interne Abhängigkeiten.');
+    throw new Error('Für den Mac Mini-Laufzeitabgleich fehlen interne Abhängigkeiten.');
   }
   const status = await getStatus(IVA_IMAC_DEVICE_ID);
   if (status?.attested !== true || status?.online !== true) {
-    return { status: 'waiting_for_imac', detail: 'Der attestierte iMac ist noch nicht online.' };
+    return { status: 'waiting_for_imac', detail: 'Der attestierte Mac Mini ist noch nicht online.' };
   }
   const allowed = new Set(Array.isArray(status.allowedActions) ? status.allowedActions : []);
   const commands = await listCommands({ deviceId: IVA_IMAC_DEVICE_ID, limit: 100 });
   if (!allowed.has(FUNDING_RUNTIME_REQUIRED_ACTION)) {
     if (!allowed.has('codex.task.start')) {
-      return { status: 'blocked', detail: 'Die alte iMac-Laufzeit kann den sicheren Aktualisierungsauftrag nicht annehmen.' };
+      return { status: 'blocked', detail: 'Die alte Mac Mini-Laufzeit kann den sicheren Aktualisierungsauftrag nicht annehmen.' };
     }
     const failedUpdates = commands.filter(command => command.action === 'codex.task.start'
       && command.payload?.requestId === FUNDING_RUNTIME_MARKER
@@ -56,26 +56,26 @@ export async function reconcileFundingImacRuntime({
       return {
         status: 'blocked_icloud_materialization',
         attempts: failedUpdates.length,
-        detail: failedUpdates[0]?.error || 'Die iMac-iCloud-Dateien konnten wiederholt nicht materialisiert werden.',
+        detail: failedUpdates[0]?.error || 'Die Mac Mini-iCloud-Dateien konnten wiederholt nicht materialisiert werden.',
       };
     }
     const command = await enqueue({
       deviceId: IVA_IMAC_DEVICE_ID,
       action: 'codex.task.start',
       payload: {
-        title: 'iMac-Laufzeit für den Förderlauf aktualisieren',
+        title: 'Mac Mini-Laufzeit für den Förderlauf aktualisieren',
         requestId: FUNDING_RUNTIME_MARKER,
         mode: 'operational',
         prompt: fundingRuntimeUpdatePrompt(),
         acceptanceCriteria: [
-          'Die lokale iMac-Laufzeit stammt aus dem autoritativen IVA-iCloud-Workspace.',
+          'Die lokale Mac Mini-Laufzeit stammt aus dem autoritativen IVA-iCloud-Workspace.',
           'Zwei fortlaufende Railway-Heartbeats bestätigen den neu gestarteten Agenten.',
           'Die Aktionsliste enthält funding.legacy-monitor.suspend.',
           'Kein Förderlauf und keine externe Kommunikation wurden ausgelöst.',
         ],
       },
       requestedBy: 'funding-runtime-reconciler',
-      requestText: `[${FUNDING_RUNTIME_MARKER}] Lokale iMac-Laufzeit ohne Fachaktionen aktualisieren`,
+      requestText: `[${FUNDING_RUNTIME_MARKER}] Lokale Mac Mini-Laufzeit ohne Fachaktionen aktualisieren`,
     });
     return { status: 'runtime_update_queued', commandId: command.id };
   }
@@ -100,7 +100,7 @@ export async function reconcileFundingImacRuntime({
           displayName: 'Förderung – Tageslauf 1 → 2 → 3',
         },
         requestedBy: 'funding-runtime-catchup',
-        requestText: `[${FUNDING_RUNTIME_MARKER}] Ausgefallenen 05:00-Förderlauf heute genau einmal auf dem iMac nachholen`,
+        requestText: `[${FUNDING_RUNTIME_MARKER}] Ausgefallenen 05:00-Förderlauf heute genau einmal auf dem Mac Mini nachholen`,
       });
       return {
         status: 'ready_funding_catchup_queued',

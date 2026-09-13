@@ -62,8 +62,8 @@
   function showProgress(data) {
     if (data.phase === 'queued') {
       $('availabilityStatus').textContent = displayed?.weeks?.length
-        ? 'Der bisherige Stand bleibt vorläufig sichtbar. Die neue Planbar-Prüfung wartet auf den attestierten iMac und startet automatisch.'
-        : 'Die Planbar-Prüfung wartet auf den attestierten iMac und startet automatisch. Bitte lassen Sie die Seite geöffnet.';
+        ? 'Der bisherige Stand bleibt vorläufig sichtbar. Die neue Planbar-Prüfung wartet auf den attestierten Mac Mini und startet automatisch.'
+        : 'Die Planbar-Prüfung wartet auf den attestierten Mac Mini und startet automatisch. Bitte lassen Sie die Seite geöffnet.';
     } else {
       $('availabilityStatus').textContent = displayed?.weeks?.length
         ? 'Der bisherige Stand bleibt vorläufig sichtbar. Planbar wird gerade neu geladen und vollständig geprüft …'
