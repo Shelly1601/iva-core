@@ -35,23 +35,29 @@ const args=buildCodexCliArguments({jobId:crypto.randomUUID(),mode:'operational',
 assert.ok(args.includes('danger-full-access'));assert.ok(args.includes('approval_policy="never"'));assert.ok(!args.includes('--approve-for-me'));
 console.log('Local binding, access boundary, recovery and display: passed');
 const port=19431;
-const child=spawn(process.execPath,['index.js'],{cwd:new URL('..',import.meta.url).pathname,env:{...process.env,DATA_DIR:data,PORT:String(port),MACMINI_COCKPIT_TOKEN:cockpitToken,MACMINI_DEVICE_TOKEN:deviceToken,API_TOKEN:'retired-browser-token',IMAC_DEVICE_TOKEN:'retired-device-token',RAILWAY_ENVIRONMENT:'test'},stdio:['ignore','pipe','pipe']});
+const child=spawn(process.execPath,['index.js'],{cwd:new URL('..',import.meta.url).pathname,env:{...process.env,DATA_DIR:data,PORT:String(port),MACMINI_COCKPIT_TOKEN:cockpitToken,MACMINI_DEVICE_TOKEN:deviceToken,API_TOKEN:'existing-remote-cockpit-token',IMAC_DEVICE_TOKEN:'retired-device-token',RAILWAY_ENVIRONMENT:'test'},stdio:['ignore','pipe','pipe']});
 let logs='';child.stdout.on('data',x=>logs+=x);child.stderr.on('data',x=>logs+=x);
 const base=`http://127.0.0.1:${port}`;
 const meta={hostname:EXECUTION_HOSTNAME,hardwareModel:EXECUTION_HARDWARE_MODEL,hardwareFingerprint:EXECUTION_HARDWARE_FINGERPRINT,workspace:EXECUTION_WORKSPACE,localWorkspace:true,iCloudAuthoritative:false,protocolVersion:EXECUTION_PROTOCOL_VERSION,release:'macmini-test',allowedActions:['agent.status','codex.task.start']};
 const agentHeaders={authorization:`Bearer ${deviceToken}`,'content-type':'application/json','x-iva-agent-host':meta.hostname,'x-iva-agent-hardware-model':meta.hardwareModel,'x-iva-agent-fingerprint':meta.hardwareFingerprint,'x-iva-agent-workspace':meta.workspace,'x-iva-agent-local-workspace':'true','x-iva-agent-icloud':'false','x-iva-agent-protocol':String(meta.protocolVersion),'x-iva-agent-release':meta.release};
 try{
  let ready=false;for(let i=0;i<100;i++){if(child.exitCode!==null)throw Error(logs);try{if((await fetch(base+'/health')).ok){ready=true;break}}catch{}await new Promise(r=>setTimeout(r,100))}assert.ok(ready,logs);
- assert.equal((await fetch(base+'/cockpit')).status,403);
- assert.equal((await fetch(base+'/api/todos',{headers:{authorization:'Bearer retired-browser-token'}})).status,403);
+ assert.equal((await fetch(base+'/cockpit')).status,200);
+ assert.equal((await fetch(base+'/cockpit-v9.css')).status,200);
+ assert.equal((await fetch(base+'/api/todos')).status,401);
+ assert.equal((await fetch(base+'/api/todos',{headers:{authorization:'Bearer existing-remote-cockpit-token'}})).status,200);
+ assert.equal((await fetch(base+'/health/pipedrive')).status,403);
+ assert.equal((await fetch(base+'/device-agent/imac-nadine/heartbeat',{method:'POST',headers:{authorization:'Bearer existing-remote-cockpit-token'},body:'{}'})).status,401);
+ assert.equal((await fetch(base+'/api/todos',{headers:{authorization:'Bearer retired-browser-token'}})).status,401);
  assert.equal((await fetch(base+'/telegram',{method:'POST',headers:{'content-type':'application/json'},body:'{}'})).status,403);
  assert.equal((await fetch(base+'/cockpit',{headers:{'x-iva-macmini-cockpit':cockpitToken}})).status,200);
  assert.equal((await fetch(base+'/device-agent/imac-nadine/heartbeat',{method:'POST',headers:{...agentHeaders,authorization:'Bearer retired-device-token'},body:JSON.stringify(meta)})).status,401);
  assert.equal((await fetch(base+`/device-agent/${EXECUTION_DEVICE_ID}/heartbeat`,{method:'POST',headers:{...agentHeaders,'x-iva-agent-fingerprint':'wrong'},body:JSON.stringify(meta)})).status,401);
  let response=await fetch(base+`/device-agent/${EXECUTION_DEVICE_ID}/heartbeat`,{method:'POST',headers:agentHeaders,body:JSON.stringify(meta)});assert.equal(response.status,200,await response.clone().text());
- response=await fetch(base+`/api/devices/${EXECUTION_DEVICE_ID}/commands`,{method:'POST',headers:{'x-iva-macmini-cockpit':cockpitToken,'content-type':'application/json'},body:JSON.stringify({action:'agent.status',confirmed:true})});assert.equal(response.status,202,await response.clone().text());
+ response=await fetch(base+`/api/devices/${EXECUTION_DEVICE_ID}/commands`,{method:'POST',headers:{authorization:'Bearer existing-remote-cockpit-token','content-type':'application/json'},body:JSON.stringify({action:'agent.status',confirmed:true})});assert.equal(response.status,202,await response.clone().text());
+ assert.equal((await fetch(base+'/api/devices/imac-nadine/commands',{method:'POST',headers:{authorization:'Bearer existing-remote-cockpit-token','content-type':'application/json'},body:JSON.stringify({action:'agent.status'})})).status,400);
  response=await fetch(base+`/device-agent/${EXECUTION_DEVICE_ID}/commands/next`,{headers:agentHeaders});assert.equal(response.status,200,await response.clone().text());const {command}=await response.json();assert.equal(command.deviceId,EXECUTION_DEVICE_ID);
  response=await fetch(base+`/device-agent/${EXECUTION_DEVICE_ID}/commands/${command.id}/complete`,{method:'POST',headers:agentHeaders,body:JSON.stringify({leaseToken:command.leaseToken,ok:true,result:{verified:true}})});assert.equal(response.status,200,await response.clone().text());
  response=await fetch(base+`/device-agent/${EXECUTION_DEVICE_ID}/commands/next`,{headers:agentHeaders});assert.equal((await response.json()).command,null);
- console.log('HTTP server: old cockpit and device tokens rejected; exclusive Mac Mini heartbeat, queue, claim and completion passed');
+ console.log('HTTP server: remote cockpit authenticated; other execution devices rejected; Mac Mini queue, claim and completion passed');
 }finally{child.kill('SIGTERM');if(child.exitCode===null)await once(child,'exit');await rm(data,{recursive:true,force:true})}

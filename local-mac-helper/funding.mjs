@@ -187,16 +187,16 @@ export function resolveFundingRecipients(input = {}) {
   }
 
   const suppliedCc = Array.isArray(input.cc) ? input.cc.map(extractEmailAddress).filter(Boolean) : [];
-  if (suppliedCc.length > 1) throw new Error('Für einen Förderentwurf darf höchstens ein eindeutig zugeordneter Vertriebspartner im CC stehen.');
+  if (suppliedCc.length > 1) throw new Error('Für einen Förderentwurf darf höchstens ein zuständiger Vertriebsleiter im CC stehen.');
   const vpName = clean(input.vpName || input.vertriebspartnerName);
-  const rawVpEmail = input.vpEmail || input.vertriebspartnerEmail || suppliedCc[0] || extractEmailAddress(vpName);
+  const rawVpEmail = input.vpEmail || input.vertriebspartnerEmail || extractEmailAddress(vpName);
   const vpEmail = extractEmailAddress(rawVpEmail);
-  if (suppliedCc.length && vpEmail && suppliedCc[0] !== vpEmail) {
-    throw new Error('Die übergebene CC-Adresse stimmt nicht mit der erkannten Vertriebspartner-E-Mail überein.');
+  const supervisor = resolveFundingSupervisor(input);
+  if (suppliedCc.length && suppliedCc[0] !== supervisor.email) {
+    throw new Error('Die übergebene CC-Adresse stimmt nicht mit dem zuständigen Vertriebsleiter überein. Vertriebspartner oder interne Bearbeiter sind kein Ersatzempfänger.');
   }
   const warnings = [];
-  if (rawVpEmail && !vpEmail) warnings.push('Die Vertriebspartner-E-Mail ist nicht eindeutig gültig und wurde nicht ins CC übernommen.');
-  if (!vpEmail) warnings.push('Keine eindeutige Vertriebspartner-E-Mail vorhanden; der Entwurf bleibt ohne CC und muss kontrolliert werden.');
+  if (rawVpEmail && !vpEmail) warnings.push('Die Vertriebspartner-E-Mail ist nicht eindeutig gültig und kann nicht als Zuordnungsbeleg verwendet werden.');
   const salutation = /^(herr|frau)$/i.test(clean(input.customerSalutation || input.salutation))
     ? `${clean(input.customerSalutation || input.salutation)} `
     : '';
@@ -204,10 +204,11 @@ export function resolveFundingRecipients(input = {}) {
 
   return {
     to: [customerEmail],
-    cc: vpEmail && vpEmail !== customerEmail ? [vpEmail] : [],
+    cc: supervisor.email !== customerEmail ? [supervisor.email] : [],
     customerEmail,
     vpName,
     vpEmail: vpEmail || null,
+    supervisor,
     greeting: `Guten Tag ${salutation}${customerName},`,
     warnings,
   };

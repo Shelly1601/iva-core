@@ -22,6 +22,14 @@ function recipients(values, field) {
   return [...new Set(values.filter(Boolean).map(value => email(value, field)))].slice(0, 100);
 }
 
+export function assertFundingDraftGreeting({from, to, body, html = ''}) {
+  if (from !== 'foerderung@heat-hero.com' || to.length !== 1 || to[0] !== 'k.bolz@heat-hero.com') return;
+  const htmlText = html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;|&#160;/g, ' ').trim();
+  if (!/^Hallo\s+Kati\s*,/i.test(body.trim()) || (html && !/^Hallo\s+Kati\s*,/i.test(htmlText))) {
+    throw new Error('Förderentwurf an Katharina Bolz: Der neue Begleittext muss oben mit „Hallo Kati,“ beginnen. Ein zitierter alter Mailverlauf ersetzt diese Anrede nicht.');
+  }
+}
+
 export function normalizeDraftPayload(input = {}, { allowNoRecipient = false } = {}) {
   const subject = String(input.subject || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 240);
   const body = String(input.body || '').replace(/\0/g, '').trim().slice(0, 100000);
@@ -35,6 +43,7 @@ export function normalizeDraftPayload(input = {}, { allowNoRecipient = false } =
   if (!body) throw new Error('Mailtext fehlt.');
   if (!allowNoRecipient && !to.length) throw new Error('Mindestens ein Empfänger fehlt.');
   if (!from) throw new Error('Der gewünschte Absender fehlt. Ohne eindeutigen Absender wird kein Outlook-Entwurf erstellt.');
+  assertFundingDraftGreeting({from, to, body, html});
   return { subject, body, html, to, cc, bcc, attachments, from };
 }
 
@@ -106,6 +115,7 @@ export function buildForwardDraftAppleScript(input = {}, now = new Date()) {
     input.customerEmail,
     input.vpEmail,
   ], 'Originalempfänger');
+  assertFundingDraftGreeting({from, to, body});
   if (!dedupeNeedle) throw new Error('Für den internen Weiterleitungsentwurf fehlt die eindeutige Deal-ID.');
   const lines = [
     'tell application id "com.microsoft.Outlook"',
