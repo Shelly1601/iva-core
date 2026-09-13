@@ -125,7 +125,7 @@ assert.equal(buildFundingCaseReference({ customerName: 'Max Mustermann', locatio
 assert.equal(buildFundingCaseReference({ customerName: 'Max Mustermann' }).text, 'Max Mustermann');
 const namedRecipients = resolveFundingRecipients({ customerName: 'Max Mustermann', customerEmail: 'max@example.com', vpName: 'Holger von Ameln', vpEmail: 'holger@example.com (Büro)', directSalesRoster: { members: [] } });
 assert.deepEqual(namedRecipients.to, ['max@example.com']);
-assert.deepEqual(namedRecipients.cc, ['p.germer@heat-hero.com']);
+assert.deepEqual(namedRecipients.cc, ['holger@example.com']);
 assert.equal(namedRecipients.greeting, 'Guten Tag Max Mustermann,');
 const directRoster = { members: ['Mirwais Barak', 'Anton Roschnow', 'Katrin Müller'] };
 assert.equal(matchDirectSalesPartner({ vpName: 'Mirwais Barak', vpEmail: 'm.barak@ekd-solar.de' }, directRoster).memberName, 'Mirwais Barak');
@@ -134,7 +134,7 @@ assert.equal(resolveFundingSupervisor({ fundingRoute: 'direct_sales', vpEmail: '
 assert.equal(resolveFundingSupervisor({ vpEmail: 'external@ekd-solar.de', directSalesRoster: { members: [] } }).email, 'f.bolz@heat-hero.com');
 assert.equal(resolveFundingSupervisor({ vpEmail: 'external@example.com', directSalesRoster: { members: [] } }).email, 'p.germer@heat-hero.com');
 const emailOnlyRecipients = resolveFundingRecipients({ customerName: 'Max Mustermann', customerEmail: 'max@example.com', vpName: 'vp@example.com', directSalesRoster: { members: [] } });
-assert.deepEqual(emailOnlyRecipients.cc, ['p.germer@heat-hero.com']);
+assert.deepEqual(emailOnlyRecipients.cc, ['vp@example.com']);
 assert.equal(emailOnlyRecipients.greeting, 'Guten Tag Max Mustermann,');
 assert.throws(() => resolveFundingRecipients({ customerName: 'Max Mustermann' }), /Kunden-E-Mail-Adresse/);
 assert.throws(() => resolveFundingRecipients({ customerName: 'Max Mustermann', customerEmail: 'max@example.com', to: ['falsch@example.com'] }), /An-Feld/);
@@ -168,7 +168,7 @@ const childQuestion = renderFundingMinorChildrenQuestionEmail({
   customerName: 'Max Mustermann', customerEmail: 'max@example.com', orderNumber: 'A-4711', vpEmail: 'vp@example.com',
 });
 assert.deepEqual(childQuestion.recipients.to, ['max@example.com']);
-assert.deepEqual(childQuestion.recipients.cc, ['p.germer@heat-hero.com']);
+assert.deepEqual(childQuestion.recipients.cc, ['vp@example.com']);
 assert.match(childQuestion.body, /Kind unter 18 Jahren/);
 assert.equal(resolveFundingNoResponseEscalationRecipient({ salesStructure: 'EKD' }).email, 'k.bolz@heat-hero.com');
 assert.equal(resolveFundingNoResponseEscalationRecipient({ vpEmail: 'anna@ekd-solar.de' }).email, 'k.bolz@heat-hero.com');
@@ -674,7 +674,7 @@ console.log('PASS IVA Mac Helper: sichere Förder-Prüfläufe, Outlook-Entwürfe
 
 const sarahPartner = resolveFundingRecipients({customerName:'Max Mustermann',customerEmail:'max@example.com',vpName:'Sarah Lux',vpEmail:'s.lux@example.com',directSalesRoster:{members:[]}});
 assert.deepEqual(sarahPartner.to,['max@example.com']);
-assert.deepEqual(sarahPartner.cc,['p.germer@heat-hero.com']);
+assert.throws(()=>resolveFundingRecipients({customerName:'Max Mustermann',customerEmail:'max@example.com',to:['s.lux@example.com']}),/An-Feld/);
 assert.throws(()=>normalizeDraftPayload({from:'foerderung@heat-hero.com',to:['k.bolz@heat-hero.com'],subject:'WG: Förderunterlagen',body:'Hallo Florian,\nBitte prüfen.'}),/Hallo Kati/);
 assert.throws(()=>normalizeDraftPayload({from:'foerderung@heat-hero.com',to:['k.bolz@heat-hero.com'],subject:'WG: Förderunterlagen',body:'Hallo Kati,\nBitte prüfen.',html:'<p>Hallo Florian,</p>'}),/Hallo Kati/);
 assert.equal(normalizeDraftPayload({from:'foerderung@heat-hero.com',to:['k.bolz@heat-hero.com'],subject:'WG: Förderunterlagen',body:'Hallo Kati,\nBitte prüfen.\n\nOriginal: Hallo Florian,',html:'<p>Hallo Kati,</p><blockquote>Hallo Florian,</blockquote>'}).to[0],'k.bolz@heat-hero.com');
