@@ -71,3 +71,41 @@ test('failed or vanished project writes cannot be reported as saved', async () =
   assert.notEqual(output?.saved, true);
   assert.notEqual(output?.ok, true);
 });
+
+test('LLM connection status distinguishes provider catalog, metadata and configured project accounts', async () => {
+  const cases = [
+    { name: 'catalog-only', items: [], connectionCount: 0, configuredAccountCount: 0 },
+    { name: 'metadata-only', items: [{ provider: 'instagram', label: 'Alpha planned account', handle: 'alpha_profile', configured: false, hasToken: false, status: 'missing_connection' }], connectionCount: 1, configuredAccountCount: 0 },
+    { name: 'configured-account', items: [{ provider: 'instagram', label: 'Alpha configured account', handle: 'alpha_profile', configured: true, hasToken: true, status: 'configured', verifiedAt: null }], connectionCount: 1, configuredAccountCount: 1 },
+  ];
+  for (const fixture of cases) {
+    const requestedProjects = [];
+    const original = projectSkill({
+      projectId: alpha.id, getProject: async () => alpha, readProjectFile, addProjectNote,
+      connections: { list: async projectId => {
+        requestedProjects.push(projectId);
+        assert.equal(projectId, alpha.id);
+        return {
+          items: fixture.items,
+          providers: [{ id: 'instagram', label: 'CATALOG_IS_NOT_A_CONNECTED_ACCOUNT', configured: true }],
+          encryptionReady: true,
+        };
+      } },
+    });
+    const scoped = filterProjectTools({}, { projectId: alpha.id, projectTools: original });
+    const output = await prepareIvaTool(scoped.listCurrentProjectConnections).execute({});
+    assert.deepEqual(requestedProjects, [alpha.id], fixture.name);
+    assert.equal(output.projectId, alpha.id, fixture.name);
+    assert.equal(output.connectionCount, fixture.connectionCount, fixture.name);
+    assert.equal(output.configuredAccountCount, fixture.configuredAccountCount, fixture.name);
+    assert.deepEqual(output.connections, fixture.items, fixture.name);
+    assert.equal(output.providers, undefined, fixture.name);
+    assert.equal(output.encryptionReady, undefined, fixture.name);
+    assert.doesNotMatch(JSON.stringify(output), /CATALOG_IS_NOT_A_CONNECTED_ACCOUNT/, fixture.name);
+    assert.equal(typeof output.summary, 'string', fixture.name);
+    assert.ok(output.summary.trim(), fixture.name);
+    if (fixture.configuredAccountCount === 0) assert.match(output.summary, /kein|nicht|fehl|vorgemerkt|noch|\b0\b/i, fixture.name);
+    if (fixture.name === 'catalog-only') assert.deepEqual(output.connections, []);
+    if (fixture.name === 'configured-account') assert.equal(output.connections[0].verifiedAt, null, 'Configured must not become verified.');
+  }
+});
