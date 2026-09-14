@@ -1,3 +1,6 @@
+import { createWebsiteService } from './websites/service.js';
+import { registerWebsiteRoutes, registerWebsitePublicationRoute } from './websites/routes.js';
+import { websiteSkill } from './websites/tools.js';
 import { createSpecialistRunner } from './core/specialists.js';
 import { specialistSkill } from './skills/specialists.js';
 import { createInstagramConnector } from './integrations/instagram.js';
@@ -355,7 +358,10 @@ import { reconcileFundingImacRuntime, summarizeFundingRuntimeCommands } from './
 import { createInvestmentModule } from './investment/index.js';
 import { createPublicScheduling } from './heat-hero/public-scheduling.js';
 
+const DATA_DIR = process.env.DATA_DIR || '/data';
+const websiteService = createWebsiteService({dataDir:DATA_DIR,getProject,listProjects,env:process.env});
 const app = express();
+registerWebsitePublicationRoute(app, websiteService);
 app.use(express.json({
   // Authenticated iMac snapshots can contain several hundred Planbar entries.
   // Keep a bounded allowance above Express' 100 KB default; the agent also
@@ -368,7 +374,6 @@ app.use(express.json({
 }));
 createPublicScheduling().registerRoutes(app);
 
-const DATA_DIR = process.env.DATA_DIR || '/data';
 const projectConnections = createProjectConnectionStore({dataDir:DATA_DIR,env:process.env,getProject});
 const MEM_FILE = DATA_DIR + '/memory.json';
 const tooOftenReplyStore = createTooOftenReplyStore({ dataDir: DATA_DIR });
@@ -1018,6 +1023,7 @@ async function contextToolMap(agent, {sessionId='default',runId='',projectId='',
     // Shared compute is available, but no private global account is inherited.
     env={...env,TAVILY_API_KEY:process.env.TAVILY_API_KEY,FAL_KEY:process.env.FAL_KEY};
   }
+  Object.assign(all, websiteSkill({service:websiteService,projectId}));
   if(allowDelegation)for(const [name,value] of Object.entries(specialistSkill({runner:specialistRunner,parentRunId:runId,projectId,context:`${project?projectContext(project):''}\nAktueller Nutzerauftrag: ${String(userText).slice(0,4000)}`})))all[name]={...value,iva:{skillId:'specialists'}};
   return {all,env};
 }
@@ -1807,6 +1813,7 @@ app.use('/api', (req, res, next) => {
 });
 
 investment.registerRoutes(app);
+registerWebsiteRoutes(app, websiteService);
 
 function envReady(...names) {
   return names.every(name => Boolean(String(process.env[name] || '').trim()));
@@ -3693,6 +3700,7 @@ app.get('/cockpit', (_req, res) => {
   res.set('Cache-Control', 'no-store, max-age=0, must-revalidate');
   res.sendFile(path.join(__dirnameIva, 'public', 'cockpit.html'));
 });
+app.get('/website-studio', (_req,res) => { res.set('Cache-Control','no-store'); res.sendFile(path.join(__dirnameIva,'public','website-studio.html')); });
 app.get('/workspace', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'workspace.html')));
 app.get('/pv-calculator', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'pv-calculator.html')));
 app.get('/pv-schnellrechner', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'pv-calculator.html')));

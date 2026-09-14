@@ -2,7 +2,7 @@
 // distinct from verified availability; neither descriptions nor model claims
 // can grant new access or turn an unknown tool into a read-only tool.
 export const TOOL_ROUTING_VERSION = '1.0.0';
-const readTools = new Set(`getCalendar getCalendly getIvaAppointmentTypes getMails getLeads findHeatHeroLeads getPipedriveStatus searchPipedriveDeals listPipedriveDeals getPipedriveDeal getAirtableStatus listAirtableInstallationQueue listAirtableWorkflowStage searchAirtableWorkflowRecords getAirtableWorkflowRecord listCampaigns listBrands listContentWorkbench analyzeReferences askArchitect listWorkspaces getWorkspace listAdviceModules searchAdviceKnowledge listOpportunities listOpportunityWatchSources listOpportunityProjects getAccountingSummary listAccountingEntities listAccountingDocuments getAccountingDocument getEnergyTariffConnectorStatus qonektoStatus listQonektoTools callQonektoReadTool getLumitWorkflow listLumitServicedApplications getKnowledgeLibraryStatus listKnowledgeLibrary getPersonalKnowledgeBaseStatus searchPersonalKnowledgeBase getInvestmentStatus getInvestmentPortfolio getInvestmentRiskReport searchSaxoInstruments getInvestmentKnowledgeStatus getInvestmentMandate listInvestmentAnalyses listInvestmentJournal listInvestmentWatchlist listInvestmentOrderDrafts listCapabilityReviews getImacCommandStatus getImacTaskStatus checkIvaBuildDispatch checkIvaBuildTask getInstagramConnectionStatus readInstagramReference listOwnInstagramMedia readOwnInstagramComments getMetaAdsInsights getIvaConnectionStatus getIvaAgentRoster getCurrentProject readCurrentProjectFile listCurrentProjectConnections listAdviceModules createCandidateSearchPlan screenResumeAgainstCriteria createInterviewGuide`.split(' '));
+const readTools = new Set(`getCalendar getCalendly getIvaAppointmentTypes getMails getLeads findHeatHeroLeads getPipedriveStatus searchPipedriveDeals listPipedriveDeals getPipedriveDeal getAirtableStatus listAirtableInstallationQueue listAirtableWorkflowStage searchAirtableWorkflowRecords getAirtableWorkflowRecord listCampaigns listBrands listContentWorkbench analyzeReferences askArchitect listWorkspaces getWorkspace listAdviceModules searchAdviceKnowledge listOpportunities listOpportunityWatchSources listOpportunityProjects getAccountingSummary listAccountingEntities listAccountingDocuments getAccountingDocument getEnergyTariffConnectorStatus qonektoStatus listQonektoTools callQonektoReadTool getLumitWorkflow listLumitServicedApplications getKnowledgeLibraryStatus listKnowledgeLibrary getPersonalKnowledgeBaseStatus searchPersonalKnowledgeBase getInvestmentStatus getInvestmentPortfolio getInvestmentRiskReport searchSaxoInstruments getInvestmentKnowledgeStatus getInvestmentMandate listInvestmentAnalyses listInvestmentJournal listInvestmentWatchlist listInvestmentOrderDrafts listCapabilityReviews getImacCommandStatus getImacTaskStatus checkIvaBuildDispatch checkIvaBuildTask getInstagramConnectionStatus readInstagramReference listOwnInstagramMedia readOwnInstagramComments getMetaAdsInsights getIvaConnectionStatus getIvaAgentRoster listIvaWebsites getIvaWebsite getCurrentProject readCurrentProjectFile listCurrentProjectConnections listAdviceModules createCandidateSearchPlan screenResumeAgainstCriteria createInterviewGuide`.split(' '));
 const groups = {
   memory: ['iva', 'local', 'notizen todos erinnerung'],
   calendar: ['calendar', 'api', 'kalender termine buchungen calendly'],
@@ -26,6 +26,7 @@ const groups = {
   deviceControl: ['mac-mini', 'native-browser', 'mac mini browser outlook website portal datei ausfuhren'],
   planbar: ['mac-mini', 'native-browser', 'planbar terminierung plantafel kalenderwoche'],
   builder: ['mac-mini', 'worker', 'bauen entwickeln implementieren iva code software'],
+  websites: ['iva', 'local', 'website webseite homepage lovable github hosting domain preview vorschau 3d bauen gestalten importieren veröffentlichen'],
   projects: ['iva', 'local', 'projekt projektakte dateien dokumente anbindungen'],
   specialists: ['iva', 'worker', 'fachagent agenten team parallel teilaufgaben delegieren'],
 };
@@ -48,7 +49,7 @@ const roles = {
   'iva-marketing': ['instagram', 'marketing', 'research', 'opportunities'],
   'iva-energy': ['workspaces', 'energyTariffs', 'research'], 'iva-accounting': ['accounting'],
   'iva-sales': ['crm', 'pipedrive', 'advice', 'research'], 'iva-knowledge': ['knowledgeLibrary', 'research'],
-  'iva-recruiting': ['recruiting', 'knowledgeLibrary', 'research'], 'iva-builder': ['builder', 'deviceControl', 'research'],
+  'iva-recruiting': ['recruiting', 'knowledgeLibrary', 'research'], 'iva-builder': ['websites', 'builder', 'deviceControl', 'research'],
 };
 const requirements = {
   apify: [['APIFY_TOKEN']], research: [['TAVILY_API_KEY']], pipedrive: [['PIPEDRIVE_API_TOKEN']],

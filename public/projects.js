@@ -893,3 +893,7 @@ window.addEventListener('focus', () => {
   if (state.current?.id === 'dewarmte') void refreshDewarmteJobs({ jobsOnly: true, silent: true });
 });
 load();
+
+// Keep the Website Studio entry bound to the currently visible project.
+const websiteStudioEntry = document.getElementById("websiteStudioEntry");
+if (websiteStudioEntry) websiteStudioEntry.addEventListener("click", () => { const p = new URLSearchParams(location.search).get("id"); websiteStudioEntry.href = "/website-studio" + (p ? "?projectId=" + encodeURIComponent(p) : ""); });
