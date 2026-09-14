@@ -1,3 +1,5 @@
+import { createProjectAccessStore } from './access/store.js';
+import { registerProjectAccessAdminRoutes, registerPortalRoutes } from './access/routes.js';
 import { createWebsiteService } from './websites/service.js';
 import { registerWebsiteRoutes, registerWebsitePublicationRoute } from './websites/routes.js';
 import { websiteSkill } from './websites/tools.js';
@@ -359,9 +361,12 @@ import { createInvestmentModule } from './investment/index.js';
 import { createPublicScheduling } from './heat-hero/public-scheduling.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
-const websiteService = createWebsiteService({dataDir:DATA_DIR,getProject,listProjects,env:process.env});
+const projectAccess = createProjectAccessStore({dataDir:DATA_DIR,getProject,env:process.env});
+const coreOrigin = new URL(process.env.IVA_CORE_ORIGIN || ('https://' + (process.env.RAILWAY_PUBLIC_DOMAIN || 'iva-core-production.up.railway.app'))).origin;
+const websiteService = createWebsiteService({dataDir:DATA_DIR,getProject,listProjects,env:process.env,authorizeProject:async projectId=>{const config=await projectAccess.getProjectAccess(projectId);if(!config.modules.includes('websites'))throw Object.assign(new Error('Websites sind für dieses Projekt nicht freigegeben.'),{status:403});}});
 const app = express();
 registerWebsitePublicationRoute(app, websiteService);
+registerPortalRoutes(app, {access:projectAccess,websites:websiteService,coreOrigin});
 app.use(express.json({
   // Authenticated iMac snapshots can contain several hundred Planbar entries.
   // Keep a bounded allowance above Express' 100 KB default; the agent also
@@ -1814,6 +1819,7 @@ app.use('/api', (req, res, next) => {
 
 investment.registerRoutes(app);
 registerWebsiteRoutes(app, websiteService);
+registerProjectAccessAdminRoutes(app,{access:projectAccess,coreOrigin});
 
 function envReady(...names) {
   return names.every(name => Boolean(String(process.env[name] || '').trim()));
@@ -3700,6 +3706,7 @@ app.get('/cockpit', (_req, res) => {
   res.set('Cache-Control', 'no-store, max-age=0, must-revalidate');
   res.sendFile(path.join(__dirnameIva, 'public', 'cockpit.html'));
 });
+app.get('/portal', (_req,res) => { res.set('Cache-Control','no-store'); res.sendFile(path.join(__dirnameIva,'public','portal.html')); });
 app.get('/website-studio', (_req,res) => { res.set('Cache-Control','no-store'); res.sendFile(path.join(__dirnameIva,'public','website-studio.html')); });
 app.get('/workspace', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'workspace.html')));
 app.get('/pv-calculator', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'pv-calculator.html')));

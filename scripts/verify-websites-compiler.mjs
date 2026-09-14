@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { runInNewContext } from 'node:vm';
 import { compileWebsite } from '../websites/compiler.js';
 
 const file = (path, content) => ({ path, content, encoding: 'utf8' });
@@ -50,6 +51,39 @@ test('filesystem paths, Node modules, missing virtual files and undeclared packa
   }
 });
 
+test('public browser bundles preserve optional CommonJS fallbacks without requiring a source package manifest', async () => {
+  // This shape is emitted by Framer Motion in the imported Goals & Concepts
+  // production bundle. The optional package is absent in the original browser.
+  const output = await compileWebsite([
+    file('index.html', '<html><head></head><body><script type="module" src="./assets/index-built.js"></script></body></html>'),
+    file('assets/index-built.js', 'let accepts=()=>true;function setValidator(value){if(value)accepts=value}try{setValidator(require("@emotion/is-prop-valid").default)}catch{}globalThis.optionalFallbackWorks=accepts("data-website");'),
+  ]);
+  assert.equal(output.status, 'ready');
+  assert.doesNotMatch(output.html, /esm\.sh\/@emotion|type="importmap"/);
+  const script = output.html.match(/<script type="module">([\s\S]*?)<\/script>/)[1];
+  const browser = {};
+  runInNewContext(script, browser, { timeout: 1000 });
+  assert.equal(browser.optionalFallbackWorks, true);
+});
+
+test('optional require fallback cannot load installed host packages and required or Node imports stay rejected', async () => {
+  const html = file('index.html', '<script type="module" src="./entry.js"></script>');
+  const guarded = await compileWebsite([
+    html,
+    file('entry.js', 'try{globalThis.loadedHostPackage=!!require("express")}catch{globalThis.loadedHostPackage=false}'),
+  ]);
+  const browser = {};
+  runInNewContext(guarded.html.match(/<script type="module">([\s\S]*?)<\/script>/)[1], browser, { timeout: 1000 });
+  assert.equal(browser.loadedHostPackage, false);
+  for (const source of [
+    'globalThis.required = require("@emotion/is-prop-valid");',
+    'globalThis.required = require("express");',
+    'try { globalThis.required = require("node:fs"); } catch {}',
+    'try { globalThis.required = require("/etc/passwd"); } catch {}',
+    'import required from "@emotion/is-prop-valid"; globalThis.required = required;',
+  ]) await assert.rejects(compileWebsite([html, file('entry.js', source)]), error => error.code === 'WEBSITE_COMPILE_ERROR', source);
+});
+
 test('scripts and CSS cannot close their embedding element through generated file contents', async () => {
   const output = await compileWebsite([
     file('index.html', '<html><head><link rel="stylesheet" href="/style.css"></head><body><script type="module" src="/entry.js"></script></body></html>'),
@@ -59,6 +93,44 @@ test('scripts and CSS cannot close their embedding element through generated fil
   assert.doesNotMatch(output.html, /<\/style><script>window\.escaped|<\/script><script>window\.escaped/);
   assert.equal((output.html.match(/<script type="module">/g) || []).length, 1);
   assert.match(output.html, /\\\/script|\\x3c\/script/);
+});
+
+test('embedded JavaScript preserves replacement tokens and React $$typeof through every insertion pass', async () => {
+  const tokens = ['$$', '$&', "$'", '$`', '$1', '$<name>'];
+  const code = `globalThis.values=${JSON.stringify(tokens)};globalThis.reactShape={"$$typeof":"react-element"};`;
+  for (const [script, entry] of [
+    ['<script type="module" src="/entry.js"></script>', file('entry.js', code)],
+    ['<script src="/entry.js"></script>', file('entry.js', code)],
+    [`<script type="module">${code}</script>`, null],
+    [`<script>${code}</script>`, null],
+  ]) {
+    const output = await compileWebsite([
+      file('index.html', `<html><head><title>Prefix sentinel</title></head><body>${script}<p>Suffix sentinel</p></body></html>`),
+      ...(entry ? [entry] : []),
+    ]);
+    const scripts = [...output.html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)];
+    assert.equal(scripts.length, 1);
+    const browser = {};
+    runInNewContext(scripts[0][1], browser, { timeout: 1000 });
+    assert.deepEqual(JSON.parse(JSON.stringify(browser.values)), tokens);
+    assert.equal(browser.reactShape.$$typeof, 'react-element');
+    assert.equal((output.html.match(/Prefix sentinel/g) || []).length, 1);
+    assert.equal((output.html.match(/Suffix sentinel/g) || []).length, 1);
+  }
+});
+
+test('inline CSS and rewritten asset tags keep literal replacement metacharacters', async () => {
+  const tokens = ['$$', '$&', "$'", '$`'];
+  const literal = tokens.join('|');
+  const output = await compileWebsite([
+    file('index.html', `<html><head><link rel="icon" data-markers="${literal}" href="/logo.svg"><style>body::after { content: "${literal}"; }</style></head><body>Suffix sentinel</body></html>`),
+    file('logo.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>'),
+  ]);
+  const style = output.html.match(/<style>([\s\S]*?)<\/style>/)[1];
+  assert(style.includes(literal));
+  assert(output.html.includes(`data-markers="${literal}"`));
+  assert.equal((output.html.match(/Suffix sentinel/g) || []).length, 1);
+  assert.equal((output.html.match(/<style>/g) || []).length, 1);
 });
 
 test('unsupported server frameworks and invalid JSX fail instead of returning a fabricated preview', async () => {
@@ -118,4 +190,78 @@ test('React Router gets an opaque-preview adapter while published HTTPS routing 
   assert.match(output.html, /window\.location\.protocol/);
   assert.match(output.html, /https:\/\/esm\.sh\/react-router-dom@6\.28\.0/);
   assert.ok(output.warnings.some(value => value.includes('Speicherverlauf')));
+});
+
+async function bundledHistoryFixture(native) {
+  const output = await compileWebsite([
+    file('index.html', '<html><body><script type="module" src="/assets/built.js"></script></body></html>'),
+    file('assets/built.js', 'globalThis.__reactRouterVersion="6";globalThis.routerWindow=document.defaultView;globalThis.initialRoute=document.defaultView.location.pathname;'),
+  ]);
+  const browser = { window: native, URL, Symbol, structuredClone };
+  runInNewContext(output.html.match(/<script type="module">([\s\S]*?)<\/script>/)[1], browser, { timeout: 1000 });
+  assert(output.warnings.some(value => value.includes('gebündelter React Router')));
+  return browser;
+}
+
+test('already bundled React Router gets memory history inside an opaque srcdoc without relaxing origin access', async () => {
+  const events = [];
+  const native = {
+    location: new URL('about:srcdoc'),
+    get history() { throw new Error('Native opaque history must not be read'); },
+    get parent() { throw new Error('Parent remains inaccessible'); },
+    get localStorage() { throw new Error('Storage remains inaccessible'); },
+    PopStateEvent: class { constructor(type, value) { this.type = type; this.state = value.state; } },
+    DOMException,
+    dispatchEvent(event) { events.push(event); },
+  };
+  const browser = await bundledHistoryFixture(native);
+  const target = browser.routerWindow;
+  assert.equal(browser.initialRoute, '/');
+  target.history.replaceState({ idx: 0 }, '');
+  target.history.pushState({ idx: 1, usr: { selected: true } }, '', '/services?mode=detail#contact');
+  assert.equal(target.location.pathname, '/services');
+  assert.equal(target.location.search, '?mode=detail');
+  assert.equal(target.location.hash, '#contact');
+  assert.equal(target.history.state.usr.selected, true);
+  target.history.back();
+  assert.equal(target.location.pathname, '/');
+  assert.equal(events[0].type, 'popstate');
+  assert.equal(events[0].state.idx, 0);
+  target.history.forward();
+  assert.equal(target.location.pathname, '/services');
+  assert.equal(native.location.href, 'about:srcdoc');
+  assert.throws(() => target.history.pushState({}, '', 'https://outside.example/'), error => error.name === 'SecurityError');
+  assert.throws(() => target.parent, /inaccessible/);
+  assert.throws(() => target.localStorage, /inaccessible/);
+});
+
+test('already bundled React Router preserves the public site mount on native history writes', async () => {
+  const mount = '/s/11111111-1111-4111-8111-111111111111';
+  const writes = [];
+  const native = {
+    location: new URL('https://websites.example.org' + mount + '/'),
+    history: { state: null, length: 1,
+      replaceState(state, _title, url) { this.state = state; if (url) native.location = new URL(url); writes.push(['replace', url]); },
+      pushState(state, _title, url) { this.state = state; native.location = new URL(url); this.length++; writes.push(['push', url]); },
+    },
+    DOMException,
+  };
+  const browser = await bundledHistoryFixture(native);
+  assert.equal(browser.initialRoute, '/');
+  const target = browser.routerWindow;
+  target.history.replaceState({ idx: 0 }, '');
+  target.history.pushState({ idx: 1 }, '', '/services?mode=detail#contact');
+  assert.equal(target.location.pathname, '/services');
+  assert.equal(native.location.pathname, mount + '/services');
+  assert.equal(native.location.search, '?mode=detail');
+  assert.equal(native.location.hash, '#contact');
+  assert.equal(writes[1][0], 'push');
+  assert.throws(() => target.history.replaceState({}, '', 'https://outside.example/'), error => error.name === 'SecurityError');
+});
+
+test('bundled history adaptation leaves standalone custom-domain roots on their native browser window', async () => {
+  const native = { location: new URL('https://customer.example.org/services'), history: { state: { idx: 1 } } };
+  const browser = await bundledHistoryFixture(native);
+  assert.equal(browser.routerWindow, native);
+  assert.equal(browser.initialRoute, '/services');
 });

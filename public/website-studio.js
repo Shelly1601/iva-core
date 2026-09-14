@@ -2,7 +2,8 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
-  const API = '/api/website-studio';
+  const external = new URLSearchParams(location.search).get('external') === '1';
+  const API = external ? '/api/portal/website-studio' : '/api/website-studio';
   const state = { projects: [], sites: [], projectId: '', siteId: '', site: null, status: null, epoch: 0, refreshSequence: 0, previewSequence: 0, previewRevision: '', previewKey: '', messageKey: '', poll: null, drafts: new Map(), importKind: 'url', loading: false, actionBusy: false };
   const activeJobs = new Set(['queued', 'running', 'pending', 'starting', 'building', 'importing', 'publishing']);
   const element = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = String(text); return node; };
@@ -13,16 +14,31 @@
   const isCurrent = captured => captured.epoch === state.epoch && captured.projectId === state.projectId && captured.siteId === state.siteId;
   const draftKey = captured => `${captured.projectId}/${captured.siteId || 'new'}`;
   const busy = () => activeJobs.has(state.site?.job?.status);
-  function token() { try { return localStorage.getItem('iva_token') || ''; } catch { return ''; } }
+  function token() { if (external) return ''; try { return localStorage.getItem('iva_token') || ''; } catch { return ''; } }
+  function capabilities() {
+    if (!external) return { role: 'admin', canEdit: true, canPublish: true, canExport: true };
+    if (state.statusProjectId !== state.projectId) return { role: 'viewer', canEdit: false, canPublish: false, canExport: false };
+    const value = state.status?.capabilities || {};
+    const role = value.role || state.projects.find(project => project.id === state.projectId)?.role || 'viewer';
+    return { role, canEdit: ['editor', 'publisher'].includes(role) && value.canEdit !== false, canPublish: role === 'publisher' && value.canPublish !== false, canExport: value.canExport === true, dailyBuildLimit: value.dailyBuildLimit };
+  }
   function safeLink(value) { try { const url = new URL(value); return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.href : ''; } catch { return ''; } }
   function externalLink(label, url, className = 'inline-link') { const href = safeLink(url); if (!href) return element('span', 'muted', label); const link = element('a', className, label); link.href = href; link.target = '_blank'; link.rel = 'noopener noreferrer'; return link; }
   function sitePath(captured, suffix = '', extra = {}) { const query = new URLSearchParams({ projectId: captured.projectId, ...extra }); return `${API}/sites/${encodeURIComponent(captured.siteId)}${suffix}?${query}`; }
   async function request(url, { method = 'GET', body, raw = false, blob = false, contentType } = {}) {
+    if (external) {
+      if (!url.startsWith(`${API}/`) && url !== '/api/portal/session') throw new Error('Diese Funktion gehört nicht zu deinem Projektzugang.');
+      if (method !== 'GET' && method !== 'HEAD') {
+        if (/\/(?:connections|github|domain)(?:\?|$)/.test(url)) throw new Error('Diese Einstellung übernimmt deine Projektbetreuung.');
+        if (/\/publish(?:\?|$)/.test(url) ? !capabilities().canPublish : !capabilities().canEdit) throw new Error('Dein Zugang ist für diese Änderung nicht freigegeben.');
+      }
+    }
     const headers = new Headers();
     const access = token(); if (access) headers.set('Authorization', `Bearer ${access}`);
     if (body !== undefined) headers.set('Content-Type', contentType || (raw ? 'application/octet-stream' : 'application/json'));
     const response = await fetch(url, { method, headers, credentials: 'same-origin', body: body === undefined ? undefined : raw ? body : JSON.stringify(body), cache: 'no-store' });
-    if (response.status === 401) { if (!$('authDialog').open) $('authDialog').showModal(); throw new Error('Bitte verbinde dich mit deinem IVA-Zugang.'); }
+    if (response.status === 401) { if (external) { location.replace('/portal'); throw new Error('Bitte melde dich im Projektportal erneut an.'); } if (!$('authDialog').open) $('authDialog').showModal(); throw new Error('Bitte verbinde dich mit deinem IVA-Zugang.'); }
+    if (external && response.status === 403 && method === 'GET') { location.replace('/portal'); throw new Error('Dieses Projekt ist für deinen Zugang nicht mehr freigegeben.'); }
     if (!response.ok) {
       let payload; try { payload = await response.json(); } catch { /* Do not show arbitrary HTML error bodies. */ }
       const message = typeof payload?.error === 'string' ? payload.error : payload?.error?.message || payload?.message;
@@ -56,6 +72,7 @@
     const captured = scope();
     if (!projectId) { state.loading = false; updateControls(); return; }
     try {
+      if (external) { await refreshStatus(); if (!isCurrent(captured)) return; }
       const result = await request(`${API}/sites?${new URLSearchParams({ projectId })}`);
       if (!isCurrent(captured)) return;
       state.sites = asArray(result, 'sites'); state.loading = false;
@@ -125,15 +142,26 @@
     state.lastDraftRevision = site?.draftRevisionId || '';
   }
   function updateControls() {
+    const access = capabilities();
     const site = Boolean(state.site); const locked = busy() || state.loading || state.actionBusy;
     for (const control of document.querySelectorAll('[data-site-action]')) control.disabled = !site || (['githubButton', 'publishButton', 'addMedia'].includes(control.id) && locked);
     for (const id of ['githubButton', 'publishButton', 'exportButton', 'historyButton', 'refreshPreview']) $(id).disabled ||= !state.site?.draftRevisionId;
-    $('sendButton').disabled = !state.projectId || locked || !$('chatInput').value.trim();
-    $('chatInput').disabled = !state.projectId || state.loading;
-    $('newSite').disabled = !state.projects.length;
-    $('importButton').disabled = locked;
-    $('introImport').disabled = locked;
-    $('composerNote').textContent = locked ? 'Dein Auftrag wird im Hintergrund verarbeitet.' : 'Änderungen landen zuerst in deiner Vorschau.';
+    $('sendButton').disabled = !access.canEdit || !state.projectId || locked || !$('chatInput').value.trim();
+    $('chatInput').disabled = !access.canEdit || !state.projectId || state.loading;
+    $('newSite').disabled = !access.canEdit || !state.projects.length;
+    $('importButton').disabled = !access.canEdit || locked;
+    $('introImport').disabled = !access.canEdit || locked;
+    $('addMedia').disabled ||= !access.canEdit;
+    $('publishButton').disabled ||= !access.canPublish;
+    $('exportButton').disabled ||= !access.canExport;
+    $('composerNote').textContent = !access.canEdit ? 'Dein Zugang ist zum Ansehen freigegeben.' : locked ? 'Dein Auftrag wird im Hintergrund verarbeitet.' : 'Änderungen landen zuerst in deiner Vorschau.';
+    if (external) {
+      $('publishButton').hidden = !access.canPublish; $('exportButton').hidden = !access.canExport; $('newSite').hidden = !access.canEdit; $('importButton').hidden = !access.canEdit;
+      document.querySelector('.more-menu').hidden = !access.canEdit && !access.canExport;
+      $('chatForm').hidden = !access.canEdit; $('chatIntro').hidden ||= !access.canEdit; $('viewerIntro').hidden = access.canEdit || Boolean(state.site?.messages?.length);
+      $('assistantStatus').textContent = access.canEdit ? busy() ? 'Gestaltung läuft im Hintergrund' : 'Bereit für deinen nächsten Schritt' : 'Vorschau & gespeicherte Versionen';
+      if (!access.canEdit) { $('emptyStart').lastChild.textContent = 'Zum Projektportal'; $('emptyTitle').textContent = 'Hier erscheint eure Website.'; $('emptyDescription').textContent = 'Sobald ein Entwurf vorbereitet ist, kannst du ihn hier ansehen.'; }
+    }
   }
   function renderPreviewWarnings(warnings) {
     const entries = [...new Set(asArray(warnings, 'warnings').map(warning => typeof warning === 'string' ? warning : warning?.message || warning?.text || '').filter(Boolean))].slice(0, 20);
@@ -167,16 +195,17 @@
     finally { if (isCurrent(captured) && sequence === state.previewSequence) $('previewLoading').hidden = true; }
   }
   function openNewSite({ name = '', url = '' } = {}) {
+    if (!capabilities().canEdit) return;
     fillProjects($('newSiteProject'), state.projectId); $('newSiteName').value = name; $('newSiteUrl').value = url;
     openDialog('newSiteDialog');
     if (!state.projects.length) $('newSiteDialog').querySelector('.form-feedback').textContent = 'Lege zuerst ein Projekt an. Danach kannst du hier deine Website starten.';
   }
-  function openImport() { if (!state.site) { openNewSite(); return; } $('importTarget').textContent = `Importieren in „${state.site.name}“. Der aktuelle Stand bleibt als Version erhalten.`; $('importUrl').value = state.site.sourceUrl || ''; updateImportKind('url'); openDialog('importDialog'); }
-  function updateImportKind(kind) { state.importKind = kind; for (const node of document.querySelectorAll('[data-import]')) node.classList.toggle('active', node.dataset.import === kind); $('importUrlLabel').hidden = kind !== 'url'; $('importRepoLabel').hidden = kind !== 'github'; $('importZipLabel').hidden = kind !== 'zip'; $('importUrl').required = kind === 'url'; $('importRepository').required = kind === 'github'; $('importZip').required = kind === 'zip'; $('importNote').textContent = kind === 'url' ? 'Übernimm deine eigene öffentlich erreichbare Website. Geschützte Inhalte und Backend-Funktionen gehören nicht zum URL-Import. Für eine fremde Referenz gib IVA den Link im Chat.' : kind === 'github' ? 'IVA übernimmt den Quellcode. Für private Repositories muss dein GitHub-Zugang verbunden sein.' : 'Exportiere dein Projekt beim bisherigen Anbieter und lade die ZIP-Datei hier hoch. Zugangsdaten gehören in die Anbindungen.'; }
+  function openImport() { if (!capabilities().canEdit) return; if (!state.site) { openNewSite(); return; } $('importTarget').textContent = `Importieren in „${state.site.name}“. Der aktuelle Stand bleibt als Version erhalten.`; $('importUrl').value = state.site.sourceUrl || ''; updateImportKind('url'); openDialog('importDialog'); }
+  function updateImportKind(kind) { if (external && kind === 'github') return; state.importKind = kind; for (const node of document.querySelectorAll('[data-import]')) node.classList.toggle('active', node.dataset.import === kind); $('importUrlLabel').hidden = kind !== 'url'; $('importRepoLabel').hidden = kind !== 'github'; $('importZipLabel').hidden = kind !== 'zip'; $('importUrl').required = kind === 'url'; $('importRepository').required = kind === 'github'; $('importZip').required = kind === 'zip'; $('importNote').textContent = kind === 'url' ? 'Übernimm deine eigene öffentlich erreichbare Website. Geschützte Inhalte und Backend-Funktionen gehören nicht zum URL-Import. Für eine fremde Referenz gib IVA den Link im Chat.' : kind === 'github' ? 'IVA übernimmt den Quellcode. Für private Repositories muss dein GitHub-Zugang verbunden sein.' : 'Exportiere dein Projekt beim bisherigen Anbieter und lade die ZIP-Datei hier hoch. Zugangsdaten gehören in die Anbindungen.'; }
   function optimisticJob(result, kind = 'build') { if (!state.site) return; const job = result.job || result; if (activeJobs.has(job.status)) state.site.job = { ...job, type: kind }; renderSite(); }
   async function refreshAfterAction(captured, result, kind) { if (!isCurrent(captured)) return; optimisticJob(result, kind); await refreshSite(captured); }
   async function submitChat(event) {
-    event.preventDefault(); if (busy() || state.actionBusy || !state.projectId) return;
+    event.preventDefault(); if (!capabilities().canEdit || busy() || state.actionBusy || !state.projectId) return;
     const message = $('chatInput').value.trim(); if (!message) return;
     let captured = scope(); state.actionBusy = true; updateControls();
     try {
@@ -204,9 +233,9 @@
       const row = element('article', `revision-row${current ? ' current' : ''}`); const top = element('div', 'revision-row-top');
       top.append(element('strong', '', revisionName(revision.id))); if (current) top.append(element('span', 'small-badge', 'Aktueller Entwurf')); else if (revision.id === state.site.publishedRevisionId) top.append(element('span', 'small-badge', 'Veröffentlicht'));
       row.append(top, element('p', '', revision.summary || 'Gespeicherter Website-Stand'), element('small', '', `${date(revision.createdAt)}${revision.fileCount ? ` · ${revision.fileCount} Dateien` : ''}`));
-      const actions = element('div', 'revision-row-actions'); const preview = button('Ansehen'); const restore = button('Als Entwurf übernehmen'); restore.disabled = current || busy();
+      const actions = element('div', 'revision-row-actions'); const preview = button('Ansehen'); const restore = button('Als Entwurf übernehmen'); restore.disabled = current || busy() || !capabilities().canEdit; restore.hidden = !capabilities().canEdit;
       preview.addEventListener('click', () => { if (!isCurrent(captured)) return; $('historyDialog').close(); showPane('preview'); loadPreview(revision.id).catch(error => toast(error.message, true)); });
-      restore.addEventListener('click', async () => { if (!isCurrent(captured)) return; restore.disabled = true; try { const result = await request(sitePath(captured, '/restore'), { method: 'POST', body: { projectId: captured.projectId, revisionId: revision.id, baseRevisionId: state.site.draftRevisionId } }); if (!isCurrent(captured)) return; state.previewRevision = ''; state.previewKey = ''; await refreshAfterAction(captured, result, 'restore'); $('historyDialog').close(); toast('Die Version ist jetzt dein neuer Entwurf.'); } catch (error) { toast(error.message, true); } finally { restore.disabled = current || busy(); } });
+      restore.addEventListener('click', async () => { if (!isCurrent(captured) || !capabilities().canEdit) return; restore.disabled = true; try { const result = await request(sitePath(captured, '/restore'), { method: 'POST', body: { projectId: captured.projectId, revisionId: revision.id, baseRevisionId: state.site.draftRevisionId } }); if (!isCurrent(captured)) return; state.previewRevision = ''; state.previewKey = ''; await refreshAfterAction(captured, result, 'restore'); $('historyDialog').close(); toast('Die Version ist jetzt dein neuer Entwurf.'); } catch (error) { toast(error.message, true); } finally { restore.disabled = current || busy() || !capabilities().canEdit; } });
       actions.append(preview, restore); row.append(actions); $('revisionList').append(row);
     }
     if (!revisions.length) $('revisionList').append(element('p', 'muted', 'Sobald IVA deine Website anlegt oder du sie importierst, erscheint hier die erste Version.'));
@@ -214,14 +243,14 @@
   }
   function githubReady() { const github = state.status?.github; return github === true || github?.configured === true || github?.connected === true || ['configured', 'connected', 'ready', 'verified'].includes(github?.status); }
   function openGitHub() {
-    if (!state.site) return; $('githubSummary').replaceChildren();
+    if (external || !state.site) return; $('githubSummary').replaceChildren();
     const github = state.site.github;
     if (github?.url || github?.repositoryUrl) { $('githubSummary').append(element('p', '', 'Diese Website ist bereits einem Repository zugeordnet.'), externalLink(github.repository || github.repo || 'Repository öffnen', github.url || github.repositoryUrl)); }
     else $('githubSummary').textContent = githubReady() ? 'Dein GitHub-Zugang ist hinterlegt. IVA kann ein privates Repository anlegen.' : 'Verbinde GitHub einmal, damit IVA den Code für dich sichern kann.';
     $('repositoryName').value = github?.repo || github?.repository?.split('/').at(-1) || state.site.name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 100) || 'meine-website';
     $('githubSubmit').disabled = !githubReady(); openDialog('githubDialog');
   }
-  function openPublish() { if (!state.site?.draftRevisionId) return; const revision = state.previewRevision || state.site.draftRevisionId; $('publishName').textContent = state.site.name; $('publishRevision').textContent = revisionName(revision); const dialog = openDialog('publishDialog'); dialog._revisionId = revision; }
+  function openPublish() { if (!capabilities().canPublish || !state.site?.draftRevisionId) return; const revision = state.previewRevision || state.site.draftRevisionId; $('publishName').textContent = state.site.name; $('publishRevision').textContent = revisionName(revision); const dialog = openDialog('publishDialog'); dialog._revisionId = revision; }
   function connectionRow(name, detail, label, ready) { const row = element('div', 'connection-row'); const copy = element('div'); copy.append(element('b', '', name), element('p', '', detail)); const badge = element('span', 'small-badge', label); if (!ready) badge.style.borderColor = '#526078'; row.append(copy, badge); return row; }
   function renderConnections() {
     const root = $('connectionStatus'); root.replaceChildren();
@@ -236,10 +265,12 @@
     $('githubTokenForm').hidden = Boolean(github?.connectUrl && safeLink(github.connectUrl));
   }
   async function refreshStatus() {
-    try { state.status = await request(`${API}/status`); renderConnections();
+    const projectId = state.projectId;
+    try { const status = await request(`${API}/status${external ? `?projectId=${encodeURIComponent(projectId)}` : ''}`); if (external && projectId !== state.projectId) return; state.status = status; state.statusProjectId = projectId; if (!external) renderConnections();
       const models = state.status?.models;
       for (const option of $('modelSelect').options) { if (option.value === 'auto') continue; const details = Array.isArray(models) ? models.find(model => [model.id, model.provider, model.key].includes(option.value)) : models?.[option.value]; option.disabled = details === false || details?.available === false || details?.configured === false; }
       if ($('modelSelect').selectedOptions[0]?.disabled) $('modelSelect').value = 'auto';
+      updateControls();
     } catch (error) { $('connectionStatus').replaceChildren(element('p', 'muted', error.message)); }
   }
   function renderDomain(domain = state.site?.domain, publication = state.site?.publication) {
@@ -262,7 +293,8 @@
   async function boot() {
     $('assistantStatus').textContent = 'Projekte werden geladen …';
     try {
-      const projects = await request(`${API}/projects`); state.projects = asArray(projects, 'projects');
+      if (external) { const session = await request('/api/portal/session'); state.projects = asArray(session.projects, 'projects').filter(project => project.modules?.includes('websites')).map(project => ({ ...project, id: project.projectId })); if (!state.projects.length) { location.replace('/portal'); return; } }
+      else { const projects = await request(`${API}/projects`); state.projects = asArray(projects, 'projects'); }
       const params = new URLSearchParams(location.search); const requested = params.get('projectId'); const selected = state.projects.find(project => project.id === requested)?.id || state.projectId || state.projects[0]?.id || '';
       fillProjects($('projectSelect'), selected); await selectProject(selected, params.get('siteId') || '');
       await refreshStatus();
@@ -272,7 +304,7 @@
   $('projectSelect').addEventListener('change', event => selectProject(event.target.value));
   $('siteSelect').addEventListener('change', event => selectSite(event.target.value));
   $('newSite').addEventListener('click', () => openNewSite());
-  $('emptyStart').addEventListener('click', () => { if (state.site) { showPane('chat'); $('chatInput').focus(); } else openNewSite(); });
+  $('emptyStart').addEventListener('click', () => { if (!capabilities().canEdit) { location.href = '/portal'; return; } if (state.site) { showPane('chat'); $('chatInput').focus(); } else openNewSite(); });
   $('chatInput').addEventListener('input', () => { saveDraft(); updateControls(); });
   $('chatInput').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('chatForm').requestSubmit(); } });
   $('chatForm').addEventListener('submit', submitChat);
@@ -285,8 +317,8 @@
   $('historyButton').addEventListener('click', openHistory); $('githubButton').addEventListener('click', openGitHub); $('publishButton').addEventListener('click', openPublish);
   $('refreshPreview').addEventListener('click', () => loadPreview(state.previewRevision || state.site?.draftRevisionId, { force: true }));
   $('previewTab').addEventListener('click', () => { if (state.site?.draftRevisionId) loadPreview(state.site.draftRevisionId); });
-  for (const id of ['domainButton', 'footerDomain']) $(id).addEventListener('click', () => { if (state.site) { openDialog('domainDialog'); renderDomain(); } });
-  for (const id of ['connectionSettings', 'githubConnect']) $(id).addEventListener('click', () => { $('githubDialog').close(); openDialog('connectionsDialog'); refreshStatus(); });
+  for (const id of ['domainButton', 'footerDomain']) $(id).addEventListener('click', () => { if (!external && state.site) { openDialog('domainDialog'); renderDomain(); } });
+  for (const id of ['connectionSettings', 'githubConnect']) $(id).addEventListener('click', () => { if (external) return; $('githubDialog').close(); openDialog('connectionsDialog'); refreshStatus(); });
   $('newSiteForm').addEventListener('submit', event => { event.preventDefault(); formAction(event.currentTarget, async () => {
     const original = $('newSiteDialog')._scope; const projectId = $('newSiteProject').value; if (!projectId) throw new Error('Lege zuerst ein IVA-Projekt an.');
     const sourceUrl = $('newSiteUrl').value.trim(); const result = await request(`${API}/sites`, { method: 'POST', body: { projectId, name: $('newSiteName').value.trim(), ...(sourceUrl ? { sourceUrl } : {}) } }); const site = result.site || result;
@@ -307,10 +339,20 @@
   $('publishForm').addEventListener('submit', event => { event.preventDefault(); formAction(event.currentTarget, async () => { const dialog = $('publishDialog'); const captured = dialog._scope; if (!isCurrent(captured)) return; const result = await request(sitePath(captured, '/publish'), { method: 'POST', body: { projectId: captured.projectId, revisionId: dialog._revisionId } }); if (!isCurrent(captured)) return; await refreshAfterAction(captured, result, 'publish'); dialog.close(); const publication = result.publication || result; toast(['active', 'live', 'published'].includes(publication.status) ? 'Deine Website ist veröffentlicht.' : 'Veröffentlichung vorbereitet. Den Status siehst du unter der Vorschau.'); }); });
   $('githubTokenForm').addEventListener('submit', event => { event.preventDefault(); formAction(event.currentTarget, async () => { const githubToken = $('githubToken').value.trim(); if (!githubToken) throw new Error('Gib deinen GitHub-Zugang ein.'); $('githubToken').value = ''; await request(`${API}/connections`, { method: 'POST', body: { githubToken } }); await refreshStatus(); toast('GitHub-Zugang wurde hinterlegt.'); }); });
   $('connectionsDialog').addEventListener('close', () => { $('githubToken').value = ''; });
-  $('authForm').addEventListener('submit', event => { event.preventDefault(); formAction(event.currentTarget, async () => { const access = $('authToken').value.trim(); if (!access) return; try { localStorage.setItem('iva_token', access); } catch { throw new Error('Dein Browser lässt das Speichern des IVA-Zugangs nicht zu.'); } $('authToken').value = ''; await request(`${API}/projects`); $('authDialog').close(); await boot(); }); });
+  $('authForm').addEventListener('submit', event => { event.preventDefault(); if (external) return; formAction(event.currentTarget, async () => { const access = $('authToken').value.trim(); if (!access) return; try { localStorage.setItem('iva_token', access); } catch { throw new Error('Dein Browser lässt das Speichern des IVA-Zugangs nicht zu.'); } $('authToken').value = ''; await request(`${API}/projects`); $('authDialog').close(); await boot(); }); });
   $('exportButton').addEventListener('click', async () => { if (!state.site) return; const captured = scope(); const name = state.site.name; $('exportButton').disabled = true; try { const blob = await request(sitePath(captured, '/export'), { blob: true }); const url = URL.createObjectURL(blob); const link = element('a'); link.href = url; link.download = `${name.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 80) || 'website'}.zip`; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000); toast('Dein Website-Export wurde heruntergeladen.'); } catch (error) { toast(error.message, true); } finally { updateControls(); } });
   $('addMedia').addEventListener('click', () => { $('mediaFile')._scope = scope(); $('mediaFile').click(); });
   $('mediaFile').addEventListener('change', async () => { const file = $('mediaFile').files[0]; const captured = $('mediaFile')._scope; $('mediaFile').value = ''; if (!file || !isCurrent(captured)) return; if (file.size > 3 * 1024 * 1024) { toast('Einzelne Bilder, Videos, Schrift- und 3D-Dateien dürfen höchstens 3 MiB groß sein.', true); return; } state.actionBusy = true; updateControls(); try { const result = await request(sitePath(captured, '/assets', { name: file.name }), { method: 'POST', body: file, raw: true, contentType: file.type || 'application/octet-stream' }); if (!isCurrent(captured)) return; state.previewRevision = ''; state.previewKey = ''; await refreshAfterAction(captured, result, 'asset'); toast('Die Datei ist in deiner Website hinterlegt. Sag IVA, wo sie erscheinen soll.'); } catch (error) { if (isCurrent(captured)) toast(error.message, true); } finally { if (isCurrent(captured)) { state.actionBusy = false; updateControls(); } } });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && state.siteId) refreshSite().catch(error => toast(error.message, true)); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && state.siteId) { if (external) refreshStatus(); refreshSite().catch(error => toast(error.message, true)); } });
+  if (external) {
+    document.body.classList.add('external-studio');
+    $('portalBack').hidden = false;
+    const brand = document.querySelector('.brand'); brand.href = '/portal'; brand.setAttribute('aria-label', 'Zurück zu deinem Projektportal'); brand.title = 'Zurück zu deinen Projekten';
+    for (const id of ['connectionSettings', 'githubButton', 'domainButton', 'footerDomain', 'connectionsDialog', 'githubDialog', 'authDialog']) $(id).hidden = true;
+    for (const link of document.querySelectorAll('a[href="/projects"]')) link.hidden = true;
+    for (const choice of document.querySelectorAll('[data-import="github"]')) choice.hidden = true;
+    $('newSiteDialog').querySelector('.muted').textContent = 'Lege eine Website innerhalb eines für dich freigegebenen Projekts an.';
+    document.title = 'IVA · Dein Website Studio';
+  }
   boot();
 })();

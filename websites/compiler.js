@@ -35,6 +35,78 @@ function pinnedVersion(version, name) {
   return match[1];
 }
 
+// Serialized into the browser bundle, never invoked by the compiler. React
+// Router's bundled browser-history implementation obtains this window through
+// document.defaultView. Keep the actual iframe origin and parent access intact.
+function bundledRouterWindow() {
+  const native = globalThis.window;
+  if (!native) return undefined;
+  const preview = ['about:', 'data:'].includes(native.location.protocol);
+  const mount = native.location.pathname.match(/^\/s\/[a-f0-9-]{36}(?:\/|$)/)?.[0].replace(/\/$/, '') || '';
+  if (!preview && !mount) return native;
+  const slot = Symbol.for('iva.website.bundled-browser-history.v1');
+  if (native[slot]) return native[slot];
+  const entries = [{ url: new URL('https://iva-preview.invalid/'), state: null }];
+  let index = 0;
+  const current = () => {
+    if (preview) return new URL(entries[index].url);
+    const url = new URL(native.location.href);
+    if (url.pathname === mount || url.pathname.startsWith(mount + '/')) url.pathname = url.pathname.slice(mount.length) || '/';
+    return url;
+  };
+  const state = () => preview ? entries[index].state : native.history.state;
+  const notify = () => native.dispatchEvent(new native.PopStateEvent('popstate', { state: state() }));
+  function navigate(value, nextState, replace) {
+    const previous = current();
+    const url = value == null ? previous : new URL(String(value), previous);
+    if (url.origin !== previous.origin) throw new native.DOMException('Website history must remain within this website.', 'SecurityError');
+    if (preview) {
+      const row = { url, state: globalThis.structuredClone(nextState) };
+      if (replace) entries[index] = row;
+      else { entries.splice(index + 1); entries.push(row); index++; }
+    } else {
+      url.pathname = mount + (url.pathname.startsWith('/') ? url.pathname : '/' + url.pathname);
+      native.history[replace ? 'replaceState' : 'pushState'](nextState, '', url.href);
+    }
+  }
+  const history = {
+    get state() { return state(); },
+    get length() { return preview ? entries.length : native.history.length; },
+    pushState(value, _title, url) { navigate(url, value, false); },
+    replaceState(value, _title, url) { navigate(url, value, true); },
+    go(delta = 0) {
+      if (!preview) return native.history.go(delta);
+      const next = index + Math.trunc(Number(delta) || 0);
+      if (next >= 0 && next < entries.length && next !== index) { index = next; notify(); }
+    },
+    back() { this.go(-1); },
+    forward() { this.go(1); },
+  };
+  const location = {
+    assign(value) { navigate(value, null, false); notify(); },
+    replace(value) { navigate(value, null, true); notify(); },
+    toString() { return current().href; },
+  };
+  for (const property of ['href', 'origin', 'protocol', 'host', 'hostname', 'port', 'pathname', 'search', 'hash']) {
+    Object.defineProperty(location, property, {
+      enumerable: true,
+      get: () => current()[property],
+      ...(property === 'origin' ? {} : { set(value) { const url = current(); url[property] = value; location.assign(url.href); } }),
+    });
+  }
+  const proxy = new Proxy(Object.create(null), {
+    get(_target, property) {
+      if (property === 'location') return location;
+      if (property === 'history') return history;
+      if (property === 'window' || property === 'self') return proxy;
+      const value = Reflect.get(native, property, native);
+      return typeof value === 'function' ? value.bind(native) : value;
+    },
+  });
+  native[slot] = proxy;
+  return proxy;
+}
+
 export async function compileWebsite(input) {
   const files = normalizeWebsiteFiles(input);
   const byPath = new Map(files.map(file => [file.path, file]));
@@ -49,6 +121,7 @@ export async function compileWebsite(input) {
     if (!packageJson || typeof packageJson !== 'object' || Array.isArray(packageJson)) throw compileError('Ungültiges package.json.');
   }
   const dependencies = { ...(packageJson.devDependencies || {}), ...(packageJson.dependencies || {}) };
+  const bundledRouting = files.some(file => /\.(?:m?js|cjs)$/.test(file.path) && /__reactRouterVersion/.test(textOf(file)) && /document\.defaultView/.test(textOf(file)));
   if (dependencies.next || dependencies.nuxt || dependencies['@sveltejs/kit'] || dependencies.astro || [...byPath.keys()].some(name => /\.(?:vue|svelte)$/.test(name))) throw compileError('Dieses Projekt benötigt einen isolierten Framework-Build. Direkt unterstützt werden statische Websites und React/Vite ohne Server-Rendering.');
   const entryFile = byPath.get('index.html');
   if (!entryFile) throw compileError('Die Website benötigt eine index.html im Hauptordner.');
@@ -161,6 +234,8 @@ export async function compileWebsite(input) {
   }
   async function bundle(entry, kind = 'js') {
     const virtual = new Map();
+    const routingAdapter = '__iva_bundled_browser_history.js';
+    if (bundledRouting && kind === 'js') virtual.set(routingAdapter, `const browserHistoryWindow = (${bundledRouterWindow.toString()})(); export { browserHistoryWindow as "document.defaultView" };`);
     let entryName = entry.path;
     if (entry.contents != null) { entryName = `__iva_inline_${cryptoId()}.${kind}`; virtual.set(entryName, entry.contents); }
     const plugin = { name: 'iva-memory-only', setup(build) {
@@ -179,6 +254,17 @@ export async function compileWebsite(input) {
             const importer = virtual.has(args.importer) ? entry.importer || 'index.html' : args.importer || 'index.html';
             if (/[?&]react(?:&|$)/.test(args.path)) throw compileError('SVG-React-Plugins sind nicht eingerichtet. Importiere SVGs als Bild-URL oder verwende direktes JSX.');
             return { path: resolveFile(args.path, importer, true), namespace: 'iva-website', pluginData: { raw: /[?&](?:raw|inline)(?:&|$)/.test(args.path), url: /[?&]url(?:&|$)/.test(args.path) } };
+          }
+          if (args.kind === 'require-call' && args.namespace === 'iva-website') {
+            const { name } = packageParts(args.path);
+            if (!Object.hasOwn(dependencies, name)) {
+              // Shipped browser bundles can contain optional CommonJS probes
+              // inside try/catch (e.g. Framer Motion's Emotion integration).
+              // Let esbuild's parser preserve only its guarded fallback. This
+              // custom namespace has no resolveDir and never uses filesystem
+              // resolution; an unguarded missing require still fails the build.
+              return undefined;
+            }
           }
           if (args.path === 'react-router-dom') {
             browserPackage(args.path);
@@ -217,7 +303,7 @@ export function createHashRouter(routes, options) { return preview() ? Router.cr
     let context;
     let timeout;
     try {
-      context = await esbuild.context({ entryPoints: [entryName], bundle: true, write: false, absWorkingDir: '/__iva_virtual_website__', outfile: `/__iva_virtual_website__/bundle.${kind}`, platform: 'browser', format: 'esm', target: ['es2020'], jsx: 'automatic', jsxImportSource: 'react', tsconfigRaw: { compilerOptions: { experimentalDecorators: false } }, logLevel: 'silent', legalComments: 'none', minify: false, plugins: [plugin], define: { 'process.env.NODE_ENV': '"production"', 'import.meta.env.DEV': 'false', 'import.meta.env.PROD': 'true', 'import.meta.env.MODE': '"production"', 'import.meta.env.BASE_URL': '"./"', 'import.meta.env': '{}' } });
+      context = await esbuild.context({ entryPoints: [entryName], bundle: true, write: false, absWorkingDir: '/__iva_virtual_website__', outfile: `/__iva_virtual_website__/bundle.${kind}`, platform: 'browser', format: 'esm', target: ['es2020'], jsx: 'automatic', jsxImportSource: 'react', tsconfigRaw: { compilerOptions: { experimentalDecorators: false } }, logLevel: 'silent', legalComments: 'none', minify: false, plugins: [plugin], ...(bundledRouting && kind === 'js' ? { inject: [routingAdapter] } : {}), define: { 'process.env.NODE_ENV': '"production"', 'import.meta.env.DEV': 'false', 'import.meta.env.PROD': 'true', 'import.meta.env.MODE': '"production"', 'import.meta.env.BASE_URL': '"./"', 'import.meta.env': '{}' } });
       const result = await Promise.race([context.rebuild(), new Promise((_, reject) => { timeout = setTimeout(() => { void context.cancel(); reject(compileError('Der Website-Build hat das Zeitlimit von 20 Sekunden erreicht.')); }, 20_000); })]);
       warnings.push(...(result.warnings || []).map(item => item.text));
       return { js: result.outputFiles.find(file => file.path.endsWith('.js'))?.text || '', css: result.outputFiles.find(file => file.path.endsWith('.css'))?.text || '' };
@@ -236,7 +322,7 @@ export function createHashRouter(routes, options) { return preview() ? Router.cr
       const result = await bundle({ path: resolveFile(attr.href) }, 'css');
       styles.push(result.css);
       html = html.replace(match[0], '');
-    } else if (attr.href && /^(?:icon|shortcut icon|apple-touch-icon)$/i.test(attr.rel || '') && !external(attr.href)) html = html.replace(match[0], match[0].replace(attr.href, escapeAttribute(assetUrl(attr.href, 'index.html'))));
+    } else if (attr.href && /^(?:icon|shortcut icon|apple-touch-icon)$/i.test(attr.rel || '') && !external(attr.href)) html = html.replace(match[0], () => match[0].replace(attr.href, () => escapeAttribute(assetUrl(attr.href, 'index.html'))));
   }
   const scriptMatches = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)];
   for (const match of scriptMatches) {
@@ -253,7 +339,7 @@ export function createHashRouter(routes, options) { return preview() ? Router.cr
       if (!/\.(?:m?js|cjs)$/i.test(name)) throw compileError('Klassische Script-Dateien müssen JavaScript enthalten.');
       replacement = await classicScript(rewriteAssetLiterals(textOf(byPath.get(name)), name));
     } else replacement = await classicScript(match[2]);
-    html = html.replace(match[0], replacement);
+    html = html.replace(match[0], () => replacement);
   }
   const protectedScripts = [];
   html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, script => { const marker = `<!--IVA-COMPILED-SCRIPT-${cryptoId()}-->`; protectedScripts.push([marker, script]); return marker; });
@@ -264,7 +350,10 @@ export function createHashRouter(routes, options) { return preview() ? Router.cr
     return `srcset=${quote}${escapeAttribute(urls.join(', '))}${quote}`;
   }));
   const inlineStyles = [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi)];
-  for (const [tag, css] of inlineStyles) html = html.replace(tag, tag.replace(css, styleText(cssAssets(await prepareCss(css)))));
+  for (const [tag, css] of inlineStyles) {
+    const rewritten = styleText(cssAssets(await prepareCss(css)));
+    html = html.replace(tag, () => tag.replace(css, () => rewritten));
+  }
   html = html.replace(/<[a-z][^>]*>/gi, tag => tag.replace(/\bstyle\s*=\s*(["'])([^"']+)\1/gi, (_match, quote, css) => `style=${quote}${escapeAttribute(cssAssets(css))}${quote}`));
   const importMap = Object.keys(browserImports).length ? `<script type="importmap">${scriptText(JSON.stringify({ imports: browserImports }))}</script>` : '';
   const head = `<meta http-equiv="Content-Security-Policy" content="${escapeAttribute(CSP)}"><meta name="referrer" content="no-referrer">${importMap}${styles.length ? `<style>${styleText(styles.join('\n'))}</style>` : ''}`;
@@ -272,8 +361,9 @@ export function createHashRouter(routes, options) { return preview() ? Router.cr
   else if (/<html\b[^>]*>/i.test(html)) html = html.replace(/<html\b[^>]*>/i, tag => `${tag}<head>${head}</head>`);
   else if (/<!doctype\b[^>]*>/i.test(html)) html = html.replace(/<!doctype\b[^>]*>/i, tag => `${tag}<head>${head}</head>`);
   else html = `<head>${head}</head>${html}`;
-  for (const [marker, script] of protectedScripts) html = html.replace(marker, script);
+  for (const [marker, script] of protectedScripts) html = html.replace(marker, () => script);
   if (imported.size) warnings.push(`Browser-Pakete werden über HTTPS von esm.sh geladen: ${[...imported].join(', ')}.`);
+  if (bundledRouting) warnings.push('Bereits gebündelter React Router verwendet in der isolierten Vorschau einen Speicherverlauf und berücksichtigt beim Hosting den Website-Unterpfad.');
   if (Buffer.byteLength(html) > 20 * 1024 * 1024) throw compileError('Die fertige Website überschreitet 20 MiB.');
   return { html, status: 'ready', errors: [], warnings: [...new Set(warnings)].slice(0, 30) };
 }

@@ -332,6 +332,9 @@ function render() {
   $('content').innerHTML = `${customerSchedulingSection(project)}${dewarmteLinkPdfSection(project)}${brandSection(project)}${opportunityOriginSection(project)}${notesSection(project)}${objective ? `<section class="hero"><div class="eyebrow">Zielbild</div><h2>${esc(objective)}</h2></section>` : ''}${archiveSection(project)}${operationalSections(project)}`;
   $('content').insertAdjacentHTML('afterbegin','<details class="card project-team-host"><summary>Team &amp; Anbindungen · Fachagenten und Projektzugänge</summary><div id="projectTeam"></div></details>');
   window.mountIvaProjectTeam?.($('projectTeam'),{project,api});
+  const accessHost = document.createElement('div');
+  $('content').prepend(accessHost);
+  window.mountIvaProjectAccess?.(accessHost, { project, api });
   collapseProjectSections();
   if ($('customerSchedulingForm')) $('customerSchedulingForm').insertAdjacentHTML('afterend', `<section id="schedulingHistory" class="capacity-overview">${schedulingHistory(project)}</section>`);
   if ($('customerSchedulingForm')) {
@@ -855,14 +858,20 @@ async function removeProject(id) {
 
 $('token').value = token();
 $('saveToken').onclick = () => { localStorage.setItem(TOKEN_KEY, $('token').value.trim()); load(); };
-$('newProject').onclick = () => { $('projectForm').reset(); $('projectDialog').showModal(); setTimeout(() => $('projectName').focus(), 0); };
+$('newProject').onclick = () => { $('projectForm').reset(); void window.prepareIvaProjectModules?.(api); $('projectDialog').showModal(); setTimeout(() => $('projectName').focus(), 0); };
 $('projectForm').onsubmit = async event => {
   event.preventDefault();
   const submit = event.submitter;
   if (submit) submit.disabled = true;
   try {
     const description = $('projectDescription').value.trim();
+    const modules = window.readIvaNewProjectModules?.();
     let project = await api('/api/projects', { method: 'POST', body: { name: $('projectName').value.trim(), category: $('projectCategory').value.trim(), websiteUrl: $('projectWebsite').value.trim(), instagramUrl: $('projectInstagram').value.trim(), description, objective: description, status: 'idea' } });
+    let accessError = '';
+    if (modules) {
+      try { await api(`/api/projects/${encodeURIComponent(project.id)}/access`, { method: 'POST', body: { modules, externalEnabled: false, externalRole: 'editor', dailyBuildLimit: 10 } }); }
+      catch (error) { accessError = error.message; }
+    }
     const file = $('projectLogo').files[0];
     let logoError = '';
     if (file) {
@@ -875,7 +884,8 @@ $('projectForm').onsubmit = async event => {
     state.projects.sort((a, b) => a.name.localeCompare(b.name, 'de'));
     $('projectDialog').close();
     selectProject(project.id);
-    showToast(logoError ? `Projekt angelegt, Logo nicht übernommen: ${logoError}` : 'Projektakte angelegt.', Boolean(logoError));
+    const followUp = [accessError ? `Bereiche bitte im Projekt prüfen: ${accessError}` : '', logoError ? `Logo nicht übernommen: ${logoError}` : ''].filter(Boolean).join(' ');
+    showToast(followUp ? `Projekt angelegt. ${followUp}` : 'Projektakte mit gewählten Bereichen angelegt.', Boolean(followUp));
   } catch (error) { showToast(error.message, true); }
   finally { if (submit) submit.disabled = false; }
 };

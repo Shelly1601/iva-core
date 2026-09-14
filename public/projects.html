@@ -38,6 +38,7 @@
     @media(max-width:700px){.origin-facts,.origin-grid{grid-template-columns:1fr}.opportunity-score{min-width:68px}}
   </style>
   <link rel="stylesheet" href="/project-team.css">
+  <link rel="stylesheet" href="/project-access.css">
 </head>
 <body>
   <div class="app">
@@ -61,6 +62,7 @@
   <dialog id="brandDialog"><form class="dialog-body" id="brandForm"><div class="eyebrow">Schneller erkennen</div><h2>Markenprofil bearbeiten</h2><div class="form-grid"><label>Name<input id="brandName" maxlength="180" required></label><label>Bereich<input id="brandCategory" maxlength="220"></label><label>Website<input id="brandWebsite" maxlength="1200" inputmode="url" placeholder="https://www.beispiel.de"></label><label>Instagram<input id="brandInstagram" maxlength="1200" placeholder="@profil oder Instagram-Link"></label><label class="full">Kurzbeschreibung<textarea id="brandDescription" maxlength="5000"></textarea></label><label class="full logo-picker">Logo ersetzen<input id="brandLogo" type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"><div class="logo-help">PNG, JPG oder WebP · maximal 5 MB · das Logo erscheint sofort links in der Projektliste.</div><button class="btn danger remove-logo" id="removeBrandLogo" type="button">Logo entfernen</button></label></div><div class="dialog-actions"><button class="btn" type="button" data-close="brandDialog">Abbrechen</button><button class="btn primary" type="submit">Markenprofil speichern</button></div></form></dialog>
   <dialog id="folderDialog"><form class="dialog-body" id="folderForm"><div class="eyebrow">Projektakte strukturieren</div><h2>Ordner anlegen</h2><div class="muted" id="folderParentHint"></div><label>Ordnername<input id="folderName" maxlength="180" required placeholder="z. B. Absprachen"></label><div class="dialog-actions"><button class="btn" type="button" data-close="folderDialog">Abbrechen</button><button class="btn primary" type="submit">Ordner anlegen</button></div></form></dialog>
   <script src="/project-team.js"></script>
+  <script src="/project-access.js"></script>
   <script src="/projects.js"></script>
 </body>
 </html>
