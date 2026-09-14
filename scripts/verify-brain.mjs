@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { brainPolicy, reviewContext, selectBrainModels, createBrain } from '../core/brain.js';
+import { projectSessionId, projectContext } from '../core/project-scope.js';
 
 const models = [
   { key: 'groq:test', provider: 'groq', model: { id: 'one' } },
@@ -130,6 +131,7 @@ for (const streaming of [false, true]) {
       return result;
     };
     const deps = {
+      chatProject: async (_projectId, sessionId) => ({ project: null, sessionId }), TOOL_EXECUTION_POLICY: 'Use only the actual registered tools.',
       handleTrackedQonektoConfirmation: async () => null, routeAgent: () => ({ agent: { id: 'iva', name: 'IVA', modelProfile: 'chat' } }), beginAgentRun: async () => ({ id: 'test' }), assembleTools: () => ({ write: { execute: async () => { writes++; } } }), buildSystemPrompt: async () => input.system, buildKnowledgePromptContext: async () => '', incidentPromptContext: async () => '', loadConversations: async () => ({}), saveConversations: async () => {}, chooseModel: () => models[0], checkBudget: async () => {}, prepareBrain: f.brain.prepare, recordBrainReview: async () => {}, generateText: primary, streamText: primary, recordUsage: async () => {}, finishAgentRun: async () => {}, usedToolNames: () => [], recordChatRunFailure: async () => {}, MAX_TURNS: 10,
     };
     const entry = new Function(...Object.keys(deps), `${askSource}\n${streamSource}\nreturn ${streaming ? 'streamIva' : 'askIva'};`)(...Object.values(deps));
@@ -137,5 +139,61 @@ for (const streaming of [false, true]) {
     assert.equal(f.calls.length, 2);
     assert.equal(executions, 1);
     assert.equal(writes, 1);
+  });
+}
+
+const chatProjectSource = source.slice(source.indexOf('async function chatProject('), source.indexOf('function assembleWorkflowTools('));
+for (const streaming of [false, true]) {
+  test(`${streaming ? 'stream' : 'chat'} project entry isolates real session namespace, context and tool scope`, async () => {
+    const calls = [], prompts = [], forbidden = [], finished = [];
+    const projects = { alpha: { id: 'alpha', name: 'Alpha', description: 'Alpha objective' }, beta: { id: 'beta', name: 'Beta', description: 'Beta objective' } };
+    let histories = {
+      web: [{ role: 'user', content: 'GLOBAL_PRIVATE_MEMORY_SENTINEL' }],
+      [projectSessionId('alpha', 'web')]: [{ role: 'user', content: 'Alpha previous source' }],
+      [projectSessionId('beta', 'web')]: [{ role: 'user', content: 'Beta previous source' }],
+    };
+    const forbiddenCall = name => async () => { forbidden.push(name); throw new Error(`Forbidden global context: ${name}`); };
+    const primary = async args => {
+      prompts.push(args);
+      assert.doesNotMatch(args.system, /GLOBAL_ACCOUNT_RULE_SENTINEL|GLOBAL_PRIVATE_MEMORY_SENTINEL/);
+      assert.match(args.system, /Marketing & Growth/);
+      const value = await args.tools.readProject.execute();
+      const result = { text: `Done ${value.projectId}`, usage: {}, steps: [] };
+      await args.onFinish?.(result);
+      return result;
+    };
+    const deps = {
+      getProject: async id => projects[id] || null, projectSessionId, projectContext,
+      TOOL_EXECUTION_POLICY: 'Only project-bound tools are available.',
+      handleTrackedQonektoConfirmation: forbiddenCall('confirmation'),
+      buildSystemPrompt: forbiddenCall('system'), buildKnowledgePromptContext: forbiddenCall('knowledge'), incidentPromptContext: forbiddenCall('incident'),
+      routeAgent: () => ({ agent: { id: 'iva-marketing', name: 'Marketing & Growth', modelProfile: 'chat', rolePrompt: 'GLOBAL_ACCOUNT_RULE_SENTINEL fixed foreign agency and account.' } }),
+      beginAgentRun: async input => { calls.push({ type: 'begin', ...input }); return { id: `run-${calls.length}` }; },
+      assembleTools: async (_agent, options) => { calls.push({ type: 'tools', ...options }); return { readProject: { execute: async () => ({ projectId: options.projectId }) } }; },
+      loadConversations: async () => structuredClone(histories), saveConversations: async value => { histories = value; },
+      chooseModel: () => models[0], checkBudget: async () => {},
+      prepareBrain: async args => { assert.doesNotMatch(JSON.stringify(args.messages), /GLOBAL_PRIVATE_MEMORY_SENTINEL/); return { system: args.system }; },
+      recordBrainReview: async () => {}, generateText: primary, streamText: primary, recordUsage: async () => {},
+      finishAgentRun: async (id, result) => finished.push({ id, ...result }), usedToolNames: () => ['readProject'], recordChatRunFailure: async () => {}, MAX_TURNS: 10,
+    };
+    const entry = new Function(...Object.keys(deps), `${chatProjectSource}\n${askSource}\n${streamSource}\nreturn ${streaming ? 'streamIva' : 'askIva'};`)(...Object.values(deps));
+    for (const projectId of ['alpha', 'beta']) {
+      if (streaming) await entry(`Work for ${projectId}`, 'web', false, 'iva-marketing', undefined, projectId);
+      else await entry(`Work for ${projectId}`, 'web', false, 'iva-marketing', projectId);
+    }
+    assert.deepEqual(forbidden, []);
+    assert.equal(prompts.length, 2); assert.equal(finished.length, 2);
+    const assemblies = calls.filter(item => item.type === 'tools');
+    assert.deepEqual(assemblies.map(item => item.projectId), ['alpha', 'beta']);
+    assert.deepEqual(assemblies.map(item => item.sessionId), ['alpha', 'beta'].map(id => projectSessionId(id, 'web')));
+    assert.notEqual(assemblies[0].sessionId, assemblies[1].sessionId);
+    assert.ok(assemblies.every(item => item.runId));
+    assert.match(prompts[0].system, /Alpha objective/); assert.doesNotMatch(prompts[0].system, /Beta objective/);
+    assert.match(prompts[1].system, /Beta objective/); assert.doesNotMatch(prompts[1].system, /Alpha objective/);
+    assert.doesNotMatch(JSON.stringify(prompts[0].messages), /Beta previous source/);
+    assert.doesNotMatch(JSON.stringify(prompts[1].messages), /Alpha previous source|Done alpha/);
+    assert.equal(histories.web[0].content, 'GLOBAL_PRIVATE_MEMORY_SENTINEL');
+    assert.equal(histories[projectSessionId('alpha', 'web')].at(-1).content, 'Done alpha');
+    assert.equal(histories[projectSessionId('beta', 'web')].at(-1).content, 'Done beta');
   });
 }

@@ -3,7 +3,7 @@
 // gemeinsamen IVA-Core. Der Router waehlt deterministisch; unbekannte oder
 // deaktivierte Agenten fallen sicher auf IVA Standard zurueck.
 
-const STANDARD_SKILLS = ['memory', 'calendar', 'mails', 'crm', 'pipedrive', 'airtable', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'builder', 'qonekto', 'lumit', 'capabilityReview', 'knowledgeLibrary', 'recruiting', 'deviceControl', 'planbar', 'investment', 'incidentMemory'];
+const STANDARD_SKILLS = ['memory', 'calendar', 'mails', 'crm', 'pipedrive', 'airtable', 'marketing', 'research', 'workspaces', 'advice', 'opportunities', 'accounting', 'energyTariffs', 'selfImprovement', 'builder', 'qonekto', 'lumit', 'capabilityReview', 'knowledgeLibrary', 'recruiting', 'deviceControl', 'planbar', 'investment', 'incidentMemory', 'instagram', 'specialists', 'toolRouting'];
 
 // Schnittstellen sind IVA-weit geteilt. Fachagenten bleiben unterschiedliche
 // Rollen, duerfen aber bei gemischten Auftraegen auf dieselben Live-Systeme
@@ -13,7 +13,7 @@ export const SHARED_INTERFACE_SKILLS = Object.freeze([
   'memory', 'calendar', 'mails', 'crm', 'pipedrive', 'airtable', 'marketing',
   'research', 'workspaces', 'advice', 'opportunities', 'accounting',
   'energyTariffs', 'qonekto', 'lumit', 'knowledgeLibrary', 'recruiting',
-  'deviceControl', 'planbar', 'investment', 'incidentMemory',
+  'deviceControl', 'planbar', 'investment', 'incidentMemory', 'instagram', 'specialists', 'toolRouting',
 ]);
 
 export const WORKFLOW_INTERFACE_SKILLS = SHARED_INTERFACE_SKILLS;

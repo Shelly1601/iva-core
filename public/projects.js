@@ -330,6 +330,8 @@ function render() {
   $('description').textContent = project.description || 'Projektakte für Ideen, Absprachen und Dokumente.';
   const objective = project.objective || project.description;
   $('content').innerHTML = `${customerSchedulingSection(project)}${dewarmteLinkPdfSection(project)}${brandSection(project)}${opportunityOriginSection(project)}${notesSection(project)}${objective ? `<section class="hero"><div class="eyebrow">Zielbild</div><h2>${esc(objective)}</h2></section>` : ''}${archiveSection(project)}${operationalSections(project)}`;
+  $('content').insertAdjacentHTML('afterbegin','<details class="card project-team-host"><summary>Team &amp; Anbindungen · Fachagenten und Projektzugänge</summary><div id="projectTeam"></div></details>');
+  window.mountIvaProjectTeam?.($('projectTeam'),{project,api});
   collapseProjectSections();
   if ($('customerSchedulingForm')) $('customerSchedulingForm').insertAdjacentHTML('afterend', `<section id="schedulingHistory" class="capacity-overview">${schedulingHistory(project)}</section>`);
   if ($('customerSchedulingForm')) {
