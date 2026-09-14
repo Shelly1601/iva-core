@@ -18,6 +18,7 @@ import { importPanasonicLeadsToMeinCrm } from './integrations/meincrm-panasonic-
 import { addTodoSubtask, createTodo, toggleTodoSubtask, updateTodoNotes } from './todos/model.js';
 // Stufe 1-3: Model Router, Skills, Agent-Registry.
 import { chooseModel, recordUsage, checkBudget } from './core/router.js';
+import { prepareBrain, brainStatus } from './core/brain.js';
 import { memorySkill } from './skills/memory.js';
 import { calendarSkill } from './skills/calendar.js';
 import { mailsSkill } from './skills/mails.js';
@@ -1038,6 +1039,10 @@ async function recordChatRunFailure(agent, run, error) {
   }).catch(() => null);
 }
 
+async function recordBrainReview(runId, report) {
+  await recordAudit({ category: 'brain', action: 'model-review', actor: 'iva-brain', target: runId, status: report.status, detail: JSON.stringify(report) }).catch(() => null);
+}
+
 async function recordDirectAnswer(sessionId, userText, answer) {
   const conv = await loadConversations();
   const history = Array.isArray(conv[sessionId]) ? conv[sessionId] : [];
@@ -1078,6 +1083,8 @@ async function askIva(userText, sessionId = 'default', voice = false, agentId = 
   try {
     const routed = chooseModel({ task: agent.modelProfile });
     await checkBudget(routed);
+    ({ system } = await prepareBrain({ system, messages, userText, primary: routed, voice, onReport: report => recordBrainReview(run.id, report) }));
+    await checkBudget(routed);
     const { text, usage, steps } = await generateText({ model: routed.model, system, messages, tools: agentTools, maxSteps: 6, ...(voice ? { maxTokens: 420 } : {}) });
     await recordUsage(routed, usage);
     conv[sessionId] = [...messages, { role: 'assistant', content: text || '(ok)' }].slice(-MAX_TURNS);
@@ -1116,6 +1123,9 @@ async function streamIva(userText, sessionId = 'default', voice = false, agentId
   const messages = [...history, { role: 'user', content: userText }];
   try {
     const routed = chooseModel({ task: agent.modelProfile });
+    await checkBudget(routed);
+    ({ system } = await prepareBrain({ system, messages, userText, primary: routed, voice, abortSignal, onReport: report => recordBrainReview(run.id, report) }));
+    if (abortSignal?.aborted) throw abortSignal.reason || new Error('Abgebrochen');
     await checkBudget(routed);
     return streamText({
       model: routed.model,
@@ -2416,6 +2426,7 @@ app.post('/api/todos/:ts/subtasks/:id/toggle', async (req, res) => {
   res.json({ ok: true, ...result });
 });
 app.post('/api/chat', async (req, res) => { try { res.json({ reply: await askIva(req.body?.message || '', req.body?.sessionId || 'web', req.body?.voice === true, req.body?.agentId || 'iva-standard') }); } catch (e) { res.json({ reply: 'Fehler: ' + e.message }); } });
+app.get('/api/brain/status', (_req, res) => res.json(brainStatus()));
 app.post('/api/chat/stream', async (req, res) => {
   const aborter = new AbortController();
   req.on('aborted', () => aborter.abort());

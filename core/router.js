@@ -118,7 +118,13 @@ function resolveModelKey(task) {
 //   { task, key, provider, modelId, safetyLevel, model } - "model" ist direkt in generateText({model: ...}) verwendbar.
 export function chooseModel({ task }) {
   const key = resolveModelKey(task);
+  return chooseModelKey(key, { task });
+}
+
+// Explicit secondary model selection never changes the configured main route.
+export function chooseModelKey(key, { task = 'brain-review' } = {}) {
   const cfg = modelConfig(key);
+  if (!cfg) throw new Error(`Router: unbekanntes Modell "${key}"`);
   let model;
   if (cfg.provider === 'anthropic') model = anthropic(cfg.id);
   else if (cfg.provider === 'google') model = googleClient()(cfg.id);
@@ -144,17 +150,28 @@ function currentMonthKey(d = new Date()) {
 }
 
 let _usageCache = null;
+let _usageLoading = null;
+let _accountingQueue = Promise.resolve();
+const reservations = new Map();
+function accounting(action) {
+  const pending = _accountingQueue.then(action);
+  _accountingQueue = pending.catch(() => {});
+  return pending;
+}
 async function loadUsage() {
   if (_usageCache) return _usageCache;
-  try { _usageCache = JSON.parse(await fs.readFile(USAGE_FILE, 'utf8')); }
-  catch { _usageCache = { months: {} }; }
-  return _usageCache;
+  if (!_usageLoading) _usageLoading = fs.readFile(USAGE_FILE, 'utf8')
+    .then(JSON.parse).catch(() => ({ months: {} }))
+    .then(value => (_usageCache = value));
+  return _usageLoading;
 }
 async function saveUsage(u) {
   _usageCache = u;
   try {
     await fs.mkdir(DATA_DIR, { recursive: true }).catch(() => {});
-    await fs.writeFile(USAGE_FILE, JSON.stringify(u, null, 2));
+    const temporary = `${USAGE_FILE}.${process.pid}.tmp`;
+    await fs.writeFile(temporary, JSON.stringify(u, null, 2), { mode: 0o600 });
+    await fs.rename(temporary, USAGE_FILE);
   } catch { /* Persistenz-Fehler nicht kritisch */ }
 }
 
@@ -170,10 +187,15 @@ export async function currentSpendEUR(monthKey = currentMonthKey()) {
 // Nach jedem LLM-Call aufrufen. usage = { promptTokens, completionTokens } (AI-SDK-Shape).
 export async function recordUsage(routed, usage) {
   if (!routed || !usage) return;
+  return accounting(() => recordUsageUnlocked(routed, usage));
+}
+
+async function recordUsageUnlocked(routed, usage) {
   const cfg = modelConfig(routed.key);
   if (!cfg) return;
-  const tin = Number(usage.promptTokens || 0);
-  const tout = Number(usage.completionTokens || 0);
+  const positive = value => Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0;
+  const tin = positive(usage.promptTokens);
+  const tout = positive(usage.completionTokens);
   const eur = (tin / 1e6) * cfg.eurPerMTokIn + (tout / 1e6) * cfg.eurPerMTokOut;
   const u = await loadUsage();
   const mk = currentMonthKey();
@@ -200,12 +222,35 @@ export async function recordUsage(routed, usage) {
 // Task-Profil ist explizit als "liability" markiert (haftungsrelevant, darf
 // niemals aus Kostengruenden blockiert werden).
 export async function checkBudget(routed) {
+  await _accountingQueue;
   const { totalEUR } = await currentSpendEUR();
-  if (totalEUR >= MONTHLY_BUDGET_EUR && routed?.safetyLevel !== 'liability') {
+  const reservedEUR = [...reservations.values()].reduce((sum, value) => sum + value, 0);
+  if (totalEUR + reservedEUR >= MONTHLY_BUDGET_EUR && routed?.safetyLevel !== 'liability') {
     const err = new Error(`Router: Monatsbudget ${MONTHLY_BUDGET_EUR} EUR erreicht (aktuell ${totalEUR.toFixed(2)} EUR). Task "${routed?.task}" gestoppt. Erhoehe IVA_MONTHLY_BUDGET_EUR oder warte auf naechsten Monat.`);
     err.code = 'budget_exceeded';
     throw err;
   }
+}
+
+export function estimateUsageEUR(routed, { promptTokens = 0, completionTokens = 0 } = {}) {
+  const cfg = modelConfig(routed?.key);
+  if (!cfg) return Infinity;
+  return (Math.max(0, promptTokens) * cfg.eurPerMTokIn + Math.max(0, completionTokens) * cfg.eurPerMTokOut) / 1e6;
+}
+
+// Reserve the bounded advisory request before dispatch, including concurrent
+// requests. The caller releases in finally; actual usage is recorded separately.
+export function reserveModelBudget(routed, estimateEUR) {
+  return accounting(async () => {
+    const { totalEUR } = await currentSpendEUR();
+    const reservedEUR = [...reservations.values()].reduce((sum, value) => sum + value, 0);
+    if (!Number.isFinite(estimateEUR) || estimateEUR < 0 || totalEUR + reservedEUR + estimateEUR >= MONTHLY_BUDGET_EUR) {
+      throw Object.assign(new Error('Budget fuer Modellpruefung nicht verfuegbar.'), { code: 'budget_exceeded' });
+    }
+    const id = Symbol('brain-budget');
+    reservations.set(id, estimateEUR);
+    return () => reservations.delete(id);
+  });
 }
 
 // Fuer Introspection (Tests, spaetere UI).
