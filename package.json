@@ -73,7 +73,7 @@
     "test:project-team": "node --test scripts/verify-specialists.mjs scripts/verify-instagram.mjs scripts/verify-project-scope.mjs scripts/verify-project-connections.mjs scripts/verify-project-tools.mjs scripts/verify-tool-routing.mjs scripts/verify-project-team.mjs",
     "test:websites": "node --test scripts/verify-websites-*.mjs scripts/verify-website-host.mjs",
     "test:project-access": "node --test scripts/verify-project-access*.mjs scripts/verify-project-portal-http.mjs",
-    "test:growth": "node --test scripts/verify-media-evidence.mjs scripts/verify-opportunity-*.mjs scripts/verify-project-providers.mjs scripts/verify-marketing-projects.mjs scripts/verify-investment-monitor.mjs scripts/verify-research.mjs scripts/verify-growth-http.mjs"
+    "test:growth": "node --test scripts/verify-media-evidence.mjs scripts/verify-opportunity-*.mjs scripts/verify-project-providers.mjs scripts/verify-marketing-projects.mjs scripts/verify-marketing-web-extract.mjs scripts/verify-investment-monitor.mjs scripts/verify-research.mjs scripts/verify-growth-http.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.0.0",

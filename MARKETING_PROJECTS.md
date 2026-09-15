@@ -1,11 +1,11 @@
 # Projektgebundenes Marketing
 
-Stand: 14. September 2026. Die neue Oberfläche `/marketing?projectId=…` verbindet Firmenprofil, Wettbewerberanalyse, eigene Inhalte und echte Higgsfield-Aufträge. Die bisherige globale Markenwerkbank bleibt unter `/marketing?legacy=1` erreichbar und wird ausdrücklich nicht als Datenbestand des gewählten Projekts dargestellt.
+Stand: 15. September 2026. Die neue Oberfläche `/marketing?projectId=…` verbindet Firmenprofil, Wettbewerberanalyse, eigene Inhalte und echte Higgsfield-Aufträge. Die bisherige globale Markenwerkbank bleibt unter `/marketing?legacy=1` erreichbar und wird ausdrücklich nicht als Datenbestand des gewählten Projekts dargestellt.
 
 ## Vorhandener Umfang
 
 - Pro realem IVA-Projekt: Markenname, Unternehmen, Angebot, Zielgruppe, Branche, Region, Website, Instagram, LinkedIn, Farben, Tonalität, Regeln und eigenes PNG/JPEG/WebP-Logo (3 MiB). Eigenständiger atomarer Store, Daten werden nie anhand einer vom Modell frei wählbaren Marke umgebunden.
-- Direkte öffentliche Referenz-URLs oder automatische Websuche über den bestehenden Tavily-Zugang. Suchtreffer werden erst nach echtem Abruf zu Inhaltsbelegen. Website-/LinkedIn-Text über den bestehenden DNS-gepinnten HTTPS-Reader. Instagram-Profile: öffentliche Post-Stichprobe über vorhandenes Apify, einschließlich beobachteter Captions und tatsächlich gelieferter Metriken. Einzelne Instagram-Posts/Reels: optional gemeinsamer `readMediaEvidence` mit expliziter Text-/Video-/Tonabdeckung.
+- Direkte öffentliche Referenz-URLs oder automatische Websuche über den bestehenden Tavily-Zugang. Suchtreffer werden erst nach echtem Abruf zu Inhaltsbelegen. Website-/LinkedIn-Text zuerst über den bestehenden DNS-gepinnten HTTPS-Reader, bei Fehlern oder fehlendem Inhalt alternativ über den konfigurierten Tavily-Extract-Zugang. Nur tatsächlicher Text derselben URL zählt; Browserprüfungs-, Anmelde- und leere JavaScript-Hüllen gelten nicht als Inhaltsbeleg. Der Abrufweg, das Datum und die tatsächliche Zieladresse bleiben in der Quelle erhalten. Instagram-Profile: öffentliche Post-Stichprobe über vorhandenes Apify, einschließlich beobachteter Captions und tatsächlich gelieferter Metriken. Einzelne Instagram-Posts/Reels, TikTok-/YouTube-Videolinks und öffentliche Videodateien: gemeinsamer `readMediaEvidence` mit expliziter Text-/Video-/Tonabdeckung.
 - Quellen, Abrufdatum, unbekannte Metriken, nicht lesbare Quellen und Grenzen bleiben sichtbar. Keine erfundenen Umsätze, Reichweiten oder Erfolgsquoten. Ein Quellenlink oder eine Caption ist keine vollständige Videoanalyse. LinkedIn kann öffentliche Lesezugriffe blockieren; eine eigene Kontoverbindung hebt das nicht auf.
 - Eigene Reel-/UGC-/Carousel-/LinkedIn-Entwürfe und Kampagnenkonzepte auf Grundlage des gespeicherten Projektprofils und optional einer Analyse desselben Projekts. Modelle nutzen den bestehenden Router und seine Budgetprüfung, Reservierung und Verbrauchsbuchung. Auto priorisiert Claude Sonnet, danach eingerichtetes Gemini, danach Groq. Kein neues Tageslimit.
 - Higgsfield: exakte dokumentierte Veo-3.1-Endpunkte, standardmäßig 1080p mit Ton, 4/6/8 Sekunden, Hoch-/Querformat. Modellwahl einschließlich eigenem Ausgangsbild und optional Fast. Zuerst authentifizierte Preisabfrage, anschließend expliziter Auftrag für genau diese gespeicherten Parameter. Preissteigerungen blockieren die Generation bis zur neuen Schätzung. Gleichzeitige Klicks und unsicher beendete Provider-POSTs werden nicht automatisch wiederholt.
@@ -64,8 +64,8 @@ Kein Endpunkt wird aus einem inoffiziellen SDK geraten. Verfügbarkeit und Koste
 
 ## Prüfung
 
-`node --test scripts/verify-marketing-projects.mjs`
+`node --test scripts/verify-marketing-projects.mjs scripts/verify-marketing-web-extract.mjs`
 
 Isolierte Tests ohne Netzwerk, Port oder echte Konten: Projekttrennung, Quellenstatus, Caption-vs-Video, tatsächliche Metriken, erfundene Quellenkennungen, Modellrouting und Nutzung, Profil-Snapshot bei laufendem Job, Neustart, Modulberechtigungen, Higgsfield-Schema, reine Kosten-Verifikation, Geheimnisbegrenzung, Video-URL, Kostenbestätigung, Projekt-/Quote-Zuordnung, Preisänderung, Doppelstart und unklarer POST.
 
-Noch gesondert zu prüfen: echte Browserdarstellung einschließlich schmaler Ansicht sowie Live-Providerzugang mit bestehendem Projektkonto. Diese Dokumentation ist keine Behauptung einer erfolgten Veröffentlichung oder Live-Generation.
+Desktop und schmale Ansicht wurden im echten Chrome mit kontrollierten Anbieterantworten geprüft. Die Produktion wird zusätzlich mit einer öffentlichen Referenzseite und tatsächlicher KI-Entwurfserstellung geprüft; ein fehlgeschlagener Abruf bleibt sichtbar unverfügbar. Higgsfield braucht noch Projektzugangsdaten; keine bezahlte Videoerstellung wurde als Live-Test ausgeführt.
