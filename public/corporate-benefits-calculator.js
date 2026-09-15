@@ -1,3 +1,4 @@
+import { parseAdviceNumber } from './advice-calculators.js';
 import { BKV_CATALOG_SOURCES, findBkvOffer } from './bkv-offer-catalog.js';
 
 export const CORPORATE_BENEFIT_SOURCES = [
@@ -106,11 +107,7 @@ export const BENEFIT_PREFERENCE_RANKING = [
 ];
 
 function number(value, fallback = 0) {
-  let normalized = String(value ?? '').trim().replace(/\s/g, '');
-  if (normalized.includes(',')) normalized = normalized.replace(/\./g, '').replace(',', '.');
-  else if (/^\d{1,3}(?:\.\d{3})+$/.test(normalized)) normalized = normalized.replace(/\./g, '');
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  return parseAdviceNumber(value) ?? fallback;
 }
 
 function bounded(value, min, max, fallback = min) {
@@ -147,6 +144,13 @@ function selectedTurnoverRate(data) {
 }
 
 export function calculateCorporateBenefits(data = {}) {
+  const limits = { employees: 100000, companySickDays: 365, companySickDayCost: 100000, averageGrossSalary: 1000000, companyTurnoverRate: 100, replacementCostMonths: 60, savedSickDaysPerEmployee: 365, turnoverReductionPoints: 100, bkvParticipationPercent: 100, bkvMonthlyPremium: 100000, bavParticipationPercent: 100, employeeDeferral: 100000, employerSubsidyPercent: 100, extraEmployerBav: 100000, estimatedNetImpactPercent: 100, comparisonBudgetMonthly: 100000, salaryOnCostsPercent: 100, nonCashBenefitMonthly: 100000, otherTaxableBenefitsMonthly: 100000, employeePkvContributionMonthly: 100000, employerPkvSubsidyMonthly: 100000, employerVlMonthly: 100000, employeeVlMonthly: 100000, referenceNetPay: 1000000 };
+  const issues = Object.entries(limits).flatMap(([field, max]) => {
+    if (data[field] === undefined || data[field] === null || data[field] === '') return [];
+    const value = parseAdviceNumber(data[field]);
+    return value === null || value < 0 || value > max || field === 'employees' && !Number.isInteger(value)
+      ? [{ field, reason: `Bitte eine gültige Zahl zwischen 0 und ${max} eingeben.` }] : [];
+  });
   const employees = Math.round(bounded(data.employees, 0, 100000, 0));
   const sickDays = selectedSickDays(data);
   const sickDayCost = selectedSickDayCost(data);
@@ -242,6 +246,10 @@ export function calculateCorporateBenefits(data = {}) {
   ];
 
   return {
+    status: issues.length ? 'data-required' : 'scenario',
+    calculationReady: issues.length === 0,
+    automaticProposalEligible: false,
+    issues,
     assumptions: {
       employees, sickDays: round(sickDays, 1), sickDaysSource: data.sickDaysMode === 'company' ? 'Unternehmenswert' : data.sickDaysMode === 'wido2025' ? 'WIdO/AOK 2025' : 'TK 2023',
       sickDayCost: round(sickDayCost), sickDayCostSource: data.sickDayCostMode === 'company' ? 'Unternehmenswert' : data.sickDayCostMode === 'baua2024' ? 'BAuA 2024, abgeleitet' : 'Planwert',

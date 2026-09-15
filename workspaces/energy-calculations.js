@@ -33,8 +33,10 @@ export const ENERGY_SOURCES = {
 
 function numberValue(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  const text = String(value ?? '').trim().replace(/\s/g, '').replace(',', '.');
-  if (!text) return null;
+  let text = String(value ?? '').trim().replace(/\s/g, '');
+  if (!text || !/^[+-]?(?:\d+(?:[.,]\d+)?|\d{1,3}(?:\.\d{3})+(?:,\d+)?)$/.test(text)) return null;
+  if (text.includes(',')) text = text.replace(/\./g, '').replace(',', '.');
+  else if (/^[+-]?\d{1,3}(?:\.\d{3})+$/.test(text)) text = text.replace(/\./g, '');
   const parsed = Number(text);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -75,7 +77,7 @@ export function calculateHeatLoad(input = {}) {
   const prepared = rooms.map(room => {
     const roomMissing = [];
     const area = numberValue(room.area);
-    const height = numberValue(room.height || building.floorHeight);
+    const height = numberValue(room.height === '' || room.height == null ? building.floorHeight : room.height);
     const indoor = numberValue(room.targetTemperature);
     const airChanges = numberValue(room.airChanges);
     const components = [
@@ -90,6 +92,11 @@ export function calculateHeatLoad(input = {}) {
     if (indoor === null) missingField(roomMissing, `rooms.${room.id}.targetTemperature`, `${roomLabel}: Soll-Raumtemperatur`, room.id);
     if (indoor !== null && outdoor !== null && indoor <= outdoor) missingField(roomMissing, `rooms.${room.id}.targetTemperature`, `${roomLabel}: Solltemperatur muss über der Außentemperatur liegen`, room.id);
     if (airChanges === null || airChanges < 0) missingField(roomMissing, `rooms.${room.id}.airChanges`, `${roomLabel}: Luftwechselrate ab 0`, room.id);
+    if (!roomMissing.length && outdoor !== null && bridgePercent !== null) {
+      const transmission = components.reduce((sum, part) => sum + part.area * part.uValue, 0);
+      const estimate = (transmission * (1 + bridgePercent / 100) + 0.34 * airChanges * area * height) * (indoor - outdoor);
+      if (!Number.isFinite(estimate) || !Number.isFinite(estimate / area)) missingField(roomMissing, `rooms.${room.id}`, `${roomLabel}: Größen außerhalb des berechenbaren Bereichs`, room.id);
+    }
     missing.push(...roomMissing);
     return { room, area, height, indoor, airChanges, components, complete: roomMissing.length === 0 };
   });
@@ -147,7 +154,7 @@ export function calculateHeatLoad(input = {}) {
 
 export function eligibleCostCap(unitsValue, applicationDate = FUNDING_RULES_START) {
   const units = numberValue(unitsValue), day = fundingDateKey(applicationDate);
-  if (!Number.isInteger(units) || units < 1 || !day || day < FUNDING_RULES_START || day > FUNDING_SCHEDULE_END) return null;
+  if (!Number.isSafeInteger(units) || units < 1 || !day || day < FUNDING_RULES_START || day > FUNDING_SCHEDULE_END) return null;
   let reductions = 0;
   for (let year = 2027; year <= 2030; year++) for (const month of ['02', '08']) if (day >= `${year}-${month}-01`) reductions++;
   const firstUnit = 28_000 - 750 * reductions;
@@ -192,7 +199,7 @@ function formatPercent(value) {
 }
 
 export function buildKfw458NoteSummary(result = {}) {
-  if (result.calculationReady === false || !Number.isFinite(result.estimatedGrant)) return `Förderhöhe noch nicht belastbar berechenbar: ${(result.blockers || []).slice(0, 3).join(' ')}`;
+  if (result.canUseForFundingNote !== true || !Number.isFinite(result.estimatedGrant)) return `Förderhöhe noch nicht belastbar berechenbar: ${(result.blockers || []).slice(0, 3).join(' ')}`;
   const units = Math.max(1, Math.floor(numberValue(result.units) || 1));
   const bonuses = result.bonuses || {};
   const child = result.incomeBonusRequested !== true ? 'nicht angesetzt' : result.eligibleMinorChild === true ? 'ja (+10.000 EUR Einkommensgrenze)' : 'nein';
@@ -228,7 +235,7 @@ export function calculateKfw458Funding(input = {}, now = new Date()) {
   if (isProjection) blockers.push('Das Antragsdatum liegt in der Zukunft. Die ausgewiesene Planung beruht auf der veröffentlichten Staffel; vor dem tatsächlichen Antrag aktuelle Regeln erneut prüfen.');
   if (rulesSupported) checks.push(`Regelstand ab 21.07.2026; Fördersätze und Kostengrenze zum ${rulesDay}${supplementary ? ' (Basisantrag)' : ''}.`);
   const suppliedUnits = numberValue(input.units);
-  const unitsKnown = suppliedUnits !== null && Number.isInteger(suppliedUnits) && suppliedUnits >= 1;
+  const unitsKnown = suppliedUnits !== null && Number.isSafeInteger(suppliedUnits) && suppliedUnits >= 1;
   const units = unitsKnown ? suppliedUnits : 1;
   const projectCosts = Math.max(0, numberValue(input.projectCosts) || 0);
   const ageYears = numberValue(input.existingBuildingAgeYears);

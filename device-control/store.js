@@ -30,6 +30,7 @@ export const DEVICE_ACTIONS = Object.freeze({
   'funding.legacy-monitor.suspend': Object.freeze({ description: 'Veralteten lokalen 30-Minuten-Fördermonitor ohne Dateilöschung anhalten', mutating: true, requiresAttestedAgent: true }),
   'funding.reviews.list': Object.freeze({ description: 'Lokale Förder-Prüfwarteschlange zusammenfassen', mutating: false, requiresAttestedAgent: true }),
   'planbar.search.refresh': Object.freeze({ description: 'Sichtbaren Planbar-Terminindex rein lesend aktualisieren', mutating: false, requiresAttestedAgent: true }),
+  'customer-care.mail.send': Object.freeze({ description: 'Regelbasierten Kundenbrief über Outlook senden und Originalbeleg prüfen', mutating: true, requiresAttestedAgent: true }),
   'planbar.customer.schedule': Object.freeze({ description: 'Einen eindeutig belegten Kunden über den lokalen iMac-Workflow in Planbar terminieren', mutating: true, requiresAttestedAgent: true }),
   'project.workflow.run': Object.freeze({ description: 'Einen freigegebenen Projekt-Workflow einmalig manuell starten', mutating: true, requiresAttestedAgent: true }),
   'portal.credentials.status': Object.freeze({ description: 'Nur die Belegung von IVAs lokalem macOS-Schlüsselbund prüfen', mutating: false, requiresAttestedAgent: true }),
@@ -60,7 +61,7 @@ async function saveStore(store) {
     version: 2,
     commands: store.commands
       .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
-      .slice(-MAX_COMMANDS),
+      .filter((command,index,all)=>command.action==='customer-care.mail.send'&&!command.customerCareReceiptRecorded || index>=all.length-MAX_COMMANDS),
     agents: store.agents && typeof store.agents === 'object' ? store.agents : {},
   };
   try {
@@ -175,6 +176,11 @@ export async function deviceAgentStatus(deviceId = IVA_IMAC_DEVICE_ID) {
 }
 
 function validatePayload(action, payload = {}) {
+  if (action === 'customer-care.mail.send') {
+    const outboxId=String(payload.outboxId||''),projectId=String(payload.projectId||'');
+    if(!/^[A-Za-z0-9:_-]{1,180}$/.test(outboxId)||!/^[A-Za-z0-9_-]{1,100}$/.test(projectId))throw new Error('Ungültiger Kundenbetreuungsauftrag.');
+    return {outboxId,projectId,requestId:'customer-care:'+outboxId};
+  }
   if (action === 'planbar.customer.schedule') {
     const customerName = cleanText(payload.customerName, 220);
     const partnerId = cleanText(payload.partnerId, 80).toLowerCase();
@@ -296,7 +302,7 @@ export async function enqueueDeviceCommand({ deviceId = IVA_IMAC_DEVICE_ID, acti
         && Date.parse(item.expiresAt) > now.getTime());
       if (existing) return { ...existing };
     }
-    if (actionName === 'planbar.customer.schedule' || actionName === 'project.workflow.run') {
+    if (actionName === 'planbar.customer.schedule' || actionName === 'project.workflow.run' || actionName === 'customer-care.mail.send') {
       // Eine Outbox-Wiederholung nach einem Serverabbruch muss auch einen schon
       // abgeschlossenen Auftrag wiederfinden, nicht erneut ausführen.
       const sameRequest = normalizedPayload.requestId && store.commands.find(item => item.deviceId === device
@@ -345,8 +351,9 @@ export async function claimNextDeviceCommand(deviceId = IVA_IMAC_DEVICE_ID, agen
         changed = true;
       }
       if (command.status === 'running' && Date.parse(command.leaseExpiresAt || 0) <= now) {
-        const uncertainMutation = DEVICE_ACTIONS[command.action]?.mutating === true;
-        command.status = uncertainMutation || command.attempts >= 3 ? 'failed' : 'queued';
+        const customerCareResume = command.action==='customer-care.mail.send';
+        const uncertainMutation = DEVICE_ACTIONS[command.action]?.mutating === true && !customerCareResume;
+        command.status = !customerCareResume && (uncertainMutation || command.attempts >= 3) ? 'failed' : 'queued';
         if (uncertainMutation) {
           command.error = 'Ausführung nach Verbindungsabbruch unklar. Keine automatische Wiederholung einer schreibenden Aktion; Ergebnis zuerst prüfen.';
           command.completedAt = new Date(now).toISOString();
@@ -399,11 +406,14 @@ export async function completeDeviceCommand({ deviceId, commandId, leaseToken, o
     command.error = ok === true ? null : cleanText(error, 1000);
     // Ausschließlich attestierte Vorstartfehler: niemals unklare Schreibaktionen,
     // Lease-Verluste oder fachlich blockierte Workflows automatisch wiederholen.
-    if (ok !== true && command.action === 'planbar.customer.schedule' && command.claimedBy
-      && failureStage === 'before_launch' && command.attempts < 3 && Date.parse(command.expiresAt) > Date.now() + 60_000) {
+    const retryCustomerCare = command.action === 'customer-care.mail.send' && command.claimedBy
+      && (ok !== true || result?.receipt?.retryReadbackOnly === true);
+    const retryPlanbarBeforeLaunch = ok !== true && command.action === 'planbar.customer.schedule' && command.claimedBy
+      && failureStage === 'before_launch' && command.attempts < 3 && Date.parse(command.expiresAt) > Date.now() + 60_000;
+    if (retryPlanbarBeforeLaunch || retryCustomerCare) {
       command.status = 'queued';
-      command.retryAt = new Date(Date.now() + command.attempts * 15_000).toISOString();
-      command.failureStage = 'before_launch';
+      command.retryAt = new Date(Date.now() + (retryCustomerCare ? Math.min(300_000, 2_000 * 2 ** Math.min(command.attempts, 8)) : command.attempts * 15_000)).toISOString();
+      command.failureStage = retryCustomerCare ? 'customer-care-resume' : 'before_launch';
       delete command.completedAt;
     } else {
       delete command.retryAt;
@@ -467,4 +477,14 @@ export async function deviceCommandStatus(commandId) {
   if (!command) return null;
   const { leaseToken, ...safe } = command;
   return safe;
+}
+
+// Exact pending outbox identities, independent of the recent-command UI limit.
+export async function findCustomerCareDeviceCommands(outboxIds=[]) {
+  const ids=new Set(outboxIds.map(String));
+  const store=await loadStore();
+  return store.commands.filter(c=>c.deviceId===IVA_IMAC_DEVICE_ID&&c.action==='customer-care.mail.send'&&ids.has(c.payload?.outboxId)).map(({leaseToken,...c})=>c);
+}
+export async function acknowledgeCustomerCareCommand(id) {
+  return transaction(async()=>{const store=await loadStore(),command=store.commands.find(c=>c.id===id&&c.action==='customer-care.mail.send');if(command&&['completed','canceled'].includes(command.status)){command.customerCareReceiptRecorded=true;await saveStore(store);}return {acknowledged:command?.customerCareReceiptRecorded===true};});
 }

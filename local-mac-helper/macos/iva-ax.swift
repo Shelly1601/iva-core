@@ -755,6 +755,154 @@ struct ComposeSendExpectation: Decodable {
     let attachments: [String]
 }
 
+struct TextComposeExpectation: Decodable {
+    let from: String
+    let subject: String
+    let body: String
+    let to: [String]
+    let cc: [String]?
+    let bcc: [String]?
+    let attachments: [String]?
+    let html: String?
+}
+
+struct TextComposeSnapshot: Codable {
+    let from: String
+    let subject: String
+    let body: String
+    let to: [String]
+    let cc: [String]
+    let bcc: [String]
+    let attachmentCount: Int
+    let unclassifiedRecipientCount: Int
+    let composeCount: Int
+    let bodyCount: Int
+    let sendButtonCount: Int
+}
+
+func textComposeMismatch(_ detail: String) -> HelperError {
+    return HelperError.message("CUSTOMER_CARE_COMPOSE_MISMATCH: " + detail)
+}
+
+func textComposeEmails(_ text: String) throws -> [String] {
+    let pattern = #"[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9.-]*[A-Z0-9])?\.[A-Z]{2,}"#
+    let regex = try NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+    let range = NSRange(text.startIndex..<text.endIndex, in: text)
+    return regex.matches(in: text, range: range).compactMap { match in
+        guard let found = Range(match.range, in: text) else { return nil }
+        return String(text[found]).lowercased()
+    }
+}
+
+func canonicalTextComposeBody(_ text: String) -> String {
+    return text.replacingOccurrences(of: "\r\n", with: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+func validateTextCompose(_ actual: TextComposeSnapshot, expected: TextComposeExpectation) throws {
+    let sender = expected.from.lowercased(), recipients = expected.to.map { $0.lowercased() }
+    guard recipients.count == 1, try textComposeEmails(recipients[0]) == recipients,
+          try textComposeEmails(sender) == [sender], !expected.subject.isEmpty, expected.subject.count <= 240,
+          !expected.subject.contains("\n"), !expected.subject.contains("\r"), !expected.subject.contains("\0"),
+          !expected.body.isEmpty, expected.body.count <= 100000, !expected.body.contains("\0"),
+          (expected.cc ?? []).isEmpty, (expected.bcc ?? []).isEmpty, (expected.attachments ?? []).isEmpty,
+          (expected.html ?? "").isEmpty else { throw textComposeMismatch("Die Versandvorgabe ist ungültig.") }
+    guard actual.composeCount == 1, actual.bodyCount == 1, actual.sendButtonCount == 1 else {
+        throw textComposeMismatch("Verfassen-Fenster, Mailtext oder Senden-Schaltfläche ist nicht eindeutig.")
+    }
+    guard actual.from == sender, actual.subject == expected.subject,
+          canonicalTextComposeBody(actual.body) == canonicalTextComposeBody(expected.body) else {
+        throw textComposeMismatch("Absender, Betreff oder vollständiger Mailtext stimmen nicht überein.")
+    }
+    guard actual.to == recipients, actual.cc.isEmpty, actual.bcc.isEmpty,
+          actual.attachmentCount == 0, actual.unclassifiedRecipientCount == 0 else {
+        throw textComposeMismatch("Empfänger oder Anlagen stimmen nicht exakt überein.")
+    }
+}
+
+func inspectTextCompose(_ appElement: AXUIElement) throws -> (TextComposeSnapshot, AXUIElement) {
+    guard let window = attribute(appElement, kAXFocusedWindowAttribute), CFGetTypeID(window) == AXUIElementGetTypeID() else {
+        throw textComposeMismatch("Kein fokussiertes Outlook-Verfassen-Fenster.")
+    }
+    let rawNodes = collect(unsafeBitCast(window, to: AXUIElement.self), maxDepth: 24, maxNodes: 16000)
+    guard rawNodes.count < 16000, !rawNodes.contains(where: { $0.path.count >= 24 && !children($0.element).isEmpty }) else {
+        throw textComposeMismatch("Die Oberfläche wurde nicht vollständig gelesen.")
+    }
+    let nodes = uniqueAXNodes(rawNodes)
+    let accounts = nodes.filter { matches($0, role: "AXPopUpButton", description: "accountPicker") }
+    let subjects = nodes.filter { matches($0, role: "AXTextField", description: "subjectTextField") }
+    let bodies = nodes.filter { $0.role == "AXTextArea" }
+    let toFields = nodes.filter { matches($0, role: "AXTextField", description: "toTextField") }
+    guard accounts.count == 1, subjects.count == 1, bodies.count == 1, toFields.count == 1 else {
+        throw textComposeMismatch("Absender-, An-, Betreff- oder Textfeld nicht eindeutig.")
+    }
+    let accountEmails = try textComposeEmails(safeValue(accounts[0].element))
+    guard accountEmails.count == 1 else { throw textComposeMismatch("Absenderkonto nicht eindeutig auslesbar.") }
+    let recipientIds = ["toTextField", "ccTextField", "bccTextField"]
+    var recipientPaths: [[Int]] = []
+    var values: [String: [String]] = [:]
+    var unresolved = 0
+    for identifier in recipientIds {
+        let fields = nodes.filter { matches($0, role: "AXTextField", description: identifier) }
+        guard fields.count <= 1 else { throw textComposeMismatch("Empfängerfeld mehrfach sichtbar.") }
+        guard let field = fields.first else { values[identifier] = []; continue }
+        var container = field
+        if field.path.count > 1 {
+            for depth in stride(from: field.path.count - 1, through: 1, by: -1) {
+                let prefix = Array(field.path.prefix(depth))
+                guard let parent = rawNodes.first(where: { $0.path == prefix }) else { break }
+                let descendants = rawNodes.filter { pathPrefix(prefix, matches: $0.path) }
+                let crossesBoundary = descendants.contains { node in
+                    CFEqual(node.element, accounts[0].element) || CFEqual(node.element, subjects[0].element)
+                    || node.role == "AXTextArea" || recipientIds.contains(where: { $0 != identifier && matches(node, role: "AXTextField", description: $0) })
+                }
+                if crossesBoundary { break }
+                container = parent
+            }
+        }
+        recipientPaths.append(container.path)
+        let descendants = uniqueAXNodes(rawNodes.filter { pathPrefix(container.path, matches: $0.path) })
+        var emails = Set<String>()
+        for node in descendants {
+            let label = "\(node.title) \(node.description) \(safeValue(node.element)) \(textAttribute(node.element, kAXHelpAttribute))"
+            let found = try textComposeEmails(label)
+            emails.formUnion(found)
+            if ["AXToken", "AXTokenField", "AXCell"].contains(node.role), found.isEmpty,
+               !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { unresolved += 1 }
+            if node.role == "AXButton", found.isEmpty {
+                let caption = (node.title.isEmpty ? node.description : node.title).lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                let knownControl = ["an", "an:", "to", "to:", "cc", "cc:", "bcc", "bcc:", "kopie", "blindkopie"].contains(caption)
+                    || node.identifier.lowercased().contains("showbutton") || node.identifier.lowercased().contains("addressbook")
+                if !caption.isEmpty && !knownControl { unresolved += 1 }
+            }
+        }
+        let draftText = safeValue(field.element).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !draftText.isEmpty {
+            let directEmails = try textComposeEmails(draftText)
+            if directEmails.count != 1 || draftText.lowercased() != directEmails.first { unresolved += 1 }
+        }
+        values[identifier] = emails.sorted()
+    }
+    let excludedPaths = recipientPaths + [accounts[0].path, subjects[0].path, bodies[0].path]
+    for node in nodes where ["AXTextField", "AXStaticText", "AXButton", "AXTokenField", "AXComboBox", "AXCell", "AXToken", "AXPopUpButton"].contains(node.role) {
+        if excludedPaths.contains(where: { pathPrefix($0, matches: node.path) }) { continue }
+        let text = "\(node.title) \(node.description) \(safeValue(node.element)) \(textAttribute(node.element, kAXHelpAttribute))"
+        if !(try textComposeEmails(text)).isEmpty || ["AXToken", "AXTokenField"].contains(node.role) && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { unresolved += 1 }
+    }
+    let attachmentGrids = nodes.filter { $0.identifier.lowercased() == "attachmentgrid" }
+    let attachmentCount = attachmentGrids.reduce(0) { count, grid in count + children(grid.element).count }
+        + nodes.filter { $0.role == "AXAttachment" || ($0.role == "AXImage" && pathPrefix(bodies[0].path, matches: $0.path)) }.count
+    let sendButtons = nodes.filter { node in
+        guard node.role == "AXButton", (attribute(node.element, kAXEnabledAttribute) as? Bool ?? false) else { return false }
+        let caption = (node.title.isEmpty ? node.description : node.title).lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return ["senden", "send"].contains(caption) || node.identifier.lowercased() == "sendbutton"
+    }
+    guard sendButtons.count == 1 else { throw textComposeMismatch("Die Senden-Schaltfläche ist nicht eindeutig.") }
+    let snapshot = TextComposeSnapshot(from: accountEmails[0], subject: safeValue(subjects[0].element), body: safeValue(bodies[0].element),
+        to: values["toTextField"] ?? [], cc: values["ccTextField"] ?? [], bcc: values["bccTextField"] ?? [],
+        attachmentCount: attachmentCount, unclassifiedRecipientCount: unresolved, composeCount: 1, bodyCount: bodies.count, sendButtonCount: sendButtons.count)
+    return (snapshot, sendButtons[0].element)
+}
+
 do {
     let arguments = Array(CommandLine.arguments.dropFirst())
     let command = arguments.first ?? "doctor"
@@ -807,6 +955,15 @@ do {
         guard arguments.count >= 2 else { throw HelperError.message("ensure-app-window-right benötigt eine App-ID.") }
         try writeJSON(ensureApplicationWindowOnRight(bundleIdentifier: arguments[1]))
         exit(0)
+    }
+
+    // Pure snapshot validation permits regression checks without starting Outlook or sending mail.
+    if command == "validate-text-compose-snapshot" {
+        guard arguments.count == 3 else { throw textComposeMismatch("Erwartung und Snapshot fehlen.") }
+        let expected = try JSONDecoder().decode(TextComposeExpectation.self, from: Data(contentsOf: URL(fileURLWithPath: arguments[1])))
+        let actual = try JSONDecoder().decode(TextComposeSnapshot.self, from: Data(contentsOf: URL(fileURLWithPath: arguments[2])))
+        try validateTextCompose(actual, expected: expected)
+        try writeJSON(["verified": true]); exit(0)
     }
 
     let (app, appElement) = try outlookApplication()
@@ -1259,6 +1416,24 @@ do {
             "attachmentNames": try xlsxNames(in: refreshed),
             "focusedWindowTitle": focusedWindowTitle(appElement),
         ])
+        exit(0)
+    }
+
+    if command == "send-verified-text-compose" || command == "verify-text-compose" {
+        guard arguments.count == 2 else { throw textComposeMismatch("Die Erwartungsdatei fehlt.") }
+        let expected = try JSONDecoder().decode(TextComposeExpectation.self, from: Data(contentsOf: URL(fileURLWithPath: arguments[1])))
+        let (snapshot, sendButton) = try inspectTextCompose(appElement)
+        try validateTextCompose(snapshot, expected: expected)
+        if command == "verify-text-compose" {
+            try writeJSON(["verified": true]); exit(0)
+        }
+        // One native action only. Even an AX error can mean that Outlook accepted
+        // the click. The persisted caller journal must resolve it from Sent MIME.
+        let pressResult = AXUIElementPerformAction(sendButton, kAXPressAction as CFString)
+        if pressResult != .success {
+            throw HelperError.message("CUSTOMER_CARE_SEND_UNCERTAIN: Sendeaktion ausgelöst; ausschließlich Gesendet-Rückprüfung erlaubt.")
+        }
+        try writeJSON(["attempted": true, "verifiedBeforeSend": true, "requiresSentReadback": true])
         exit(0)
     }
 

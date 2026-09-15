@@ -6,6 +6,9 @@ const SALUTATION_LABELS = { male: 'Mann', female: 'Frau', diverse: 'Divers', com
 const $ = id => document.getElementById(id);
 const state = {
   customers: [],
+  projects: [],
+  projectId: new URLSearchParams(location.search).get("projectId") || "",
+  careMount: null,
   workspaces: [],
   current: null,
   currentWorkspace: null,
@@ -111,6 +114,12 @@ function mergeCustomers(qonektoCustomers, workspaces) {
   ].sort((a, b) => clean(a.name).localeCompare(clean(b.name), 'de'));
 }
 
+function customerProjects(workspace) {
+  const data=workspace?.data||{}, explicit=[...(data.projectIds||[]),data.projectId,data.crm?.projectId].filter(Boolean);
+  const norm=x=>String(x||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+  return state.projects.filter(p=>explicit.length?explicit.includes(p.id):[p.id,p.name].some(x=>norm(x)===norm(data.project||data.crm?.project))).map(p=>p.id);
+}
+function selectedProject() { return state.projects.find(p=>p.id===state.projectId); }
 function renderCustomerList() {
   const root = $('customerList');
   const query = clean($('customerSearch').value).toLocaleLowerCase('de');
@@ -185,7 +194,9 @@ async function loadCustomers({ force = false, keepSelection = true } = {}) {
   } catch {
     state.workspaces = [];
   }
-  state.customers = mergeCustomers(qonekto.customers || [], state.workspaces);
+  const visibleWorkspaces=state.projectId ? state.workspaces.filter(w=>customerProjects(w).includes(state.projectId)) : state.workspaces;
+  const includeQonekto=!state.projectId || selectedProject()?.name === 'Goals & Concepts';
+  state.customers = mergeCustomers(includeQonekto ? (qonekto.customers || []) : [], visibleWorkspaces);
   renderCustomerList();
   if (qonektoError) showNotice(`Qonekto konnte gerade nicht geladen werden: ${qonektoError.message}. Deine IVA-Kundenakten bleiben sichtbar.`, 'error');
   if (previousId && state.customers.some(customer => customer.id === previousId)) await openCustomer(previousId, { force });
@@ -196,6 +207,7 @@ function findLocalWorkspace(customerId) {
 }
 
 async function ensureWorkspace(customer) {
+  const selectionId=state.current?.listId;
   if (state.currentWorkspace) return state.currentWorkspace;
   const workspace = await api('/api/workspaces', {
     method: 'POST',
@@ -218,11 +230,11 @@ async function ensureWorkspace(customer) {
         city: customer.city || '',
         address: sourceAddress(customer),
       },
-      data: { project: 'Goals & Concepts', company: customer.company || '', relationship: 'Qonekto / Blau Direkt', nextStep: '' },
+      data: { projectId: state.projectId || state.projects.find(p=>p.name==='Goals & Concepts')?.id || '', project: selectedProject()?.name || 'Goals & Concepts', company: customer.company || '', relationship: 'Qonekto / Blau Direkt', nextStep: '' },
     }),
   });
   state.workspaces.unshift(workspace);
-  state.currentWorkspace = workspace;
+  if(state.current?.listId===selectionId)state.currentWorkspace = workspace;
   return workspace;
 }
 
@@ -348,6 +360,10 @@ function renderDetail(detail, listId) {
       </div>
     </section>
     <div class="record-sections">
+      <details class="record-section" id="customerCareSection">
+        <summary><span class="section-icon">✉</span><span class="section-title"><b>Kundenbetreuung & Kampagnen</b><small>Themen, Jahres-Check-up, Vertragsfristen und persönliche Versandregeln</small></span><span class="section-chevron">›</span></summary>
+        <div class="section-body" id="customerCareRoot"></div>
+      </details>
       <details class="record-section">
         <summary><span class="section-icon">⌂</span><span class="section-title"><b>Kontakt & Stammdaten</b><small>${escapeHtml(customer.email || customer.mobile || customer.phone || sourceAddress(customer) || 'Kontaktdaten prüfen')}</small></span><span class="section-chevron">›</span></summary>
         <div class="section-body"><div class="data-grid">
@@ -394,6 +410,19 @@ function renderDetail(detail, listId) {
   $('emptyState').hidden = true;
   detailRoot.hidden = false;
   bindDetailEvents(listId);
+  state.careMount?.destroy?.();
+  $('customerCareSection').addEventListener('toggle', async event=>{
+    if(!event.target.open || state.careMount?.root === $('customerCareRoot'))return;
+    const target=$('customerCareRoot');target.textContent='Kundenbetreuung wird geladen …';
+    try {
+      const w=await ensureWorkspace(customer);
+      if(!target.isConnected || state.current?.listId!==listId)return;
+      const projects=customerProjects(w),projectId=projects.includes(state.projectId)?state.projectId:projects[0];
+      if(!projectId)throw new Error('Bitte die Kundenakte zuerst einem Projekt zuordnen.');
+      const mounted=window.IVACustomerCare.mount(target,{projectId,workspaceId:w.id,customerId:w.id,customerName:customer.name,api,onNotice:showNotice});
+      state.careMount={...mounted,root:target};
+    }catch(e){target.textContent=e.message;}
+  });
 }
 
 function localDetail(workspace) {
@@ -1084,7 +1113,7 @@ async function saveLocalCustomer() {
           address: [values.strasse, [values.plz, values.ort].filter(Boolean).join(' ')].filter(Boolean).join(', '),
         },
         data: {
-          project: 'Goals & Concepts', company: values.firma || '',
+          projectId: state.projectId || state.projects.find(p=>p.name==='Goals & Concepts')?.id || '', project: selectedProject()?.name || 'Goals & Concepts', company: values.firma || '',
           relationship: transferRequested ? 'IVA-Kundenakte · Qonekto-Übertragung vorbereitet' : 'IVA-Kundenakte · noch nicht in Qonekto angelegt',
           nextStep: transferRequested ? 'Qonekto-Anlage ausdrücklich bestätigen' : 'Bei Bedarf an Blau Direkt übertragen',
           qonektoDraft: values,
@@ -1345,4 +1374,11 @@ for (const eventName of ['dragleave', 'drop']) documentDropzone.addEventListener
 documentDropzone.addEventListener('drop', event => showSelectedDocumentFiles(event.dataTransfer?.files));
 $('ivaHelper').addEventListener('click', () => window.open('/cockpit', '_blank', 'noopener'));
 
-loadCustomers({ keepSelection: false });
+async function initializeCustomerProjects(){
+  try {const result=await api('/api/customer-care/projects');state.projects=result.projects||[];
+    const select=$('customerProject');for(const p of state.projects){const option=document.createElement('option');option.value=p.id;option.textContent=p.name;select.append(option);}select.value=state.projectId;
+    select.addEventListener('change',()=>{state.projectId=select.value;state.current=null;state.currentWorkspace=null;state.careMount?.destroy?.();$('customerDetail').hidden=true;$('emptyState').hidden=false;void loadCustomers({keepSelection:false});});
+  }catch(e){showNotice(e.message,'error');}
+  await loadCustomers({keepSelection:false});
+}
+initializeCustomerProjects();

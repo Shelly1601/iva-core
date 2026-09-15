@@ -6,6 +6,13 @@ import { readMediaEvidence } from './integrations/media-evidence.js';
 import { searchEvidence } from './opportunities/evidence.js';
 import { createOpportunityJobs } from './opportunities/jobs.js';
 import { createOpportunityScheduler } from './opportunities/scheduler.js';
+import { createCustomerCareService } from './customer-care/service.js';
+import { createCustomerCareCustomers, createCustomerCareDelivery } from './customer-care/adapters.js';
+import { registerCustomerCareRoutes, registerCustomerCarePublicRoutes, createCustomerCareScheduler } from './customer-care/routes.js';
+import { createCustomerCareLanding } from './customer-care/landing.js';
+import { customerCareSkill } from './customer-care/tools.js';
+import { createCustomerCareQuotes } from './customer-care/quotes.js';
+import { adviceCalculatorReadiness } from './advice/calculator-audit.js';
 import { createProjectAccessStore } from './access/store.js';
 import { registerProjectAccessAdminRoutes, registerPortalRoutes } from './access/routes.js';
 import { createWebsiteService } from './websites/service.js';
@@ -360,6 +367,8 @@ import {
   completeDeviceCommand,
   deviceAgentStatus,
   deviceCommandStatus,
+  findCustomerCareDeviceCommands,
+  acknowledgeCustomerCareCommand,
   enqueueDeviceCommand,
   listDeviceCommands,
   recordDeviceAgentHeartbeat,
@@ -372,7 +381,19 @@ const DATA_DIR = process.env.DATA_DIR || '/data';
 const projectAccess = createProjectAccessStore({dataDir:DATA_DIR,getProject,env:process.env});
 const coreOrigin = new URL(process.env.IVA_CORE_ORIGIN || ('https://' + (process.env.RAILWAY_PUBLIC_DOMAIN || 'iva-core-production.up.railway.app'))).origin;
 const websiteService = createWebsiteService({dataDir:DATA_DIR,getProject,listProjects,env:process.env,authorizeProject:async projectId=>{const config=await projectAccess.getProjectAccess(projectId);if(!config.modules.includes('websites'))throw Object.assign(new Error('Websites sind für dieses Projekt nicht freigegeben.'),{status:403});}});
+const customerCareCustomers = createCustomerCareCustomers({listWorkspaces:workspaces.listWorkspaces,listProjects});
+const customerCareDelivery = createCustomerCareDelivery({enqueueDeviceCommand,findCustomerCareDeviceCommands,acknowledgeCustomerCareCommand,deviceAgentStatus});
+async function requireCareProject(id) {
+  const project = await getProject(id); if (!project) return null;
+  const access = await projectAccess.getProjectAccess(id);
+  if (!access.modules.includes('crm') && !access.modules.includes('marketing')) throw Object.assign(new Error('Kundenbetreuung ist für dieses Projekt nicht freigegeben.'),{status:403});
+  return project;
+}
+const customerCareQuotes = createCustomerCareQuotes({dataDir:DATA_DIR,customers:customerCareCustomers,getWorkspace:workspaces.getWorkspace,readWorkspaceFile:workspaces.readWorkspaceFile});
+const customerCareService = createCustomerCareService({dataDir:DATA_DIR,getCustomers:customerCareCustomers,getProject:requireCareProject,deliver:customerCareDelivery.deliver,getOptimizationQuote:customerCareQuotes.get,publicOrigin:coreOrigin});
+const customerCareLanding = createCustomerCareLanding({coreOrigin,getProject});
 const app = express();
+registerCustomerCarePublicRoutes(app,{service:customerCareService});
 registerWebsitePublicationRoute(app, websiteService);
 registerPortalRoutes(app, {access:projectAccess,websites:websiteService,coreOrigin});
 app.use(express.json({
@@ -1056,6 +1077,7 @@ async function contextToolMap(agent, {sessionId='default',runId='',projectId='',
     env={...env,TAVILY_API_KEY:process.env.TAVILY_API_KEY,FAL_KEY:process.env.FAL_KEY};
   }
   Object.assign(all, websiteSkill({service:websiteService,projectId}));
+  Object.assign(all, customerCareSkill({service:customerCareService,projectId,landing:customerCareLanding,websiteService,calculatorReadiness:adviceCalculatorReadiness}));
   if(allowDelegation)for(const [name,value] of Object.entries(specialistSkill({runner:specialistRunner,parentRunId:runId,projectId,context:`${project?projectContext(project):''}\nAktueller Nutzerauftrag: ${String(userText).slice(0,4000)}`})))all[name]={...value,iva:{skillId:'specialists'}};
   return {all,env};
 }
@@ -1507,6 +1529,12 @@ app.post('/device-agent/:deviceId/commands/:commandId/complete', async (req, res
       failureStage: req.body?.failureStage || '',
       agentMetadata: imacAgentMetadataFromRequest(req),
     });
+    if (command.action === 'customer-care.mail.send' && command.result?.receipt) {
+      try {
+        await customerCareService.completeDelivery(command.payload.outboxId,command.result.receipt,{projectId:command.payload.projectId});
+        if(command.status==='completed')await acknowledgeCustomerCareCommand(command.id);
+      } catch { console.error('Kundenbetreuung: Versandbeleg bleibt zur erneuten Zuordnung gespeichert.'); }
+    }
     if (req.body?.ok !== true) {
       await recordIncident({
         system: 'imac',
@@ -1663,6 +1691,13 @@ app.post('/device-agent/:deviceId/project-workflow-runs', async (req, res) => {
     res.status(201).json({ ...stored, telegramReport });
   }
   catch (error) { res.status(400).json({ error: error.message }); }
+});
+
+app.get('/device-agent/:deviceId/customer-care/:outboxId', async (req,res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.status(401).json({error:'unauthorized'});
+  res.set('Cache-Control','no-store');
+  try { res.json(await customerCareService.getDeliveryEnvelope(req.params.outboxId)); }
+  catch(error) { const definitive=error.code==='CUSTOMER_CARE_DELIVERY_CANCELLED';res.status(error.status || 503).json({error:error.message,code:definitive?'CUSTOMER_CARE_NOT_ELIGIBLE':error.code||'CUSTOMER_CARE_TEMPORARY'}); }
 });
 
 app.post('/device-agent/:deviceId/operational-runs', async (req, res) => {
@@ -1844,6 +1879,9 @@ investment.registerRoutes(app);
 registerProjectProviderRoutes(app,projectProviders);
 registerProjectMarketingRoutes(app,{service:projectMarketing,authorizeProject:requireMarketingProject});
 registerWebsiteRoutes(app, websiteService);
+registerCustomerCareRoutes(app,{service:customerCareService,listProjects,access:projectAccess,customers:customerCareCustomers,readiness:customerCareDelivery.readiness,calculatorReadiness:adviceCalculatorReadiness,websiteService,landing:customerCareLanding,quotes:customerCareQuotes});
+const customerCareScheduler = createCustomerCareScheduler({service:customerCareService,listProjects,authorize:async id=>{const access=await projectAccess.getProjectAccess(id);return access.modules.includes('crm')||access.modules.includes('marketing');},reconcile:customerCareDelivery.reconcile,onError:()=>console.error('Kundenbetreuung: Projektlauf noch offen; gespeicherter Stand bleibt erhalten.')});
+app.get('/api/customer-care/scheduler-status',(_q,r)=>r.json(customerCareScheduler.status()));
 registerProjectAccessAdminRoutes(app,{access:projectAccess,coreOrigin});
 
 function envReady(...names) {
@@ -3517,6 +3555,8 @@ const automationRunner = createAutomationOrchestrator({
     deviceAgentStatus,
     enqueueDeviceCommand,
     deviceCommandStatus,
+  findCustomerCareDeviceCommands,
+  acknowledgeCustomerCareCommand,
     deviceId: IVA_IMAC_DEVICE_ID,
   }),
   'planbar-weekly-export': createPlanbarForecastAutomationHandler({
@@ -3524,6 +3564,8 @@ const automationRunner = createAutomationOrchestrator({
     deviceAgentStatus,
     enqueueDeviceCommand,
     deviceCommandStatus,
+  findCustomerCareDeviceCommands,
+  acknowledgeCustomerCareCommand,
     deviceId: IVA_IMAC_DEVICE_ID,
   }),
   'montage-required-fields-morning': createProjectWorkflowAutomationHandler({
@@ -3534,6 +3576,8 @@ const automationRunner = createAutomationOrchestrator({
     deviceAgentStatus,
     enqueueDeviceCommand,
     deviceCommandStatus,
+  findCustomerCareDeviceCommands,
+  acknowledgeCustomerCareCommand,
     deviceId: IVA_IMAC_DEVICE_ID,
   }),
   'planbar-completion-morning': createProjectWorkflowAutomationHandler({
@@ -3544,6 +3588,8 @@ const automationRunner = createAutomationOrchestrator({
     deviceAgentStatus,
     enqueueDeviceCommand,
     deviceCommandStatus,
+  findCustomerCareDeviceCommands,
+  acknowledgeCustomerCareCommand,
     deviceId: IVA_IMAC_DEVICE_ID,
   }),
   'manufacturer-leads-wattfox': createProjectWorkflowAutomationHandler({
@@ -3555,6 +3601,8 @@ const automationRunner = createAutomationOrchestrator({
     deviceAgentStatus,
     enqueueDeviceCommand,
     deviceCommandStatus,
+  findCustomerCareDeviceCommands,
+  acknowledgeCustomerCareCommand,
     deviceId: IVA_IMAC_DEVICE_ID,
   }),
   'daily-briefing': async () => sendBriefing(),

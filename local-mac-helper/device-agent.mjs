@@ -33,11 +33,12 @@ const APP_BUNDLE_IDENTIFIERS = Object.freeze({
 });
 // Reine Task-Starts bedienen keine UI. Der gestartete Worker hält selbst die
 // UI-Sperre und den Wachschutz; Display-/Lockfehler dürfen die Übergabe nicht verdecken.
-const UI_ACTIONS = new Set(['computer.status', 'portal.login', 'app.open']);
+const UI_ACTIONS = new Set(['customer-care.mail.send','computer.status', 'portal.login', 'app.open']);
 const AGENT_WORKSPACE = path.resolve(process.env.IVA_DEVICE_WORKSPACE || path.join(path.dirname(fileURLToPath(import.meta.url)), '..'));
 const ALLOWED_ACTIONS = Object.freeze([
   'agent.status',
   'computer.status',
+  'customer-care.mail.send',
   'funding.monitor.status',
   'funding.legacy-monitor.suspend',
   'funding.reviews.list',
@@ -130,7 +131,7 @@ async function request(pathname, { method = 'GET', body } = {}) {
   const text = await response.text();
   let payload = null;
   try { payload = text ? JSON.parse(text) : null; } catch {}
-  if (!response.ok) throw new Error(`IVA-Gerätekanal HTTP ${response.status}: ${String(payload?.error || text || response.statusText).slice(0, 400)}`);
+  if (!response.ok) throw Object.assign(new Error(`IVA-Gerätekanal HTTP ${response.status}: ${String(payload?.error || text || response.statusText).slice(0, 400)}`), {status:response.status,code:payload?.code});
   return payload;
 }
 
@@ -338,6 +339,10 @@ async function executeDeviceCommand(command) {
       ...imacDeviceAgentMetadata(),
       launchd,
     };
+  }
+  if (command.action === 'customer-care.mail.send') {
+    const {createCustomerCareMailExecutor}=await import('./customer-care-mail.mjs');
+    return createCustomerCareMailExecutor({getEnvelope:outboxId=>request(`/device-agent/${IMAC_DEVICE_ID}/customer-care/${encodeURIComponent(outboxId)}`)})(command.payload);
   }
   if (command.action === 'computer.status') {
     const { diagnoseOutlook } = await import('./outlook.mjs');

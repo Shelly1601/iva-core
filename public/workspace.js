@@ -1,3 +1,4 @@
+import { calculateAdviceScenario } from './advice-calculators.js';
 import { calculateCorporateBenefits } from './corporate-benefits-calculator.js';
 import { applyBkvOfferSelection, findBkvOffer } from './bkv-offer-catalog.js';
 import { normalizePresentationProfile, presentationConcept, presentationCopy, presentationDesign, presentationEvidence } from './presentation-concepts.js';
@@ -611,27 +612,10 @@ function percent(value) {
   return new Intl.NumberFormat('de-DE', { maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0) + ' %';
 }
 
-function futureValue(initial, monthly, annualRate, years) {
-  const months = Math.max(0, Math.round(years * 12));
-  const rate = annualRate / 100 / 12;
-  if (!months) return initial;
-  if (!rate) return initial + monthly * months;
-  return initial * Math.pow(1 + rate, months) + monthly * ((Math.pow(1 + rate, months) - 1) / rate);
-}
-
-function remainingLoan(principal, annualInterest, annualRepayment, years) {
-  const monthlyRate = annualInterest / 100 / 12;
-  const payment = principal * ((annualInterest + annualRepayment) / 100) / 12;
-  const months = Math.max(0, Math.round(years * 12));
-  if (!principal || !months) return { payment, remaining: principal };
-  if (!monthlyRate) return { payment, remaining: Math.max(0, principal - payment * months) };
-  const remaining = principal * Math.pow(1 + monthlyRate, months) - payment * ((Math.pow(1 + monthlyRate, months) - 1) / monthlyRate);
-  return { payment, remaining: Math.max(0, remaining) };
-}
-
 function calculateAdvice(module, data) {
   if (module.calculator === 'corporate-benefits') {
     const corporate = calculateCorporateBenefits(data);
+    if (corporate.calculationReady === false) return { title: 'Firmenvorsorge · Eingaben prüfen', status: 'data-required', items: [], issues: corporate.issues, automaticProposalEligible: false, note: corporate.issues.map(issue => `${issue.field}: ${issue.reason}`).join(' ') };
     return {
       title: 'Firmenvorsorge-Business-Case · Szenario',
       items: [
@@ -646,41 +630,7 @@ function calculateAdvice(module, data) {
       corporate,
     };
   }
-  if (module.calculator === 'financial-summary') {
-    const income = numeric(data.monthlyIncome), expenses = numeric(data.monthlyExpenses || data.essentialExpenses);
-    return { title: 'Finanzübersicht', items: [{ label: 'Freier Cashflow', value: euro(income - expenses) + ' / Monat' }, { label: 'Nettovermögen', value: euro(numeric(data.assets) - numeric(data.liabilities)) }, { label: 'Liquiditätsreichweite', value: expenses ? `${(numeric(data.liquidAssets || data.liquidityReserve) / expenses).toFixed(1)} Monate` : '–' }] };
-  }
-  if (module.calculator === 'business-summary') {
-    const employees = Math.max(1, numeric(data.employees));
-    return { title: 'Unternehmensübersicht', items: [{ label: 'Liquidität abzüglich Schulden', value: euro(numeric(data.liquidity) - numeric(data.liabilities)) }, { label: 'Umsatz je Beschäftigtem', value: euro(numeric(data.annualRevenue) / employees) }, { label: 'Erfasste Schlüsselpersonen', value: data.keyPersons ? 'Ja' : 'Noch offen' }] };
-  }
-  if (module.calculator === 'retirement-gap') {
-    const years = Math.max(0, numeric(data.retirementAge) - numeric(data.currentAge));
-    const desiredFuture = numeric(data.desiredNetPension) * Math.pow(1 + numeric(data.inflation) / 100, years);
-    const gap = Math.max(0, desiredFuture - numeric(data.expectedPension) - numeric(data.existingPrivatePension));
-    const neededCapital = numeric(data.withdrawalRate) ? gap * 12 / (numeric(data.withdrawalRate) / 100) : 0;
-    const remainingCapital = Math.max(0, neededCapital - numeric(data.existingCapital));
-    const monthly = years ? futureValue(0, 1, numeric(data.returnRate), years) : 0;
-    return { title: 'Vorsorgebedarf · Modellrechnung', items: [{ label: 'Projizierter Netto-Wunsch', value: euro(desiredFuture) + ' / Monat' }, { label: 'Versorgungslücke', value: euro(gap) + ' / Monat' }, { label: 'Zusätzliches Kapital', value: euro(remainingCapital) }, { label: 'Erforderliche Sparrate', value: monthly ? euro(remainingCapital / monthly) + ' / Monat' : '–' }], note: 'Vereinfachte Modellrechnung; Steuern, Krankenversicherung, Rentendynamik und konkrete Produktkosten sind noch nicht berücksichtigt.' };
-  }
-  if (module.calculator === 'depot-comparison') {
-    const years = numeric(data.years), months = years * 12, tax = numeric(data.taxRate) / 100;
-    const scenario = suffix => {
-      const initial = numeric(data['initial' + suffix]), monthly = numeric(data['monthly' + suffix]);
-      const gross = futureValue(initial, monthly, numeric(data['return' + suffix]) - numeric(data['cost' + suffix]), years);
-      const paid = initial + monthly * months, gain = Math.max(0, gross - paid);
-      return Math.max(0, gross - gain * tax);
-    };
-    return { title: 'Vermögensvergleich · vereinfachte Nettobetrachtung', items: [{ label: data.scenarioAName || 'Variante A', value: euro(scenario('A')) }, { label: data.scenarioBName || 'Variante B', value: euro(scenario('B')) }, { label: 'Differenz', value: euro(Math.abs(scenario('A') - scenario('B'))) }], note: 'Die Steuer wird pauschal auf den modellierten Gewinn angewendet. Produktindividuelle Besteuerung, Teilfreistellung, Versicherungsprivilegien und Abschlusskosten müssen separat ergänzt werden.' };
-  }
-  if (module.calculator === 'property-financing') {
-    const price = numeric(data.purchasePrice), ancillary = price * numeric(data.ancillaryPercent) / 100;
-    const loan = Math.max(0, price + ancillary - numeric(data.equity));
-    const result = remainingLoan(loan, numeric(data.interestRate), numeric(data.repaymentRate), numeric(data.years));
-    const rent = numeric(data.monthlyRent), maintenance = numeric(data.maintenance);
-    return { title: 'Immobilienrechnung', items: [{ label: 'Finanzierungsbedarf', value: euro(loan) }, { label: 'Monatliche Annuität', value: euro(result.payment) }, { label: 'Restschuld', value: euro(result.remaining) }, { label: 'Bruttomietrendite', value: price ? percent(rent * 12 / price * 100) : '–' }, { label: 'Monatlicher Cashflow vor Steuer', value: euro(rent - maintenance - result.payment) }] };
-  }
-  return null;
+  return calculateAdviceScenario(module, data);
 }
 
 function renderCalculation(root, module, data) {

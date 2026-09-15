@@ -112,14 +112,14 @@ export const ADVICE_MODULES = [
   },
   {
     id: 'retirement-planning', group: 'retirement', icon: '↗', title: 'Altersvorsorgeplanung', short: 'Versorgungslücke, Kapitalbedarf und notwendige Sparrate sichtbar machen.', status: 'ready', badge: 'Rechner',
-    sections: [{ title: 'Ruhestand', fields: [field('currentAge', 'Aktuelles Alter'), field('retirementAge', 'Gewünschtes Rentenalter'), field('desiredNetPension', 'Gewünschtes Netto im Ruhestand', { unit: '€ / Monat' }), field('expectedPension', 'Erwartete gesetzliche / berufliche Rente', { unit: '€ / Monat' }), field('existingPrivatePension', 'Bestehende private Renten', { unit: '€ / Monat' }), field('existingCapital', 'Vorhandenes Vorsorgekapital', { unit: '€' }), field('inflation', 'Inflation', { unit: '%', value: 2 }), field('returnRate', 'Rendite bis Rentenbeginn', { unit: '%', value: 4 }), field('withdrawalRate', 'Entnahmerate im Ruhestand', { unit: '%', value: 3.5 })] }], calculator: 'retirement-gap',
+    sections: [{ title: 'Ruhestand', fields: [field('currentAge', 'Aktuelles Alter'), field('retirementAge', 'Gewünschtes Rentenalter'), field('desiredNetPension', 'Gewünschtes Netto im Ruhestand', { unit: '€ / Monat' }), field('expectedPension', 'Erwartete gesetzliche / berufliche Rente bei Rentenbeginn', { unit: '€ / Monat' }), field('existingPrivatePension', 'Private Renten bei Rentenbeginn', { unit: '€ / Monat' }), field('existingCapital', 'Vorhandenes Vorsorgekapital', { unit: '€' }), field('inflation', 'Inflation', { unit: '%', value: 2 }), field('returnRate', 'Effektive Jahresrendite bis Rentenbeginn', { unit: '%', value: 4 }), field('withdrawalRate', 'Entnahmerate im Ruhestand', { unit: '%', value: 3.5 })] }], calculator: 'retirement-gap',
   },
   {
     id: 'depot-comparison', group: 'retirement', icon: '⇄', title: 'Depot / Fondspolice vergleichen', short: 'Zwei Spar- oder Anlagewege mit Rendite und Kosten gegenüberstellen.', status: 'ready', badge: 'Rechner',
     sections: [
       { title: 'Rahmen', fields: [field('years', 'Laufzeit', { unit: 'Jahre', value: 25 }), field('taxRate', 'Steuer auf Ertrag (vereinfacht)', { unit: '%', value: 25 })] },
-      { title: 'Variante A', fields: [field('scenarioAName', 'Bezeichnung A', { type: 'text', value: 'Depot' }), field('initialA', 'Startkapital A', { unit: '€' }), field('monthlyA', 'Sparrate A', { unit: '€ / Monat' }), field('returnA', 'Bruttorendite A', { unit: '%', value: 6 }), field('costA', 'Laufende Kosten A', { unit: '%', value: 0.4 })] },
-      { title: 'Variante B', fields: [field('scenarioBName', 'Bezeichnung B', { type: 'text', value: 'Fondspolice' }), field('initialB', 'Startkapital B', { unit: '€' }), field('monthlyB', 'Sparrate B', { unit: '€ / Monat' }), field('returnB', 'Bruttorendite B', { unit: '%', value: 6 }), field('costB', 'Laufende Kosten B', { unit: '%', value: 1.2 })] },
+      { title: 'Variante A', fields: [field('scenarioAName', 'Bezeichnung A', { type: 'text', value: 'Depot' }), field('initialA', 'Startkapital A', { unit: '€' }), field('monthlyA', 'Sparrate A', { unit: '€ / Monat' }), field('returnA', 'Effektive Brutto-Jahresrendite A', { unit: '%', value: 6 }), field('costA', 'Laufende Kosten A', { unit: '%', value: 0.4 })] },
+      { title: 'Variante B', fields: [field('scenarioBName', 'Bezeichnung B', { type: 'text', value: 'Fondspolice' }), field('initialB', 'Startkapital B', { unit: '€' }), field('monthlyB', 'Sparrate B', { unit: '€ / Monat' }), field('returnB', 'Effektive Brutto-Jahresrendite B', { unit: '%', value: 6 }), field('costB', 'Laufende Kosten B', { unit: '%', value: 1.2 })] },
     ], calculator: 'depot-comparison',
   },
   {
@@ -170,11 +170,16 @@ export function getAdviceModule(id) {
 }
 
 export function adviceConnectorStatus() {
-  const url = String(process.env.GKV_COMPARE_URL || '').trim();
+  let url = '';
+  try {
+    const candidate = new URL(String(process.env.GKV_COMPARE_URL || '').trim());
+    if (candidate.protocol === 'https:' && !candidate.username && !candidate.password) url = candidate.toString();
+  } catch {}
   const provider = String(process.env.GKV_COMPARE_PROVIDER || '').trim();
   const tariffs = energyTariffStatus();
   return {
-    gkv: { configured: Boolean(url), provider: provider || '', launchUrl: url || '' },
+    gkv: { configured: Boolean(url), provider: provider || '', launchUrl: url || '', comparisonEnabled: false, resultReadbackVerified: false },
+    nafi: { configured: false, comparisonEnabled: false, provider: 'NAFI', mode: 'adapter-missing', reason: 'NAFI-Lizenz und Schnittstellenvertrag müssen zugeordnet und der Adapter mit echten Tarifantworten geprüft werden.' },
     energyTariffs: {
       configured: tariffs.portalLoginConfigured || tariffs.apiCredentialsConfigured,
       comparisonEnabled: tariffs.comparisonEnabled,

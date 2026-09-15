@@ -1,3 +1,4 @@
+import { parseAdviceNumber } from '../public/advice-calculators.js';
 const roundMoney = value => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const boundedInteger = (value, min, max, fallback = 0) => Math.min(max, Math.max(min, Math.round(finite(value, fallback))));
@@ -22,13 +23,14 @@ export function calculateHeatPumpElectricity(input = {}) {
   const sourceConfig = HEAT_PUMP_CONVERSION_TYPES[source];
   if (!sourceConfig) throw new Error('Unbekannter Energieträger für die Wärmepumpen-Umrechnung.');
 
-  const annualConsumption = Math.max(0, finite(input.annualConsumption));
-  const seasonalPerformanceFactor = finite(input.seasonalPerformanceFactor, 4);
-  if (seasonalPerformanceFactor < 1.5 || seasonalPerformanceFactor > 8) {
+  const annualConsumption = parseAdviceNumber(input.annualConsumption);
+  if (annualConsumption === null || annualConsumption < 0 || annualConsumption > 1e9) throw new Error('Der Jahresverbrauch muss als gültige Zahl zwischen 0 und 1 Milliarde angegeben werden.');
+  const seasonalPerformanceFactor = input.seasonalPerformanceFactor === undefined ? 4 : parseAdviceNumber(input.seasonalPerformanceFactor);
+  if (seasonalPerformanceFactor === null || seasonalPerformanceFactor < 1.5 || seasonalPerformanceFactor > 8) {
     throw new Error('Die Jahresarbeitszahl muss zwischen 1,5 und 8 liegen.');
   }
-  const boilerEfficiencyPercent = finite(input.boilerEfficiencyPercent, 100);
-  if (boilerEfficiencyPercent < 50 || boilerEfficiencyPercent > 100) {
+  const boilerEfficiencyPercent = input.boilerEfficiencyPercent === undefined ? 100 : parseAdviceNumber(input.boilerEfficiencyPercent);
+  if (boilerEfficiencyPercent === null || boilerEfficiencyPercent < 50 || boilerEfficiencyPercent > 100) {
     throw new Error('Der Bestandswirkungsgrad muss zwischen 50 und 100 Prozent liegen.');
   }
 
@@ -212,6 +214,16 @@ function normalizedAddOns(value) {
 }
 
 export function calculatePvPrice(input = {}) {
+  input = { ...input };
+  const limits = { householdConsumptionKwh: [0, 1e9], heatPumpConsumptionKwh: [0, 1e9], evConsumptionKwh: [0, 1e9], targetCoveragePercent: [20, 160], specificYieldKwhPerKwp: [650, 1300], usableRoofAreaM2: [0, 1e7], layoutFactorPercent: [40, 100], moduleCount: [0, 200, true], storage6Qty: [0, 10, true], storage9Qty: [0, 10, true], ...Object.fromEntries(QUANTITY_ITEMS.map(item => [item.id, [0, 200, true]])) };
+  for (const [field, [min, max, integer]] of Object.entries(limits)) {
+    if (input[field] === '' || input[field] === null || input[field] === undefined) { delete input[field]; continue; }
+    const value = parseAdviceNumber(input[field]);
+    if (value === null || value < min || value > max || integer && !Number.isInteger(value)) throw new Error(`${field}: gültige ${integer ? 'ganze ' : ''}Zahl zwischen ${min} und ${max} erforderlich.`);
+    input[field] = value;
+  }
+  if (input.basicEquipment !== undefined && typeof input.basicEquipment !== 'boolean') throw new Error('Grundausstattung muss ausdrücklich Ja oder Nein sein.');
+  if (input.inverterFamily !== undefined && !['tp', 'tp2'].includes(input.inverterFamily)) throw new Error('Unbekannte Wechselrichter-Baureihe.');
   const moduleAreaM2 = PV_MODULE.widthM * PV_MODULE.heightM;
   const householdConsumptionKwh = Math.max(0, finite(input.householdConsumptionKwh, 4000));
   const heatPumpConsumptionKwh = Math.max(0, finite(input.heatPumpConsumptionKwh));
@@ -235,7 +247,7 @@ export function calculatePvPrice(input = {}) {
     throw new Error(`Der aktuelle Sol-Living-Preisstand unterstützt 8 bis 70 Module. Ermittelt wurden ${moduleCount}.`);
   }
 
-  const systemKwp = roundMoney(moduleCount * PV_MODULE.powerW / 1000);
+  const systemKwp = moduleCount * PV_MODULE.powerW / 1000;
   const inverterFamily = input.inverterFamily === 'tp2' ? 'tp2' : 'tp';
   const inverter = selectInverter(inverterFamily, String(input.inverterId || ''), systemKwp);
   const basicEquipment = input.basicEquipment === undefined ? true : Boolean(input.basicEquipment);

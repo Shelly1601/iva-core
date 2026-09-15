@@ -8,9 +8,11 @@ function cleanText(value, max = 500) {
 }
 
 function positiveNumber(value) {
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : null;
   let normalized = String(value ?? '').trim().replace(/\s/g, '');
-  if (/^\d{1,3}(?:\.\d{3})+$/.test(normalized)) normalized = normalized.replace(/\./g, '');
-  else normalized = normalized.replace(',', '.');
+  if (!normalized || !/^(?:\d+(?:[.,]\d+)?|\d{1,3}(?:\.\d{3})+(?:,\d+)?)$/.test(normalized)) return null;
+  if (normalized.includes(',')) normalized = normalized.replace(/\./g, '').replace(',', '.');
+  else if (/^\d{1,3}(?:\.\d{3})+$/.test(normalized)) normalized = normalized.replace(/\./g, '');
   const number = Number(normalized);
   return Number.isFinite(number) && number > 0 ? number : null;
 }
@@ -57,6 +59,7 @@ export function prepareEnergyTariffRequest(input = {}) {
   if (!COMMODITIES.has(commodity)) missing.push('commodity');
   if (!annualConsumptionKwh) missing.push('annualConsumptionKwh');
   if (!customerAddress && !postalCode) missing.push('customerAddressOrPostalCode');
+  if (postalCode && !/^\d{5}$/.test(postalCode)) missing.push('postalCode');
 
   const provider = energyTariffStatus();
   return {
@@ -92,15 +95,19 @@ export async function prepareWorkspaceEnergyTariffRequest({ workspaces, workspac
   const workspace = await workspaces.getWorkspace(workspaceId);
   if (!workspace) return null;
 
-  const heating = workspace.data?.heating || {};
-  const inferredConsumption = String(heating.consumptionUnit || '').toLowerCase() === 'kwh'
+  const heating = workspace.data?.existingHeating || workspace.data?.heating || {};
+  // A heating bill is only a gas tariff basis when the source and unit match.
+  // Heat-pump/household electricity require their own meter consumption.
+  const inferredConsumption = input.commodity === 'gas'
+    && /^(?:gas|erdgas)$/i.test(String(heating.energySource || '').trim())
+    && String(heating.consumptionUnit || '').toLowerCase() === 'kwh'
     ? heating.annualConsumption
     : null;
   const request = prepareEnergyTariffRequest({
     ...input,
     customerName: input.customerName || workspace.customer?.name,
     customerAddress: input.customerAddress || workspace.customer?.address,
-    annualConsumptionKwh: input.annualConsumptionKwh || inferredConsumption,
+    annualConsumptionKwh: input.annualConsumptionKwh ?? inferredConsumption,
     meterType: input.meterType || workspace.data?.electrical?.meterType,
   });
   const previous = Array.isArray(workspace.data?.tariffRequests) ? workspace.data.tariffRequests : [];
