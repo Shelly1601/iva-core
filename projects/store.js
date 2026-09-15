@@ -176,9 +176,9 @@ const HEAT_HERO_PROJECT = {
       status: 'active',
       enabled: true,
       schedule: 'Täglich · 08:00 Uhr',
-      execution: 'Codex-Automation · lokaler iMac · WhatsApp, Chrome, Pipedrive, Planbar, Outlook und Telegram-Fallback',
-      purpose: 'Nadines Nachrichten aus „Terminierungen Dispo“ vom Vortag Kunden und KW zuordnen, vorhandene HH-Einträge als reine Formatbeispiele lesen und zusätzlich täglich bestehende relevante Kundentermine auf Präfixe `HH`/`EN`/`DW` sowie fehlende Auftragsnummer oder Kurzbeschreibung prüfen und vervollständigen.',
-      safety: 'Nur eindeutige Einzelfälle und eindeutig belegte Bestandskorrekturen bearbeiten; Pipedrive und HH-Beispiele rein lesend, nichts in Planbar anlegen, löschen oder verschieben. Unklare Dokumente, Partner oder TMB-Maße blockieren den Fall. Maximal 20 Minuten, danach Display genau einmal aus.',
+      execution: 'Codex-Automation · lokaler Mac Mini · WhatsApp, Chrome, Pipedrive, Planbar, Outlook und Telegram-Fallback',
+      purpose: 'Offene IVA-Terminierungen und tägliche Bestandslücken ausschließlich für belegte private Heat-Hero-/HH-Kunden vervollständigen. Enter, andere Partner und B2B sind ausgeschlossen. WhatsApp ist ein unabhängiger Zusatzeingang und blockiert keine belegbaren Planbar-Fälle.',
+      safety: 'Nur bestehende eindeutig belegte private HH-Termine ergänzen; Pipedrive und fremde Formatbeispiele bleiben lesend. Keine Neuanlage oder Verschiebung. Jeder Schreibschritt wird frisch rückgelesen. Technische Hürden werden fallweise repariert, offene Angaben dauerhaft nachgezogen und erst nach Soll-/Ist-Nachweis abgeschlossen.',
       nextStep: 'Nächsten automatischen Morgenlauf darauf prüfen, ob Bestandscheck und Forecast-Horizont nur eindeutige Präfix- und Vervollständigungsfälle ändern und alle übrigen sauber blockieren.',
     },
     {

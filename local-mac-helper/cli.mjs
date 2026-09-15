@@ -26,7 +26,7 @@ import { diagnoseWhatsAppMac, syncDirectSalesRosterFromWhatsApp } from './whatsa
 import { loadDirectSalesRosterSync } from './direct-sales-roster.mjs';
 import { startMacHelperServer } from './server.mjs';
 import { analyzeFundingPdf } from './funding-document-extractor.mjs';
-import { loadFundingScan, scanPipedriveFundingBoard } from './funding-scan.mjs';
+import { loadFundingScan, scanPipedriveFundingBoard, recordFundingDocumentReview } from './funding-scan.mjs';
 import { loadFundingMailScan, scanFundingMailbox } from './funding-mail-scan.mjs';
 import {
   acknowledgeFundingMessages,
@@ -72,6 +72,7 @@ import {
   credentialBrokerStatus,
 } from './credential-broker.mjs';
 import { ensurePortalLogin, portalAuthPolicy } from './portal-auth.mjs';
+import { prepareFundingSend, markFundingSendSubmitted, completeFundingSend, reviewFundingSendResumption } from './funding-send-state.mjs';
 import { completeFundingMail } from './funding-mail-completion.mjs';
 import { ensureAppWindowOnRightDisplay, requireRightDisplayWorkspace } from './display-workspace.mjs';
 import { beginDewarmteDelivery, finishDewarmteDelivery } from './dewarmte-delivery-state.mjs';
@@ -107,6 +108,15 @@ const batchService = new FundingBatchService({
 
 async function main() {
   const [command, filePath, confirmation, extra, final, sixth] = process.argv.slice(2);
+  if (command === 'funding-send') {
+    let result;
+    if (filePath === 'prepare') result = await prepareFundingSend(await readJson(confirmation));
+    else if (filePath === 'before-submit') result = await markFundingSendSubmitted(confirmation, await readJson(extra));
+    else if (filePath === 'complete') result = await completeFundingSend(confirmation, { messageId: extra || undefined });
+    else if (filePath === 'resume') result = await reviewFundingSendResumption(confirmation);
+    else throw new Error('Unbekannter Förder-Versandschritt.');
+    return console.log(JSON.stringify(result, null, 2));
+  }
   if (command === 'credential-policy') return console.log(JSON.stringify({ keychain: credentialBrokerPolicy(), portalLogin: portalAuthPolicy() }, null, 2));
   if (command === 'credential-status') return console.log(JSON.stringify(await credentialBrokerStatus(filePath), null, 2));
   if (command === 'credential-setup') {
@@ -247,6 +257,10 @@ async function main() {
     }), null, 2));
   }
   if (command === 'mark-pipedrive-funding-won') {
+    if (confirmation === '--receipt') {
+      if (final !== '--commit') throw new Error('Für Gewonnen fehlt --commit.');
+      return console.log(JSON.stringify(await markPipedriveFundingDealWon({ dealId: filePath, approvalEvidence: await readJson(extra), confirmApply: true }), null, 2));
+    }
     if (extra !== '--commit') throw new Error('Der Deal wurde nicht auf „Gewonnen“ gesetzt. Zum Bestätigen --commit anhängen.');
     return console.log(JSON.stringify(await markPipedriveFundingDealWon({
       dealId: filePath,
@@ -280,9 +294,13 @@ async function main() {
     });
     return console.log(JSON.stringify(report, null, 2));
   }
+  if (command === 'record-funding-document-review') {
+    return console.log(JSON.stringify(await recordFundingDocumentReview(await readJson(filePath)), null, 2));
+  }
   if (command === 'latest-funding-scan') return console.log(JSON.stringify(await loadFundingScan(), null, 2));
   if (command === 'scan-funding-mailbox') {
     const report = await scanFundingMailbox({
+      fundingRun: filePath === '--funding-run' ? (await readJson(confirmation)).fundingRun : { mode: 'incremental' },
       onProgress: ({ processed, total }) => console.error(`Förderpostfach: ${processed}/${total} Nachrichten mit Anlagen zur lokalen Dokumentprüfung markiert`),
     });
     return console.log(JSON.stringify(report, null, 2));
@@ -296,7 +314,7 @@ async function main() {
   if (command === 'funding-monitor-background-readiness') return console.log(JSON.stringify(await fundingMonitorBackgroundReadiness(), null, 2));
   if (command === 'funding-monitor-new-mail') return console.log(JSON.stringify(await detectNewFundingMessages(), null, 2));
   if (command === 'run-funding-monitor-once') {
-    return console.log(JSON.stringify(await runFundingMonitorOnce({ ignoreIdle: filePath === '--ignore-idle' }), null, 2));
+    return console.log(JSON.stringify(await runFundingMonitorOnce({ ignoreIdle: process.argv.includes('--ignore-idle'), fundingRun: process.argv.includes('--funding-run') ? (await readJson(process.argv[process.argv.indexOf('--funding-run') + 1])).fundingRun : { mode: 'incremental' } }), null, 2));
   }
   if (command === 'list-funding-reviews') return console.log(JSON.stringify(await listFundingReviews(), null, 2));
   if (command === 'funding-monitor-launchd-status') return console.log(JSON.stringify(await fundingMonitorLaunchAgentStatus(), null, 2));
@@ -421,7 +439,7 @@ async function main() {
   node local-mac-helper/cli.mjs update-pipedrive-funding-notes /pfad/notizen.json --commit
   node local-mac-helper/cli.mjs scan-funding-board
   node local-mac-helper/cli.mjs latest-funding-scan
-  node local-mac-helper/cli.mjs scan-funding-mailbox
+  node local-mac-helper/cli.mjs scan-funding-mailbox [--funding-run /absoluter/auftrag/request.json]
   node local-mac-helper/cli.mjs latest-funding-mail-scan
   node local-mac-helper/cli.mjs initialize-funding-monitor --commit
   node local-mac-helper/cli.mjs funding-monitor-status

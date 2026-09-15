@@ -1437,7 +1437,7 @@ app.post('/device-agent/:deviceId/background/pipedrive/deals/:dealId/funding-tra
 });
 app.post('/device-agent/:deviceId/background/pipedrive/deals/:dealId/won', async (req, res) => {
   if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
-  try { res.json(await markPipedriveFundingDealWonApi({ dealId: req.params.dealId, approvalFileName: req.body?.approvalFileName, confirmation: 'Pipedrive schreiben' })); }
+  try { res.json(await markPipedriveFundingDealWonApi({ dealId: req.params.dealId, approvalFileName: req.body?.approvalFileName, approvalEvidence: req.body?.approvalEvidence, confirmation: 'Pipedrive schreiben' })); }
   catch (error) { res.status(409).json({ error: error.message }); }
 });
 app.post('/device-agent/:deviceId/background/pipedrive/deals/:dealId/files', express.raw({ type: 'application/octet-stream', limit: '50mb' }), async (req, res) => {
@@ -1642,9 +1642,10 @@ app.post('/device-agent/:deviceId/project-workflow-runs', async (req, res) => {
     const projectId = req.body?.projectId === 'dewarmte' ? 'dewarmte' : 'heat-hero';
     const stored = await recordProjectWorkflowResult(projectId, req.body || {});
     let telegramReport = null;
-    const fundingIds = new Set(['funding-daily-sequence', 'funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning']);
+    const fundingIds = new Set(['funding-initial-backfill', 'funding-daily-sequence', 'funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning']);
     const terminal = ['completed', 'failed', 'blocked', 'timed_out', 'incomplete'].includes(String(req.body?.status || ''));
-    if (terminal && fundingIds.has(String(req.body?.workflowId || ''))) {
+    const changed = (Array.isArray(req.body?.metrics?.workflowSteps) ? req.body.metrics.workflowSteps : []).reduce((sum, step) => sum + (Number(step.changed) || 0), 0);
+    if (terminal && changed > 0 && fundingIds.has(String(req.body?.workflowId || ''))) {
       const mem = await loadMemory();
       if (mem.chatId) {
         const secretFreeSummary = String(req.body?.summary || req.body?.error || 'Kein Detailbericht vorhanden.')
@@ -3498,6 +3499,14 @@ const automationRunner = createAutomationOrchestrator({
       : `E-Mail-Zustellung fehlgeschlagen; Wochenreport ersatzweise per Telegram zugestellt. Grund: ${delivery.emailError}`;
     return { reportKey: report.key, delivery, summary };
   },
+  'funding-initial-backfill': createProjectWorkflowAutomationHandler({
+    projectId: 'heat-hero', workflowId: 'funding-initial-backfill',
+    displayName: 'Förderung – einmaliger Rücklauf ab 01.08.2026',
+    workflowInput: { fundingRun: { mode: 'initial-backfill', since: '2026-08-01' } },
+    enabledWorkflowIds: ['funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning'],
+    requiredAllowedActions: ['funding.legacy-monitor.suspend', 'project.workflow.run', 'codex.task.status'],
+    getProject, deviceAgentStatus, enqueueDeviceCommand, deviceCommandStatus, deviceId: IVA_IMAC_DEVICE_ID,
+  }),
   'funding-daily-sequence': createProjectWorkflowAutomationHandler({
     projectId: 'heat-hero',
     workflowId: 'funding-daily-sequence',

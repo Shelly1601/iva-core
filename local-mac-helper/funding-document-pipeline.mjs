@@ -157,13 +157,8 @@ export function assessRegistrationCertificateDate(text, now = new Date()) {
   candidates.sort((a, b) => b.date - a.date);
   const selected = candidates[0];
   const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const threshold = new Date(today);
-  threshold.setUTCMonth(threshold.getUTCMonth() - 3);
   if (selected.date > new Date(today.getTime() + 24 * 60 * 60 * 1000)) {
     return { status: 'invalid', issueDate: selected.date.toISOString().slice(0, 10), reason: 'Ausstellungsdatum der Meldebescheinigung liegt in der Zukunft.' };
-  }
-  if (selected.date < threshold) {
-    return { status: 'invalid', issueDate: selected.date.toISOString().slice(0, 10), reason: 'Meldebescheinigung ist älter als drei Monate.' };
   }
   return { status: 'valid', issueDate: selected.date.toISOString().slice(0, 10), reason: null };
 }

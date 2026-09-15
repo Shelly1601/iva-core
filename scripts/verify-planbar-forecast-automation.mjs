@@ -31,6 +31,7 @@ function harness({ projectEnabled = true, online = true, commands = {} } = {}) {
   assert.equal(queued.length, 1);
   assert.equal(queued[0].payload.runMode, 'automatic');
   assert.equal(queued[0].payload.automationSlotKey, 'planbar-weekly-export:weekly:2026-W35');
+  assert.equal(queued[0].payload.requestId, 'planbar-weekly-export:weekly:2026-W35');
   assert.equal(commands[queued[0].id].status, 'queued');
 }
 
@@ -42,7 +43,7 @@ function harness({ projectEnabled = true, online = true, commands = {} } = {}) {
 
 {
   const commands = {
-    start: { id: 'start', status: 'completed', result: { sent: true, sentFolderVerified: true, period: 'KW 37-46 / 2026', attachmentCount: 8 } },
+    start: { id: 'start', status: 'completed', result: { sent: true, sentFolderVerified: true, runMode: 'automatic', automationSlotKey: 'forecast:weekly:2026-W35', period: 'KW 37-46 / 2026', attachmentCount: 8 } },
   };
   const { handler } = harness({ commands });
   const result = await handler({ slotKey: 'forecast:weekly:2026-W35', attempt: 1, previousResult: { commandId: 'start' } });
@@ -53,11 +54,18 @@ function harness({ projectEnabled = true, online = true, commands = {} } = {}) {
 {
   const commands = {
     start: { id: 'start', status: 'completed', result: { jobId: '12345678-1234-4234-8234-123456789012' } },
-    status: { id: 'status', status: 'completed', result: { status: 'completed', workflowProof: { sentFolderVerified: true, period: 'KW 37-46 / 2026', attachmentCount: 8 } } },
+    status: { id: 'status', status: 'completed', result: { status: 'completed', workflowProof: { sentFolderVerified: true, runMode: 'automatic', automationSlotKey: 'forecast:weekly:2026-W35', period: 'KW 37-46 / 2026', attachmentCount: 8 } } },
   };
   const { handler } = harness({ commands });
   const result = await handler({ slotKey: 'forecast:weekly:2026-W35', attempt: 1, previousResult: { commandId: 'start', jobId: commands.start.result.jobId, statusCommandId: 'status' } });
   assert.equal(result.sentFolderVerified, true);
+}
+
+{
+  for (const proof of [{ sentFolderVerified: true }, { sentFolderVerified: true, runMode: 'manual', automationSlotKey: 'forecast:weekly:2026-W35' }, { sentFolderVerified: true, runMode: 'automatic', automationSlotKey: 'forecast:weekly:2026-W34' }]) {
+    const { handler } = harness({ commands: { start: { id: 'start', status: 'completed', result: { sent: true, ...proof } } } });
+    await assert.rejects(handler({ slotKey: 'forecast:weekly:2026-W35', attempt: 1, previousResult: { commandId: 'start' } }), /Gesendet-Nachweis/);
+  }
 }
 
 {
@@ -77,7 +85,7 @@ console.log('PASS Planbar-Forecast-Automation verfolgt Mac Mini und Outlook bis 
 {
   const commands = {
     start: { id: 'start', status: 'completed', result: { jobId: '12345678-1234-4234-8234-123456789012' } },
-    status: { id: 'status', status: 'completed', result: { status: 'completed', workflowOutcome: 'no_changes', workflowSteps: [{ id: 'completeness', status: 'completed' }], workflowMetrics: { checked: 73, changed: 0 }, resultPreview: '73 Fälle geprüft; keine Änderungen erforderlich.' } },
+    status: { id: 'status', status: 'completed', result: { status: 'completed', planbarCompletionProof: { protocol: 2, jobId: '12345678-1234-4234-8234-123456789012', scope: 'heat-hero-private', inventoryComplete: true, status: 'no_changes' }, workflowOutcome: 'no_changes', workflowSteps: [{ id: 'completeness', status: 'completed' }], workflowMetrics: { checked: 73, changed: 0 }, resultPreview: '73 Fälle geprüft; keine Änderungen erforderlich.' } },
   };
   const handler = createProjectWorkflowAutomationHandler({
     workflowId: 'planbar-completion-morning',

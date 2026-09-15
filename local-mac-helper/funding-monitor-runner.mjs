@@ -93,7 +93,13 @@ async function processMessage(message, board) {
     vpEmail: snapshot.vpEmail || null,
     source: 'outlook-funding-inbox',
     pipedriveMutated: false,
+    messageId: message.messageId || null,
   };
+  if (message.messageId && !message.uiDescriptionVerified) {
+    await saveFundingReview({ ...base, status: 'native_message_ui_resolution_pending', attachmentCount: null });
+    await acknowledgeFundingMessages([fingerprint]);
+    return { fingerprint, dealId: base.dealId, status: 'native_message_ui_resolution_pending', acknowledged: true };
+  }
   if (!/hat dateien/i.test(message.description)) {
     await saveFundingReview({ ...base, status: 'mail_text_review_required', attachmentCount: 0 });
     await acknowledgeFundingMessages([fingerprint]);
@@ -127,7 +133,7 @@ async function processMessage(message, board) {
   return { fingerprint, dealId: base.dealId, status: recommendation.status, acknowledged: true };
 }
 
-export async function runFundingMonitorOnce({ ignoreIdle = false } = {}) {
+export async function runFundingMonitorOnce({ ignoreIdle = false, fundingRun = { mode: 'incremental' } } = {}) {
   let lock;
   try {
     await mkdir(dataRoot(), { recursive: true, mode: 0o700 });
@@ -149,11 +155,12 @@ export async function runFundingMonitorOnce({ ignoreIdle = false } = {}) {
         return { status: 'skipped_not_idle', readiness, sent: false, pipedriveMutated: false };
       }
     }
-    const detected = await detectNewFundingMessages();
+    const detected = await detectNewFundingMessages({ fundingRun });
     const board = await scanPipedriveFundingBoard({ persist: true });
     if (!detected.newMessageCount) {
       const result = {
-        status: 'open_deals_checked_no_new_mail',
+        status: detected.scanComplete ? 'open_deals_checked_no_new_mail' : 'mail_scan_continuation_pending',
+        scanComplete: detected.scanComplete,
         newMessageCount: 0,
         dealsChecked: board.read,
         boardCounts: board.boardCounts,
@@ -172,6 +179,7 @@ export async function runFundingMonitorOnce({ ignoreIdle = false } = {}) {
     }
     const report = {
       status: results.some(item => item.status === 'failed') ? 'partial_failure' : 'review_queue_updated',
+      scanComplete: detected.scanComplete,
       startedAt,
       completedAt: new Date().toISOString(),
       newMessageCount: detected.newMessageCount,

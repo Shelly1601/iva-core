@@ -17,14 +17,15 @@ export const FUNDING_WORKFLOW_POLICY = Object.freeze({
   timeZone: 'Europe/Berlin',
   schedule: 'Täglich · 05:00 Uhr',
   executionHost: 'macmini-nadine',
-  emailMode: 'draft-only',
+  emailMode: 'verified-send',
   deleteMail: false,
   deletePipedrive: false,
   deleteFiles: false,
   deleteManagedLocalCopiesAfterVerifiedReplacement: true,
-  emptyWholeUserTrash: false,
-  processedMailFolder: 'fertig',
-  noteSuffix: '(Notiz von Nadine via KI)',
+  emptyWholeUserTrash: true,
+  trashCleanupExecutor: 'authorized-daily-worker',
+  processedMailFolder: 'Fertig',
+  noteSuffix: '(Notiz von Nadine)',
   reportChannel: 'telegram-with-project-protocol',
   sheet: Object.freeze({
     spreadsheetId: '1XPlBa5XgBixML0RquR_kwIwyxTDqRtpfXAudYimKB_8',
@@ -60,6 +61,7 @@ function euro(value) {
 }
 
 export function buildFundingCalculationNote({ result = {}, sources = [], openPoints = [], status = '' } = {}) {
+  if (result.canUseForFundingNote !== true || typeof result.estimatedGrant !== 'number' || !Number.isFinite(result.estimatedGrant) || typeof result.eligibleCosts !== 'number' || !Number.isFinite(result.eligibleCosts)) throw new Error('Die Förderberechnung ist noch nicht vollständig belegt und darf nicht als Betragsnotiz verwendet werden.');
   const units = Math.max(1, Math.floor(Number(result.units) || 1));
   const summary = clean(result.noteSummary, 1200);
   const firstLine = units > 1 && !/^[\d.]+,\d{2}\s*€/.test(summary)

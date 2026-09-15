@@ -11,13 +11,13 @@ if (process.argv.includes('--from-existing')) {
   throw new Error('Forecast-Abbruch: --from-existing ist für Planbar-Forecasts nicht mehr zulässig. Planbar muss zuerst neu eingelesen werden.');
 }
 const outputDirectory = path.resolve(argument('output', process.argv[2] || 'outputs/planbar-weekly/current'));
-const isoYear = Number(argument('year', '2026'));
-const firstWeek = Number(argument('start-week', '36'));
-const lastWeek = Number(argument('end-week', '45'));
-if (![isoYear, firstWeek, lastWeek].every(Number.isInteger) || lastWeek - firstWeek !== 9) {
-  throw new Error('Forecast-Daten benötigen ein Jahr und genau zehn Kalenderwochen.');
+const isoYear = Number(argument('year'));
+const firstWeek = Number(argument('start-week'));
+const lastWeek = Number(argument('end-week'));
+if (![isoYear, firstWeek, lastWeek].every(Number.isInteger) || isoYear < 2026 || firstWeek < 1 || lastWeek - firstWeek !== 9) {
+  throw new Error('Forecast-Daten benötigen ausdrücklich --year, --start-week und --end-week für den aktuellen Zehn-Wochen-Zeitraum. Ein historischer Standardzeitraum wird nicht verwendet.');
 }
-await mkdir(outputDirectory, { recursive: true });
+await mkdir(outputDirectory, { recursive: true, mode: 0o700 });
 const outputFile = path.join(outputDirectory, 'forecast-data.json');
 const rowsFile = path.join(outputDirectory, 'data.json');
 const result = await collectAndBuildPlanbarForecast({ isoYear, firstWeek, lastWeek });

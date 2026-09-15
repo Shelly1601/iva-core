@@ -4,7 +4,7 @@ import { loadDirectSalesRosterSync, matchDirectSalesPartner } from './direct-sal
 export const FUNDING_DOCUMENTS = Object.freeze({
   signed_offer: 'Unterschriebenes Angebot',
   identity_card: 'Personalausweis (Vorder- und Rückseite)',
-  registration_certificate: 'Meldebescheinigung (so aktuell wie möglich)',
+  registration_certificate: 'Meldebescheinigung',
   land_register: 'Vollständiger und leserlicher Grundbuchauszug (ca. 10 Seiten)',
   tax_assessment_2023: 'Einkommensteuerbescheid 2023',
   tax_assessment_2024: 'Einkommensteuerbescheid 2024',
@@ -15,7 +15,7 @@ export const FUNDING_SENDER_EMAIL = 'foerderung@heat-hero.com';
 export const FUNDING_PRIMARY_RECIPIENT_EMAIL = 'p.germer@heat-hero.com';
 export const FUNDING_SUPERVISORS = Object.freeze({
   default: Object.freeze({ route: 'default', name: 'Patrick Germer', firstName: 'Patrick', email: 'p.germer@heat-hero.com' }),
-  ekd: Object.freeze({ route: 'ekd', name: 'Florian Bolz', firstName: 'Florian', email: 'f.bolz@heat-hero.com' }),
+  ekd: Object.freeze({ route: 'ekd', name: 'Kati Bolz', firstName: 'Kati', email: 'k.bolz@heat-hero.com' }),
   direct_sales: Object.freeze({ route: 'direct_sales', name: 'Noah Zielinski', firstName: 'Noah', email: 'n.zielinski@heat-hero.com' }),
 });
 export const FUNDING_SIGNATURE = Object.freeze({
@@ -30,6 +30,7 @@ export const FUNDING_SIGNATURE = Object.freeze({
 });
 export const FUNDING_ESCALATION_RECIPIENTS = Object.freeze({
   ekd: Object.freeze({ name: 'Kati Bolz', email: 'k.bolz@heat-hero.com' }),
+  direct_sales: Object.freeze({ name: 'Noah Zielinski', email: 'n.zielinski@heat-hero.com' }),
   default: Object.freeze({ name: 'Patrick Germer', email: 'p.germer@heat-hero.com' }),
 });
 export const FUNDING_ESCALATION_DELAY_DAYS = 7;
@@ -107,9 +108,12 @@ export function resolveFundingSupervisor(input = {}) {
 export function resolveFundingNoResponseEscalationRecipient(input = {}) {
   const evidence = [input.salesStructure, input.vertriebsstruktur, input.fundingRoute, input.route, input.vpEmail, input.vertriebspartnerEmail]
     .map(value => clean(value, 300)).join(' ');
-  return /(?:^|\W)ekd(?:\W|$)|@[a-z0-9.-]*ekd[a-z0-9.-]*\.[a-z]{2,}\b/i.test(evidence)
-    ? { route: 'ekd', ...FUNDING_ESCALATION_RECIPIENTS.ekd }
-    : { route: 'default', ...FUNDING_ESCALATION_RECIPIENTS.default };
+  if (/(?:^|\W)ekd(?:\W|$)|@(?:[a-z0-9-]+\.)?ekd-solar\.de\b/i.test(evidence)) return { route: 'ekd', ...FUNDING_ESCALATION_RECIPIENTS.ekd };
+  const direct = /(?:^|\W)(?:direct_sales|direktvertrieb)(?:\W|$)/i.test(evidence)
+    || matchDirectSalesPartner({ vpName: input.vpName || input.vertriebspartnerName, vpEmail: input.vpEmail || input.vertriebspartnerEmail }, input.directSalesRoster || loadDirectSalesRosterSync()).matched;
+  if (direct) return { route: 'direct_sales', ...FUNDING_ESCALATION_RECIPIENTS.direct_sales };
+  if (/(?:^|\W)sol[ -]?(?:living|heat)(?:\W|$)/i.test(evidence)) return { route: 'default', ...FUNDING_ESCALATION_RECIPIENTS.default };
+  throw new Error('Der zuständige Vertriebsleiter für die 7-Tage-Eskalation ist nicht eindeutig zugeordnet.');
 }
 
 export function assessFundingNoResponseEscalation(input = {}, now = new Date()) {
@@ -189,9 +193,9 @@ export function resolveFundingRecipients(input = {}) {
   const suppliedCc = Array.isArray(input.cc) ? input.cc.map(extractEmailAddress).filter(Boolean) : [];
   if (suppliedCc.length > 1) throw new Error('Für einen Förderentwurf darf höchstens ein eindeutig zugeordneter Vertriebspartner im CC stehen.');
   const vpName = clean(input.vpName || input.vertriebspartnerName);
-  const rawVpEmail = input.vpEmail || input.vertriebspartnerEmail || suppliedCc[0] || extractEmailAddress(vpName);
+  const rawVpEmail = input.vpEmail || input.vertriebspartnerEmail || extractEmailAddress(vpName);
   const vpEmail = extractEmailAddress(rawVpEmail);
-  if (suppliedCc.length && vpEmail && suppliedCc[0] !== vpEmail) {
+  if (suppliedCc.length && (!vpEmail || suppliedCc[0] !== vpEmail)) {
     throw new Error('Die übergebene CC-Adresse stimmt nicht mit der erkannten Vertriebspartner-E-Mail überein.');
   }
   const warnings = [];
@@ -211,6 +215,21 @@ export function resolveFundingRecipients(input = {}) {
     greeting: `Guten Tag ${salutation}${customerName},`,
     warnings,
   };
+}
+
+// Call immediately before the authorized scheduled send. This validates a
+// concrete draft, not a user's free-text claim that the recipients are right.
+export function validateFundingSendEnvelope({ type = 'missing-documents', input = {}, prepared = {}, evidence = {}, now = new Date() } = {}) {
+  if (!['missing-documents', 'no-response'].includes(type)) throw new Error('Nicht freigegebener Förder-Mailtyp.');
+  if (evidence.sourceReviewComplete !== true || evidence.identityVerified !== true || evidence.pipedriveFilesReadbackVerified !== true || evidence.pipedriveNotesReadbackVerified !== true) throw new Error('Vor dem Förderversand fehlen Quellenprüfung oder Rücklesebelege.');
+  const rendered = type === 'no-response' ? renderFundingNoResponseEscalationDraft(input, now) : renderFundingMissingDocumentsEmail(input);
+  const recipients = type === 'no-response' ? { to: rendered.to, cc: [] } : rendered.recipients;
+  if (type === 'missing-documents' && (recipients.warnings.length || !recipients.vpEmail || evidence.customerAddressVerified !== true || evidence.partnerAddressVerified !== true)) throw new Error('Kundenadresse und tatsächlicher Vertriebspartner im CC müssen eindeutig belegt sein.');
+  if (type === 'no-response' && (!input.originalMessageId || prepared.originalMessageId !== input.originalMessageId || evidence.originalMessageForwarded !== true || evidence.responseThreadReadComplete !== true)) throw new Error('Die ursprüngliche Mail und der vollständige Antwortverlauf sind für die Weiterleitung nicht belegt.');
+  const equalAddresses = (left, right) => JSON.stringify((left || []).map(normalizeEmail).sort()) === JSON.stringify((right || []).map(normalizeEmail).sort());
+  if (normalizeEmail(prepared.from) !== FUNDING_SENDER_EMAIL || !equalAddresses(prepared.to, recipients.to) || !equalAddresses(prepared.cc, recipients.cc) || (prepared.bcc || []).length
+    || prepared.subject !== rendered.subject || (prepared.introduction || prepared.body) !== rendered.body) throw new Error('Der Förderentwurf stimmt nicht mit dem freigegebenen Text und den belegten Empfängern überein.');
+  return { verified: true, from: FUNDING_SENDER_EMAIL, to: recipients.to, cc: recipients.cc, subject: rendered.subject, requiresSentReadback: true, originalMessageMustBeForwarded: type === 'no-response' };
 }
 
 export function renderFundingSignaturePlain() {

@@ -36,6 +36,27 @@ function normalizedRunStatus(value) {
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'blocked', 'stopped', 'timed_out', 'incomplete']);
 
+function recoveryAttempt(value) {
+  return Number.isSafeInteger(value) && value >= 0 && value <= 1000 ? value : 0;
+}
+
+function isVerifiedRecovery(existing, input, incomingStatus, incomingUpdatedAt, existingUpdatedAt) {
+  if (!existing || !['failed', 'blocked', 'timed_out', 'incomplete'].includes(existing.status)
+    || !['queued', 'running'].includes(incomingStatus) || input.phase !== 'recovering'
+    || !Number.isFinite(incomingUpdatedAt) || incomingUpdatedAt <= existingUpdatedAt
+    || recoveryAttempt(input.recoveryAttempts) <= recoveryAttempt(existing.recoveryAttempts)
+    || !existing.jobId || clean(input.jobId, 100) !== existing.jobId) return false;
+  // Bind continuation to the same job and project/workflow. A scheduling key
+  // also has to match when one was already established; it cannot be removed.
+  if (clean(input.projectId, 100) !== (existing.projectId || '')
+    || clean(input.workflowId, 140) !== (existing.workflowId || '')
+    || existing.schedulingKey && input.schedulingKey !== existing.schedulingKey) return false;
+  const previous = existing.planbarProgress?.reservation;
+  const incoming = input.planbarProgress?.reservation;
+  if (previous && incoming && ['customerId', 'appointmentId', 'resourceId', 'isoYear', 'week', 'startDate', 'endDateExclusive'].some(key => previous[key] !== incoming[key])) return false;
+  return true;
+}
+
 function sessionHash(value) {
   return value ? crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 12) : '';
 }
@@ -130,8 +151,9 @@ export async function upsertExternalAgentRun(input = {}) {
     const incomingStatus = normalizedRunStatus(input.status);
     const incomingUpdatedAt = input.updatedAt ? Date.parse(input.updatedAt) : Number.NaN;
     const existingUpdatedAt = Date.parse(existing?.updatedAt || 0);
+    const verifiedRecovery = isVerifiedRecovery(existing, input, incomingStatus, incomingUpdatedAt, existingUpdatedAt);
     if (existing && ((Number.isFinite(incomingUpdatedAt) && incomingUpdatedAt < existingUpdatedAt)
-      || (TERMINAL_RUN_STATUSES.has(existing.status) && !TERMINAL_RUN_STATUSES.has(incomingStatus)))) {
+      || (TERMINAL_RUN_STATUSES.has(existing.status) && !TERMINAL_RUN_STATUSES.has(incomingStatus) && !verifiedRecovery))) {
       // Der Geräteabgleich darf einen neueren Abschluss nicht mit einem alten
       // Zwischenstand überschreiben. Das gilt für alle Workflows; einen
       // verspäteten ERSTEN Slotbeleg behalten wir trotzdem.
@@ -173,6 +195,7 @@ export async function upsertExternalAgentRun(input = {}) {
       status,
       phase: clean(input.phase || item.phase, 80),
       progress: Math.max(0, Math.min(100, Number(input.progress ?? item.progress) || 0)),
+      recoveryAttempts: Math.max(recoveryAttempt(item.recoveryAttempts), recoveryAttempt(input.recoveryAttempts)),
       tools: [...new Set([...(item.tools || []), ...(Array.isArray(input.tools) ? input.tools : [])]
         .map(value => clean(value, 120)).filter(Boolean))].slice(0, 30),
       proofs: (Array.isArray(input.proofs) ? input.proofs : (item.proofs || []))

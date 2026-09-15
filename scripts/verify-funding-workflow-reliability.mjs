@@ -28,8 +28,11 @@ function fakeSpawn() {
 try {
   assert.deepEqual(prioritizedPipedriveApiSourceDealIds(['8503', '8153', '8503', '317']), ['8153', '8503', '317']);
   assert.deepEqual(prioritizedPipedriveApiSourceDealIds(['8503', '317', '42'], { limit: 2 }), ['8503', '317']);
-  assert.equal(fundingWonFollowUpIsVerified({ statusVerified: true, followUpStageVerified: false }), true);
-  assert.equal(fundingWonFollowUpIsVerified({ statusVerified: false, followUpStageVerified: true }), true);
+  assert.equal(fundingWonFollowUpIsVerified({ statusVerified: true, followUpStageVerified: false }), false);
+  assert.equal(fundingWonFollowUpIsVerified({ statusVerified: false, followUpStageVerified: true }), false);
+  const verifiedWon = { statusVerified: true, followUpStageVerified: true, labelsVerified: true, requiredFieldsVerified: true };
+  assert.equal(fundingWonFollowUpIsVerified(verifiedWon), true);
+  for (const flag of Object.keys(verifiedWon)) assert.equal(fundingWonFollowUpIsVerified({ ...verifiedWon, [flag]: false }), false);
   assert.equal(fundingWonFollowUpIsVerified({ statusVerified: false, followUpStageVerified: false }), false);
 
   const started = await startCodexTask({
@@ -85,6 +88,11 @@ try {
     'Pipedrive-Lesen, Dateiübertragung und Phasenstatus dürfen im CLI nicht mehr aus dem Chrome-Modul kommen');
   assert.match(codexTaskSource, /list-pipedrive-stage "Montage terminieren"/);
   assert.match(codexTaskSource, /keine Pipedrive-Browser-Tabs/);
+  const pipedriveApiSource = await readFile(new URL('../integrations/pipedrive.js', import.meta.url), 'utf8');
+  assert.ok(/completePipedriveFundingWon\(input,/.test(pipedriveApiSource) && /missingFields: missingFundingRequiredFields/.test(pipedriveApiSource),
+    'der API-Schreibweg muss den Gewonnen-Übergang bei fehlenden Pflichtfeldern sperren');
+  const wonSource = await readFile(new URL('../integrations/pipedrive-funding-won.js', import.meta.url), 'utf8');
+  assert.match(wonSource, /email|phone/);
   const fundingNoteSource = pipedriveSource.slice(
     pipedriveSource.indexOf('export async function createPipedriveFundingRequestNote'),
     pipedriveSource.indexOf('async function readPipedriveApiBatchAsync'),

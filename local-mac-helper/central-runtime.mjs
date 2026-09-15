@@ -10,7 +10,7 @@ export const CENTRAL_RUNTIME_VERSION = 'imac-central-v6';
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 const allowedPath = value => /^local-mac-helper\/[a-z0-9-]+\.mjs$/.test(value)
   || /^local-mac-helper\/macos\/[a-z0-9-]+\.swift$/.test(value)
-  || ['local-mac-helper/runtime-package.json', 'local-mac-helper/manufacturer-lead-config.json', 'local-mac-helper/assets/heat-hero-logo.png', 'operations/customer-scheduling.js', 'operations/incident-memory.js', 'projects/dewarmte.js', 'projects/dewarmte-material-standard.js'].includes(value);
+  || ['local-mac-helper/outlook-mime-parser.py', 'local-mac-helper/runtime-package.json', 'local-mac-helper/manufacturer-lead-config.json', 'local-mac-helper/assets/heat-hero-logo.png', 'operations/customer-scheduling.js', 'operations/incident-memory.js', 'projects/dewarmte.js', 'projects/dewarmte-material-standard.js'].includes(value);
 
 // Only deployed source files, never .env, credentials, customer files or outputs.
 export async function buildCentralRuntimeBundle(repo) {

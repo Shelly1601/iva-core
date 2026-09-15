@@ -1,4 +1,4 @@
-import { executePlanbarJavaScript } from './planbar.mjs';
+import { executePlanbarJavaScript, refreshPlanbarPage } from './planbar.mjs';
 
 export const PLANBAR_FORECAST_YEAR = 2026;
 export const PLANBAR_FORECAST_FIRST_WEEK = 36;
@@ -149,6 +149,7 @@ export function buildPlanbarForecast(rawEntries, {
     const address = normalizePlanbarAddress(entry.workAddress);
     const manufacturer = normalizePlanbarManufacturer(entry.task);
     const system = extractPlanbarSystem(entry.task);
+    if (startDate && customer && !clean(entry.team)) throw new Error('Forecast-Abbruch: Die sichtbare Planbar-Spalte eines Termins fehlt; Ausschlüsse sind nicht prüfbar.');
     if (!startDate || !customer) {
       excluded.push({
         id: clean(entry.id),
@@ -233,16 +234,21 @@ export async function collectPlanbarForecastSource({
   firstWeek = PLANBAR_FORECAST_FIRST_WEEK,
   lastWeek = PLANBAR_FORECAST_LAST_WEEK,
   timeoutMs = 120000,
+  execute = executePlanbarJavaScript,
+  refresh = refreshPlanbarPage,
 } = {}) {
   const rangeStart = isoWeekMonday(isoYear, firstWeek);
   const rangeEndExclusive = addDays(isoWeekMonday(isoYear, lastWeek), 7);
-  const raw = await executePlanbarJavaScript(String.raw`(() => {
+  const reload = await refresh({ execute, timeoutMs: Math.min(timeoutMs, 60000) });
+  if (reload?.verified !== true || !Number.isFinite(Date.parse(reload.refreshedAt || ''))) throw new Error('Forecast-Abbruch: Der vollständige Planbar-Neuladevorgang ist nicht belegt.');
+  const raw = await execute(String.raw`(() => {
     const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
     const configElement = document.querySelector('[data-planboard-config]');
     if (!configElement) throw new Error('Die Planbar-Konfiguration wurde nicht gefunden.');
     const config = JSON.parse(configElement.dataset.planboardConfig || '{}');
     if (!config.routes?.resourceDataForTooltips) throw new Error('Die Planbar-Lesequelle wurde nicht gefunden.');
-    const url = new URL(config.routes.resourceDataForTooltips);
+    const url = new URL(config.routes.resourceDataForTooltips, location.href);
+    if (url.origin !== location.origin) throw new Error('Die Planbar-Lesequelle gehört nicht zur angemeldeten Plantafel.');
     url.searchParams.set('start', ${JSON.stringify(rangeStart)});
     url.searchParams.set('end', ${JSON.stringify(rangeEndExclusive)});
     url.searchParams.set('globalEdit', 'true');
@@ -286,7 +292,8 @@ export async function collectPlanbarForecastSource({
   })()`, { timeoutMs });
   const source = JSON.parse(raw);
   if (!Array.isArray(source.entries) || !source.entries.length) throw new Error('Planbar hat keine Forecast-Einträge geliefert.');
-  return source;
+  if (source.cacheBypass !== true || !Number.isFinite(Date.parse(source.collectedAt || '')) || Date.parse(source.collectedAt) < Date.parse(reload.refreshedAt)) throw new Error('Forecast-Abbruch: Die Daten stammen nicht nachweislich aus der neu geladenen Plantafel.');
+  return { ...source, planbarRefreshedAt: reload.refreshedAt, reloadVerified: true };
 }
 
 export async function collectAndBuildPlanbarForecast(options = {}) {

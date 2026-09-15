@@ -554,8 +554,8 @@ try {
 
   console.log('Device-Control: selbstheilenden Förderlaufzeit-Abgleich prüfen …');
   const { FUNDING_RUNTIME_MARKER, FUNDING_RUNTIME_MAX_UPDATE_ATTEMPTS, fundingRuntimeUpdatePrompt, reconcileFundingImacRuntime, summarizeFundingRuntimeCommands } = await import('../device-control/funding-runtime-reconciler.js');
-  assert.match(fundingRuntimeUpdatePrompt(), /IVA-iMac-JETZT-fertigstellen\.command/);
-  assert.match(fundingRuntimeUpdatePrompt(), /Starte keinen Förderlauf/);
+  assert.match(fundingRuntimeUpdatePrompt(), /install-central-runtime\.mjs/);
+  assert.match(fundingRuntimeUpdatePrompt(), /Kein Förderlauf/);
   let queuedRuntimeCommand = null;
   const updateQueued = await reconcileFundingImacRuntime({
     getStatus: async () => ({ ...imacMetadata, attested: true, online: true, allowedActions: ['codex.task.start', 'agent.status'] }),
@@ -594,9 +594,8 @@ try {
       result: { suspended: true, loaded: false, plistRetained: true },
     }],
   });
-  assert.equal(runtimeCatchupQueued.status, 'ready_funding_catchup_queued');
-  assert.equal(queuedFundingCatchup.action, 'project.workflow.run');
-  assert.equal(queuedFundingCatchup.payload.workflowId, 'funding-daily-sequence');
+  assert.equal(runtimeCatchupQueued.status, 'ready');
+  assert.equal(queuedFundingCatchup, null, 'Laufzeitwartung darf keinen parallelen Förderlauf starten');
   const runtimeReady = await reconcileFundingImacRuntime({
     getStatus: async () => ({ ...imacMetadata, attested: true, online: true }),
     enqueue: async () => { throw new Error('bei vorhandenem Tageslauf darf nichts doppelt eingereiht werden'); },
@@ -612,7 +611,8 @@ try {
   });
   assert.equal(runtimeReady.status, 'ready');
   assert.equal(runtimeReady.legacyMonitorSuspended, true);
-  assert.equal(runtimeReady.fundingCatchupCommandId, 'funding-catchup');
+  assert.equal(runtimeReady.commandId, 'legacy-suspend');
+  assert.equal(runtimeReady.fundingCatchupCommandId, undefined);
   const diagnostic = summarizeFundingRuntimeCommands([
     { id: 'runtime-update', action: 'codex.task.start', status: 'completed', payload: { requestId: FUNDING_RUNTIME_MARKER }, result: { jobId: 'job-1' } },
     { id: 'legacy-suspend', action: 'funding.legacy-monitor.suspend', status: 'completed', requestText: `[${FUNDING_RUNTIME_MARKER}] geprüft`, result: { suspended: true, loaded: false, plistRetained: true } },

@@ -110,10 +110,10 @@ export async function transitionPipedriveFundingStage({ dealId, fromStage, toSta
   return request(`/device-agent/${DEVICE_ID}/background/pipedrive/deals/${id}/funding-transition`, { method: 'POST', body: { fromStage, toStage }, timeoutMs: 60_000 });
 }
 
-export async function markPipedriveFundingDealWon({ dealId, approvalFileName, confirmApply = false } = {}) {
+export async function markPipedriveFundingDealWon({ dealId, approvalFileName, approvalEvidence, confirmApply = false } = {}) {
   if (confirmApply !== true) throw new Error('Der Deal wurde nicht auf „Gewonnen“ gesetzt: confirmApply=true fehlt.');
   const id = String(dealId || '').replace(/\D/g, '');
-  return request(`/device-agent/${DEVICE_ID}/background/pipedrive/deals/${id}/won`, { method: 'POST', body: { approvalFileName }, timeoutMs: 90_000 });
+  return request(`/device-agent/${DEVICE_ID}/background/pipedrive/deals/${id}/won`, { method: 'POST', body: { approvalFileName, approvalEvidence }, timeoutMs: 90_000 });
 }
 
 export async function readPipedriveFundingDealsViaApi({ dealIds, onProgress } = {}) {

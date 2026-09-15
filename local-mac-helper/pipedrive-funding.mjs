@@ -14,11 +14,11 @@ export const PIPEDRIVE_FUNDING_CONFIG = Object.freeze({
       label: 'Angebot veröffentlicht',
       aliases: ['Angebot veröffentlicht'],
       checkMode: 'signed-offer-gate',
-      moveWhenCompleteTo: 'Antrag eingereicht / Förderunterlagen einreichen',
+      moveWhenCompleteTo: 'Auftrag eingereicht / Förderunterlagen einreichen',
       stayInStage: false,
     }),
     documents: Object.freeze({
-      label: 'Antrag eingereicht / Förderunterlagen einreichen',
+      label: 'Auftrag eingereicht / Förderunterlagen einreichen',
       aliases: [
         'Antrag eingereicht / Förderunterlagen',
         'Antrag eingereicht / Förderunterlagen einreichen',
@@ -26,11 +26,11 @@ export const PIPEDRIVE_FUNDING_CONFIG = Object.freeze({
         'Auftrag eingereicht / Förderunterlagen einreichen',
       ],
       checkMode: 'complete-document-review',
-      moveWhenCompleteTo: 'Förderung beantragt',
+      moveWhenCompleteTo: 'Förderung beantragen',
       stayInStage: false,
     }),
     fundingRequested: Object.freeze({
-      label: 'Förderung beantragt',
+      label: 'Förderung beantragen',
       aliases: ['Förderung beantragt', 'Förderung beantragen'],
       checkMode: 'complete-document-review',
       moveWhenCompleteTo: null,
@@ -66,7 +66,7 @@ export function buildFundingStageChecklist(stageValue, { incomeBonusRequested } 
       requiredDocuments: [{ id: 'signed_offer', label: FUNDING_DOCUMENTS.signed_offer }],
       scanSources: ['Pipedrive-Dateien'],
       requireCompleteReview: true,
-      movementRule: 'Der Deal darf erst bei eindeutig erkanntem unterschriebenem Angebot nach „Antrag eingereicht / Förderunterlagen einreichen“ verschoben werden.',
+      movementRule: 'Der Deal darf erst bei eindeutig erkanntem unterschriebenem Angebot nach „Auftrag eingereicht / Förderunterlagen einreichen“ verschoben werden.',
       stayInStage: false,
       moveWhenCompleteTo: stage.moveWhenCompleteTo,
       canCreateFinalDraftAutomatically: false,
@@ -82,9 +82,8 @@ export function buildFundingStageChecklist(stageValue, { incomeBonusRequested } 
   ];
   const openQuestions = [];
   if (incomeBonusRequested === true) requiredDocumentIds.push('tax_assessment_2023', 'tax_assessment_2024');
-  if (incomeBonusRequested !== true && incomeBonusRequested !== false) {
-    openQuestions.push('Ist für diesen Deal der Einkommensbonus beantragt?');
-  }
+  // An absent bonus request is not a missing document. Only an explicit
+  // positive source instruction adds income evidence to this checklist.
 
   return {
     pipeline: PIPEDRIVE_FUNDING_CONFIG.pipeline,
@@ -93,8 +92,8 @@ export function buildFundingStageChecklist(stageValue, { incomeBonusRequested } 
     scanSources: ['Pipedrive-Dateien', 'zugeordnete Förder-E-Mails'],
     requireCompleteReview: true,
     movementRule: stage.stayInStage
-      ? 'Der Deal bleibt unabhängig vom Dokumentenstatus in „Förderung beantragt“. '
-      : 'Der Deal darf erst nach bestätigter Vollständigkeit nach „Förderung beantragt“ verschoben werden.',
+      ? 'Der Deal bleibt unabhängig vom Dokumentenstatus in „Förderung beantragen“. '
+      : 'Der Deal darf erst nach bestätigter Vollständigkeit nach „Förderung beantragen“ verschoben werden.',
     stayInStage: stage.stayInStage,
     moveWhenCompleteTo: stage.moveWhenCompleteTo,
     canCreateFinalDraftAutomatically: openQuestions.length === 0,

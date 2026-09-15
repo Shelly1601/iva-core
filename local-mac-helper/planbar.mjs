@@ -6,6 +6,7 @@ import {
   PLANBAR_MINIMUM_BLOCK_DAYS,
 } from '../operations/customer-scheduling.js';
 import { requireRightDisplayWorkspace } from './display-workspace.mjs';
+import { assertImacExecutionHost } from './imac-host-guard.mjs';
 
 const PLANBAR_HOST = 'heathero-partner-a.planbar365.com';
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -32,6 +33,7 @@ function runAppleScript(script, { timeoutMs = 120000 } = {}) {
 }
 
 export async function executePlanbarJavaScript(javascript, { timeoutMs = 120000 } = {}) {
+  assertImacExecutionHost();
   const workspace = await requireRightDisplayWorkspace();
   const script = `tell application "Google Chrome"
 repeat with w in windows
@@ -39,14 +41,14 @@ repeat with w in windows
   set isRightWorkspace to (item 1 of windowBounds) is greater than or equal to ${Math.round(workspace.target.x)} and (item 3 of windowBounds) is less than or equal to ${Math.round(workspace.target.x + workspace.target.width)}
   if isRightWorkspace then
     repeat with t in tabs of w
-      if (URL of t) contains "${PLANBAR_HOST}/resource/list" then return (execute t javascript ${JSON.stringify(String(javascript))})
+      if (URL of t) starts with "https://${PLANBAR_HOST}/resource/list" then return (execute t javascript ${JSON.stringify(String(javascript))})
     end repeat
   end if
 end repeat
 return "NO_TAB"
 end tell`;
   const output = await runAppleScript(script, { timeoutMs });
-  if (output === 'NO_TAB') throw new Error('Planbar ist nicht in einem Chrome-Fenster auf dem rechten Display geöffnet. Links wird nicht ersatzweise gearbeitet.');
+  if (output === 'NO_TAB') throw new Error('Planbar ist nicht auf der Plantafel geöffnet: Im IVA-Arbeitsbereich des Mac Mini fehlt das angemeldete Chrome-Fenster. Ein einzelnes Display genügt.');
   return output;
 }
 

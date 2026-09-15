@@ -6,6 +6,7 @@ import path from 'node:path';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { loadFundingScan } from './funding-scan.mjs';
 import { openOutlookAccountFolder, runMacUiBridge } from './macos-ui.mjs';
+import { createFundingIntakeStore } from './funding-intake-state.mjs';
 
 const FUNDING_MAILBOX = 'foerderung@heat-hero.com';
 const execFileAsync = promisify(execFile);
@@ -121,22 +122,43 @@ export async function initializeFundingMonitor({ fundingScan, persist = true } =
   return { ...state, savedTo };
 }
 
-export async function detectNewFundingMessages({ filePath = defaultFundingMonitorStateFile() } = {}) {
-  const state = await loadFundingMonitorState(filePath);
-  const processed = new Set(state.processedMessageFingerprints || []);
-  const descriptions = await readFundingInboxDescriptions();
-  const messages = descriptions
-    .map(description => ({ fingerprint: fundingMessageFingerprint(description), description }))
-    .filter(item => !processed.has(item.fingerprint));
+export async function detectNewFundingMessages({ filePath = defaultFundingMonitorStateFile(), fundingRun = { mode: 'incremental' },
+  intakeStore = createFundingIntakeStore(), readPage, readMessage } = {}) {
+  const state = await loadFundingMonitorState(filePath).catch(error => { if (error.code !== 'ENOENT') throw error; return { mode: 'review-only', emailSendEnabled: false, replyDraftsOnly: true }; });
+  const reader = readPage ? null : await import('./outlook-mailbox.mjs');
+  const pageReader = readPage || reader.readFundingMailboxPage;
+  const messageReader = readMessage || reader?.readFundingMailboxMessage;
+  const run = await intakeStore.begin(fundingRun);
+  const page = run.scanComplete ? null : await pageReader({ from: FUNDING_MAILBOX, folder: 'Posteingang', mode: run.mode, since: run.since, cursor: run.cursor, limit: 100 });
+  const recorded = page ? await intakeStore.recordPage(page, { mode: run.mode, expectedCursor: run.cursor || null }) : { messages: [], scanComplete: true };
+  const pending = (await intakeStore.status()).pending;
+  const messages = [...recorded.messages], pendingReadErrors = [];
+  const seen = new Set(messages.map(item => item.fingerprint));
+  // Pending mail IDs survive cursor advancement. Their content is read fresh,
+  // never reconstructed from stale list previews or read/unread flags.
+  for (const item of pending) {
+    if (seen.has(item.fingerprint)) continue;
+    if (!messageReader) throw new Error('Offene Fördermails benötigen das gezielte native Rücklesen ihrer gespeicherten Nachrichten-ID.');
+    try {
+      const observed = await messageReader({ from: FUNDING_MAILBOX, folder: 'Posteingang', messageId: item.messageId });
+      if (observed?.messageId !== item.messageId) throw new Error('message_identity_unverified');
+      messages.push({ ...item, description: String(observed.description || '').slice(0, 5000), hasAttachments: observed.hasAttachments === true });
+    } catch {
+      pendingReadErrors.push({ messageId: item.messageId, fingerprint: item.fingerprint, code: 'FUNDING_PENDING_MESSAGE_RECHECK' });
+    }
+  }
   return {
     checkedAt: new Date().toISOString(),
     mode: state.mode,
     emailSendEnabled: state.emailSendEnabled === true,
     replyDraftsOnly: state.replyDraftsOnly !== false,
-    inboxMessageCount: descriptions.length,
+    inboxMessageCount: page?.messages.length || 0,
     newMessageCount: messages.length,
     messages,
-    stateMutated: false,
+    scanComplete: recorded.scanComplete, coverageVerified: page?.coverageVerified === true || run.scanComplete,
+    source: 'outlook-native', fundingRun: { mode: run.mode, since: run.since, runId: run.runId },
+    pendingReadErrors,
+    stateMutated: true,
   };
 }
 
@@ -146,8 +168,9 @@ export async function acknowledgeFundingMessages(fingerprints, { filePath = defa
     throw new Error('Zum Abschliessen eines Monitorlaufs fehlen gueltige Nachrichten-Fingerprints.');
   }
   const state = await loadFundingMonitorState(filePath);
-  state.processedMessageFingerprints = [...new Set([...(state.processedMessageFingerprints || []), ...values])];
-  state.initialFullScanPending = false;
+  // Queued for review is not processed. Only the intake receipt and the
+  // verified move to Fertig complete a mail.
+  state.queuedMessageFingerprints = [...new Set([...(state.queuedMessageFingerprints || []), ...values])];
   state.lastCheckedAt = new Date().toISOString();
   state.lastRun = { acknowledgedAt: state.lastCheckedAt, messageCount: values.length };
   await saveState(state, filePath);
@@ -172,7 +195,7 @@ export async function recordFundingMonitorOutcome(input = {}, { filePath = defau
     state.escalationDraftKeys = [...new Set([...(state.escalationDraftKeys || []), escalationKey])];
   }
   if (fingerprintValue) {
-    state.processedMessageFingerprints = [...new Set([...(state.processedMessageFingerprints || []), fingerprintValue])];
+    state.queuedMessageFingerprints = [...new Set([...(state.queuedMessageFingerprints || []), fingerprintValue])];
   }
   state.lastCheckedAt = new Date().toISOString();
   state.lastRun = {

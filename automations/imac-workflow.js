@@ -1,3 +1,5 @@
+import { fundingIntakeProofIsComplete } from '../local-mac-helper/workflow-recovery.mjs';
+
 const TERMINAL_TASK_STATUSES = new Set(['completed', 'failed', 'blocked', 'timed_out', 'incomplete', 'stopped']);
 
 function waiting(summary, result = {}) {
@@ -7,6 +9,11 @@ function waiting(summary, result = {}) {
 function commandFailure(command, label) {
   const detail = command?.error || command?.cancelReason || `Status ${command?.status || 'unbekannt'}`;
   return new Error(`${label} auf dem Mac Mini fehlgeschlagen: ${detail}`);
+}
+
+function currentForecastProof(proof, slotKey) {
+  return proof?.sentFolderVerified === true && proof.runMode === 'automatic'
+    && proof.automationSlotKey === slotKey;
 }
 
 export function createPlanbarForecastAutomationHandler({
@@ -30,7 +37,7 @@ export function createPlanbarForecastAutomationHandler({
     let commandId = previousResult.commandId || '';
     let jobId = previousResult.jobId || '';
     let statusCommandId = previousResult.statusCommandId || '';
-    if (!commandId) {
+    if (!commandId && !jobId) {
       const imac = await deviceAgentStatus();
       if (imac.online !== true || imac.dispatchReady !== true) {
         return waiting('Planbar-Forecast wartet auf den erreichbaren, attestierten Mac Mini.', { commandId, jobId, statusCommandId });
@@ -42,7 +49,7 @@ export function createPlanbarForecastAutomationHandler({
           projectId: 'heat-hero',
           workflowId: 'planbar-weekly-export',
           displayName: 'Planbar-Forecast als Excel-Listen',
-          requestId: `${slotKey}:attempt:${attempt}`,
+          requestId: slotKey,
           runMode: 'automatic',
           automationSlotKey: slotKey,
         },
@@ -52,15 +59,15 @@ export function createPlanbarForecastAutomationHandler({
       commandId = command.id;
     }
 
-    const command = await deviceCommandStatus(commandId);
-    if (!command) throw new Error('Der Mac Mini-Auftrag des Planbar-Forecasts ist nicht mehr auffindbar.');
-    if (['queued', 'running'].includes(command.status)) {
+    const command = commandId ? await deviceCommandStatus(commandId) : null;
+    if (!command && !jobId) return waiting('Die Auftragszustellung wird mit derselben stabilen Forecast-ID wiederhergestellt.', { commandId: '', jobId, statusCommandId: '' });
+    if (command && ['queued', 'running'].includes(command.status)) {
       return waiting('Planbar-Forecast wurde an den Mac Mini übergeben und wartet auf den lokalen Start.', { commandId, jobId, statusCommandId });
     }
-    if (command.status !== 'completed') throw commandFailure(command, 'Planbar-Forecast');
+    if (command && command.status !== 'completed' && !jobId) throw commandFailure(command, 'Planbar-Forecast');
 
-    if (command.result?.sent === true) {
-      if (command.result.sentFolderVerified !== true) {
+    if (command?.result?.sent === true) {
+      if (!currentForecastProof(command.result, slotKey)) {
         throw new Error('Outlook hat den Forecast übernommen, aber der Gesendet-Nachweis fehlt noch. Der nächste sichere Versuch prüft ausschließlich den vorhandenen Versand.');
       }
       return {
@@ -72,7 +79,7 @@ export function createPlanbarForecastAutomationHandler({
       };
     }
 
-    jobId = command.result?.jobId || jobId;
+    jobId = command?.result?.jobId || jobId;
     if (!jobId) throw new Error('Der Mac Mini hat weder einen verifizierten Versand noch eine lokale Forecast-Auftrags-ID gemeldet.');
 
     if (statusCommandId) {
@@ -83,7 +90,7 @@ export function createPlanbarForecastAutomationHandler({
       if (statusCommand?.status === 'completed') {
         const local = statusCommand.result || {};
         if (TERMINAL_TASK_STATUSES.has(local.status)) {
-          if (local.status === 'completed' && local.workflowProof?.sentFolderVerified === true) {
+          if (local.status === 'completed' && currentForecastProof(local.workflowProof, slotKey)) {
             return {
               commandId,
               jobId,
@@ -119,6 +126,7 @@ export function createProjectWorkflowAutomationHandler({
   workflowId,
   displayName,
   enabledWorkflowIds = [workflowId],
+  workflowInput = {},
   requiredAllowedActions = [],
   getProject,
   deviceAgentStatus,
@@ -140,7 +148,7 @@ export function createProjectWorkflowAutomationHandler({
     let commandId = previousResult.commandId || '';
     let jobId = previousResult.jobId || '';
     let statusCommandId = previousResult.statusCommandId || '';
-    if (!commandId) {
+    if (!commandId && !jobId) {
       const imac = await deviceAgentStatus();
       const missingActions = requiredAllowedActions.filter(action => !imac.allowedActions?.includes(action));
       if (imac.online !== true || imac.dispatchReady !== true || missingActions.length) {
@@ -150,6 +158,7 @@ export function createProjectWorkflowAutomationHandler({
         deviceId,
         action: 'project.workflow.run',
         payload: {
+          ...workflowInput,
           projectId,
           workflowId,
           displayName,
@@ -163,13 +172,13 @@ export function createProjectWorkflowAutomationHandler({
       commandId = command.id;
     }
 
-    const command = await deviceCommandStatus(commandId);
-    if (!command) throw new Error(`Der Mac Mini-Auftrag „${displayName}“ ist nicht mehr auffindbar.`);
-    if (['queued', 'running'].includes(command.status)) {
+    const command = commandId ? await deviceCommandStatus(commandId) : null;
+    if (!command && !jobId) return waiting('Die Auftragszustellung wird mit derselben stabilen Workflow-ID wiederhergestellt.', { commandId: '', jobId, statusCommandId: '' });
+    if (command && ['queued', 'running'].includes(command.status)) {
       return waiting(`${displayName} wurde an den Mac Mini übergeben und wartet auf den lokalen Start.`, { commandId, jobId, statusCommandId });
     }
-    if (command.status !== 'completed') throw commandFailure(command, displayName);
-    jobId = command.result?.jobId || jobId;
+    if (command && command.status !== 'completed' && !jobId) throw commandFailure(command, displayName);
+    jobId = command?.result?.jobId || jobId;
     if (!jobId) throw new Error(`Der Mac Mini hat für „${displayName}“ keine lokale Auftrags-ID gemeldet.`);
 
     if (statusCommandId) {
@@ -181,6 +190,20 @@ export function createProjectWorkflowAutomationHandler({
         const local = statusCommand.result || {};
         if (TERMINAL_TASK_STATUSES.has(local.status)) {
           if (local.status === 'completed') {
+            if (['funding-initial-backfill', 'funding-daily-sequence', 'funding-monitor'].includes(workflowId)) {
+              const proof = local.fundingIntakeProof;
+              const mode = workflowId === 'funding-initial-backfill' ? 'initial-backfill' : 'incremental';
+              if (!['completed', 'no_changes'].includes(local.workflowOutcome) || !fundingIntakeProofIsComplete({proof, jobId, mode, createdAt: local.createdAt})) {
+                throw new Error('Der Förderlauf hat noch keinen vollständigen aktuellen Mail- und Bearbeitungsnachweis.');
+              }
+            }
+            if (workflowId === 'planbar-completion-morning') {
+              const proof = local.planbarCompletionProof;
+              if (proof?.protocol !== 2 || proof.jobId !== jobId || proof.scope !== 'heat-hero-private'
+                || proof.inventoryComplete !== true || !['completed', 'no_changes'].includes(proof.status)) {
+                throw new Error('Der Heat-Hero-Lauf hat keinen vollständigen aktuellen Fall- und Bestandsnachweis.');
+              }
+            }
             return {
               commandId,
               jobId,

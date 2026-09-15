@@ -4,9 +4,11 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { assertImacFundingHost } from './funding-workflows.mjs';
 import { moveOutlookMessageToFolder } from './macos-ui.mjs';
+import { createFundingIntakeStore, validateFundingIntakeReceipt, withFundingFileLock } from './funding-intake-state.mjs';
 
 export const FUNDING_MAILBOX = 'foerderung@heat-hero.com';
-export const FUNDING_DONE_FOLDER = 'fertig';
+export const FUNDING_DONE_FOLDER = 'Fertig';
+let completionQueue = Promise.resolve();
 
 function clean(value, max = 500) {
   return String(value || '').replace(/\u0000/g, '').trim().slice(0, max);
@@ -22,10 +24,10 @@ function stateFile() {
 async function loadState(filePath = stateFile()) {
   try {
     const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-    return { version: 1, completed: Array.isArray(parsed.completed) ? parsed.completed : [] };
+    return { version: 2, completed: Array.isArray(parsed.completed) ? parsed.completed : [], pendingMoves: Array.isArray(parsed.pendingMoves) ? parsed.pendingMoves : [] };
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error;
-    return { version: 1, completed: [] };
+    return { version: 2, completed: [], pendingMoves: [] };
   }
 }
 
@@ -41,19 +43,16 @@ async function saveState(state, filePath = stateFile()) {
 }
 
 export function validateFundingMailCompletion(input = {}) {
-  const messageFingerprint = clean(input.messageFingerprint, 160);
+  const receipt = validateFundingIntakeReceipt(input.receipt || input);
+  const messageFingerprint = receipt.messageFingerprint;
   const messageDescription = clean(input.messageDescription, 5000);
-  const dealId = clean(input.dealId, 100);
-  const uploadedFileNames = Array.isArray(input.uploadedFileNames)
-    ? [...new Set(input.uploadedFileNames.map(value => clean(value, 240)).filter(Boolean))]
-    : [];
-  const textRelevant = input.textRelevant === true;
+  const dealId = receipt.dealId;
+  const uploadedFileNames = receipt.uploadedFiles.map(file => file.filename);
+  const textRelevant = receipt.textRelevant;
   if (!messageFingerprint) throw new Error('Die Fördermail besitzt keinen stabilen Nachrichten-Fingerprint.');
   if (!messageDescription || !/(?:Betreff:|Kein Betreff)/i.test(messageDescription)) throw new Error('Die Fördermail ist in Outlook nicht exakt identifiziert.');
   if (!dealId) throw new Error('Die Fördermail ist keinem eindeutigen Pipedrive-Deal zugeordnet.');
   if (input.ambiguous === true) throw new Error('Die Fördermail ist nicht eindeutig zugeordnet und bleibt im Posteingang.');
-  if (input.pipedriveFilesVerified !== true) throw new Error('Die Dateien der Fördermail wurden im Pipedrive-Deal noch nicht vollständig verifiziert.');
-  if (textRelevant && input.pipedriveTextVerified !== true) throw new Error('Der relevante Mailtext wurde im Pipedrive-Deal noch nicht verifiziert.');
   return {
     messageFingerprint,
     messageDescription,
@@ -61,27 +60,69 @@ export function validateFundingMailCompletion(input = {}) {
     uploadedFileNames,
     textRelevant,
     pipedriveFilesVerified: true,
-    pipedriveTextVerified: !textRelevant || input.pipedriveTextVerified === true,
+    pipedriveTextVerified: true,
+    receipt,
   };
+}
+
+async function resolveMailboxIdentity(input) {
+  const { resolveSourceIdentity } = await import('./outlook-ui-mailbox.mjs');
+  return resolveSourceIdentity(input);
+}
+
+function verifiedIdentity(result, messageId) {
+  return result?.identityVerified === true && result.messageId === messageId;
+}
+
+async function inspectMove(completion, resolveIdentity) {
+  const resolve = folder => resolveIdentity({ from: FUNDING_MAILBOX, folder, messageId: completion.receipt.messageId, description: completion.messageDescription });
+  const destination = await resolve(FUNDING_DONE_FOLDER);
+  if (verifiedIdentity(destination, completion.receipt.messageId)) return { verifiedInDestination: true };
+  if (destination?.notFound !== true) throw new Error('Die Identität im Zielordner ist noch nicht belegt.');
+  const source = await resolve('Posteingang');
+  return { verifiedInDestination: false, verifiedInSource: verifiedIdentity(source, completion.receipt.messageId) };
 }
 
 export async function completeFundingMail(input = {}, {
   moveMessage = moveOutlookMessageToFolder,
   load = loadState,
   save = saveState,
+  verifyMove,
+  resolveIdentity = resolveMailboxIdentity,
+  intakeStore = createFundingIntakeStore(),
 } = {}) {
   assertImacFundingHost();
   const completion = validateFundingMailCompletion(input);
+  const operation = completionQueue.catch(() => {}).then(() => withFundingFileLock(stateFile(), async () => {
   const state = await load();
+  state.pendingMoves ||= [];
   const previous = state.completed.find(item => item.messageFingerprint === completion.messageFingerprint);
-  if (previous) return { status: 'already_completed', moved: false, destinationFolder: FUNDING_DONE_FOLDER, completion: previous };
-  const moved = await moveMessage({
-    from: FUNDING_MAILBOX,
-    messageDescription: completion.messageDescription,
-    destinationFolder: FUNDING_DONE_FOLDER,
-  });
-  if (moved?.verifiedInDestination !== true) throw new Error('Die Fördermail wurde nicht im Outlook-Unterordner „fertig“ verifiziert.');
-  const record = { ...completion, completedAt: new Date().toISOString(), destinationFolder: FUNDING_DONE_FOLDER };
-  await save({ version: 1, completed: [...state.completed, record].slice(-5000) });
-  return { status: 'completed', moved: true, destinationFolder: FUNDING_DONE_FOLDER, completion: record };
+  if (previous) {
+    if (previous.dealId !== completion.dealId) throw new Error('Die bereits bearbeitete Fördermail gehört zu einem anderen Deal.');
+    await intakeStore.completeMessage({ ...completion.receipt, moveVerified: true });
+    return { status: 'already_completed', moved: false, destinationFolder: FUNDING_DONE_FOLDER, completion: previous };
+  }
+  const pending = state.pendingMoves.find(item => item.messageFingerprint === completion.messageFingerprint);
+  if (pending && pending.dealId !== completion.dealId) throw new Error('Die offene Mailverschiebung gehört zu einem anderen Deal.');
+  const before = pending ? await (verifyMove || (value => inspectMove(value, resolveIdentity)))(completion) : null;
+  if (pending && before?.verifiedInDestination !== true && before?.verifiedInSource !== true) throw new Error('Der Ausgang der Mailverschiebung ist offen; zuerst Quelle und Ziel eindeutig rücklesen.');
+  if (!pending) {
+    state.pendingMoves.push({ messageFingerprint: completion.messageFingerprint, messageId: completion.receipt.messageId, dealId: completion.dealId, startedAt: new Date().toISOString() });
+    await save(state);
+  }
+  if (before?.verifiedInDestination !== true) {
+    const source = await resolveIdentity({ from: FUNDING_MAILBOX, folder: 'Posteingang', messageId: completion.receipt.messageId, description: completion.messageDescription });
+    if (!verifiedIdentity(source, completion.receipt.messageId) || !source.description) throw new Error('Die Quellnachricht wurde nicht anhand ihrer tatsächlichen Message-ID verifiziert.');
+    await moveMessage({ from: FUNDING_MAILBOX, messageDescription: source.description, destinationFolder: FUNDING_DONE_FOLDER });
+  }
+  const destination = await resolveIdentity({ from: FUNDING_MAILBOX, folder: FUNDING_DONE_FOLDER, messageId: completion.receipt.messageId, description: completion.messageDescription });
+  if (!verifiedIdentity(destination, completion.receipt.messageId)) throw new Error('Die Fördermail wurde nicht anhand ihrer Message-ID in Fertig rückgelesen.');
+  const { messageDescription, ...metadata } = completion;
+  const record = { ...metadata, completedAt: new Date().toISOString(), destinationFolder: FUNDING_DONE_FOLDER };
+  await save({ version: 2, completed: [...state.completed, record].slice(-5000), pendingMoves: state.pendingMoves.filter(item => item.messageFingerprint !== completion.messageFingerprint) });
+  await intakeStore.completeMessage({ ...completion.receipt, moveVerified: true });
+  return { status: 'completed', moved: before?.verifiedInDestination !== true, destinationFolder: FUNDING_DONE_FOLDER, completion: record };
+  }));
+  completionQueue = operation;
+  return operation;
 }

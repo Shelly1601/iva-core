@@ -1,12 +1,16 @@
 import crypto from 'node:crypto';
 import { withImacExecutionLock } from './ui-execution-lock.mjs';
 import os from 'node:os';
+import { assertImacExecutionHost } from './imac-host-guard.mjs';
+import { recoveryDelayMs, hasCompletionEvidence, planbarRecoveryDelayMs } from './workflow-recovery.mjs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { mkdir, open, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { accessSync, constants as fsConstants, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { materializeIcloudWorkspace } from './icloud-workspace.mjs';
+import { createPlanbarCompletionStore } from './planbar-completion.mjs';
+import { createFundingIntakeStore } from './funding-intake-state.mjs';
 import { assertImacFundingHost } from './funding-workflows.mjs';
 import { isoWeekRange, mergePlanbarSchedulingProgress, planbarSchedulingKey, planbarSchedulingSummary } from '../operations/customer-scheduling.js';
 import { validateDewarmteLinkPdfInput } from '../projects/dewarmte.js';
@@ -20,6 +24,7 @@ import {
 const MODULE_PATH = fileURLToPath(import.meta.url);
 const REPO_ROOT = path.resolve(process.env.IVA_DEVICE_WORKSPACE || path.join(path.dirname(MODULE_PATH), '..'));
 const TASK_ROOT = process.env.IVA_CODEX_TASK_ROOT || path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper', 'codex-tasks');
+const planbarCompletion = createPlanbarCompletionStore({ dataDir: path.join(REPO_ROOT, 'data'), tasksDir: TASK_ROOT });
 const DEWARMTE_INPUT_ROOT = path.join(process.env.IVA_MAC_HELPER_DATA_DIR || path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper'), 'dewarmte-inputs');
 const MAX_PROMPT_LENGTH = 12_000;
 const MAX_RUNTIME_MS = 6 * 60 * 60_000;
@@ -27,11 +32,12 @@ export const CODEX_TASK_MAX_QUEUE_WAIT_MS = 12 * 60 * 60_000;
 export const CODEX_TASK_HEARTBEAT_INTERVAL_MS = 30_000;
 export const CODEX_TASK_HEARTBEAT_STALE_MS = 90_000;
 export const CODEX_TASK_MAX_LAUNCH_ATTEMPTS = 3;
-export const CODEX_TASK_MAX_RECOVERY_ATTEMPTS = 2;
+export const CODEX_TASK_MAX_RECOVERY_ATTEMPTS = Number.MAX_SAFE_INTEGER;
 const CODEX_TASK_RETENTION_MS = 7 * 24 * 60 * 60_000;
-const TERMINAL_TASK_STATUSES = new Set(['completed', 'failed', 'blocked', 'timed_out', 'incomplete']);
+const TERMINAL_TASK_STATUSES = new Set(['completed', 'failed', 'blocked', 'stopped', 'timed_out', 'incomplete']);
 const FUNDING_WORKFLOW_STEPS = Object.freeze({
   'funding-daily-sequence': Object.freeze(['completeness', 'amount', 'approval']),
+  'funding-initial-backfill': Object.freeze(['completeness', 'amount', 'approval']),
   'funding-monitor': Object.freeze(['completeness']),
   'kfw-funding-amount-morning': Object.freeze(['amount']),
   'kfw-approval-morning': Object.freeze(['approval']),
@@ -52,7 +58,7 @@ const CODEX_CANDIDATES = Object.freeze([
   '/Applications/ChatGPT.app/Contents/Resources/codex',
   '/Applications/Codex.app/Contents/Resources/codex',
 ]);
-const HARD_EXTERNAL_BLOCKER_PATTERN = /\b(?:captcha|konto(?:sperre|\s+gesperrt)|account\s+(?:is\s+)?locked|technisch\s+erzwungene?\s+(?:externe?\s+)?(?:best[aä]tigung|freigabe)|(?:externe?\s+)?(?:best[aä]tigung|freigabe)\s+(?:durch\s+)?nadine|fehlende\s+(?:oder\s+verweigerte\s+)?(?:berechtigung|befugnis)|(?:zugangsdaten|credentials?)\s+(?:sind\s+)?(?:nicht\s+verf[uü]gbar|abgelehnt)|recht(?:e[ns]?|er)\s+(?:display|bildschirm).{0,100}\b(?:fehlt|nicht\s+(?:angeschlossen|verf[uü]gbar|erkennbar|nutzbar)|physisch\s+nicht)|(?:irreversible|unumkehrbare)\s+(?:aktion|entscheidung).{0,100}\b(?:au[sß]erhalb|ohne)\b)/i;
+const HARD_EXTERNAL_BLOCKER_PATTERN = /\b(?:captcha|konto(?:sperre|\s+gesperrt)|account\s+(?:is\s+)?locked|technisch\s+erzwungene?\s+(?:externe?\s+)?(?:best[aä]tigung|freigabe)|(?:externe?\s+)?(?:best[aä]tigung|freigabe)\s+(?:durch\s+)?nadine|fehlende\s+(?:oder\s+verweigerte\s+)?(?:berechtigung|befugnis)|(?:zugangsdaten|credentials?)\s+(?:sind\s+)?(?:nicht\s+verf[uü]gbar|abgelehnt)|(?:irreversible|unumkehrbare)\s+(?:aktion|entscheidung).{0,100}\b(?:au[sß]erhalb|ohne)\b)/i;
 const TECHNICAL_FAILURE_PATTERN = /(?:status|ergebnis)\s*:\s*(?:\*\*)?technisch\s+blockiert\b|technischer\s+blocker\s*:|\b(?:browser|chrome|tab|fenster|ui|accessibility|apple\s*script|automation|steuerung|verbindungs?(?:fehler|abbruch)?|netzwerk|network|reload|seite\s+(?:neu\s+)?laden|sitzung|session|login|anmeldung|datei|icloud|resource\s+deadlock|eagain|edeadlk|etimedout|econn\w+|timeout|tool(?:-|\s)?fehler|worker|prozess\s+unterbrochen|mcp|railway\s+(?:nicht\s+)?erreichbar)\b/i;
 
 function clean(value, max = 500) {
@@ -225,7 +231,7 @@ function startCodexTaskHeartbeat(jobId, options = {}) {
 async function reportTaskState(request, state, resultPreview = '') {
   try {
     const { reportOperationalRun, reportProjectWorkflowRun } = await import('./device-agent.mjs');
-    const terminal = ['completed', 'failed', 'blocked', 'timed_out', 'incomplete'].includes(state.status);
+    const terminal = TERMINAL_TASK_STATUSES.has(state.status);
     const isProjectWorkflow = request.mode === 'project-workflow';
     const isOperational = request.mode === 'operational';
     const operational = {
@@ -241,6 +247,7 @@ async function reportTaskState(request, state, resultPreview = '') {
       workflowId: request.workflowId || '',
       schedulingKey: request.planbar ? planbarSchedulingKey(request.planbar) : '',
       planbarProgress: state.planbarProgress || null,
+      recoveryAttempts: Number(state.recoveryAttempts || 0),
       requestPreview: request.title,
       status: state.status,
       phase: state.phase,
@@ -250,7 +257,7 @@ async function reportTaskState(request, state, resultPreview = '') {
       error: state.error || (['failed', 'blocked', 'timed_out', 'incomplete'].includes(state.status) ? state.detail : ''),
       proofs: state.workflowProof?.sentFolderVerified === true
         ? [`Outlook-Gesendet verifiziert: ${state.workflowProof.subject || state.workflowProof.period || 'Planbar-Forecast'}`]
-        : [],
+        : state.planbarCompletionProof?.status === 'completed' ? [`Planbar frisch rückgelesen: ${state.planbarCompletionProof.completed} private Heat-Hero-Termine vollständig geprüft.`] : [],
       startedAt: state.startedAt || request.createdAt,
       completedAt: terminal ? state.completedAt || state.updatedAt : '',
       updatedAt: state.updatedAt,
@@ -274,6 +281,8 @@ async function reportTaskState(request, state, resultPreview = '') {
           workflowOutcome: state.workflowOutcome || null,
           workflowSteps: state.workflowSteps || [],
           ...(state.workflowProof || {}),
+          planbarCompletionProof: state.planbarCompletionProof || null,
+          fundingIntakeProof: state.fundingIntakeProof || null,
         },
       });
     }
@@ -343,6 +352,16 @@ export function shouldResumeCodexTaskAfterTermination({
   exitCode = 0,
   timedOut = false,
 } = {}) {
+  if (state.status === 'stopped' || state.phase === 'user_deferred') return false;
+  if (hasCompletionEvidence({request,state,resultText,structuredResult}) && !timedOut && exitCode === 0) return false;
+  if (request.workflowId === 'planbar-completion-morning') {
+    const proof = state.planbarCompletionProof;
+    // A missing WhatsApp login must not abandon independently executable work.
+    // Only a fully enumerated run with exclusively external gaps can stop here.
+    if (proof?.protocol === 2 && proof.jobId === request.jobId && proof.status === 'partial'
+      && proof.retryRequired === false) return false;
+    return true;
+  }
   const evidence = [resultText, structuredResult?.summary, state?.error, state?.detail]
     .filter(Boolean)
     .join('\n');
@@ -368,15 +387,16 @@ export function buildCodexPrompt(request) {
   const incidentInstruction = incidentMemoryInstructions(request);
   const completionMandate = commandCompletionMandate();
   if (request.mode === 'project-workflow') {
-    return `Nadine hat diesen Projekt-Workflow in IVA ausdrücklich über den Button „Manuell auslösen“ gestartet. Führe jetzt genau einen operativen Einmallauf aus, ohne eine weitere Planbestätigung zu verlangen.
+    return `Nadine hat diesen Projekt-Workflow ausdrücklich beauftragt; der Start erfolgt manuell oder über den von ihr eingerichteten Zeitplan. Führe jetzt genau einen operativen Einmallauf aus, ohne eine weitere Planbestätigung zu verlangen.
 
 Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.md vollständig. ${runtimeInstruction} ${displayInstruction} Dies ist kein Bauauftrag: ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts. Führe nur den unten genannten Workflow mit seinen dokumentierten Quellen, Sicherheitsregeln, Verifikationen, Zeitlimits, Protokollen und Rückfallwegen aus. Normale erneute Anmeldungen erledigst du mit den vorhandenen sicheren Zugangsdaten selbstständig. Bei CAPTCHA, Kontosperre oder technisch erzwungener externer Bestätigung stoppst du mit dem konkreten Blocker. Bei einem fachlichen Sicherheits-Gate rate nicht: lasse den betroffenen Fall unverändert und bearbeite alle übrigen unabhängigen Fälle weiter. Erfinde keinen Erfolg.
 
-Manueller Einmallauf:
+Beauftragter Lauf:
 ${request.prompt}${recoveryInstruction}
 ${request.planbar ? planbarReceiptInstructions(request) : ''}
 
 ${workflowResultInstructions(request)}
+${request.workflowId === 'planbar-completion-morning' ? `Verbindlicher Fallnachweis: Lies das Kapitel Maschinenlesbarer Abschluss in PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md. Verwende node ${JSON.stringify(MODULE_PATH)} planbar-completion ${request.jobId} reconcile, dann list, begin, observe/proof und finish. Eingangsbelege liegen in ${jobPaths(request.jobId).directory}. Ohne vollständigen Protokoll-2-Nachweis bleibt dieser Auftrag offen.` : ''}
 
 ${completionMandate}
 
@@ -448,14 +468,35 @@ export function codexTaskPolicy() {
   });
 }
 
-export async function startCodexTask({ prompt, title = '', requestId = '', acceptanceCriteria = [], mode = 'build', projectId = '', workflowId = '', workflowName = '', planbar = null } = {}, { materialize = materializeIcloudWorkspace, spawnProcess = spawn, report = reportTaskState } = {}) {
+export async function startCodexTask({ prompt, title = '', requestId = '', acceptanceCriteria = [], mode = 'build', projectId = '', workflowId = '', workflowName = '', planbar = null, forecastDelivery = null, fundingRun = null, workflowRevision = '' } = {}, { materialize = materializeIcloudWorkspace, spawnProcess = spawn, report = reportTaskState } = {}) {
+  assertImacExecutionHost();
   const cleanPrompt = clean(prompt, MAX_PROMPT_LENGTH);
   if (cleanPrompt.length < 10) throw new Error('Der Codex-Auftrag ist zu kurz.');
   const normalizedMode = ['project-workflow', 'operational'].includes(mode) ? mode : 'build';
   const jobId = codexJobIdForRequest(requestId);
   const paths = jobPaths(jobId);
   try {
-  const existing = await readJson(paths.state).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
+  let existing = await readJson(paths.state).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
+  let upgradedWorkflow = false;
+  if (existing && ['failed', 'blocked', 'timed_out', 'incomplete'].includes(existing.status)
+    && workflowId === 'planbar-completion-morning' && workflowRevision === 'heat-hero-completion-v2') {
+    const priorRequest = await readJson(paths.request);
+    if (priorRequest.workflowId === workflowId && priorRequest.workflowRevision !== workflowRevision) {
+      const claim = await readJson(paths.executionClaim).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
+      const heartbeat = await readJson(paths.heartbeat).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
+      if ([existing.workerPid, existing.childPid, claim?.pid, heartbeat?.workerPid, heartbeat?.childPid].some(processIsAlive)) {
+        return { jobId, status: existing.status, startedLocally: true, duplicate: true, activeProcessPreserved: true };
+      }
+      await writeJsonAtomic(path.join(paths.directory, 'pre-heat-hero-v2.json'), { request: priorRequest, state: existing });
+      existing = await writeState(paths, { ...existing, status: 'queued', phase: 'recovering',
+        recoveryAttempts: Number(existing.recoveryAttempts || 0) + 1, nextAttemptAt: null,
+        workerPid: null, childPid: null, completedAt: null, error: '',
+        detail: 'Der korrigierte Heat-Hero-Ablauf setzt denselben Auftrag mit gespeicherten Belegen fort.', updatedAt: new Date().toISOString() });
+      await archiveExecutionClaim(paths, Date.now());
+      upgradedWorkflow = true;
+    }
+  }
+  if (existing?.nextAttemptAt && Date.parse(existing.nextAttemptAt) > Date.now()) return {jobId,status:'queued',phase:'recovering',nextAttemptAt:existing.nextAttemptAt,startedLocally:false,duplicate:true};
   if (existing && existing.status !== 'queued') return { jobId, status: existing.status, title: existing.title, workspace: 'iva-core', startedLocally: true, duplicate: true };
   if (existing && (await readJson(paths.request)).launchProtocol !== 2) return { jobId, status: existing.status, title: existing.title, workspace: 'iva-core', startedLocally: false, duplicate: true };
   // Operative Helfer kommen aus der geprüften zentralen Laufzeit. Veraltete
@@ -475,20 +516,26 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
     workflowId: clean(workflowId, 140),
     workflowName: clean(workflowName, 220),
     planbar,
+    forecastDelivery,
+    fundingRun,
+    workflowRevision,
     launchProtocol: 2,
-    resultProtocol: FUNDING_WORKFLOW_STEPS[clean(workflowId, 140)] ? 1 : 0,
+    resultProtocol: clean(workflowId, 140) === 'planbar-completion-morning' ? 2 : FUNDING_WORKFLOW_STEPS[clean(workflowId, 140)] ? 1 : 0,
     workspace: REPO_ROOT,
     workspaceReadiness: {
       iCloud: workspaceReadiness.iCloud,
       materialized: workspaceReadiness.materialized,
       checkedFiles: workspaceReadiness.probes?.length || 0,
     },
-    createdAt: new Date().toISOString(),
+    createdAt: upgradedWorkflow ? existing.createdAt : new Date().toISOString(),
   };
-  if (!existing) {
-  await writeFile(paths.request, JSON.stringify(request, null, 2), { mode: 0o600 });
+  if (!existing || upgradedWorkflow) {
+  await writeJsonAtomic(paths.request, request);
+  if (upgradedWorkflow) await report(request, existing, existing.detail);
+  else {
   const initialState = await writeState(paths, { jobId, title: request.title, requestId: request.requestId, mode: request.mode, projectId: request.projectId, workflowId: request.workflowId, status: 'queued', phase: request.mode === 'build' ? 'planning' : 'queued', progress: request.mode === 'build' ? 5 : 0, detail: 'Auftrag wartet auf den lokalen Codex-Start.', createdAt: request.createdAt, updatedAt: request.createdAt, workspace: REPO_ROOT });
   await report(request, initialState);
+  }
   }
   const childEnv = { ...process.env };
   delete childEnv.IVA_MAC_WAKE_GUARD_ACTIVE;
@@ -505,20 +552,25 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
 }
 
 const PROJECT_WORKFLOW_TASKS = Object.freeze({
+  'funding-initial-backfill': Object.freeze({
+    title: 'Förderung – einmaliger Rücklauf ab 01.08.2026',
+    prompt: 'Lies FUNDING_WORKFLOWS.md vollständig. Führe einmal den vollständigen Mail-Rücklauf ab 01.08.2026 und anschließend die Schritte Vollständigkeit → Förderhöhe → KfW-Zusagen aus. Die konkrete fundingRun-Konfiguration und der dauerhafte Cursor sind verbindlich. Alle Seiten und unvollständig bearbeiteten Nachrichten abarbeiten; ein sichtbarer Posteingang-Ausschnitt beweist keine Vollständigkeit. Kein Zurücksetzen des Cursors nach Unterbrechung. Nach Abschluss ist dieser historische Rücklauf dauerhaft erledigt.',
+    acceptanceCriteria: ['Der einmalige Rücklauf ab 01.08.2026 wurde vollständig paginiert und anhand der Mail-IDs belegt.', 'Alle offenen Nachrichten sind verarbeitet oder mit einem konkreten nicht technisch behebbaren Grund dauerhaft vorgemerkt.', 'Ablage, Rücklesen und Fertig-Verschiebung sind pro Mail nachgewiesen.'],
+  }),
   'funding-daily-sequence': Object.freeze({
     title: 'Förderung – Tageslauf 1 → 2 → 3',
-    prompt: 'Lies FUNDING_WORKFLOWS.md vollständig und führe den dort beschriebenen Tageslauf exakt in der Reihenfolge „Förderung 1 – Vollständigkeit & Unterlagen“ → „Förderung 2 – Förderhöhe prüfen“ → „Förderung 3 – KfW-Zusagen prüfen“ aus. Arbeite ausschließlich auf diesem iMac. Prüfe beim ersten produktiven Lauf alle relevanten Deals, bereits vorhandenen Deal-Dateien und zuordenbaren Fördermails, danach inkrementell plus tägliche Offenfall- und 7-Tage-Reaktionsprüfung. Lade vorhandene Pipedrive-Dateien ausschließlich über den geprüften Helfer `node local-mac-helper/cli.mjs download-pipedrive-files <deal-id> [datei-ids]`; improvisiere keine privaten Download-URLs und gib niemals Sitzungstoken aus. Prüfe die Google-Liste vor vollständigen Deal-Folgeaktionen auf genau eine Spalte Kundename/Name, Datum und Bemerkung; schreibe bei fehlender oder mehrdeutiger Überschrift keinesfalls in eine Ersatzspalte. Kunden- und interne Eskalationsmails bleiben ausnahmslos Outlook-Entwürfe und werden nicht versandt. Die ausdrücklich vorgesehenen echten Folgeaktionen bei eindeutig vollständigen Deals – verifizierte Pipedrive-Felder/Phasen, native WhatsApp an Viktoria, deduplizierter Eintrag in die Google-Tabelle und Verschieben vollständig in Pipedrive verarbeiteter Fördermails in Outlook nach „fertig“ – sind freigegeben. Unklare oder unvollständig verarbeitete Mails bleiben im Eingang. In Fachsystemen nichts löschen. Nach verifiziertem Korrektur-Upload darfst du ausschließlich die exakt zugehörigen Dateien im verwalteten lokalen IVA-Förderordner endgültig entfernen; leere nie den gesamten Benutzer-Papierkorb. Beende den Lauf mit einem kurzen Deal-für-Deal-Bericht; Geheimnisse und Steuerdetails auslassen.',
-    acceptanceCriteria: ['Alle drei Workflows laufen in der dokumentierten Reihenfolge und nie parallel.', 'Der Lauf wurde durch die iMac-Hostprüfung zugelassen; MacBook und iPhone waren nur Fernsteuerung.', 'Kunden- und Eskalationsmails sind ausschließlich Entwürfe; kein Mailversand und keine Löschung in Fachsystemen.', 'Bereits vorhandene Deal-Dateien wurden auf PDF-Format, Standardbezeichnung, Lesbarkeit und Vollständigkeit geprüft.', 'Jede Pipedrive-, WhatsApp-, Tabellen- und Mailverschiebeaktion ist eindeutig zugeordnet, dedupliziert und nach der Aktion verifiziert.', 'Nur vollständig in Pipedrive verarbeitete Fördermails wurden nach „fertig“ verschoben.', 'Nach sieben vollen Tagen ohne Antwort wurde EKD intern an Kati, alles andere an Patrick als echter Weiterleitungsentwurf vorbereitet.', 'Lokale Löschung traf ausschließlich verifiziert ersetzte IVA-Arbeitskopien; fremde Papierkorb-Inhalte blieben erhalten.', 'Der Abschluss enthält je Deal die tatsächlich ausgeführten Änderungen oder den konkreten offenen Punkt.'],
+    prompt: 'Lies FUNDING_WORKFLOWS.md vollständig. Führe auf diesem Mac Mini die Schritte Vollständigkeit & Unterlagen → Förderhöhe → KfW-Zusagen geordnet aus. Verarbeite ausschließlich neue sowie dauerhaft vorgemerkte noch nicht vollständig bearbeitete E-Mails. Kein täglicher Rücklauf ab August, kein erneutes Lesen bereits erledigter Mails. Die tägliche Prüfung offener Deals, KfW-Zusagen und unbeantworteter Anforderungen nach sieben Tagen bleibt bestehen. Ein gelesener Posteingang-Eintrag ist noch kein Bearbeitungsnachweis.',
+    acceptanceCriteria: ['Alle drei Schritte laufen geordnet und verwenden denselben dauerhaften Bearbeitungsstand.', 'Erledigte Mails werden nicht erneut verarbeitet; offene Nachrichten bleiben bis zum verifizierten Abschluss vorgemerkt.', 'Jede Ablage, Nachricht, Phasenänderung und Fertig-Verschiebung ist eindeutig zugeordnet und rückgelesen.'],
   }),
   'funding-monitor': Object.freeze({
     title: 'Förderung 1 – Vollständigkeit & Unterlagen',
-    prompt: 'Lies FUNDING_WORKFLOWS.md vollständig und führe ausschließlich „Förderung 1 – Vollständigkeit & Unterlagen“ genau einmal auf diesem iMac aus. Prüfe auch bereits im Deal vorhandene Dateien und die 7-Tage-Reaktionsfrist. Lade vorhandene Pipedrive-Dateien ausschließlich über `node local-mac-helper/cli.mjs download-pipedrive-files <deal-id> [datei-ids]`; improvisiere keine privaten Download-URLs und gib niemals Sitzungstoken aus. Kunden- und interne Eskalationsmails bleiben Entwürfe; alle dort ausdrücklich genannten, eindeutig belegten Pipedrive-, native-WhatsApp-, Tabellen- und Mailverschiebeaktionen nach „fertig“ sind freigegeben. Unvollständig verarbeitete Mails bleiben im Eingang. In Fachsystemen nichts löschen; nur verifiziert ersetzte lokale IVA-Arbeitskopien im verwalteten Förderordner dürfen endgültig entfernt werden, niemals der gesamte Benutzer-Papierkorb. Berichte jede Dealaktion oder den konkreten Blocker.',
-    acceptanceCriteria: ['Angebot-veröffentlicht-Deals, offene Förderunterlagen, bestehende Deal-Dateien und neue Fördermails sind vollständig geprüft.', 'Nur eindeutig belegte leere Felder und erlaubte Vorwärtsphasen wurden gespeichert und erneut gelesen.', 'Kunden- und 7-Tage-Eskalationsmails sind Entwürfe; WhatsApp und Tabelle folgen nur nach verifizierter Vollständigkeit und genau einmal.', 'Nur vollständig verarbeitete Fördermails wurden verifiziert nach „fertig“ verschoben.', 'Nur verifiziert ersetzte lokale IVA-Arbeitskopien wurden entfernt; in Fachsystemen und im fremden Papierkorb wurde nichts gelöscht.'],
+    prompt: 'Lies FUNDING_WORKFLOWS.md vollständig. Führe ausschließlich Schritt 1 genau einmal auf diesem Mac Mini aus. Neue und noch nicht vollständig verarbeitete Mails aus dem dauerhaften Intake prüfen, offene Deals und die Sieben-Tage-Reaktionsfrist abarbeiten. Bereits erledigte Mails nicht erneut lesen; niemals die Historie ab August neu scannen.',
+    acceptanceCriteria: ['Neue und noch offene Nachrichten sind anhand stabiler IDs geprüft.', 'Nur belegte Felder und erlaubte Vorwärtsphasen wurden gespeichert und rückgelesen.', 'Fertig-Verschiebung erfolgt erst nach verifizierter vollständiger Ablage.'],
   }),
   'kfw-funding-amount-morning': Object.freeze({
     title: 'Förderung 2 – Förderhöhe prüfen',
-    prompt: 'Lies FUNDING_WORKFLOWS.md vollständig und führe ausschließlich „Förderung 2 – Förderhöhe prüfen“ genau einmal auf diesem iMac aus. Prüfe immer die vollständige Dealakte und verwende den versionierten KfW-Rechenkern mit dem zum Antragsdatum passenden offiziellen Regelstand. Offene Kundenfragen nur als Outlook-Entwurf an Kunde mit VP im CC. Nichts löschen.',
-    acceptanceCriteria: ['Keine Förderzahl ohne belegte Gebäude-/Wohneinheitenstruktur, Antragsdatum und Kostenquelle.', 'MFH-Berechnungen verwenden die korrekte Kostenstaffel und beginnen in der Notiz mit dem Eurobetrag.', 'Notizen haben das Wichtigste zuerst und enden mit (Notiz von Nadine via KI).', 'Kundenmails sind nur Entwürfe; nichts wurde gelöscht.'],
+    prompt: 'Lies FUNDING_WORKFLOWS.md vollständig und führe ausschließlich „Förderung 2 – Förderhöhe prüfen“ genau einmal auf diesem Mac Mini aus. Prüfe immer die vollständige Dealakte und verwende den versionierten KfW-Rechenkern mit dem zum Antragsdatum passenden offiziellen Regelstand. Offene Kundenfragen gemäß geprüftem Förder-Versandablauf an den Kunden mit VP im CC bearbeiten; nur bei eindeutigen Quellen und bekanntem Muster versenden, sonst als Entwurf behalten.',
+    acceptanceCriteria: ['Keine Förderzahl ohne belegte Gebäude-/Wohneinheitenstruktur, Antragsdatum und Kostenquelle.', 'MFH-Berechnungen verwenden die korrekte Kostenstaffel und beginnen in der Notiz mit dem Eurobetrag.', 'Notizen haben das Wichtigste zuerst und enden exakt mit (Notiz von Nadine).', 'Fördermails haben eine aktuelle Inhalts- und Empfängerprüfung sowie einen dauerhaften Versandbeleg.'],
   }),
   'kfw-approval-morning': Object.freeze({
     title: 'Förderung 3 – KfW-Zusagen prüfen',
@@ -527,13 +579,13 @@ const PROJECT_WORKFLOW_TASKS = Object.freeze({
   }),
   'planbar-weekly-export': Object.freeze({
     title: 'Planbar-Forecast manuell ausführen',
-    prompt: 'Lies PLANBAR_FORECAST_WORKFLOW.md vollständig und führe den dort beschriebenen Forecast jetzt genau einmal für den aktuell vorgesehenen rollierenden Zehn-Wochen-Zeitraum aus. Erster fachlicher Schritt: Lade ausschließlich im eigenen Planbar-Fenster auf dem rechten Display den Kalender vollständig neu und warte auf die sichtbar aktuelle Plantafel. Lies danach cachefrei neu aus Planbar ein; `--from-existing`, eine vorbereitete Quelle und ein früherer Export sind verboten. Die unmittelbar folgende Kalenderwoche bleibt ausgelassen. Erzeuge ausschließlich aus diesem Lauf die geprüfte Gesamt-XLSX und die nichtleeren Hersteller-XLSX sowie forecast-data.json, manifest.json beziehungsweise xlsx-manifest.json und qa.json im aktuellen Laufordner. David Service, Dawid Service sowie Antonio Lausic, Lausich und Lausitsch sind harte Ausschlüsse. Rufe nach vollständiger Tabellen-QA ausschließlich den dokumentierten deterministischen Sender mit den für diesen Auftrag vorgegebenen Run-Parametern auf. Der Sender fragt Planbar unmittelbar vor Outlook nochmals cachefrei ab und versendet nur bei exakter Übereinstimmung mit dem Export-Snapshot; jede Verschiebung, Löschung oder Neuanlage führt zum Abbruch und zu neu zu erzeugenden Dateien. Wenn Outlook den Versand bereits bestätigt, die Gesendet-Prüfung aber noch nicht sichtbar ist, niemals erneut senden.',
-    acceptanceCriteria: ['Planbar wurde zuerst auf dem rechten Display sichtbar neu geladen und anschließend cachefrei ausgelesen.', 'David/Dawid Service und Antonio Lausic/Lausich/Lausitsch sind vollständig ausgeschlossen.', 'Unmittelbar vor Outlook stimmt eine zweite cachefreie Planbar-Abfrage exakt mit dem Export-Snapshot überein.', 'Alle Anhänge stammen exakt aus dem aktuellen geprüften Manifest, sind XLSX-Dateien und keine PDF ist enthalten.', 'Empfänger, Zeitraum, Anhänge, Quell- und Prüfzeitpunkt sowie native Outlook-Gesendet-Prüfung sind im Sendelog protokolliert.', 'Ein fehlgeschlagener Nachweis nach bestätigtem Senden löst niemals einen Doppelversand aus.'],
+    prompt: 'Lies PLANBAR_FORECAST_WORKFLOW.md vollständig und führe den dort beschriebenen Forecast jetzt genau einmal für den aktuell vorgesehenen rollierenden Zehn-Wochen-Zeitraum aus. Erster fachlicher Schritt: Lade im eigenen Planbar-Fenster auf diesem Mac Mini den Kalender vollständig neu und warte auf die sichtbar aktuelle Plantafel. Lies danach cachefrei neu aus Planbar ein; `--from-existing`, eine vorbereitete Quelle und ein früherer Export sind verboten. Die unmittelbar folgende Kalenderwoche bleibt ausgelassen. Erzeuge ausschließlich aus diesem Lauf die geprüfte Gesamt-XLSX und die nichtleeren Hersteller-XLSX sowie forecast-data.json, manifest.json beziehungsweise xlsx-manifest.json und qa.json im aktuellen Laufordner. David Service, Dawid Service sowie Antonio Lausic, Lausich und Lausitsch sind harte Ausschlüsse. Rufe nach vollständiger Tabellen-QA ausschließlich den dokumentierten deterministischen Sender mit den für diesen Auftrag vorgegebenen Run-Parametern auf. Der Sender fragt Planbar unmittelbar vor Outlook nochmals cachefrei ab und versendet nur bei exakter Übereinstimmung mit dem Export-Snapshot; jede Verschiebung, Löschung oder Neuanlage verlangt einen tatsächlichen Neuaufbau. Bei PLANBAR_FORECAST_REBUILD_REQUIRED oder forecast-rebuild-required.json im aktuellen Laufordner sofort Daten, XLSX und QA aus einer neuen Abfrage erzeugen und denselben Sender mit unveränderten Run-Parametern erneut aufrufen. Höchstens drei Neuaufbauten pro Arbeitsabschnitt, danach checkpointen und denselben Auftrag nach kurzer Pause fortsetzen; nie alte Anhänge oder eine neue Versand-ID verwenden. Wenn Outlook den Versand bereits bestätigt, die Gesendet-Prüfung aber noch nicht sichtbar ist, niemals erneut senden.',
+    acceptanceCriteria: ['Planbar wurde zuerst auf diesem Mac Mini sichtbar neu geladen und anschließend cachefrei ausgelesen.', 'David/Dawid Service und Antonio Lausic/Lausich/Lausitsch sind vollständig ausgeschlossen.', 'Unmittelbar vor Outlook stimmt eine zweite cachefreie Planbar-Abfrage exakt mit dem Export-Snapshot überein.', 'Alle Anhänge stammen exakt aus dem aktuellen geprüften Manifest, sind XLSX-Dateien und keine PDF ist enthalten.', 'Empfänger, Zeitraum, Anhänge, Quell- und Prüfzeitpunkt sowie native Outlook-Gesendet-Prüfung sind im Sendelog protokolliert.', 'Ein fehlgeschlagener Nachweis nach bestätigtem Senden löst niemals einen Doppelversand aus.'],
   }),
   'planbar-completion-morning': Object.freeze({
-    title: 'Planbar-Vervollständigung manuell ausführen',
-    prompt: 'Lies PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md vollständig und führe den dort beschriebenen Morgenworkflow jetzt genau einmal außerplanmäßig aus. Verarbeite die dort erlaubten WhatsApp- und Übergabeeingänge und prüfe zusätzlich bestehende relevante Kundentermine im beschriebenen Bestands- und Forecast-Horizont auf die Präfixe `HH`, `EN` und `DW` sowie auf fehlende Auftragsnummer oder Beschreibung. Ändere nur die ausdrücklich freigegebenen leeren beziehungsweise eindeutig belegten Zielfelder und verifiziere jede Speicherung sichtbar. Beachte Laufzeitlimit, Idempotenz, Bericht und Display-Regel.',
-    acceptanceCriteria: ['Kein Termin wird angelegt, gelöscht, verschoben oder einer anderen Ressource zugeordnet.', 'Pipedrive und HH-Beispiele bleiben rein lesend.', 'Präfixe werden nur bei eindeutig belegtem Partner auf genau einmal `HH`, `EN` oder `DW` korrigiert.', 'Jede Änderung oder jeder Blocker wird im vorgesehenen Ergebnisbericht dokumentiert.'],
+    title: 'Heat-Hero-Planbar vervollständigen',
+    prompt: 'Lies PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md und führe den täglichen Vervollständigungslauf ausschließlich für eindeutig belegte private Heat-Hero-/HH-Kunden aus. Enter/EN, D Warmte/DW, andere Partner und B2B-/Geschäftskunden sind ausgeschlossen. Ein unbekannter Kundentyp ist vor jedem Schreiben anhand eines Primärbelegs zu klären. Erste Schritte: gespeicherten Planbar-Fortschritt und Nachziehqueue lesen, dann Planbar vollständig neu laden und den sichtbaren aktuellen Kalender prüfen. Arbeite zuerst die offenen IVA-Terminierungen, dann beauftragte Retry-/Übergabefälle, danach verfügbare eigene WhatsApp-Hinweise und den vollständigen relevanten Planbar-Bestand ab. Jeder Eingang ist unabhängig: ein WhatsApp-/Telegram-QR-Code oder nicht erreichbarer Nachrichtendienst darf weder die IVA-Queue noch den belegbaren Planbar-/Pipedrive-Bestandscheck verhindern. Telegram ist keine Pflichtquelle. Bestehende Termine behalten, keine Neuanlage/Verschiebung, nur eindeutig belegte fehlende Auftragsnummer, Beschreibung und erlaubte Stammdaten ergänzen und nach jedem Speichern erneut öffnen und Soll/Ist vergleichen. Keine pauschale Fünf-Minuten-Abbruchregel; Arbeit fallweise dauerhaft sichern und bei technischem Abbruch denselben Auftrag am ersten offenen Schritt fortsetzen. Zum Abschluss den gesamten geprüften Zeitraum nochmals frisch rücklesen. Kein Erfolg allein aus einer Zählung, einem leeren Eingang oder einer Textzusammenfassung: der maschinenlesbare Fall- und Laufnachweis ist Pflicht. Technische Zwischenfehler intern reparieren und die verifizierte Lösung im Fehlergedächtnis festhalten. Keine E-Mail oder Telegram-Nachricht aus diesem Prüflauf versenden; der tatsächliche Fortschritt und verbleibende externe Handlungsbedarf werden in IVA gespeichert.',
+    acceptanceCriteria: ['Nur durch Primärbeleg verifizierte private Heat-Hero-Kunden wurden bearbeitet; Enter, andere Partner und B2B sind ausgeschlossen.', 'IVA-Nachziehqueue, verfügbare Nachrichteneingänge und relevanter Planbar-Bestand wurden unabhängig geprüft.', 'Jeder geänderte bestehende Termin besitzt einen aktuellen Soll-/Ist-Nachweis; kein neuer Termin oder Duplikat wurde angelegt.', 'Fehlende Angaben bleiben als konkrete dauerhafte Nachziehfälle erhalten und werden nicht als erledigt gemeldet.', 'Der abschließende frische Bestandsabgleich und alle Fallausgänge sind maschinenlesbar gespeichert.'],
   }),
   'montage-required-fields-morning': Object.freeze({
     title: 'Montage-Pflichtfelder manuell prüfen',
@@ -602,8 +654,14 @@ export async function startProjectWorkflowTask({
       prompt: `${definition.prompt}\n\nSichtbarer Auftragsfortschritt – jeden Befehl erst beim tatsächlichen Beginn des Schritts ausführen:\n- Quelle wird lesend geöffnet und geprüft: node ${JSON.stringify(MODULE_PATH)} progress ${expectedJobId} planning "Installationsplanung wird lesend geöffnet und geprüft."\n- Materialzuordnung und PDF-Erstellung beginnen: node ${JSON.stringify(MODULE_PATH)} progress ${expectedJobId} implementing "Material wird drei Sprachfassungen zugeordnet; PDFs werden erstellt."\n- Render- und Sichtprüfung beginnen: node ${JSON.stringify(MODULE_PATH)} progress ${expectedJobId} testing "Drei PDFs und unveränderte Deckblätter werden visuell geprüft."\n- Projekt-Upload beginnt: node ${JSON.stringify(MODULE_PATH)} progress ${expectedJobId} deploying "Drei PDFs werden in der DeWarmte-Projektakte gespeichert."\n- Ablage und gewählte Ausgabeart werden geprüft: node ${JSON.stringify(MODULE_PATH)} progress ${expectedJobId} live_verification "Projektablage und gewählte Ausgabeart werden abschließend geprüft."\nKeine Phase vorab melden und bei einem Blocker den bestehenden Status mit konkretem Grund melden.\n\nVerbindliche Laufdaten:\n- Quelllink: ${JSON.stringify(input.sourceUrl)}\n- Ausgabeart: ${input.deliveryMode}\n- Empfänger: ${input.recipientEmail || 'keiner'}\n- Job-Schlüssel: ${expectedJobId}\n\n${supplementaryInstructions}\n\nNach PDF- und Sichtprüfung exakt alle drei Uploads ausführen:\nnode local-mac-helper/cli.mjs publish-dewarmte-pdf <absolute-de-pdf-path> ${expectedJobId} de --commit\nnode local-mac-helper/cli.mjs publish-dewarmte-pdf <absolute-en-pdf-path> ${expectedJobId} en --commit\nnode local-mac-helper/cli.mjs publish-dewarmte-pdf <absolute-nl-pdf-path> ${expectedJobId} nl --commit\n${deliveryInstruction}\nDer Upload aller drei PDFs muss vor jeder Mailaktion bestätigt sein. Vollständigen Quelllink und Empfängeradresse nicht in den Abschlussbericht übernehmen.`,
     };
   }
-  if (['funding-daily-sequence', 'funding-monitor', 'kfw-funding-amount-morning', 'kfw-approval-morning'].includes(normalizedWorkflowId)) {
+  let fundingRun = null;
+  if (FUNDING_WORKFLOW_STEPS[normalizedWorkflowId]) {
     assertImacFundingHost();
+    const initial = normalizedWorkflowId === 'funding-initial-backfill';
+    if (initial && (workflowInput.fundingRun?.mode !== 'initial-backfill' || workflowInput.fundingRun?.since !== '2026-08-01')) throw new Error('Der einmalige Förderungslauf benötigt den freigegebenen Zeitraum ab 01.08.2026.');
+    if (!initial && workflowInput.fundingRun?.mode && workflowInput.fundingRun.mode !== 'incremental') throw new Error('Der tägliche Förderungslauf darf keinen historischen Vollscan starten.');
+    fundingRun = initial ? { mode: 'initial-backfill', since: '2026-08-01' } : { mode: 'incremental' };
+    taskDefinition = { ...taskDefinition, prompt: `${taskDefinition.prompt}\n\nVerbindliche Regeln von Nadine: Mails an den Kunden, Vertriebspartner im CC, ausschließlich mit verifizierten Empfängern und bekanntem Muster; bei Unklarheit als Entwurf behalten. Nach sieben vollen Tagen ohne Antwort dieselbe Anforderung einmal an den zuständigen Vertriebsleiter weiterleiten: EKD Katharina Bolz (k.bolz@heat-hero.com), Direktvertrieb Noah Zielinski, Sol Living/Sol Heat Patrick Germer; Adressen aus der geprüften Zuordnung verwenden. Keine geratenen CC-Adressen. Vor jeder Fördermail FUNDING_SEND_STATE.md lesen: funding-send prepare, vollständige aktuelle Entwurfsprüfung, funding-send before-submit, nur bei maySend:true unmittelbar genau einmal senden, danach funding-send complete mit echtem Gesendet-Nachweis. Bei Unterbrechung funding-send resume; niemals einen neuen Vorgang zur Umgehung eines offenen Versandversuchs anlegen. Notizen: klare Zusammenfassung in Zeile 1, exakter letzter Text (Notiz von Nadine). Meldebescheinigungen ohne Altersgrenze. Einkommensbonus nur bei ausdrücklichem Hinweis in TMB, Deal-Informationen oder unterschriebenem Angebot; sonst keine Steuerunterlagen verlangen und vollständige Fälle zur Beantragung weitergeben. Anhänge vollständig als lesbare, richtig benannte PDFs ablegen, KfW-Kontoinformationen im Text ebenfalls zuordnen. Erst nach verifiziertem Upload/Notiz und vollständiger Verarbeitung nach Posteingang/Fertig verschieben. Temporäre lokale Kopien nach bestätigter Ersatzablage entfernen. Keine Fachsystem-Dateien löschen. KfW-Zusage eindeutig prüfen, alle Deal-Labels entfernen, Gewonnen speichern und den nachgelagerten Terminierungsdeal rücklesen. Fehlgeschlagene technische Schritte reparieren und beim ersten offenen Schritt fortsetzen; kein Erfolg ohne Beleg.\n\nKonfiguration dieses Laufs: fundingRun=${JSON.stringify(fundingRun)}. Sie wird im request.json gespeichert. CLI-Scan: node local-mac-helper/cli.mjs scan-funding-mailbox --funding-run <absolute-request.json>. Bereits vollständig gelesene Seiten nicht neu anfordern; offenen Cursor übernehmen.`, acceptanceCriteria: [...taskDefinition.acceptanceCriteria, 'Kunde im An-Feld, verifizierter Vertriebspartner im CC; unklare Empfänger oder Inhalte werden nicht versandt.', 'Lesbare PDF-Ablage und Notizen mit (Notiz von Nadine) sind nachgewiesen; keine Altersgrenze für Meldebescheinigungen.'] };
   }
   if (normalizedWorkflowId === 'funding-daily-sequence') {
     const berlinDay = value => new Intl.DateTimeFormat('en-CA', {
@@ -647,6 +705,7 @@ export async function startProjectWorkflowTask({
       workflowId: normalizedWorkflowId,
       workflowName: taskDefinition.title,
       requestId: effectiveRequestId,
+      forecastDelivery: { runMode: normalizedRunMode, ...(normalizedRunMode === 'automatic' ? { automationSlotKey: normalizedAutomationSlotKey } : { deliveryRunKey: normalizedRequestId }) },
     });
   }
   return startTask({
@@ -655,6 +714,8 @@ export async function startProjectWorkflowTask({
     projectId,
     workflowId: normalizedWorkflowId,
     workflowName: taskDefinition.title,
+    fundingRun,
+    workflowRevision: normalizedWorkflowId === 'planbar-completion-morning' ? 'heat-hero-completion-v2' : '',
     requestId: effectiveRequestId,
   });
 }
@@ -777,10 +838,62 @@ export async function recordPlanbarTaskProgress(jobId, input, { report = reportT
   const temporary = `${paths.planbarProgress}.${crypto.randomUUID()}.tmp`;
   await writeFile(temporary, JSON.stringify(progress, null, 2), { mode: 0o600 });
   await rename(temporary, paths.planbarProgress);
+  // The reservation receipt is already durable. A failed queue update can be
+  // reconstructed by the daily reconcile pass without creating another slot.
+  await planbarCompletion.capture(request, progress);
   const state = await readJson(paths.state);
   const updated = await writeState(paths, { ...state, planbarProgress: progress, phase: progress.status === 'completed' ? 'planbar_complete' : 'planbar_reserved', detail: planbarSchedulingSummary(progress), updatedAt: progress.updatedAt });
   await report(request, updated, planbarSchedulingSummary(progress));
   return progress;
+}
+
+export async function recordPlanbarCompletion(jobId, action, input = {}, { report = reportTaskState } = {}) {
+  const paths = jobPaths(jobId), request = await readJson(paths.request);
+  if (request.workflowId !== 'planbar-completion-morning' || request.resultProtocol !== 2) throw new Error('Kein Heat-Hero-Vervollständigungsauftrag.');
+  let result;
+  if (action === 'reconcile') result = await planbarCompletion.reconcile();
+  else if (action === 'list') result = await planbarCompletion.list();
+  else if (action === 'begin') result = await planbarCompletion.beginRun(jobId, input);
+  else if (action === 'observe') result = await planbarCompletion.enqueueObservedCase({ ...input, runId: jobId });
+  else if (action === 'proof') result = await planbarCompletion.recordProof(input.caseId, input);
+  else if (action === 'finish') result = await planbarCompletion.finishRun(jobId, input);
+  else throw new Error('Unbekannter Planbar-Nachweisschritt.');
+  const proof = await planbarCompletion.getRun(jobId);
+  if (proof) {
+    const state = await readJson(paths.state);
+    const updated = await writeState(paths, { ...state, planbarCompletionProof: proof, updatedAt: new Date().toISOString() });
+    await report(request, updated);
+  }
+  return result;
+}
+
+export function buildFundingIntakeProof(request, state) {
+  if (!request.fundingRun || !FUNDING_WORKFLOW_STEPS[request.workflowId]?.includes('completeness')) return null;
+  const initial = request.fundingRun.mode === 'initial-backfill';
+  const backfill = state.backfill || {}, delta = state.incremental || {};
+  const deltaIsLatest = Boolean(delta.startedAt && (!backfill.scannedAt || Date.parse(delta.startedAt) >= Date.parse(backfill.scannedAt)));
+  const scannedAt = initial || !deltaIsLatest ? backfill.scannedAt : delta.scannedAt;
+  const scanFinished = backfill.status !== 'running' && (initial || !deltaIsLatest
+    ? ['scanned', 'completed'].includes(backfill.status) && !backfill.cursor
+    : delta.complete === true && !delta.cursor);
+  const checkpoint = initial || !deltaIsLatest ? backfill.checkpoint : delta.checkpoint;
+  const checkpointRecorded = typeof checkpoint === 'string' && checkpoint.length > 0;
+  const coverageComplete = Boolean(scanFinished && checkpointRecorded && Number.isFinite(Date.parse(scannedAt)) && (initial || Date.parse(scannedAt) >= Date.parse(request.createdAt)));
+  const pending = Array.isArray(state.pending) ? state.pending.length : Infinity;
+  return { protocol: 2, jobId: request.jobId, mode: request.fundingRun.mode, since: initial ? backfill.since : null,
+    coverageComplete, checkpointRecorded, scannedAt: scannedAt || null, pending,
+    backfillCompleted: backfill.status === 'completed', completed: coverageComplete && pending === 0 };
+}
+
+async function fundingIntakeProofFor(request) {
+  if (!request.fundingRun || !FUNDING_WORKFLOW_STEPS[request.workflowId]?.includes('completeness')) return null;
+  return buildFundingIntakeProof(request, await createFundingIntakeStore().status());
+}
+
+export function resolveFundingTaskFinalStatus({ exitCode, structuredStatus, request, fundingIntakeProof, structuredResult }) {
+  if (exitCode !== 0) return 'failed';
+  if (structuredStatus !== 'completed') return structuredStatus;
+  return hasCompletionEvidence({ request, state: { fundingIntakeProof }, structuredResult }) ? 'completed' : 'incomplete';
 }
 
 function workflowResultSummary(result) {
@@ -886,7 +999,13 @@ export async function getCodexTaskStatus(jobId) {
   }
   const planbarProgress = await readJson(paths.planbarProgress).catch(() => state.planbarProgress || null);
   const workflowResult = workflowResultSummary(await readJson(paths.workflowResult).catch(() => null));
-  return { ...state, workflowOutcome: workflowResult?.outcome || state.workflowOutcome || '', workflowSteps: workflowResult?.steps || state.workflowSteps || [], workflowMetrics: workflowResult ? { checked: workflowResult.checked, changed: workflowResult.changed } : null, planbarProgress, resultPreview: planbarProgress ? `${planbarSchedulingSummary(planbarProgress)}\n${resultPreview}`.trim() : resultPreview };
+  const request = await readJson(paths.request);
+  const planbarCompletionProof = request.workflowId === 'planbar-completion-morning' ? await planbarCompletion.getRun(jobId) : null;
+  const workflowProof = request.workflowId === 'planbar-weekly-export' && request.forecastDelivery
+    ? await import('./planbar-forecast-mail.mjs').then(module => module.latestVerifiedPlanbarForecastDelivery({ after: request.createdAt, ...request.forecastDelivery })).catch(() => null)
+    : state.workflowProof || null;
+  const fundingIntakeProof = await fundingIntakeProofFor(request);
+  return { ...state, planbarCompletionProof, workflowProof, fundingIntakeProof, workflowOutcome: workflowResult?.outcome || state.workflowOutcome || '', workflowSteps: workflowResult?.steps || state.workflowSteps || [], workflowMetrics: workflowResult ? { checked: workflowResult.checked, changed: workflowResult.changed } : null, planbarProgress, resultPreview: planbarProgress ? `${planbarSchedulingSummary(planbarProgress)}\n${resultPreview}`.trim() : resultPreview };
 }
 
 export async function updateCodexTaskProgress(jobId, phase, detail = '') {
@@ -949,6 +1068,7 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   const paths = jobPaths(jobId);
   const request = await readJson(paths.request);
   const previousState = await readJson(paths.state);
+  if (request.workflowId === 'planbar-completion-morning') await planbarCompletion.reconcile();
   const incidentContext = {
     system: 'imac',
     workflowId: request.workflowId || '',
@@ -1008,16 +1128,18 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   const resultPreview = clean(planbarProgress ? `${planbarSchedulingSummary(planbarProgress)}\n${resultText}` : resultText, 1800);
   const workflowProof = request.workflowId === 'planbar-weekly-export'
     ? await import('./planbar-forecast-mail.mjs')
-      .then(module => module.latestVerifiedPlanbarForecastDelivery({ after: request.createdAt }))
+      .then(module => request.forecastDelivery ? module.latestVerifiedPlanbarForecastDelivery({ after: request.createdAt, ...request.forecastDelivery }) : null)
       .catch(() => null)
     : null;
+  const planbarCompletionProof = request.workflowId === 'planbar-completion-morning' ? await planbarCompletion.getRun(jobId) : null;
+  const fundingIntakeProof = await fundingIntakeProofFor(request);
   const inferredWorkflowStatus = request.mode !== 'build'
     ? inferProjectWorkflowStatus(resultText)
     : '';
   const structuredStatus = request.resultProtocol === 1 ? resolveProjectWorkflowResultStatus(structuredResult) : '';
   const resumeAfterTechnicalFailure = shouldResumeCodexTaskAfterTermination({
     request,
-    state: { ...current, planbarProgress },
+    state: { ...current, planbarProgress, workflowProof, planbarCompletionProof, fundingIntakeProof },
     resultText,
     structuredResult,
     exitCode,
@@ -1045,6 +1167,8 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
       ...current,
       planbarProgress,
       workflowProof,
+      planbarCompletionProof,
+      fundingIntakeProof,
       jobId,
       title: request.title,
       requestId: request.requestId,
@@ -1052,6 +1176,7 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
       phase: 'recovering',
       progress: Math.max(1, Number(current.progress) || 0),
       recoveryAttempts,
+      nextAttemptAt: new Date(Date.now() + (request.planbar || request.workflowId?.startsWith('planbar-') ? planbarRecoveryDelayMs(recoveryAttempts) : recoveryDelayMs(recoveryAttempts))).toISOString(),
       workerPid: null,
       childPid: null,
       error: '',
@@ -1078,12 +1203,14 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   }
   const status = request.planbar && planbarProgress?.status !== 'completed'
     ? (planbarProgress?.reservation?.verified ? 'incomplete' : 'blocked')
+    : request.workflowId === 'planbar-completion-morning'
+      ? (hasCompletionEvidence({ request, state: { planbarCompletionProof } }) ? 'completed' : 'incomplete')
     : timedOut
     ? 'timed_out'
     : current.status === 'blocked' || structuredStatus === 'blocked' || (request.resultProtocol !== 1 && inferredWorkflowStatus === 'blocked')
       ? 'blocked'
       : request.resultProtocol === 1
-        ? (exitCode !== 0 ? 'failed' : structuredStatus)
+        ? resolveFundingTaskFinalStatus({ exitCode, structuredStatus, request, fundingIntakeProof, structuredResult })
       : exitCode !== 0
         ? 'failed'
         : request.workflowId === 'planbar-weekly-export' && workflowProof?.sentFolderVerified !== true
@@ -1096,6 +1223,8 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
     ...current,
     planbarProgress,
     workflowProof,
+    planbarCompletionProof,
+    fundingIntakeProof,
     workflowOutcome: structuredResult?.outcome || current.workflowOutcome || '',
     workflowSteps: structuredResult?.steps || current.workflowSteps || [],
     jobId, title: request.title, requestId: request.requestId, status,
@@ -1252,9 +1381,11 @@ export async function syncCodexTaskStates({
     if (workerInterrupted && !orphanChildStillRunning) {
       const resultText = await readFile(paths.lastMessage, 'utf8').catch(() => '');
       const resultPreview = clean(resultText, 1800);
-      const resultBlocked = inferProjectWorkflowStatus(resultText) === 'blocked';
-      const resultSuccessful = /(?:^|\n)\s*Status\s*:\s*(?:\*\*)?erfolgreich\b/i.test(resultText)
-        || (request.mode === 'build' && state.phase === 'completed' && Boolean(resultText.trim()));
+      const resultBlocked = request.workflowId === 'planbar-completion-morning'
+        ? state.planbarCompletionProof?.status === 'partial' && state.planbarCompletionProof?.retryRequired === false
+        : ['external','business'].includes(classifyCodexTaskBlocker(resultText));
+      const structuredResult = workflowResultSummary(await readJson(paths.workflowResult).catch(() => null));
+      const resultSuccessful = hasCompletionEvidence({request,state,resultText,structuredResult});
       if (resultSuccessful || resultBlocked) {
         state = await writeState(paths, {
           ...state,
@@ -1284,6 +1415,7 @@ export async function syncCodexTaskStates({
           phase: 'recovering',
           progress: Math.max(1, Number(state.progress) || 0),
           recoveryAttempts: recoveryAttempts + 1,
+          nextAttemptAt: new Date(now + (request.planbar || request.workflowId?.startsWith('planbar-') ? planbarRecoveryDelayMs(recoveryAttempts + 1) : recoveryDelayMs(recoveryAttempts + 1))).toISOString(),
           interruptedWorkerPid: state.workerPid,
           workerPid: null,
           childPid: null,
@@ -1332,6 +1464,17 @@ if (isCodexTasksEntrypoint() && process.argv[2] === 'workflow-status') {
 } else if (isCodexTasksEntrypoint() && process.argv[2] === 'workflow-result') {
   try { console.log(JSON.stringify(await recordProjectWorkflowOutcome(process.argv[3], process.argv[4], process.argv.slice(5).join(' ')))); }
   catch (error) { console.error(error.message); process.exitCode = 1; }
+} else if (isCodexTasksEntrypoint() && process.argv[2] === 'planbar-completion') {
+  try {
+    const paths = jobPaths(process.argv[3]), action = process.argv[4];
+    let input = {};
+    if (!['list', 'reconcile'].includes(action)) {
+      const receipt = realpathSync(path.resolve(process.argv[5] || ''));
+      if (path.dirname(receipt) !== realpathSync(paths.directory) || [paths.request, paths.state, paths.planbarProgress].includes(receipt)) throw new Error('Der Eingangsbeleg muss im eigenen Auftragsordner liegen.');
+      input = await readJson(receipt);
+    }
+    console.log(JSON.stringify(await recordPlanbarCompletion(process.argv[3], action, input)));
+  } catch (error) { console.error(error.message); process.exitCode = 1; }
 } else if (isCodexTasksEntrypoint() && process.argv[2] === 'planbar-progress') {
   try {
     const paths = jobPaths(process.argv[3]);

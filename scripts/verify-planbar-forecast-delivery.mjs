@@ -13,7 +13,7 @@ const run = Object.freeze({
 
 function memoryLog(entries = []) {
   const log = { version: 1, entries };
-  return { log, loadLog: async () => log, saveLog: async () => {} };
+  return { log, loadLog: async () => log, saveLog: async () => {}, verifyCurrent: async () => ({ exactMatch: true }) };
 }
 
 {

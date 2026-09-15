@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { completePipedriveFundingWon, missingFundingRequiredFields } from './pipedrive-funding-won.js';
 import { PIPEDRIVE_COMPANY_DOMAIN, PIPEDRIVE_LAYOUT, comparePipedriveLayout } from './pipedrive-layout.js';
 
 const OAUTH_AUTHORIZE_URL = 'https://oauth.pipedrive.com/oauth/authorize';
@@ -9,7 +10,8 @@ const STATE_TTL_MS = 10 * 60_000;
 const TOKEN_REFRESH_SKEW_MS = 60_000;
 const MAX_WEBHOOK_EVENTS = 500;
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
-const IVA_NOTE_SIGNATURE = '(Notiz von Nadine via KI)';
+const IVA_NOTE_SIGNATURE = '(Notiz von Nadine)';
+const IVA_NOTE_SUFFIX_PATTERN = /(?:\s*\(Notiz von Nadine(?: via KI)?\))+\s*$/i;
 const DEAL_CUSTOM_FIELD_KEYS = Object.values(PIPEDRIVE_LAYOUT.dealFields).map(field => field.key).join(',');
 export const PIPEDRIVE_WRITE_CONFIRMATION = 'Pipedrive schreiben';
 
@@ -451,7 +453,7 @@ function fundingNoteEvidence(note) {
   const kfwEvidenceMarker = content.match(/IVA-KFW-EVIDENCE:\d+:[0-9a-f]{24}/i)?.[0] || null;
   const humanReadableIvaRequest = /^fehlende unterlagen:/i.test(text)
     && /angefragt\./i.test(text)
-    && text.toLowerCase().endsWith(IVA_NOTE_SIGNATURE.toLowerCase());
+    && IVA_NOTE_SUFFIX_PATTERN.test(text);
   const kfwEmailMatch = text.match(/[a-z0-9.!#$%&'*+/=?^_{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
   const kfwSecretAfterEmail = kfwEmailMatch
     ? text.slice((kfwEmailMatch.index || 0) + kfwEmailMatch[0].length).trim().match(/^(\S{6,})/)?.[1] || ''
@@ -549,25 +551,27 @@ async function cachedPipedriveFundingStructure() {
   return value;
 }
 
-export async function listPipedriveFundingBoard() {
+export async function listPipedriveFundingBoard({ includeOffers = false } = {}) {
   const structure = await getPipedriveStructure();
   const targets = [
-    { output: 'Angebot veröffentlicht', aliases: ['Angebot veröffentlicht', 'Angebot gesendet'] },
-    { output: 'Antrag eingereicht / Förderunterlagen einreichen', aliases: ['Antrag eingereicht / Förderunterlagen einreichen', 'Auftrag eingereicht / Förderunterlagen einreichen'] },
-    { output: 'Förderung beantragt', aliases: ['Förderung beantragen', 'Förderung beantragt'] },
+    ...(includeOffers === true ? [{ output: 'Angebot veröffentlicht', aliases: ['Angebot veröffentlicht', 'Angebot gesendet'] }] : []),
+    { id: 19, output: 'Auftrag eingereicht / Förderunterlagen einreichen', aliases: ['Auftrag eingereicht / Förderunterlagen einreichen'] },
+    { id: 18, output: 'Förderung beantragen', aliases: ['Förderung beantragen'] },
   ];
   const pipeline = structure.pipelines.find(item => Number(item.id) === Number(PIPEDRIVE_LAYOUT.pipelines.orderFeasibility.id));
   if (!pipeline) throw new Error('Die Pipedrive-Pipeline Auftragsmachbarkeit ist nicht verfügbar.');
   const stages = {};
   for (const target of targets) {
     const matches = structure.stages.filter(stage => Number(stage.pipeline_id ?? stage.pipelineId) === Number(pipeline.id)
+      && (!target.id || Number(stage.id) === target.id)
       && target.aliases.some(alias => clean(alias).toLocaleLowerCase('de-DE') === clean(stage.name).toLocaleLowerCase('de-DE')));
+    if (matches.length !== 1) throw new Error('Die live verifizierte Förderphase fehlt oder ist nicht eindeutig; kein pauschaler Historien-Scan.');
     const deals = [];
     for (const stage of matches) {
       let cursor = '';
       do {
         const page = await listPipedriveDeals({ pipelineId: pipeline.id, stageId: stage.id, status: 'open', limit: 500, cursor });
-        deals.push(...page.deals.map(deal => ({ id: String(deal.id), title: clean(deal.title, 1000), stage: target.output })));
+        deals.push(...page.deals.map(deal => ({ id: String(deal.id), title: clean(deal.title, 1000), stage: target.output, updatedAt: clean(deal.update_time, 80) })));
         cursor = clean(page.additionalData?.next_cursor || page.additionalData?.pagination?.next_cursor, 500);
       } while (cursor);
     }
@@ -686,27 +690,12 @@ export async function transitionPipedriveFundingStageApi({ dealId, fromStage, to
   return { dealId: String(dealId), ...(await updatePipedriveDealStage({ dealId, expectedStageId: fromMatches[0].id, targetStageId: toMatches[0].id, confirmation })), source: 'iva-core-pipedrive-api' };
 }
 
-export async function markPipedriveFundingDealWonApi({ dealId, approvalFileName, confirmation } = {}) {
-  assertConfirmedWrite(confirmation);
-  const id = clean(dealId, 40);
-  const fileName = path.basename(clean(approvalFileName, 500));
-  if (!/^\d+$/.test(id) || !/\.pdf$/i.test(fileName) || !/(?:kfw.{0,40}zusage|zusage.{0,40}kfw|zuschuss.{0,20}(?:zusage|bescheid))/i.test(fileName)) {
-    throw new Error('„Gewonnen“ ist nur mit gültiger Deal-ID und eindeutig bezeichnetem KfW-Zusageschreiben als PDF zulässig.');
-  }
-  const before = await getPipedriveFundingSnapshot(id);
-  if (!['förderung beantragen', 'förderung beantragt'].includes(clean(before.stage).toLocaleLowerCase('de-DE'))) throw new Error(`Deal ${id} steht nicht eindeutig in „Förderung beantragt“.`);
-  if (before.files.filter(name => path.basename(name) === fileName).length !== 1) throw new Error(`Das KfW-Zusageschreiben „${fileName}“ ist im Deal nicht genau einmal vorhanden.`);
-  const current = (await pipedriveRequest(`/api/v2/deals/${id}`)).data || {};
-  const alreadyPresent = clean(current.status).toLowerCase() === 'won';
-  if (!alreadyPresent) await pipedriveRequest(`/api/v2/deals/${id}`, { method: 'PATCH', body: { status: 'won' }, write: true });
-  let after = null;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    if (attempt) await new Promise(resolve => setTimeout(resolve, 1500));
-    after = (await pipedriveRequest(`/api/v2/deals/${id}`)).data || {};
-    if (clean(after.status).toLowerCase() === 'won') break;
-  }
-  if (clean(after?.status).toLowerCase() !== 'won') throw new Error('Pipedrive-Status „Gewonnen“ wurde nicht bestätigt.');
-  return { dealId: id, changed: !alreadyPresent, alreadyPresent, verified: true, status: after.status, stageId: String(after.stage_id || ''), mutated: !alreadyPresent, deletedFromPipedrive: false, source: 'iva-core-pipedrive-api' };
+export async function markPipedriveFundingDealWonApi(input = {}, dependencies = {}) {
+  assertConfirmedWrite(input.confirmation);
+  return completePipedriveFundingWon(input, {
+    request: pipedriveRequest, readSnapshot: getPipedriveFundingSnapshot,
+    missingFields: missingFundingRequiredFields, ...dependencies,
+  });
 }
 
 export async function uploadPipedriveDealFile({ dealId, filename, buffer } = {}) {
@@ -758,11 +747,12 @@ function assertConfirmedWrite(confirmation) {
 export async function createPipedriveDealNote({ dealId, text, confirmation } = {}) {
   assertConfirmedWrite(confirmation);
   const id = clean(dealId, 40);
-  const noteText = clean(text, 20_000);
+  const noteText = clean(text, 20_000).replace(IVA_NOTE_SUFFIX_PATTERN, '').trim();
   if (!/^\d+$/.test(id) || !noteText) throw new Error('Deal-ID und Notiztext sind erforderlich.');
   const visible = `${noteText}\n${IVA_NOTE_SIGNATURE}`;
   const current = await pipedriveRequest(`/api/v1/notes?deal_id=${id}&start=0&limit=500`);
-  const existing = (current.data || []).find(note => htmlText(note.content) === htmlText(visible));
+  const existing = (current.data || []).find(note => IVA_NOTE_SUFFIX_PATTERN.test(htmlText(note.content))
+    && htmlText(note.content).replace(IVA_NOTE_SUFFIX_PATTERN, '').trim() === htmlText(noteText));
   if (existing) return { created: false, alreadyPresent: true, noteId: String(existing.id), verified: true };
   const content = `<p>${escapeHtml(noteText).replace(/\n/g, '<br>')}</p><p>${IVA_NOTE_SIGNATURE}</p>`;
   const created = await pipedriveRequest('/api/v1/notes', { method: 'POST', body: { deal_id: Number(id), content }, write: true });

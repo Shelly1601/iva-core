@@ -10,10 +10,11 @@ let writeQueue = Promise.resolve();
 export const AUTOMATION_DEFINITIONS = Object.freeze([
   { id: 'report-email-daily', name: 'Täglicher Workflow-Report: E-Mail mit Telegram-Ersatz', category: 'Reporting', schedule: 'Täglich · 06:45 Uhr', cron: '45 6 * * *', cadence: 'daily', hour: 6, minute: 45, defaultEnabled: true, maxSlotAttempts: 3, timeoutMs: 30_000, description: 'Sendet den Vortagsreport bevorzugt per E-Mail an Nadines HeatHero-Postfach; bei nicht möglicher E-Mail-Zustellung folgt genau ein Telegram-Ersatzreport.' },
   { id: 'report-email-weekly', name: 'Wöchentlicher Workflow-Report: E-Mail mit Telegram-Ersatz', category: 'Reporting', schedule: 'Montag · 06:50 Uhr', cron: '50 6 * * 1', cadence: 'weekly', weekday: 1, hour: 6, minute: 50, defaultEnabled: true, maxSlotAttempts: 3, timeoutMs: 30_000, description: 'Sendet den Wochenreport bevorzugt per E-Mail; bei nicht möglicher E-Mail-Zustellung folgt genau ein Telegram-Ersatzreport.' },
+  { id: 'funding-initial-backfill', name: 'Förderung – einmaliger Rücklauf ab 01.08.2026', category: 'Heat Hero', schedule: 'Einmalig · 16.09.2026 · 01:00 Uhr', cron: '0 1 * * *', cadence: 'once', runAt: '2026-09-15T23:00:00.000Z', defaultEnabled: true, maxSlotAttempts: 6, timeoutMs: 120_000, description: 'Einmaliger vollständiger Mail-Rücklauf ab 1. August 2026 mit dauerhaftem Cursor, offenen Nachrichten und verifizierter Ablage. Unterbrechungen setzen denselben Auftrag fort. Nach Abschluss nur neue oder noch offene Mails; kein täglicher historischer Vollscan.' },
   { id: 'funding-daily-sequence', name: 'Förderung – Tageslauf 1 → 2 → 3 auf dem iMac', category: 'Heat Hero', schedule: 'Täglich · 05:00 Uhr', cron: '0 5 * * *', cadence: 'daily', hour: 5, minute: 0, defaultEnabled: true, maxSlotAttempts: 6, timeoutMs: 120_000, description: 'Führt den geordneten iMac-Auftrag für Vollständigkeit, Förderhöhe und KfW-Zusagen aus und bleibt bis zum echten lokalen Endstatus offen. Verpasste Slots werden nachgeholt.' },
   { id: 'planbar-weekly-export', name: 'Planbar-Forecast als Excel-Listen', category: 'Heat Hero', schedule: 'Freitag · 18:00 Uhr', cron: '0 18 * * 5', cadence: 'weekly', weekday: 5, hour: 18, minute: 0, defaultEnabled: true, maxSlotAttempts: 6, timeoutMs: 120_000, description: 'Erstellt den rollierenden Zehn-Wochen-Forecast auf dem iMac und gilt erst nach verifiziertem Outlook-Versand als erfolgreich. Pro Freitags-Slot gibt es höchstens einen automatischen Versand; manuelle Läufe werden getrennt protokolliert.' },
   { id: 'montage-required-fields-morning', name: 'Montage-Pflichtfelder morgens prüfen', category: 'Heat Hero', schedule: 'Täglich · 07:00 Uhr', cron: '0 7 * * *', cadence: 'daily', hour: 7, minute: 0, defaultEnabled: true, maxSlotAttempts: 6, timeoutMs: 120_000, description: 'Prüft offene Montage-Deals auf dem iMac und bleibt bis zum echten lokalen Endstatus offen. Verpasste Slots werden nachgeholt.' },
-  { id: 'planbar-completion-morning', name: 'Planbar Vervollständigung', category: 'Heat Hero', schedule: 'Täglich · 08:00 Uhr', cron: '0 8 * * *', cadence: 'daily', hour: 8, minute: 0, defaultEnabled: true, maxSlotAttempts: 6, timeoutMs: 120_000, description: 'Vervollständigt bestehende Planbar-Termine auf dem iMac, prüft täglich Präfixe `HH`/`EN`/`DW` sowie fehlende Auftragsnummern und Beschreibungen im relevanten Bestands- und Forecast-Horizont und bleibt bis zum echten lokalen Endstatus offen. Verpasste Slots werden nachgeholt.' },
+  { id: 'planbar-completion-morning', name: 'Planbar Vervollständigung', category: 'Heat Hero', schedule: 'Täglich · 08:00 Uhr', cron: '0 8 * * *', cadence: 'daily', hour: 8, minute: 0, defaultEnabled: true, maxSlotAttempts: 6, timeoutMs: 120_000, description: 'Vervollständigt bestehende Planbar-Termine auf dem Mac Mini, prüft täglich ausschließlich private Heat-Hero-/HH-Fälle einschließlich offener IVA-Terminierungen auf fehlende Auftragsnummern und Beschreibungen; Enter und B2B sind ausgeschlossen. Er arbeitet im relevanten Bestands- und Forecast-Horizont und bleibt bis zum echten lokalen Endstatus offen. Verpasste Slots werden nachgeholt.' },
   { id: 'manufacturer-leads-wattfox', name: 'Bosch-Herstellerleads und Wattfox', category: 'Heat Hero', schedule: 'Täglich · 21:00 Uhr; freitags mit Sieben-Tage-Abgleich', cron: '0 21 * * *', cadence: 'daily', hour: 21, minute: 0, defaultEnabled: true, maxSlotAttempts: 3, timeoutMs: 120_000, description: 'Startet den abgesicherten Bosch-/Wattfox-Lauf auf dem iMac, verfolgt ihn bis zum lokalen Endstatus und protokolliert freitags zusätzlich den Sieben-Tage-Abgleich. Panasonic läuft getrennt über den eigenen ProMatch-Workflow.' },
   { id: 'daily-briefing', name: 'IVA Morning-Briefing', category: 'Kommunikation', schedule: 'Täglich · 07:00 Uhr', cron: '0 7 * * *', cadence: 'daily', hour: 7, minute: 0, defaultEnabled: true, maxSlotAttempts: 2, timeoutMs: 120_000, description: 'Termine, Todos und CRM-Handlungsbedarf als täglicher Telegram-Überblick.' },
   { id: 'marketing-morning-report', name: 'Marketing-Morgenreport', category: 'Marketing', schedule: 'Täglich · 07:10 Uhr', cron: '10 7 * * *', cadence: 'daily', hour: 7, minute: 10, defaultEnabled: true, maxSlotAttempts: 2, timeoutMs: 60_000, description: 'Erzeugt den aktuellen Marketing-Entscheidungsreport und stellt ihn separat per Telegram zu.' },
@@ -42,7 +43,7 @@ function compactResult(value) {
 }
 
 function emptyStore() {
-  return { version: 1, overrides: {}, runs: [], reports: [], deliveries: [] };
+  return { version: 1, overrides: {}, runs: [], reports: [], deliveries: [], completedOnce: {} };
 }
 
 async function load() {
@@ -52,6 +53,7 @@ async function load() {
       ...emptyStore(), ...parsed, version: 1,
       overrides: parsed.overrides && typeof parsed.overrides === 'object' ? parsed.overrides : {},
       runs: Array.isArray(parsed.runs) ? parsed.runs : [],
+      completedOnce: parsed.completedOnce && typeof parsed.completedOnce === 'object' ? parsed.completedOnce : {},
       reports: Array.isArray(parsed.reports) ? parsed.reports : [],
       deliveries: Array.isArray(parsed.deliveries) ? parsed.deliveries : [],
     };
@@ -113,6 +115,7 @@ export async function beginAutomationRun(automationId, input = {}) {
   const definition = automationDefinition(automationId);
   if (!definition) throw new Error('Automation nicht gefunden.');
   return mutate(store => {
+    if (definition.cadence === 'once' && store.completedOnce[definition.id]) return { duplicate: true, exhausted: false, run: clone(store.completedOnce[definition.id]) };
     const nowMs = Date.now();
     const completedAt = new Date(nowMs).toISOString();
     for (const run of store.runs) {
@@ -124,7 +127,8 @@ export async function beginAutomationRun(automationId, input = {}) {
       run.status = 'failed';
       run.summary = 'Automationslauf nach Serverneustart als abgebrochen erkannt.';
       run.error = `Der Lauf blieb länger als ${Math.ceil((timeoutMs + STALE_RUN_GRACE_MS) / 1000)} Sekunden ohne Abschluss und wurde für einen sicheren Wiederholungsversuch freigegeben.`;
-      run.result = {};
+      // Preserve an acknowledged local job across server restarts.
+      run.result = run.result || {};
       run.completedAt = completedAt;
       run.durationMs = Math.max(0, nowMs - startedAtMs);
     }
@@ -164,6 +168,7 @@ export async function finishAutomationRun(runId, input = {}) {
     run.updatedAt = completedAt;
     run.completedAt = run.status === 'waiting' ? '' : completedAt;
     run.durationMs = run.status === 'waiting' ? null : Math.max(0, Date.parse(completedAt) - Date.parse(run.startedAt));
+    if (run.status === 'completed' && automationDefinition(run.automationId)?.cadence === 'once') store.completedOnce[run.automationId] = clone(run);
     return clone(run);
   });
 }

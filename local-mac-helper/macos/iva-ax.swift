@@ -58,6 +58,19 @@ func collect(_ root: AXUIElement, maxDepth: Int = 18, maxNodes: Int = 6000) -> [
     return output
 }
 
+// AX may expose the same native element through several ownership paths.
+// Deduplicate by CoreFoundation identity, never by text (two equal mail labels
+// can represent distinct messages and must remain ambiguous).
+func uniqueAXNodes(_ nodes: [AXNode]) -> [AXNode] {
+    var seen: [CFHashCode: [AXUIElement]] = [:]
+    return nodes.filter { node in
+        let key = CFHash(node.element)
+        if (seen[key] ?? []).contains(where: { CFEqual($0, node.element) }) { return false }
+        seen[key, default: []].append(node.element)
+        return true
+    }
+}
+
 func descendant(_ root: AXUIElement, path: [Int]) -> AXUIElement? {
     var current = root
     for index in path {
@@ -816,7 +829,130 @@ do {
     }
 
     let root = command == "menu-items" ? appElement : focusedRoot(appElement)
-    let nodes = collect(root)
+    let nodes = command.hasPrefix("mailbox-ui-") ? uniqueAXNodes(collect(root)) : collect(root)
+
+    if command == "mailbox-ui-clear-search" {
+        let buttons = nodes.filter { $0.role == "AXButton" && $0.identifier == "Cancel Search Button" }
+        guard buttons.count <= 1 else { throw HelperError.message("OUTLOOK_UI_SEARCH_AMBIGUOUS") }
+        if let button = buttons.first {
+            activateApplication(app)
+            let pressed = AXUIElementPerformAction(button.element, kAXPressAction as CFString)
+            if pressed != .success { try click(button.element) }
+            usleep(400_000)
+        }
+        try writeJSON(["cleared": !buttons.isEmpty]); exit(0)
+    }
+
+    if command == "mailbox-ui-close-source" {
+        guard arguments.count == 2 else { throw HelperError.message("OUTLOOK_UI_BAD_ARGUMENT") }
+        guard let editor = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.TextEdit").first else { try writeJSON(["closed": false]); exit(0) }
+        let editorElement = AXUIElementCreateApplication(editor.processIdentifier)
+        let window = focusedRoot(editorElement)
+        let document = textAttribute(window, kAXDocumentAttribute)
+        guard let url = URL(string: document), url.isFileURL, url.path == arguments[1], url.pathExtension == "mime", url.path.contains("/Outlook/Outlook 15 Profiles/"), url.path.contains("/MimeFiles/"), !(attribute(window, "AXEdited") as? Bool ?? false) else { throw HelperError.message("OUTLOOK_UI_SOURCE_CLOSE_DENIED") }
+        guard let close = attribute(window, kAXCloseButtonAttribute), CFGetTypeID(close) == AXUIElementGetTypeID() else { throw HelperError.message("OUTLOOK_UI_SOURCE_CLOSE_UNAVAILABLE") }
+        let pressed = AXUIElementPerformAction(unsafeBitCast(close, to: AXUIElement.self), kAXPressAction as CFString)
+        try writeJSON(["closed": pressed == .success]); exit(0)
+    }
+
+    // Read-only mail evidence helpers. No compose, send, move, delete, or sync.
+    if command == "mailbox-ui-list" || command == "mailbox-ui-next" {
+        let tables = nodes.filter { $0.role == "AXTable" && ($0.description == "Nachrichtenliste" || $0.title == "Nachrichtenliste") }
+        guard tables.count == 1 else { throw HelperError.message("OUTLOOK_UI_LIST_UNAVAILABLE") }
+        let table = tables[0].element
+        if command == "mailbox-ui-next" {
+            let point = try centerPoint(table)
+            guard let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left),
+                  let scroll = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -650, wheel2: 0, wheel3: 0) else { throw HelperError.message("OUTLOOK_UI_SCROLL_FAILED") }
+            move.post(tap: .cghidEventTap); scroll.post(tap: .cghidEventTap); usleep(650_000)
+        }
+        let rowElements = (attribute(table, kAXRowsAttribute) as? [AXUIElement]) ?? children(table)
+        let visibleElements = (attribute(table, "AXVisibleRows") as? [AXUIElement]) ?? []
+        var resultRows: [[String: Any]] = []
+        for (index, row) in rowElements.enumerated() {
+            let cells = uniqueAXNodes(collect(row, maxDepth: 5, maxNodes: 100)).filter { $0.role == "AXCell" && $0.description.contains("Betreff:") }
+            for cell in cells {
+                resultRows.append(["index": index, "description": cell.description, "visible": visibleElements.contains { CFEqual($0, row) }, "conversation": cell.description.contains("Unterhaltung,"), "expanded": cell.description.contains("Erweitert,")])
+            }
+        }
+        let scope = nodes.first { $0.identifier == "searchScopeButton" && $0.role == "AXPopUpButton" }
+        let search = nodes.first { $0.identifier == "Search Bar" }
+        let uiTexts = nodes.filter { $0.role == "AXStaticText" || $0.role == "AXButton" }.map { $0.title + " " + $0.description + " " + safeValue($0.element) }
+        let loading = nodes.contains { $0.role == "AXProgressIndicator" } || uiTexts.contains { $0.localizedCaseInsensitiveContains("wird geladen") || $0.localizedCaseInsensitiveContains("Suche wird ausgeführt") || $0.localizedCaseInsensitiveContains("Weitere Ergebnisse laden") }
+        let none = uiTexts.contains { $0.localizedCaseInsensitiveContains("Keine Ergebnisse") || $0.localizedCaseInsensitiveContains("Keine Nachrichten gefunden") }
+        let bars = uniqueAXNodes(collect(table, maxDepth: 3, maxNodes: 100)).filter { $0.role == "AXScrollBar" }
+        try writeJSON(["rows": resultRows, "rowCount": rowElements.count, "visibleIndices": rowElements.enumerated().filter { entry in visibleElements.contains { CFEqual($0, entry.element) } }.map { $0.offset }, "loading": loading, "emptyVerified": none, "scrollValues": bars.map { safeValue($0.element) }, "scope": scope.map { safeValue($0.element) } ?? "", "query": search.map { safeValue($0.element) } ?? "", "windowTitle": focusedWindowTitle(appElement)])
+        exit(0)
+    }
+
+    if command == "mailbox-ui-expand" {
+        guard arguments.count == 2 else { throw HelperError.message("OUTLOOK_UI_BAD_ARGUMENT") }
+        let candidates = nodes.filter { $0.role == "AXCell" && $0.description == arguments[1] && $0.description.contains("Unterhaltung,") && !$0.description.contains("Erweitert,") }
+        guard candidates.count == 1 else { throw HelperError.message("OUTLOOK_UI_CONVERSATION_AMBIGUOUS") }
+        activateApplication(app)
+        try click(candidates[0].element); usleep(200_000); try keyboardEvent(124); usleep(500_000)
+        let updated = uniqueAXNodes(collect(focusedRoot(appElement)))
+        guard updated.contains(where: { $0.role == "AXCell" && $0.description.contains("Erweitert,") && $0.description.contains("Unterhaltung,") }) else { throw HelperError.message("OUTLOOK_UI_CONVERSATION_NOT_EXPANDED") }
+        try writeJSON(["expanded": true]); exit(0)
+    }
+
+    if command == "mailbox-ui-search" {
+        guard arguments.count == 2, arguments[1].count <= 700, !arguments[1].contains("\n"), !arguments[1].contains("\r") else { throw HelperError.message("OUTLOOK_UI_BAD_QUERY") }
+        guard focusedWindowTitle(appElement).contains(" • ") else { throw HelperError.message("OUTLOOK_UI_FOLDER_REQUIRED") }
+        let fields = nodes.filter { $0.identifier == "Search Bar" && ($0.role == "AXSearchField" || $0.role == "AXTextField") }
+        guard fields.count == 1 else { throw HelperError.message("OUTLOOK_UI_SEARCH_UNAVAILABLE") }
+        activateApplication(app)
+        try click(fields[0].element); usleep(200_000)
+        let setResult = AXUIElementSetAttributeValue(fields[0].element, kAXValueAttribute as CFString, arguments[1] as CFTypeRef)
+        guard setResult == .success, safeValue(fields[0].element) == arguments[1] else { throw HelperError.message("OUTLOOK_UI_SEARCH_VALUE_UNVERIFIED") }
+        try keyboardEvent(36)
+        var scopes: [AXNode] = []
+        for _ in 0..<30 {
+            usleep(200_000)
+            let searched = uniqueAXNodes(collect(focusedRoot(appElement)))
+            scopes = searched.filter { $0.identifier == "searchScopeButton" && $0.role == "AXPopUpButton" }
+            if scopes.count == 1 { break }
+        }
+        guard scopes.count == 1 else { throw HelperError.message("OUTLOOK_UI_SEARCH_SCOPE_UNAVAILABLE") }
+        if safeValue(scopes[0].element) != "Aktueller Ordner" {
+            try click(scopes[0].element); usleep(200_000)
+            let menuNodes = uniqueAXNodes(collect(appElement, maxDepth: 22, maxNodes: 12000))
+            let options = menuNodes.filter { $0.role == "AXCell" && $0.description == "Aktueller Ordner" }
+            guard options.count == 1 else { throw HelperError.message("OUTLOOK_UI_SEARCH_SCOPE_UNAVAILABLE") }
+            try click(options[0].element); usleep(100_000); try click(options[0].element); usleep(600_000)
+        }
+        let verified = uniqueAXNodes(collect(focusedRoot(appElement)))
+        guard verified.contains(where: { $0.identifier == "searchScopeButton" && $0.role == "AXPopUpButton" && safeValue($0.element) == "Aktueller Ordner" }) else { throw HelperError.message("OUTLOOK_UI_SEARCH_SCOPE_UNVERIFIED") }
+        try writeJSON(["searched": true, "scope": "Aktueller Ordner", "query": arguments[1]]); exit(0)
+    }
+
+    if command == "mailbox-ui-source" {
+        guard arguments.count == 2, !arguments[1].contains("Unterhaltung,") else { throw HelperError.message("OUTLOOK_UI_SINGLE_MESSAGE_REQUIRED") }
+        let candidates = nodes.filter { $0.role == "AXCell" && $0.description == arguments[1] && $0.description.contains("Betreff:") }
+        guard candidates.count == 1 else { throw HelperError.message("OUTLOOK_UI_SOURCE_AMBIGUOUS") }
+        activateApplication(app)
+        let point = try centerPoint(candidates[0].element)
+        guard let down = CGEvent(mouseEventSource: nil, mouseType: .rightMouseDown, mouseCursorPosition: point, mouseButton: .right),
+              let up = CGEvent(mouseEventSource: nil, mouseType: .rightMouseUp, mouseCursorPosition: point, mouseButton: .right) else { throw HelperError.message("OUTLOOK_UI_SOURCE_MENU_FAILED") }
+        down.post(tap: .cghidEventTap); usleep(70_000); up.post(tap: .cghidEventTap); usleep(250_000)
+        let menuNodes = uniqueAXNodes(collect(appElement, maxDepth: 22, maxNodes: 12000))
+        let sourceMenus = menuNodes.filter { $0.role == "AXMenuItem" && $0.identifier == "showMessageSource:" && (attribute($0.element, kAXEnabledAttribute) as? Bool ?? false) }
+        guard sourceMenus.count == 1 else { try? keyboardEvent(53); throw HelperError.message("OUTLOOK_UI_SOURCE_MENU_UNAVAILABLE") }
+        guard AXUIElementPerformAction(sourceMenus[0].element, kAXPressAction as CFString) == .success else { throw HelperError.message("OUTLOOK_UI_SOURCE_OPEN_FAILED") }
+        for _ in 0..<60 {
+            usleep(200_000)
+            guard let editor = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.TextEdit").first else { continue }
+            guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.TextEdit" else { continue }
+            let editorElement = AXUIElementCreateApplication(editor.processIdentifier)
+            let editorWindow = focusedRoot(editorElement)
+            let document = textAttribute(editorWindow, kAXDocumentAttribute)
+            guard let url = URL(string: document), url.isFileURL, url.pathExtension == "mime", url.path.contains("/Outlook/Outlook 15 Profiles/"), url.path.contains("/MimeFiles/") else { continue }
+            // The consumer checks original MIME headers against the exact row;
+            // a stale editor document can never become identity proof by itself.
+            try writeJSON(["sourcePath": url.path, "description": arguments[1], "sourceAction": "showMessageSource:", "openedAt": ISO8601DateFormatter().string(from: Date())]); exit(0)
+        }
+        throw HelperError.message("OUTLOOK_UI_SOURCE_DOCUMENT_UNAVAILABLE")
+    }
 
     if command == "find" {
         guard arguments.count >= 2 else { throw HelperError.message("find benötigt mindestens eine AX-Rolle.") }

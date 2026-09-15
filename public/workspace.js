@@ -1164,6 +1164,32 @@ function fresh(nextMode = mode) {
   status('Neue Fallakte - noch nicht gespeichert.');
 }
 
+function fundingBoolean(id) {
+  return val(id) === 'true' ? true : val(id) === 'false' ? false : null;
+}
+function fundingNumber(id) {
+  const raw = val(id);
+  return raw !== '' && Number.isFinite(Number(raw)) ? Number(raw) : null;
+}
+function updateFundingEvidenceUI() {
+  if ($('fundingIncomeEvidence')) $('fundingIncomeEvidence').hidden = val('incomeBonusRequested') !== 'true';
+  if ($('fundingChildEvidence')) $('fundingChildEvidence').hidden = val('eligibleMinorChild') !== 'true';
+  if ($('fundingBaseDateField')) $('fundingBaseDateField').hidden = val('fundingApplicationKind') !== 'supplementary';
+}
+function collectFundingEvidence() {
+  const verified = checked('fundingIncomeVerified');
+  const childVerified = checked('fundingChildVerified');
+  return {
+    incomeBonusRequested: fundingBoolean('incomeBonusRequested'),
+    eligibleMinorChild: fundingBoolean('eligibleMinorChild'),
+    incomeEvidence: {
+      householdComplete: verified,
+      assessments: [1, 2].map(i => ({ year: fundingNumber('fundingTaxYear' + i), householdTaxableIncome: fundingNumber('fundingTaxIncome' + i), sourceId: val('fundingTaxSource' + i), verified })),
+    },
+    childEvidence: { verified: childVerified, minor: childVerified, childBenefitEligible: childVerified, mainResidenceMatched: childVerified, sourceId: val('fundingChildSource'), applicationDate: val('fundingChildEvidenceDate') },
+  };
+}
+
 function collectEnergyData() {
   return {
     schemaVersion: 'iva-tmb-1.0',
@@ -1211,11 +1237,13 @@ function collectEnergyData() {
     photoAssignments,
     calculation: current?.data?.calculation || { status: 'not-started' },
     funding: {
+      allUnitsAffected: current?.data?.funding?.allUnitsAffected,
+      previousEligibleCosts: current?.data?.funding?.previousEligibleCosts,
       applicantType: val('fundingApplicantType') || 'private-owner', selfUsed: checked('fundingSelfUsed'),
-      applicationDate: val('fundingApplicationDate'), existingBuildingAgeYears: val('existingBuildingAgeYears'), projectCosts: val('fundingProjectCosts'),
+      applicationDate: val('fundingApplicationDate'), applicationKind: val('fundingApplicationKind'), baseApplicationDate: val('fundingBaseApplicationDate'), existingBuildingAgeYears: val('existingBuildingAgeYears'), projectCosts: val('fundingProjectCosts'),
       buildingStructure: val('fundingBuildingStructure') || 'unpartitioned', ownershipSharePercent: val('fundingOwnershipSharePercent'),
       eligibleCostsConfirmedByBza: checked('eligibleCostsConfirmedByBza'),
-      householdIncome: val('householdIncome'), eligibleMinorChild: checked('eligibleMinorChild'),
+      ...collectFundingEvidence(),
       climateBonusEligible: checked('climateBonusEligible'), contractConditional: checked('contractConditional'),
       applicationBeforeStart: checked('applicationBeforeStart'), hydraulicBalancingPlanned: checked('hydraulicBalancingPlanned'),
       result: current?.data?.funding?.result || null,
@@ -1287,18 +1315,19 @@ function renderFundingResult(result = null) {
     root.append(heading, note); return;
   }
   heading.textContent = result.status === 'precheck-positive' ? 'Förder-Vorcheck vollständig' : 'Förder-Vorcheck mit offenen Punkten';
-  const euro = value => Number(value || 0).toLocaleString('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
+  const euro = value => Number.isFinite(value) ? value.toLocaleString('de-DE', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'Noch offen';
+  const percent = value => Number.isFinite(value) ? value.toLocaleString('de-DE') + ' %' : 'Noch offen';
   const grid = document.createElement('div'); grid.className = 'calc-grid';
   if (Number(result.units || 1) > 1 && result.selfUsed) {
     grid.append(
-      calcValue('Gesamtgebäude', `${result.buildingBaseRate || 0} % Grundförderung`),
-      calcValue('Selbst genutzte WE', `${result.selfUsedUnitRate || 0} %`),
-      calcValue('Effektiv gesamt', `${result.effectiveBuildingRate || 0} %`),
+      calcValue('Gesamtgebäude', percent(result.buildingBaseRate)),
+      calcValue('Selbst genutzte WE', percent(result.selfUsedUnitRate)),
+      calcValue('Effektiv gesamt', percent(result.effectiveBuildingRate)),
       calcValue('Förderfähige Kosten', euro(result.eligibleCosts)),
       calcValue('Rechnerischer Zuschuss', euro(result.estimatedGrant)),
     );
   } else {
-    grid.append(calcValue('Fördersatz', `${result.rate || 0} %`), calcValue('Förderfähige Kosten', euro(result.eligibleCosts)), calcValue('Rechnerischer Zuschuss', euro(result.estimatedGrant)));
+    grid.append(calcValue('Fördersatz', percent(result.rate)), calcValue('Förderfähige Kosten', euro(result.eligibleCosts)), calcValue('Rechnerischer Zuschuss', euro(result.estimatedGrant)));
   }
   root.append(heading, grid);
   if (result.noteSummary) {
@@ -1387,9 +1416,12 @@ function applyEnergy(data = {}) {
     pvPower: pv.power, batteryCapacity: pv.batteryCapacity, reviewedBy: declaration.reviewedBy,
     reviewedAt: declaration.reviewedAt, declarationNotes: declaration.notes,
     fundingApplicantType: funding.applicantType || 'private-owner', fundingApplicationDate: funding.applicationDate,
+    fundingApplicationKind: funding.applicationKind || 'base', fundingBaseApplicationDate: funding.baseApplicationDate,
+    incomeBonusRequested: typeof funding.incomeBonusRequested === 'boolean' ? String(funding.incomeBonusRequested) : '',
+    eligibleMinorChild: typeof funding.eligibleMinorChild === 'boolean' ? String(funding.eligibleMinorChild) : '',
+    fundingChildSource: funding.childEvidence?.sourceId, fundingChildEvidenceDate: funding.childEvidence?.applicationDate,
     existingBuildingAgeYears: funding.existingBuildingAgeYears, fundingProjectCosts: funding.projectCosts,
     fundingBuildingStructure: funding.buildingStructure || 'unpartitioned', fundingOwnershipSharePercent: funding.ownershipSharePercent,
-    householdIncome: funding.householdIncome,
   };
   for (const [id, value] of Object.entries(fields)) setVal(id, value);
   setChecked('protectedBuilding', site.protectedBuilding);
@@ -1402,7 +1434,14 @@ function applyEnergy(data = {}) {
   setChecked('reviewed', declaration.reviewed);
   setChecked('eligibleCostsConfirmedByBza', funding.eligibleCostsConfirmedByBza);
   setChecked('fundingSelfUsed', funding.selfUsed);
-  setChecked('eligibleMinorChild', funding.eligibleMinorChild);
+  const assessments = Array.isArray(funding.incomeEvidence?.assessments) ? funding.incomeEvidence.assessments : [];
+  for (let i = 1; i <= 2; i++) {
+    const row = assessments[i - 1] || {};
+    setVal('fundingTaxYear' + i, row.year); setVal('fundingTaxIncome' + i, row.householdTaxableIncome); setVal('fundingTaxSource' + i, row.sourceId);
+  }
+  setChecked('fundingIncomeVerified', funding.incomeEvidence?.householdComplete === true && assessments.length === 2 && assessments.every(row => row.verified === true));
+  setChecked('fundingChildVerified', funding.childEvidence?.verified === true && funding.childEvidence?.minor === true && funding.childEvidence?.childBenefitEligible === true && funding.childEvidence?.mainResidenceMatched === true);
+  updateFundingEvidenceUI();
   setChecked('climateBonusEligible', funding.climateBonusEligible);
   setChecked('contractConditional', funding.contractConditional);
   setChecked('applicationBeforeStart', funding.applicationBeforeStart);
@@ -2095,6 +2134,12 @@ $('pdfBtn2').addEventListener('click', downloadTmbPdf);
 $('closePrintPreview').addEventListener('click', () => document.body.classList.remove('print-preview-mode'));
 $('printPreviewPrint').addEventListener('click', () => window.print());
 $('calculateEnergyBtn').addEventListener('click', calculateEnergy);
+for (const id of ['incomeBonusRequested', 'eligibleMinorChild', 'fundingApplicationKind']) $(id)?.addEventListener('change', updateFundingEvidenceUI);
+$('fundingApplicationDate')?.addEventListener('change', () => {
+  // Never relabel an existing verified assessment when the application year changes.
+  const year = Number(val('fundingApplicationDate').slice(0, 4));
+  if (year && !val('fundingTaxYear1') && !val('fundingTaxYear2')) { setVal('fundingTaxYear1', year - 3); setVal('fundingTaxYear2', year - 2); }
+});
 $('openPvCalculatorBtn')?.addEventListener('click', openPvCalculator);
 $('toggleTmbFormBtn').addEventListener('click', () => setTmbFormView(!tmbChatState.fullForm));
 $('tmbChatAnswerBtn').addEventListener('click', acceptTmbChatAnswer);

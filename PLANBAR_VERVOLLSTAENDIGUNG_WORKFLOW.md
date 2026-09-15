@@ -2,28 +2,26 @@
 
 ## Zeitplan und Umfang
 
-- Name: `Planbar Vervollständigung`
-- Ausführung: täglich um 08:00 Uhr, Zeitzone `Europe/Berlin`, lokal auf Nadines iMac.
-- Primäre Quelle: Nadines eigene Nachrichten vom vorherigen Kalendertag in der WhatsApp-Gruppe `Terminierungen Dispo` innerhalb der Community `Heat Hero GmbH`.
-- Zusätzlicher Tagescheck: bereits vorhandene sichtbare Kundentermine im aktuell relevanten Dispo- und Forecast-Horizont dürfen auf fehlende Kürzel, fehlende Auftragsnummer und fehlende Beschreibung geprüft werden.
-- Ziel: den bereits von Nadine angelegten Planbar-Termin anhand von Kundenname und Kalenderwoche finden, **Auftragsnummer** und **Beschreibung** vervollständigen, beim eindeutig verknüpften Planbar-Kunden fehlende Stammdaten ergänzen und täglich offensichtliche Bestandslücken vor einem Forecast-Lauf schließen.
-- Laufzeitlimit: maximal 5 Minuten. Während des Laufs bleibt das Display stabil an; danach wird es genau einmal ausgeschaltet. Keine Wiederholungs- oder Aufweckschleife außerhalb des nächsten regulären Laufs.
-- Bei einem ausdrücklich manuellen Auftrag haben die konkret übergebenen Kunden-/KW-Fälle Vorrang vor jedem Bestands-, Forecast- oder Präfix-Scan. Alle zulässigen lesenden Vorbereitungen (Planbar-Treffer, Pipedrive-Metadaten, Angebotsdateien) werden parallel durchgeführt. Ein breiter Bestandscheck wird nur gestartet, wenn die konkreten Fälle vollständig bearbeitet sind und noch Zeit im Fünf-Minuten-Fenster verbleibt.
+Täglich um 08:00 Uhr (Europe/Berlin) auf diesem Mac Mini. Ausschließlich private Heat-Hero-Kunden; Enter, DeWarmte und B2B sind aus diesem Lauf ausgeschlossen. Ein HH-Präfix allein beweist keinen Privatkundenstatus. Unklare Zuordnungen zuerst lesend anhand der konkreten Deal-/Kundenakte klären.
+
+Zuerst die dauerhafte Warteschlange `data/planbar-completion.json` abarbeiten. IVA legt nach jeder verifizierten Terminreservierung fehlende Beschreibungen, Auftragsnummern und sonstige offene Schritte dort ab. Ein Abgleich mit gespeicherten Terminierungsbelegen rekonstruiert die Warteschlange nach einem unterbrochenen Schreibschritt. Danach Planbar neu laden und alle einschlägigen Bestandsfälle vom Beginn der laufenden Woche bis zum Ende des rollierenden Zehn-Wochen-Forecasts prüfen. Nadines gestrige Nachrichten aus `Terminierungen Dispo` sind eine zusätzliche Quelle. Fehlender WhatsApp-Zugriff verhindert weder Warteschlangenbearbeitung noch Planbar-/Pipedrive-Prüfung.
+
+Keine Fünf-Minuten-Abbruchregel. Technische Fehler beheben, gespeicherte Reservierungen rücklesen und beim ersten offenen Schritt fortsetzen. Nach mehreren technischen Fehlversuchen wartet derselbe Auftrag mit gespeichertem Zwischenstand; keine Doppelbuchung und keine neue Auftrags-ID. Echte externe Zugangsprobleme gelten nur für das betroffene System. Übrige unabhängige Fälle weiter bearbeiten. Kein Erfolg aufgrund eines freien Textberichts oder eines beendeten Prozesses.
 
 ## Sichere Fallzuordnung
 
 0. Die ausdrückliche Beauftragung eines konkreten Kunden-/KW-Falls umfasst die notwendige fallspezifische Suche nach diesem Kundennamen in den bereits freigegebenen Systemen Planbar und Pipedrive. Dafür keine erneute Freigabe anfordern; Namen nur innerhalb des beauftragten Arbeitswegs verwenden und nicht in externe Berichte oder andere Systeme übertragen.
-1. WhatsApp öffnen, die exakte Community und Gruppe `Terminierungen Dispo` prüfen und nur Nachrichten berücksichtigen, die nach sichtbarem Absender von Nadine stammen und gestern gesendet wurden.
+1. Falls WhatsApp zugänglich ist: die exakte Community und Gruppe `Terminierungen Dispo` prüfen und nur Nachrichten berücksichtigen, die nach sichtbarem Absender von Nadine stammen und gestern gesendet wurden.
 2. Aus jeder relevanten Nachricht Kundenname und Kalenderwoche lesen. Mehrere identische Hinweise zu demselben Kunden und derselben KW bilden einen Fall. Widersprüchliche KW-Angaben werden nicht geraten.
 3. In Planbar genau einen bestehenden Termin mit diesem Kunden in dieser sichtbaren Kalenderwoche verlangen. Der sichtbare Kalender ist für die KW allein maßgeblich. Eine abweichende interne Datums- oder Zeitraumangabe im Termindetail ist kein Blocker und wird nicht verändert.
 4. Niemals einen Termin neu anlegen, löschen, verschieben oder einer anderen Ressource zuordnen. Bei keinem oder mehreren Treffern bleibt Planbar unverändert und der Fall kommt als Blocker in den Bericht.
 
 ## Täglicher Bestandscheck für Kürzel und Vollständigkeit
 
-1. Nach den expliziten Eingängen aus WhatsApp und der einmaligen Übergabeliste, und nur solange das Laufzeitlimit sicher eingehalten werden kann, den aktuell relevanten sichtbaren Planbar-Zeitraum vom Beginn der laufenden Kalenderwoche bis zum Ende des derzeit für Angelo maßgeblichen rollierenden Forecast-Horizonts prüfen.
+1. Nach den offenen IVA-Terminierungen und den zugänglichen WhatsApp-Hinweisen den aktuell relevanten sichtbaren Planbar-Zeitraum vom Beginn der laufenden Kalenderwoche bis zum Ende des derzeit für Angelo maßgeblichen rollierenden Forecast-Horizonts prüfen.
 2. Geprüft werden nur echte Kundentermine. Urlaub, `nicht verfügbar`, Blocker und interne Standardaufgaben sind kein Prüfziel.
-3. Bei jedem geprüften Kundentermin kontrollieren, ob im Feld `Vorname` genau einmal ein belegtes Partnerpräfix vorangestellt ist. Verbindliche Standardpräfixe sind `HH` für Heat Hero, `EN` für Enter und `DW` für D Warmte.
-4. Fehlt das Präfix oder ist es falsch, darf es nur dann korrigiert werden, wenn der Partner für genau diesen bestehenden Fall eindeutig belegt ist, zum Beispiel durch die aktuelle WhatsApp-Nachricht, die einmalige Übergabeliste, den passenden ENTER-Airtable-Fall oder einen anderen im Lauf sichtbar geöffneten Primärbeleg. Ohne eindeutigen Partnerbeleg keine Präfix-Schätzung; der Fall bleibt unverändert und wird als Blocker gemeldet.
+3. Bei jedem geprüften Kundentermin kontrollieren, ob im Feld `Vorname` genau einmal ein belegtes Partnerpräfix vorangestellt ist. In diesem Lauf ist ausschließlich `HH` für belegte private Heat-Hero-Fälle zulässig.
+4. Fehlt das Präfix oder ist es falsch, darf es nur dann korrigiert werden, wenn der Partner für genau diesen bestehenden Fall eindeutig belegt ist, zum Beispiel durch die aktuelle WhatsApp-Nachricht, den passenden Heat-Hero-Deal oder einen anderen im Lauf sichtbar geöffneten Primärbeleg. Ohne eindeutigen Partnerbeleg keine Präfix-Schätzung; der Fall bleibt unverändert und wird als Blocker gemeldet.
 5. Fehlen bei einem bestehenden Kundentermin Auftragsnummer oder Beschreibung ganz oder teilweise, darf dieser Termin auch ohne neue WhatsApp-Nachricht vervollständigt werden, sofern Kunde und KW eindeutig sind und die unten stehende Dokumentlogik den Fall eindeutig belegt.
 6. Eine Beschreibung ist nicht schon deshalb vollständig, weil sie nicht leer ist. Der zwingende Anlagenbeleg ist ein vorn stehendes Wärmepumpen-Segment mit Leistung und Hersteller, zum Beispiel `10 kW Panasonic` oder `Wärmepumpe: 10 kW Panasonic`; das Wort `Anlage` muss dafür nicht wörtlich stehen. Reine Feldnotizen wie `Kunde kann das Material lagern`, eine bloße Wärmepumpe ohne `kW` oder eine `kW`-Angabe ohne Hersteller gelten genauso als unvollständig wie ein leeres Feld. Danach müssen bei Bosch zusätzlich die belegte Bosch-Nummer/Modellbezeichnung, bei Vaillant ausdrücklich `Plus` oder `Pro`, alle wirksam beauftragten Positionen und erforderlichen Speicherangaben nach diesem Workflow enthalten sein. Eine fehlende Pflichtangabe wird nachgezogen.
 7. Bereits fachlich vollständige und korrekt präfixierte Termine bleiben unverändert.
@@ -32,17 +30,12 @@
 
 1. Vor der ersten Änderung einige bestehende Planbar-Termine prüfen, bei denen vor dem Vornamen sichtbar `HH` steht. Diese Einträge stammen von Nadine und dienen ausschließlich als Formatbeispiele.
 2. Nur wiederkehrende Darstellungsmerkmale ableiten: Aufbau und Reihenfolge der Beschreibung, Schreibweise der Wärmepumpe, Trennzeichen, Groß-/Kleinschreibung und Ablage der Auftragsnummer.
-3. Die `HH`-Einträge niemals verändern und keine Kundenangaben daraus in einen anderen Fall kopieren. Sie ersetzen weder Angebot noch TMB und sind kein Beleg für den aktuellen Kundenfall.
+3. Die ausschließlich als Formatbeispiel ausgewählten fremden Einträge nicht verändern und keine Kundenangaben daraus in einen anderen Fall kopieren. Ein eigener unvollständiger HH-Fall wird nach seinem eigenen Beleg korrigiert. Sie ersetzen weder Angebot noch TMB und sind kein Beleg für den aktuellen Kundenfall.
 4. Bei unterschiedlichen Beispielen oder einem Widerspruch zur verbindlichen Fachlogik gilt dieser Workflow. Die Abweichung wird im Ergebnisbericht genannt, statt ein Muster zu erraten.
 
-## Einmalige, von Nadine bestätigte Übergabeliste
+## Frühere Übergaben
 
-- Liegt `data/planbar-completion-pending.json` mit `status: "pending"` vor, wird diese Liste vor den regulären WhatsApp-Nachrichten verarbeitet.
-- Sie ist eine ausdrückliche einmalige Nutzerfreigabe und ersetzt nur für die darin enthaltenen Kunden-/KW-Fälle die Prüfung „vorheriger Kalendertag“. Die Bilddateien und die strukturierte Warteschlange bilden gemeinsam den Eingangsbeleg.
-- Wärmepumpenangaben aus der Übergabeliste dienen grundsätzlich als Such- und Plausibilitätshinweis. Ausnahmen nur für diese 25 neu gelegten Termine: Jede Vaillant-Anlage wird mit dem sichtbaren Zusatz `Pro` geschrieben, zum Beispiel `7 kW Vaillant Pro`. Steht im unterschriebenen Angebot wegen des ursprünglichen Angebotsstands `10 kW Vaillant` oder `12 kW Vaillant Plus`, während Nadines bestätigte Übergabeliste `11 kW Vaillant Pro` nennt, ist dies zusätzlich die operative Austauschinformation wegen Nichtlieferbarkeit. Dann wird in Planbar `11 kW Vaillant Pro` verwendet. Diese Ausnahmen gelten weder für sonstige Bestandsfälle noch für spätere reguläre WhatsApp-Läufe.
-- Bei jedem Kunden aus dieser Übergabeliste muss im Planbar-Feld `Vorname` genau einmal das Präfix `HH ` vor dem eigentlichen Vornamen stehen, zum Beispiel `HH Hartmut`. Ein bereits vorhandenes `HH ` wird nicht verdoppelt.
-- Jeder Fall erhält nach der Bearbeitung einen eindeutigen Status und Zeitstempel. Abgeschlossene oder blockierte Einträge werden nicht erneut geschrieben. Wenn alle Einträge beendet sind, wird die Warteschlange auf `completed` gesetzt.
-- Nach Abschluss der Übergabeliste gilt wieder ausschließlich die tägliche WhatsApp-Quelle `Terminierungen Dispo`.
+Vorhandene alte `planbar-completion-pending.json`/`planbar-completion-retry.json` nur einmal in die neue dauerhafte Warteschlange übernehmen, sofern sie tatsächlich offene, eindeutig private Heat-Hero-Fälle enthalten. Bestehende Reservierungen und geprüfte Ergebnisse erhalten. Frühere Sonderregeln für 25 Einzelfälle begründen keine allgemeine Vaillant-Pro-Regel und keinen veralteten außerplanmäßigen Forecast.
 
 ## Pipedrive- und Dokumentprüfung
 
@@ -60,7 +53,6 @@
 - Die Wärmepumpe steht immer zuerst. Für Panasonic, Midea und andere Hersteller genügt grundsätzlich die kompakte Form `Leistung + Hersteller`, zum Beispiel `10 kW Panasonic`.
 - Bei Bosch ist die im unterschriebenen Angebot eindeutig belegte Bosch-Nummer beziehungsweise Modellbezeichnung Pflicht und wird unmittelbar ergänzt, zum Beispiel `7 kW Bosch CS6800iAW 7` beziehungsweise exakt in der belegten Schreibweise. Eine bloße Angabe wie `7 kW Bosch` ist unvollständig. Nummern dürfen niemals aus einem anderen Kundenfall oder aus einem bloßen Formatbeispiel übernommen werden.
 - Bei Vaillant ist die Variantenbezeichnung Pflicht: immer `Leistung + Vaillant Plus` oder `Leistung + Vaillant Pro`. Maßgeblich ist die unter `Pipedrive- und Dokumentprüfung` festgelegte Quellenreihenfolge einschließlich einer eindeutigen späteren Pro-Umstellungsnotiz. Eine bloße Angabe wie `11 kW Vaillant` ist unvollständig.
-- Abweichend davon wird bei den 25 Fällen der einmaligen Übergabeliste jede Vaillant-Anlage ausdrücklich als `Leistung + Vaillant Pro` geschrieben, damit keine Verwechslung mit einer Plus-Anlage entsteht.
 - Die danach verbleibenden Positionen folgen in der belegten Angebotsreihenfolge. Dubletten werden nicht künstlich erzeugt.
 - Bei mengenabhängigen Zusatzpositionen die belegte Zahl und Einheit direkt hinter der Überschrift ergänzen, zum Beispiel `Extra Verrohrung 3 m`, `Extra Kabel 8 m` oder `Weitere Wanddurchbrüche 2 Stück`. Die Menge muss aus der beauftragten Position stammen; Dezimalnullen dürfen entfallen und `Stk` wird als `Stück` geschrieben. Preise und Rechenerläuterungen bleiben ausgeschlossen.
 - Für zusätzliche Heizkreise gilt abweichend: Bei genau einem Heizkreis nur `Zusätzlicher Heizkreis` schreiben. Bei mehreren die Zahl voranstellen und den korrekten Plural verwenden, zum Beispiel `3 zusätzliche Heizkreise`.
@@ -87,7 +79,7 @@
 1. Bei aktivem Projekt-Schalter wird nach dem einmaligen Planbar-Neuladen zusätzlich eine Kapazitätsaufnahme für die kommenden zwölf Kalenderwochen erstellt.
 2. Als freier Montageplatz zählt ausschließlich eine sichtbare Ressource, die in der jeweiligen Zielwoche von Montag bis Freitag vollständig frei ist. Eine auch nur teilweise Belegung sperrt die Ressource für diese Woche; einzelne freie Tage werden nicht addiert. Jede vollständig freie zulässige Ressource zählt genau einmal.
 3. Die Ressourcen `Dawid Service` und `Antonio Lausic` sowie erkennbare Schreibvarianten dieser Namen werden vollständig ausgeschlossen. Ihre Termine oder Blöcke dürfen weder eine freie Kapazität erzeugen noch die Wochenzahl beeinflussen.
-4. Für jede geprüfte Kalenderwoche wird auch der Wert `0` gespeichert. Der lokale iMac-Lauf übermittelt Zeitstempel, ISO-Jahr, KW und Anzahl über den freigegebenen Geräte-Endpunkt an die Heat-Hero-Projektakte.
+4. Für jede geprüfte Kalenderwoche wird auch der Wert `0` gespeichert. Der lokale Mac-Mini-Lauf übermittelt Zeitstempel, ISO-Jahr, KW und Anzahl über den freigegebenen Geräte-Endpunkt an die Heat-Hero-Projektakte.
 5. IVA zeigt oberhalb von `Kunde terminieren` immer vier Kalenderwochen, deren Summe, die nächste KW mit mindestens einem freien Platz und Pfeile für frühere beziehungsweise spätere Vier-Wochen-Fenster. Quelle, Aktualisierungszeit und beide ausgeschlossenen Ressourcen bleiben sichtbar.
 6. Ist Planbar unklar, nicht eingeloggt oder der Kalender nicht vollständig sichtbar, wird kein neuer Kapazitätsstand veröffentlicht; der letzte verifizierte Stand bleibt mit seinem Zeitstempel sichtbar.
 
@@ -99,46 +91,29 @@
 4. Fehlende E-Mail-Adresse und Telefonnummer aus dem eindeutigen Pipedrive-Kontakt übernehmen. Pipedrive bleibt dabei strikt lesend. Ein separates Mobilfeld nur befüllen, wenn es vollständig, eindeutig und ausdrücklich als Mobilnummer belegt ist.
 5. Bereits gefüllte, widersprüchliche Planbar-Werte nicht automatisch überschreiben. Bei Konflikten zwischen Planbar, Angebot und Pipedrive bleibt der betreffende Stammdatenwert unverändert und kommt in `Manuell prüfen`.
 6. Keine unnötigen Kontaktdaten in Bericht oder Laufprotokoll wiedergeben. Dort nur nennen, welche Felder ergänzt, unverändert gelassen oder blockiert wurden.
-7. Im Bestandscheck dürfen zusätzlich nur eindeutig belegte Präfix-Korrekturen auf `HH `, `EN ` oder `DW ` vorgenommen werden. Ein vorhandenes korrektes Präfix wird niemals verdoppelt.
+7. Im Bestandscheck dürfen zusätzlich nur eindeutig belegte Präfix-Korrekturen auf `HH ` vorgenommen werden. Ein vorhandenes korrektes Präfix wird niemals verdoppelt.
 
 ## Schreiben und Verifizieren
 
 1. Planbar-Seite vor der Bearbeitung einmal aktualisieren und den eingeloggten Zustand prüfen. Bei Bedarf ist die erneute Anmeldung mit den in Chrome gespeicherten Zugangsdaten freigegeben.
-2. Am Termin ausschließlich Auftragsnummer und Beschreibung ändern. Beim eindeutig verknüpften Kunden dürfen zusätzlich nur `Vorname` für ein eindeutig belegtes Präfix `HH `, `EN ` oder `DW ` sowie fehlende Straße/Hausnummer, Postleitzahl, Ort, E-Mail, Telefon und bei eindeutigem Beleg Mobil ergänzt werden. Alle anderen Felder und Termine bleiben unangetastet.
+2. Am Termin ausschließlich Auftragsnummer und Beschreibung ändern. Beim eindeutig verknüpften Kunden dürfen zusätzlich nur `Vorname` für ein eindeutig belegtes Präfix `HH ` sowie fehlende Straße/Hausnummer, Postleitzahl, Ort, E-Mail, Telefon und bei eindeutigem Beleg Mobil ergänzt werden. Alle anderen Felder und Termine bleiben unangetastet.
 3. Vor dem Speichern Kundenname, sichtbare KW, Auftragsnummer, Beschreibung und alle vorgesehenen Stammdatenänderungen nochmals gegen WhatsApp, Pipedrive, Angebot und gegebenenfalls TMB prüfen.
-4. Nach jedem Speichern den Termin beziehungsweise die Kundenansicht erneut öffnen und alle geänderten Zielwerte sichtbar verifizieren. Bei Abweichung keine weiteren Schreibversuche; Fehler dokumentieren.
+4. Nach jedem Speichern den Termin beziehungsweise die Kundenansicht erneut öffnen und alle geänderten Zielwerte sichtbar verifizieren. Bei Abweichung den aktuellen Zielzustand erneut lesen, Ursache beheben und ausschließlich die noch fehlende Korrektur am selben Termin ausführen.
 5. Ein lokales Laufprotokoll verhindert die erneute Verarbeitung derselben WhatsApp-Nachricht beziehungsweise desselben Kunden-KW-Falls.
-6. Vor Abschluss des Laufs alle echten Kundentermine im geprüften Zeitraum ein zweites Mal anhand der Vollständigkeitsdefinition rücklesen. Der Lauf darf nur dann `completed` melden, wenn jeder Termin entweder fachlich vollständig sichtbar verifiziert oder mit einem echten fallspezifischen externen Hinderungsgrund einzeln offen gehalten ist. Ein technischer Browser-, Tab-, Fenster-, Reload-, Verbindungs- oder Steuerungsfehler wird repariert und idempotent fortgesetzt; er ist kein fachlicher Blocker und erscheint nicht als Blocker-Benachrichtigung an Nadine.
+6. Vor Abschluss des Laufs alle echten Kundentermine im geprüften Zeitraum ein zweites Mal anhand der Vollständigkeitsdefinition rücklesen. Der Lauf darf nur dann `completed` melden, wenn jeder erfasste private Heat-Hero-Termin fachlich vollständig sichtbar verifiziert ist. Tatsächlich externe offene Punkte ergeben `partial`, niemals `completed`. Ein technischer Browser-, Tab-, Fenster-, Reload-, Verbindungs- oder Steuerungsfehler wird repariert und idempotent fortgesetzt; er ist kein fachlicher Blocker und erscheint nicht als Blocker-Benachrichtigung an Nadine.
 
-## Einmaliger Abschluss-Forecast für Angelos Excel-Listen
+## Aktueller Forecast und Ergebnis
 
-- Die Warteschlange `data/planbar-completion-pending.json` enthält eine einmalige Abschlussaktion. Sie wird erst freigegeben, wenn **alle 25 Kundenfälle den Status `completed`** haben. Ein blockierter, übersprungener oder noch offener Fall zählt nicht als Abschluss.
-- Nach Freigabe genau einmal außerplanmäßig den verbindlichen Workflow `PLANBAR_FORECAST_WORKFLOW.md` ausführen. Für diese Abschlussaktion ist der Zeitraum fest auf **KW 36 bis einschließlich KW 45 des Jahres 2026** gesetzt, unabhängig vom späteren tatsächlichen Ausführungsdatum.
-- Empfänger ist ausschließlich Angelo Keller unter `a.keller@heat-hero.com`. Es werden ausschließlich die dort vorgeschriebenen Excel-Dateien versendet; keine PDFs und keine zusätzlichen Empfänger.
-- Die reguläre Freitagsautomation bleibt bestehen. Vor dem außerplanmäßigen Versand sowohl den lokalen Forecast-Sendelaufstatus als auch Outlook `Gesendet` auf denselben Empfänger, Betreff und KW-Bereich prüfen. Ein bereits verifizierter Versand wird nicht wiederholt.
-- Die Abschlussaktion wechselt erst nach sichtbarer Prüfung in Outlook `Gesendet` auf `sent-and-verified`. Bei einem technischen oder fachlichen Blocker bleibt sie ungesendet und wird mit konkretem Grund protokolliert; es gibt pro Lauf höchstens einen logischen Versandversuch.
-- Nach bestätigtem Versand das Ergebnis zusätzlich mit `workflowId: planbar-weekly-export` an die Heat-Hero-Projektakte melden und im Detailbericht des Vervollständigungslaufs aufführen.
+Jeder beauftragte Forecast für Angelo folgt `PLANBAR_FORECAST_WORKFLOW.md`: zuerst Planbar frisch laden, den aktuellen Zehn-Wochen-Zeitraum auslesen, Dateien daraus bauen und unmittelbar vor dem Versand erneut vergleichen. Ändert sich die Quelle, Dateien im selben Auftrag neu erstellen. Nie historische Arbeitskopien oder einen alten Versandnachweis als aktuellen Stand verwenden. Im Vervollständigungslauf keinen zusätzlichen Forecast-Versand auslösen.
 
-## Detaillierter Ergebnisbericht: E-Mail mit Telegram-Ersatz
+Ergebnis in IVA mit tatsächlichen Fallzahlen, ausgeführten Änderungen, Rücklesebelegen und noch offenen Punkten speichern. Details aufklappbar; keine täglichen Meldungen allein über gefundene, aber nicht bearbeitete Fälle. Technische Fehler intern mit Ursache, erfolgter Reparatur und verifizierter Vorbeugung dokumentieren. Eine noch ungeprüfte Vermutung ist keine gelernte Regel. Dieser Prüf- und Reparaturlauf versendet keine E-Mail oder Telegram-Nachricht.
 
-Nach jedem Lauf einen detaillierten, nachvollziehbaren Bericht an `n.sell@heat-hero.com` senden – auch bei keinen relevanten Nachrichten, ausgeschaltetem Projekt-Schalter oder echten fachlichen beziehungsweise externen Hinderungsgründen. Behebbare technische Zwischenfehler werden intern repariert und lösen keine Blocker-Benachrichtigung aus.
+## Maschinenlesbarer Abschluss
 
-Der Bericht enthält:
+Der Runner verwendet Protokoll 2. CLI: `node <absoluter-Laufzeitpfad>/codex-tasks.mjs planbar-completion <jobId> <action> [eingangsbeleg.json]`. Eingangsdateien müssen im eigenen Auftragsordner liegen; IDs und Zeitpunkte stammen aus tatsächlich ausgeführten Leseaktionen.
 
-- Laufdatum, Start-/Endzeit, betrachteten WhatsApp-Tag und Gesamtstatus;
-- die nur lesend erkannten Formatmuster der geprüften `HH`-Beispiele, ohne unnötige Kundendaten;
-- pro Fall Kundenname und KW, verwendete Quellen, eindeutigen Planbar-Treffer, geprüfte Dokumentarten, vorherige und neue Terminwerte, geänderte Kundenstammdatenfelder ohne deren vollständige sensible Inhalte sowie die tatsächlich ausgeführten Klicks/Änderungen;
-- die sichtbare Kontrolle nach dem Speichern und jede Abweichung zwischen Soll und Ist;
-- konkrete Gründe für übersprungene oder tatsächlich fachlich beziehungsweise extern blockierte Fälle; behobene technische Zwischenfehler werden intern im Fehlergedächtnis geführt und nicht als Blocker-Benachrichtigung ausgegeben;
-- Summen für gefunden, geändert, unverändert, übersprungen und blockiert sowie separat die Zahl der Präfix-Korrekturen und der im Bestandscheck vervollständigten vorhandenen Termine;
-- bei keinen relevanten Nachrichten ausdrücklich `Keine relevanten Nachrichten von gestern`;
-- einen Abschnitt `Manuell prüfen` mit allen Unsicherheiten oder auffälligen Ergebnissen.
-
-E-Mail-Regeln:
-
-1. Betreff: `IVA Planbar-Vervollständigung – <Datum> – geändert <Anzahl> / blockiert <Anzahl>`.
-2. Der E-Mail-Versand gilt erst als erfolgreich, wenn Empfänger, Betreff, Zeitpunkt und vollständiger Bericht im Gesendet-Ordner sichtbar geprüft wurden.
-3. Ist Versand oder Sichtprüfung nicht eindeutig erfolgreich, genau einen Telegram-Ersatzbericht an Nadine senden. Er enthält den vollständigen Bericht und zusätzlich den konkreten E-Mail-Fehler. Bei Längenbegrenzung darf dieser eine logische Bericht nummeriert auf mehrere Telegram-Nachrichten verteilt werden.
-4. Bei bestätigter E-Mail-Zustellung keinen zusätzlichen Telegram-Doppelbericht senden.
-
-Keine Passwörter, OTPs, vollständigen Kontaktdaten, vollständigen Dokumentinhalte oder unnötige sensible Daten in E-Mail, Telegram oder Laufprotokoll wiedergeben.
+1. `reconcile` und `list` übernehmen offene Reservierungsbelege und zeigen noch offene Fälle.
+2. `begin` erhält `{scope:"heat-hero-private",refreshedAt,sourceChecks:[{source:"planbar",status:"read",observedCount,checkedAt,evidence}]}`. Zusätzliche Quellen separat als `read`, `not_required` oder `unavailable` mit konkretem Grund und `external:true` nur bei tatsächlich externer Hürde angeben.
+3. `observe` erhält `{scopeEvidence:{partnerId:"heat-hero",customerSegment:"private",identityVerified:true,dealId,checkedAt,evidence},identity:{customerId,appointmentId,resourceId,resourceName,isoYear,week,startDate,endDateExclusive},missingDetails,remainingActions,preservedNotes,customerName}`. Die Kalenderwoche ist maßgeblich. `startDate`/`endDateExclusive` bezeichnen Montag/Samstag dieser sichtbaren Woche; abweichende interne Details nicht verschieben.
+4. `proof` erhält `{caseId,expected,actual,readback,sourceEvidence,missingDetails,externalBlockers,preservedNotes}`. `expected` und `actual`: `{orderNumber,description,manufacturer,powerKw,model,variant}`. `readback` enthält dieselbe Terminidentität plus `{source:"planbar",partnerId:"heat-hero",customerSegment:"private",identityVerified:true,firstName,checkedAt,evidence}`. Für jedes Sollfeld einen konkreten `sourceEvidence`-Eintrag `{field,sourceId,sourceKind,evidence,verified:true,checkedAt}` speichern. Auftragsnummer aus `signed-offer`; nummerngleiche Original-PDF nur nach vollständig erfolgloser Unterschriftensuche und `{sourceKind:"original-offer",matchedDealId,matchedOfferNumber,identityVerified:true,signedOfferSearchComplete:true,signedOfferFound:false}`.
+5. Vor Ende Planbar nochmals frisch öffnen, `finalReadbackStartedAt` speichern und alle erledigten Fälle in dieser letzten Runde mit `proof` rücklesen. Erst danach `finish` mit `{checkedCaseIds,inventoryComplete:true,finalReadbackStartedAt,finalReadbackAt}`. Der Helfer berechnet Vollständigkeit, Lücken und Wiederholbedarf selbst. Eine neue Endzeit ersetzt keine zweite Rückprüfung.

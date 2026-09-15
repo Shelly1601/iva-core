@@ -27,9 +27,11 @@ assert.equal(incomeBonusRate(55_000, true), 10);
 assert.equal(climateSpeedBonusRate(new Date('2026-08-03T12:00:00+02:00')), 16);
 assert.equal(climateSpeedBonusRate(new Date('2028-08-02T12:00:00+02:00')), 0);
 
+const incomeProof = amount => ({ incomeBonusRequested: true, incomeEvidence: { householdComplete: true, assessments: [2023, 2024].map(year => ({ year, householdTaxableIncome: amount, verified: true, sourceId: 'fixture-tax-' + year })) } });
+
 const funding = calculateKfw458Funding({
   applicantType: 'private-owner', selfUsed: true, existingBuildingAgeYears: 10, units: 1,
-  projectCosts: 30_000, householdIncome: 25_000, eligibleMinorChild: false, climateBonusEligible: true,
+  projectCosts: 30_000, householdIncome: 25_000, ...incomeProof(25_000), eligibleMinorChild: false, climateBonusEligible: true,
   applicationDate: '2026-08-03', eligibleCostsConfirmedByBza: true,
   contractConditional: true, applicationBeforeStart: true, hydraulicBalancingPlanned: true,
 }, new Date('2026-08-03T12:00:00+02:00'));
@@ -55,7 +57,7 @@ assert.match(rentedMfh.noteSummary, /^12\.351,17 € - 30 % Gesamtgebäude/);
 const selfUsedMfh = calculateKfw458Funding({
   applicantType: 'private-owner', selfUsed: true, existingBuildingAgeYears: 40, units: 3,
   buildingStructure: 'unpartitioned',
-  projectCosts: 58_000, householdIncome: 25_000, eligibleMinorChild: false, climateBonusEligible: true,
+  projectCosts: 58_000, householdIncome: 25_000, ...incomeProof(25_000), eligibleMinorChild: false, climateBonusEligible: true,
   applicationDate: '2026-08-10', eligibleCostsConfirmedByBza: true,
   contractConditional: true, applicationBeforeStart: true, hydraulicBalancingPlanned: true,
 }, new Date('2026-08-14T12:00:00+02:00'));
@@ -67,7 +69,7 @@ assert.match(selfUsedMfh.noteSummary, /^27\.066,67 € - 30 % Gesamtgebäude \/ 
 
 const cappedAtSeventy = calculateKfw458Funding({
   applicantType: 'private-owner', selfUsed: true, existingBuildingAgeYears: 40, units: 1,
-  projectCosts: 28_000, householdIncome: 35_000, eligibleMinorChild: false, climateBonusEligible: true,
+  projectCosts: 28_000, householdIncome: 35_000, ...incomeProof(35_000), eligibleMinorChild: false, climateBonusEligible: true,
   applicationDate: '2026-08-10', eligibleCostsConfirmedByBza: true,
   contractConditional: true, applicationBeforeStart: true, hydraulicBalancingPlanned: true,
 }, new Date('2026-08-14T12:00:00+02:00'));
@@ -85,7 +87,7 @@ assert.match(oldRulesBlocked.blockers.join(' '), /frühere KfW-Regelwerk/);
 
 const ambiguousMfh = calculateKfw458Funding({
   applicantType: 'private-owner', selfUsed: true, existingBuildingAgeYears: 40, units: 3,
-  projectCosts: 58_000, householdIncome: 25_000, personsInHousehold: 3,
+  projectCosts: 58_000, householdIncome: 25_000, ...incomeProof(25_000), personsInHousehold: 3,
   applicationDate: '2026-08-10', eligibleCostsConfirmedByBza: true,
   contractConditional: true, applicationBeforeStart: true, hydraulicBalancingPlanned: true,
 }, new Date('2026-08-14T12:00:00+02:00'));

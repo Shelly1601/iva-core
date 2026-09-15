@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-export const PLANBAR_SCHEDULING_RULE_VERSION = 'reserve-first-v1';
+export const PLANBAR_SCHEDULING_RULE_VERSION = 'reserve-first-v2';
 
 export function planbarSchedulingKey({ customerName, partnerId, partnerPrefix, isoYear, week, source, objectLocation }) {
   return createHash('sha256').update(JSON.stringify([
@@ -24,15 +24,17 @@ export function mergePlanbarSchedulingProgress(previous = null, input = {}) {
   if (isExcludedPlanbarResource(reservation.resourceName)) throw new Error('Ausgeschlossene Planbar-Ressource.');
   if (!Number.isFinite(Date.parse(reservation.verifiedAt)) || Date.parse(reservation.verifiedAt) > Date.now() + 60_000) throw new Error('Der Planbar-Prüfzeitpunkt fehlt oder ist ungültig.');
   const proof = Object.fromEntries(['customerId', 'appointmentId', 'resourceId', 'resourceName', 'isoYear', 'week', 'startDate', 'endDateExclusive', 'verifiedAt', 'verified', 'identityVerified'].map(key => [key, reservation[key]]));
+  // A later readback must not make an already verified confirmation mail older
+  // than the reservation. Preserve the first observed reservation time.
+  proof.firstVerifiedAt = previous?.reservation?.firstVerifiedAt || previous?.reservation?.verifiedAt || reservation.firstVerifiedAt || reservation.verifiedAt;
+  if (!Number.isFinite(Date.parse(proof.firstVerifiedAt)) || Date.parse(proof.firstVerifiedAt) > Date.parse(proof.verifiedAt)) throw new Error('Der erste Planbar-Reservierungsnachweis ist zeitlich ungültig.');
   if (previous?.reservation) {
     for (const key of ['customerId', 'appointmentId', 'resourceId', 'isoYear', 'week', 'startDate', 'endDateExclusive']) {
       if (previous.reservation[key] !== proof[key]) throw new Error('Die gesicherte Planbar-Reservierung darf nicht ersetzt oder verschoben werden.');
     }
   }
-  const missingDetails = (input.missingDetails ?? previous?.missingDetails ?? ['Auftragsnummer', 'Leistungsbeschreibung'])
-    .map(value => String(value).trim().slice(0, 180)).filter(Boolean).slice(0, 20);
-  const remainingActions = (input.remainingActions ?? previous?.remainingActions ?? ['Pipedrive-Abschluss', 'WhatsApp-Bestätigung'])
-    .map(value => String(value).trim().slice(0, 180)).filter(Boolean).slice(0, 20);
+  const missingDetails = detailList(input.missingDetails ?? previous?.missingDetails ?? ['Auftragsnummer', 'Leistungsbeschreibung']);
+  const remainingActions = detailList(input.remainingActions ?? previous?.remainingActions ?? ['Pipedrive-Abschluss', 'WhatsApp-Bestätigung']);
   const sourceCheck = input.sourceCheck || previous?.sourceCheck || null;
   if (sourceCheck) {
     assertSchedulableSourceStage(sourceCheck.stage);
@@ -46,13 +48,49 @@ export function mergePlanbarSchedulingProgress(previous = null, input = {}) {
   if (confirmationMail && (confirmationMail.verified !== true || typeof confirmationMail.messageId !== 'string' || !confirmationMail.messageId || confirmationMail.messageId.length > 300
     || confirmationMail.from !== 'n.sell@heat-hero.com' || !/^[a-f0-9]{64}$/.test(confirmationMail.recipientHash || '')
     || !Number.isFinite(Date.parse(confirmationMail.sentAt)) || Date.parse(confirmationMail.sentAt) > Date.now() + 60_000
-    || Date.parse(confirmationMail.sentAt) < Date.parse(reservation.verifiedAt))) throw new Error('Der geprüfte Bestätigungs-Mailnachweis fehlt.');
+    || Date.parse(confirmationMail.sentAt) < Date.parse(proof.firstVerifiedAt))) throw new Error('Der geprüfte Bestätigungs-Mailnachweis fehlt.');
   if (input.status === 'completed' && (missingDetails.length || remainingActions.length || input.completionVerified !== true)) throw new Error('Offene Ergänzungen oder Folgeaktionen dürfen nicht als vollständig gemeldet werden.');
   if (previous?.status === 'completed' && input.status !== 'completed') throw new Error('Ein vollständig geprüfter Auftrag darf nicht zurückgesetzt werden.');
   return { status: input.status, reservation: proof, missingDetails, remainingActions,
-    ...(sourceCheck ? { sourceCheck: Object.fromEntries(['dealId', 'partnerId', 'stage', 'identityVerified', 'objectLocationMatched', 'planbarRefreshedAt', 'verifiedAt'].map(key => [key, sourceCheck[key]])) } : {}),
+    ...(sourceCheck ? { sourceCheck: {
+      ...Object.fromEntries(['dealId', 'partnerId', 'stage', 'identityVerified', 'objectLocationMatched', 'planbarRefreshedAt', 'verifiedAt'].map(key => [key, sourceCheck[key]])),
+      customerSegment: sourceCheck.customerSegmentVerified === true && ['private', 'business'].includes(sourceCheck.customerSegment) ? sourceCheck.customerSegment : 'unknown',
+      customerSegmentVerified: sourceCheck.customerSegmentVerified === true && ['private', 'business'].includes(sourceCheck.customerSegment),
+      ...(sourceCheck.customerSegmentVerified === true && sourceCheck.customerSegmentSource ? { customerSegmentSource: String(sourceCheck.customerSegmentSource).trim().slice(0, 300) } : {}),
+    } } : {}),
     ...(confirmationMail ? { confirmationMail: Object.fromEntries(['messageId', 'from', 'recipientHash', 'sentAt', 'verified'].map(key => [key, confirmationMail[key]])) } : {}),
     completionVerified: input.status === 'completed', updatedAt: new Date().toISOString(), ruleVersion: PLANBAR_SCHEDULING_RULE_VERSION };
+}
+
+function detailList(value) {
+  if (!Array.isArray(value)) throw new Error('Offene Planbar-Angaben und Folgeaktionen müssen als Liste vorliegen.');
+  return [...new Set(value.map(item => String(item).trim().slice(0, 180)).filter(Boolean))].slice(0, 20);
+}
+
+// Derived from a persisted receipt, never from a command being accepted. The
+// completion worker persists this contract and may only edit this appointment.
+export function buildPlanbarSchedulingFollowup(request = {}, progress) {
+  if (request.partnerId !== 'heat-hero' || String(request.partnerPrefix || '').toUpperCase() !== 'HH' || !progress?.reservation?.verified) return null;
+  const baseline = mergePlanbarSchedulingProgress(null, { ...progress, status: 'reserved' });
+  const checked = mergePlanbarSchedulingProgress(baseline, progress);
+  const reservation = checked.reservation;
+  if (Number(request.isoYear) !== reservation.isoYear || Number(request.week) !== reservation.week) throw new Error('Die Nachzieh-Aufgabe gehört nicht zur beauftragten Kalenderwoche.');
+  const customerSegment = checked.sourceCheck?.customerSegmentVerified === true ? checked.sourceCheck.customerSegment : 'unknown';
+  if (customerSegment === 'business') return null;
+  const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  const caseId = `planbar-details-${hash(['heat-hero', reservation.customerId, reservation.appointmentId])}`;
+  const status = checked.status === 'completed' ? 'completed' : 'pending';
+  const revision = hash([caseId, reservation.resourceId, reservation.isoYear, reservation.week, checked.missingDetails, checked.remainingActions, status, customerSegment]);
+  return {
+    caseId, revision, kind: 'planbar-details', projectId: 'heat-hero', partnerId: 'heat-hero', partnerPrefix: 'HH',
+    jobId: String(request.jobId || '').trim().slice(0, 100), schedulingKey: planbarSchedulingKey(request),
+    requestId: String(request.requestId || request.id || '').trim().slice(0, 100), customerName: String(request.customerName || '').trim().slice(0, 220),
+    ...Object.fromEntries(['customerId', 'appointmentId', 'resourceId', 'resourceName', 'isoYear', 'week', 'startDate', 'endDateExclusive'].map(key => [key, reservation[key]])),
+    missingDetails: checked.missingDetails, remainingActions: checked.remainingActions, status,
+    customerSegment, requiresPrivateCustomerCheck: customerSegment !== 'private',
+    ...(checked.sourceCheck ? { sourceCheck: checked.sourceCheck } : {}),
+    reservationVerifiedAt: reservation.verifiedAt, updatedAt: progress.updatedAt || checked.updatedAt,
+  };
 }
 
 export function planbarSchedulingSummary(progress) {

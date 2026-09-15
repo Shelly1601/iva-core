@@ -121,7 +121,7 @@ assert.throws(
     body: 'Hallo Angelo',
     attachments: ['/tmp/Planbar.pdf'],
   }),
-  /ausschließlich eine oder mehrere XLSX-Anlagen/,
+  /ausschließlich (?:eine oder mehrere )?XLSX-Anlagen/,
 );
 
 console.log('Planbar-Forecast: Regeln, Ausschlüsse, Wochenüberlappung, Dubletten und exakt verifizierter Outlook-Versand geprüft.');

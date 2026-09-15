@@ -19,16 +19,10 @@ function successfulSuspension(command) {
 }
 
 export function fundingRuntimeUpdatePrompt() {
-  return `Aktualisiere ausschließlich die lokale IVA-Gerätelaufzeit auf diesem Mac Mini aus dem bereits synchronisierten autoritativen iCloud-Workspace.
-
-Arbeitsordner: /Users/nadine/Library/Mobile Documents/com~apple~CloudDocs/IVA-Assistent/iva-core
-
-1. Prüfe, dass der Hostname ein Mac Mini ist und dass genau dieser iCloud-Arbeitsordner aktiv ist.
-2. Führe genau einmal das bereits veröffentlichte, SHA-256-geprüfte Direktpaket aus: zsh IVA-Mac Mini-JETZT-fertigstellen.command
-3. Warte den vollständigen Abschluss dieses Befehls ab. Er lädt die fest gepinnte Laufzeit direkt aus GitHub und verwendet iCloud nicht als Laufzeitquelle.
-4. Verifiziere das ausgegebene Installationsergebnis: zwei fortlaufende Railway-Heartbeats, Laufzeitmodus local und die Aktionsliste enthält funding.legacy-monitor.suspend.
-
-Dies ist nur eine lokale Laufzeitaktualisierung. Ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts. Starte keinen Förderlauf. Öffne oder verändere weder Pipedrive noch Outlook, WhatsApp oder Google Sheets. Versende nichts. Melde nur das verifizierte Ergebnis oder den konkreten technischen Fehler.`;
+  return `Aktualisiere ausschließlich die lokale IVA-Gerätelaufzeit auf diesem Mac Mini aus dem bereits veröffentlichten zentralen IVA-Core.
+Arbeitsordner: /Users/macmini/Documents/Codex/IVA/iva-core
+Führe node local-mac-helper/install-central-runtime.mjs aus. Das Paket wird über den attestierten Gerätekanal bezogen und vor Aktivierung geprüft. Bestätige danach zwei fortlaufende Heartbeats sowie funding.legacy-monitor.suspend in der Aktionsliste.
+Kein Förderlauf, keine Fachsystemaktion und keine Nachricht. Keine Quelländerung, kein Commit und kein Deployment. Aktive lokale Workflows nicht unterbrechen.`;
 }
 
 export async function reconcileFundingImacRuntime({
@@ -68,7 +62,7 @@ export async function reconcileFundingImacRuntime({
         mode: 'operational',
         prompt: fundingRuntimeUpdatePrompt(),
         acceptanceCriteria: [
-          'Die lokale Mac Mini-Laufzeit stammt aus dem autoritativen IVA-iCloud-Workspace.',
+          'Die lokale Mac-Mini-Laufzeit stammt aus dem geprüften zentralen IVA-Core.',
           'Zwei fortlaufende Railway-Heartbeats bestätigen den neu gestarteten Agenten.',
           'Die Aktionsliste enthält funding.legacy-monitor.suspend.',
           'Kein Förderlauf und keine externe Kommunikation wurden ausgelöst.',
@@ -83,43 +77,10 @@ export async function reconcileFundingImacRuntime({
   const suspension = commands.find(command => command.action === FUNDING_RUNTIME_REQUIRED_ACTION
     && String(command.requestText || '').includes(FUNDING_RUNTIME_MARKER));
   if (successfulSuspension(suspension)) {
-    const berlinDay = value => new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit',
-    }).format(new Date(value));
-    const today = berlinDay(Date.now());
-    const fundingCatchup = commands.find(command => command.action === 'project.workflow.run'
-      && command.payload?.workflowId === FUNDING_DAILY_SEQUENCE_WORKFLOW
-      && berlinDay(command.createdAt) === today);
-    if (!fundingCatchup) {
-      const catchup = await enqueue({
-        deviceId: IVA_IMAC_DEVICE_ID,
-        action: 'project.workflow.run',
-        payload: {
-          projectId: 'heat-hero',
-          workflowId: FUNDING_DAILY_SEQUENCE_WORKFLOW,
-          displayName: 'Förderung – Tageslauf 1 → 2 → 3',
-        },
-        requestedBy: 'funding-runtime-catchup',
-        requestText: `[${FUNDING_RUNTIME_MARKER}] Ausgefallenen 05:00-Förderlauf heute genau einmal auf dem Mac Mini nachholen`,
-      });
-      return {
-        status: 'ready_funding_catchup_queued',
-        runtimeCurrent: true,
-        legacyMonitorSuspended: true,
-        commandId: suspension.id,
-        fundingCatchupCommandId: catchup.id,
-        result: suspension.result,
-      };
-    }
-    return {
-      status: 'ready',
-      runtimeCurrent: true,
-      legacyMonitorSuspended: true,
-      commandId: suspension.id,
-      fundingCatchupCommandId: fundingCatchup.id,
-      fundingCatchupStatus: fundingCatchup.status,
-      result: suspension.result,
-    };
+    // Runtime maintenance never starts business work. The automation scheduler
+    // owns the dated backfill and daily incremental slot with stable job IDs.
+    return { status: 'ready', runtimeCurrent: true, legacyMonitorSuspended: true,
+      commandId: suspension.id, result: suspension.result };
   }
   if (active(suspension)) {
     return { status: 'legacy_monitor_suspending', commandId: suspension.id };

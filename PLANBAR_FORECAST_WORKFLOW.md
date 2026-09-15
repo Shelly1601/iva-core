@@ -1,14 +1,14 @@
 # Planbar-Forecast an Angelo – verbindlicher Freitagsworkflow
 
-Stand: 30.08.2026
+Stand: 15.09.2026 · Ausführung ausschließlich auf dem attestierten Mac Mini gemäß ../AGENTS.md
 
 ## Verbindlicher Aktualitätslauf vor jedem Versand
 
-1. Nach der technischen Rechtsbildschirm-Prüfung ist der **erste fachliche Schritt** Planbar: ausschließlich das eigene Chrome-Fenster auf dem rechten Display öffnen beziehungsweise aktivieren, den Planbar-Kalender vollständig neu laden und warten, bis die Plantafel wieder sichtbar geladen ist. Andere Planbar-Fenster oder Tabs, insbesondere auf dem linken Display, bleiben unangetastet.
+1. Der **erste fachliche Schritt** ist Planbar im eigenen Chrome-Arbeitsfenster auf dem Mac Mini: den Kalender vollständig neu laden und auf ein neues, vollständig geladenes Dokument mit sichtbarer Plantafel warten. Ein einzelnes Display genügt; fremde Fenster bleiben unangetastet. Der deterministische Collector erzwingt diesen Reload vor jedem Snapshot und zeichnet `planbarRefreshedAt` sowie `reloadVerified` auf.
 2. Die Forecast-Daten werden danach cachefrei neu aus Planbar eingelesen. `forecast-data.json` und `data.json` müssen im aktuellen Laufordner entstehen. `--from-existing`, ältere Quelldateien und vorbereitete Exporte sind technisch gesperrt.
 3. Quelle, XLSX-Erzeugung, technische und visuelle Prüfung sowie Versand müssen in demselben Lauf liegen. Der belegte Planbar-Snapshot darf beim Versand höchstens 15 Minuten alt sein.
 4. Unmittelbar bevor Outlook geöffnet wird, fragt der deterministische Sender denselben Zeitraum nochmals cachefrei aus Planbar ab. Die exportrelevanten Termine müssen einschließlich Kalenderwoche, Kunde, Adresse, Anlage, Hersteller und Quell-ID exakt mit dem Export-Snapshot übereinstimmen. Die Gesamtzahl und die Herstellergruppen müssen ebenfalls identisch sein.
-5. Schon eine Verschiebung, Löschung oder Neuanlage zwischen Export und Versand bricht den Versand ab. Es werden keine alten Dateien versendet; Daten und XLSX müssen aus einer weiteren neuen Planbar-Abfrage neu erzeugt und erneut geprüft werden.
+5. Eine Verschiebung, Löschung, Neuanlage oder ein zu alter Export führt zu `PLANBAR_FORECAST_REBUILD_REQUIRED` (CLI-Exitcode 3). Dies ist eine konkrete Fortsetzungsaktion: **denselben Auftrag und dieselbe Versand-ID behalten**, Plantafel neu laden, Daten + XLSX + QA neu erzeugen und den Sender erneut aufrufen. Der Sender speichert `forecast-rebuild-required.json` im Laufordner sowie einen auftragsbezogenen Marker in `rebuild-requests/`. Höchstens drei Neuaufbauten je Auftrag; bei weiter wechselnden Daten bleibt der Auftrag mit `PLANBAR_FORECAST_SOURCE_UNSTABLE` nachvollziehbar offen. Ein bloßes „Änderung gefunden“ ist kein Abschluss.
 
 ## Zeitplan und Empfänger
 
@@ -20,9 +20,9 @@ Stand: 30.08.2026
 - Verbindliches Beispiel für den Freitagslauf am 21.08.2026: KW 35 auslassen und KW 36–45 exportieren.
 - Absender: `n.sell@heat-hero.com`.
 - Empfänger: Angelo Keller, `a.keller@heat-hero.com`.
-- Versand: sichtbar über Outlook auf dem iMac; danach in „Gesendet“ verifizieren.
-- Ausführung: Der Railway-Wochenslot bleibt bis zum echten iMac-Endzustand offen. Ist Railway oder der iMac zum Termin nicht verfügbar, wird derselbe Kalenderwochenslot nachgeholt. Ein bloß eingereihter oder gestarteter iMac-Auftrag ist kein Erfolg.
-- Wiederanlauf: Slot-ID und iMac-Auftrags-ID bleiben über Serverneustarts stabil. Fehlversuche werden begrenzt neu gestartet; ein bereits von Outlook übernommener Versand wird ausschließlich in „Gesendet“ nachgeprüft und niemals erneut gesendet.
+- Versand: sichtbar über Outlook auf dem Mac Mini; danach in „Gesendet“ verifizieren.
+- Ausführung: Der Railway-Wochenslot bleibt bis zum verifizierten Mac-Mini-Endzustand offen. Ist Railway oder der Mac Mini zum Termin nicht verfügbar, wird derselbe Kalenderwochenslot nachgeholt. Ein bloß eingereihter oder gestarteter Mac-Mini-Auftrag ist kein Erfolg.
+- Wiederanlauf: Slot-ID und Mac-Mini-Auftrags-ID bleiben über Serverneustarts stabil. Fehlversuche werden begrenzt neu gestartet; ein bereits von Outlook übernommener Versand wird ausschließlich in „Gesendet“ nachgeprüft und niemals erneut gesendet.
 
 ## Verbindliches Ausgabeformat
 
@@ -63,10 +63,10 @@ Die Zeilen sind nach Kalenderwoche und Kunde sortiert. Kopfzeile und Filter blei
 6. Dateiendungen aller Anlagen müssen `.xlsx` sein; bei `.pdf` bricht der Versand ab.
 7. Vor dem sichtbaren Outlook-Versand die zweite cachefreie Planbar-Abfrage und den exakten Snapshot-Abgleich durchführen, danach Manifest und Anhänge erneut validieren, Doppelversand über `send-log.json` und Outlook `Gesendet` ausschließen und die gesendete Nachricht anschließend in Outlook verifizieren.
 
-Der Versand erfolgt ausschließlich mit dem deterministischen iMac-Sender:
+Der Versand erfolgt ausschließlich mit dem deterministischen Mac-Mini-Sender:
 
 ```bash
-node local-mac-helper/planbar-forecast-mail.mjs "/absoluter/iCloud-Laufordner" --commit --run-mode manual --delivery-run "<stabile-ID-dieses-manuellen-Auftrags>"
+node local-mac-helper/planbar-forecast-mail.mjs "/Users/macmini/Documents/Codex/IVA/iva-core/outputs/planbar-weekly/<aktueller-Lauf>" --commit --run-mode manual --delivery-run "<stabile-ID-dieses-manuellen-Auftrags>"
 ```
 
 Der zentrale Freitagslauf ergänzt stattdessen `--run-mode automatic --automation-slot "<stabile Wochen-Slot-ID>"`. Jeder neue ausdrückliche manuelle Auftrag erhält eine neue `--delivery-run`-ID; technische Wiederholungen desselben Auftrags behalten dieselbe ID. Manuelle Aufträge dürfen niemals eine Automatik-Slot-ID erhalten.
@@ -75,4 +75,12 @@ Der Sender übernimmt nur die exakten vollständigen XLSX-Pfade aus dem Manifest
 
 ## Protokollierung
 
-Jeder Lauf dokumentiert Zeitraum, Zahl der eingelesenen und wegen der beiden Planbar-Spalten ausgeschlossenen Termine, Zahl der verbleibenden Baustellen, Zahl der Hersteller, Zahl und Namen der XLSX-Anhänge, Absender, Empfänger sowie die Prüfung im Gesendet-Ordner. `outputs/planbar-weekly/send-log.json` verhindert Doppelversand. Die zentrale Automation erhält erst den Status `completed`, wenn `sentFolderVerified: true` vorliegt; während iMac- oder Outlook-Arbeit bleibt sie sichtbar auf `waiting`.
+Jeder Lauf dokumentiert Zeitraum, Zahl der eingelesenen und wegen der beiden Planbar-Spalten ausgeschlossenen Termine, Zahl der verbleibenden Baustellen, Zahl der Hersteller, Zahl und Namen der XLSX-Anhänge, Absender, Empfänger sowie die Prüfung im Gesendet-Ordner. `outputs/planbar-weekly/send-log.json` verhindert Doppelversand. Die zentrale Automation erhält erst den Status `completed`, wenn `sentFolderVerified: true` vorliegt; während Mac-Mini- oder Outlook-Arbeit bleibt sie sichtbar auf `waiting`.
+
+## Deterministische Fortsetzung und Versandbeleg
+
+- Der Daten-Builder verlangt ausdrücklich `--year`, `--start-week` und `--end-week`; er verwendet keinen alten Standardzeitraum. Beispielaufruf: `node scripts/build-planbar-forecast-data.mjs --output "<aktueller-Laufordner>" --year <Jahr> --start-week <von> --end-week <bis>`.
+- Die abschließende Frischeprüfung lädt Planbar erneut und prüft den Snapshot. Direkt danach werden Manifest, QA und Anlagen erneut validiert; SHA-256-Prüfsummen schützen die bereits geprüften Anhänge vor nachträglichem Austausch.
+- `delivery-receipts/` enthält einen atomar angelegten, dauerhaften Beleg je stabiler Versand-ID. Er entsteht vor dem Outlook-Aufruf und wird nicht automatisch gelöscht. Parallele Prozesse können denselben Auftrag dadurch nicht zweimal abschicken.
+- Bei einem vorhandenen Versandversuch sind weitere Planbar-Abfragen und neue Anhänge für die Versandentscheidung unerheblich: Es wird nur der ursprünglich gespeicherte Absender, Empfänger, Betreff, die exakte Anlagenliste und das feste Zeitfenster des ersten Versuchs in Gesendet geprüft. Auch ein später fehlender Laufordner darf keinen Neuversand auslösen. Mehrdeutigkeit bleibt offen.
+- Der zentrale Runner verlangt `sentFolderVerified: true` für **genau dieselbe manuelle Auftrags-ID bzw. denselben automatischen Wochen-Slot**. Ein anderer erfolgreicher Forecast oder ein Erfolgssatz im Chat ist kein Versandbeleg.

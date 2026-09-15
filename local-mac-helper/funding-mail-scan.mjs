@@ -4,10 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { classifyFundingDocumentName } from './funding-document-extractor.mjs';
 import { FUNDING_BASE_REQUIRED_DOCUMENTS, loadFundingScan } from './funding-scan.mjs';
-import {
-  openOutlookAccountFolder,
-  runMacUiBridge,
-} from './macos-ui.mjs';
+import { detectNewFundingMessages } from './funding-monitor-state.mjs';
 
 const FUNDING_MAILBOX = 'foerderung@heat-hero.com';
 
@@ -48,12 +45,13 @@ export function correlateFundingMessages(cases, messageDescriptions) {
     const compactHaystack = compactReference(description);
     const scored = [];
     for (const item of prepared) {
-      const order = compactReference(item.orderNumber);
-      if (order && compactHaystack.includes(order)) {
+      const order = normalized(item.orderNumber);
+      const orderPattern = order ? new RegExp(`(?:^|[^a-z0-9])${order.split(' ').join('[^a-z0-9]*')}(?:$|[^a-z0-9])`, 'i') : null;
+      if (compactReference(order).length >= 3 && orderPattern?.test(haystack)) {
         scored.push({ item, score: 100, matchedBy: 'order_number' });
         continue;
       }
-      if (item.name.full && haystack.includes(item.name.full)) {
+      if (item.name.tokens.length >= 2 && (` ${haystack} `).includes(` ${item.name.full} `)) {
         scored.push({ item, score: 90, matchedBy: 'full_name' });
         continue;
       }
@@ -63,9 +61,7 @@ export function correlateFundingMessages(cases, messageDescriptions) {
         scored.push({ item, score: 80, matchedBy: 'first_and_surname' });
         continue;
       }
-      if (hasSurname && surnameCounts.get(item.name.surname) === 1) {
-        scored.push({ item, score: 60, matchedBy: 'unique_surname' });
-      }
+      // A surname alone is not an identity proof. Leave the mail unassigned.
     }
     if (!scored.length) continue;
     const best = Math.max(...scored.map(entry => entry.score));
@@ -106,10 +102,10 @@ function positiveTextEvidence(text) {
   return [...evidence];
 }
 
-function incomeBonusEvidence(text) {
+export function incomeBonusEvidence(text) {
   const value = normalized(text);
   if (/kein(?:en|e)? einkommensbonus|einkommensbonus.{0,30}(?:nicht|kein)|steuerbescheid.{0,40}(?:nicht benotigt|nicht erforderlich)/.test(value)) return false;
-  if (/einkommensbonus|steuerbescheid.{0,30}202[34]/.test(value)) return true;
+  if (/(?:einkommensbonus).{0,40}(?:beantragt|gewünscht|gewunscht|nutzen|in anspruch nehmen|ja\b)|(?:beantrage|beantragen|wünsche|wunsche|möchte|mochte).{0,40}einkommensbonus/.test(value)) return true;
   return null;
 }
 
@@ -141,12 +137,11 @@ export async function loadFundingMailScan(filePath = defaultFundingMailScanFile(
   return JSON.parse(await readFile(path.resolve(filePath), 'utf8'));
 }
 
-export async function scanFundingMailbox({ fundingScan, persist = true, onProgress } = {}) {
+export async function scanFundingMailbox({ fundingScan, persist = true, onProgress, fundingRun = { mode: 'incremental' }, detectMessages = detectNewFundingMessages } = {}) {
   const startedAt = new Date().toISOString();
   const pipedrive = fundingScan || await loadFundingScan();
-  await openOutlookAccountFolder({ from: FUNDING_MAILBOX, folder: 'Posteingang' });
-  const inbox = await runMacUiBridge(['find', 'AXCell'], { timeoutMs: 30000 });
-  const messageDescriptions = inbox.matches
+  const detected = await detectMessages({ fundingRun });
+  const messageDescriptions = detected.messages
     .map(item => String(item.description || ''))
     .filter(description => /(?:Betreff:|Kein Betreff)/i.test(description));
   const correlated = correlateFundingMessages(pipedrive.cases, messageDescriptions);
@@ -169,8 +164,8 @@ export async function scanFundingMailbox({ fundingScan, persist = true, onProgre
       const attachmentFileNames = [];
       const attachmentDocuments = [];
       for (const documentId of positiveTextEvidence(message.description)) mailEvidence.add(documentId);
-      const bonusEvidence = incomeBonusEvidence(message.description);
-      if (bonusEvidence != null) incomeBonusRequested = bonusEvidence;
+      // An Outlook list preview is no complete source reading and must not
+      // override the deal/TMB/signed-offer bonus instruction.
       const expectedCount = expectedAttachmentCount(message.inspection?.attachmentGrid);
       return {
         subject: extractSubject(message.description),
@@ -212,6 +207,9 @@ export async function scanFundingMailbox({ fundingScan, persist = true, onProgre
     startedAt,
     completedAt: new Date().toISOString(),
     source: 'outlook-funding-inbox-and-pipedrive-scan',
+    scanComplete: detected.scanComplete === true,
+    coverageVerified: detected.coverageVerified === true,
+    fundingRun: detected.fundingRun,
     readOnly: true,
     messagesScanned: messageDescriptions.length,
     attachmentMessagesInspected: attachmentMessages.length,

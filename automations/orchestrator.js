@@ -49,6 +49,7 @@ function lastWeeklyOccurrence(definition, parts) {
 }
 
 export function automationSlotKey(definition, now = new Date()) {
+  if (definition.cadence === 'once') return `${definition.id}:once:${definition.runAt}`;
   const parts = localParts(now);
   if (definition.cadence === 'monthly') return `${definition.id}:monthly:${parts.year}-${parts.month}`;
   if (definition.cadence === 'weekly') return `${definition.id}:weekly:${isoWeekKey(lastWeeklyOccurrence(definition, parts))}`;
@@ -59,7 +60,8 @@ export function automationSlotKey(definition, now = new Date()) {
   return `${definition.id}:daily:${dateKey(parts)}`;
 }
 
-function isDue(definition, now) {
+export function isDue(definition, now) {
+  if (definition.cadence === 'once') return Number.isFinite(Date.parse(definition.runAt)) && now.getTime() >= Date.parse(definition.runAt);
   if (definition.cadence === 'interval') return false;
   const parts = localParts(now);
   const minutes = Number(parts.hour) * 60 + Number(parts.minute);
@@ -76,6 +78,7 @@ export function createAutomationOrchestrator(handlers = {}) {
   async function runAutomation(id, { trigger = 'schedule', now = new Date(), slotKey = '', allowDisabled = false } = {}) {
     const automation = await getAutomation(id);
     if (!automation) throw new Error('Automation nicht gefunden.');
+    if (automation.cadence === 'once' && trigger !== 'manual' && !isDue(automation, now)) return { automationId: id, skipped: true, reason: 'not-due' };
     if (!automation.enabled && !allowDisabled) return { automationId: id, skipped: true, reason: 'disabled' };
     const handler = handlers[id];
     if (typeof handler !== 'function') throw new Error(`Kein Handler für Automation ${id}.`);
@@ -98,7 +101,8 @@ export function createAutomationOrchestrator(handlers = {}) {
         }),
         new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error(`Zeitlimit nach ${automation.timeoutMs} ms überschritten.`)), automation.timeoutMs); }),
       ]);
-      const requestedStatus = ['blocked', 'skipped', 'waiting'].includes(result?.status) ? result.status : 'completed';
+      const requestedStatus = result?.status === 'partial' ? (result.retryRequired === true ? 'waiting' : 'blocked')
+        : ['blocked', 'skipped', 'waiting', 'failed'].includes(result?.status) ? result.status : 'completed';
       const run = await finishAutomationRun(started.run.id, {
         status: requestedStatus,
         summary: result?.summary || (requestedStatus === 'completed' ? 'Automatischer Lauf erfolgreich abgeschlossen.' : requestedStatus === 'waiting' ? 'Automatischer Lauf wartet auf das bestätigte Endergebnis.' : 'Automatischer Lauf nicht ausgeführt.'),

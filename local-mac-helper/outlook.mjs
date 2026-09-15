@@ -305,19 +305,23 @@ export function buildVerifiedSendAppleScript(input = {}, { allowedExtensions = [
   return { script: lines.join('\n'), message, expectedAttachmentNames };
 }
 
-export function buildSentVerificationAppleScript({ from, subject, to = [], attachments = [], lookbackSeconds = 900, pollAttempts = 20 } = {}) {
+export function buildSentVerificationAppleScript({ from, subject, to = [], attachments = [], lookbackSeconds = 900, pollAttempts = 20, notBefore = '', notAfter = '' } = {}) {
   const requestedFrom = email(from, 'Absender');
   const requestedSubject = String(subject || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 240);
   const requestedTo = recipients(to, 'An');
   const expectedAttachments = [...new Set((Array.isArray(attachments) ? attachments : []).map(value => path.basename(String(value))))].sort();
   const seconds = Math.max(60, Math.min(8 * 24 * 60 * 60, Number(lookbackSeconds) || 900));
   const attempts = Math.max(1, Math.min(20, Number(pollAttempts) || 20));
+  const lower = notBefore ? Date.parse(notBefore) : null, upper = notAfter ? Date.parse(notAfter) : null;
+  if ((notBefore && !Number.isFinite(lower)) || (notAfter && !Number.isFinite(upper)) || (lower !== null && upper !== null && upper < lower)) throw new Error('Gesendet-Prüfung: Das feste Versandzeitfenster ist ungültig.');
+  const clockSeconds = Math.floor(Date.now() / 1000);
   if (!requestedSubject || !requestedTo.length || !expectedAttachments.length) throw new Error('Die Gesendet-Prüfung benötigt Absender, Betreff, Empfänger und Anlagen.');
   const lines = [
     'tell application id "com.microsoft.Outlook"',
     `set requestedSender to ${appleScriptString(requestedFrom)}`,
     `set requestedSubject to ${appleScriptString(requestedSubject)}`,
-    `set earliestTime to (current date) - ${seconds}`,
+    lower === null ? `set earliestTime to (current date) - ${seconds}` : `set earliestTime to (current date) + ${Math.ceil(lower / 1000) - clockSeconds}`,
+    upper === null ? 'set latestTime to (current date) + 60' : `set latestTime to (current date) + ${Math.ceil(upper / 1000) - clockSeconds}`,
   ];
   appendExactAccountLookup(lines);
   lines.push(
@@ -331,7 +335,7 @@ export function buildSentVerificationAppleScript({ from, subject, to = [], attac
     'set candidateMessages to (every outgoing message of targetSent whose subject is requestedSubject)',
     'end if',
     'repeat with candidate in candidateMessages',
-    'if (time sent of candidate) is greater than or equal to earliestTime and (was sent of candidate) is true then set end of recentMatches to candidate',
+    'if (time sent of candidate) is greater than or equal to earliestTime and (time sent of candidate) is less than or equal to latestTime and (was sent of candidate) is true then set end of recentMatches to candidate',
     'end repeat',
     'if (count of recentMatches) is 1 then exit repeat',
     'if (count of recentMatches) > 1 then error "Gesendet-Prüfung: Mehrere neue Nachrichten mit demselben Betreff gefunden." number 561',
@@ -358,7 +362,7 @@ export function buildSentVerificationAppleScript({ from, subject, to = [], attac
   return { script: lines.join('\n'), expected: { from: requestedFrom, subject: requestedSubject, to: requestedTo, attachments: expectedAttachments } };
 }
 
-export async function verifyOutlookSentMessage(input = {}) {
+async function verifyNativeOutlookSentMessage(input = {}) {
   const { script, expected } = buildSentVerificationAppleScript(input);
   const output = await runAppleScript(script, { timeoutMs: 30000 });
   const [subject = '', sender = '', recipientLine = '', attachmentLine = ''] = output.split(/\r?\n/);
@@ -366,11 +370,27 @@ export async function verifyOutlookSentMessage(input = {}) {
   const actualAttachments = attachmentLine.split('\t').map(name => name.trim()).filter(Boolean).sort();
   if (subject !== expected.subject) throw new Error('Gesendet-Prüfung: Der Betreff stimmt nicht exakt überein.');
   if (sender.trim().toLowerCase() !== expected.from) throw new Error('Gesendet-Prüfung: Der Absender stimmt nicht exakt überein.');
-  if (!expected.to.every(address => actualRecipients.includes(address))) throw new Error('Gesendet-Prüfung: Der An-Empfänger stimmt nicht exakt überein.');
+  if (JSON.stringify([...expected.to].sort()) !== JSON.stringify(actualRecipients)) throw new Error('Gesendet-Prüfung: Der An-Empfänger stimmt nicht exakt überein.');
   if (JSON.stringify(actualAttachments) !== JSON.stringify(expected.attachments)) {
     throw new Error('Gesendet-Prüfung: Die Anlagen stimmen nicht exakt mit dem versendeten Manifest überein.');
   }
   return { verified: true, folder: 'Gesendet', subject, sender: expected.from, recipients: actualRecipients, attachments: actualAttachments };
+}
+
+export async function verifyOutlookSentMessage(input = {}) {
+  try { return await verifyNativeOutlookSentMessage(input); }
+  catch {
+    // Modern Outlook has no native message objects for some connected accounts.
+    // The fallback reads the real Sent MIME source and performs no send action.
+    const { verifyFundingSentMessage } = await import('./outlook-ui-mailbox.mjs');
+    const reference = Date.now();
+    const result = await verifyFundingSentMessage({ ...input,
+      notBefore: input.notBefore || new Date(reference - Math.max(60, Math.min(3600, Number(input.lookbackSeconds) || 900))*1000).toISOString(),
+      notAfter: input.notAfter || new Date(reference + 60000).toISOString(),
+    });
+    if (!result.verified) throw Object.assign(new Error('Gesendet-Prüfung: IVA_SENT_MESSAGE_NOT_FOUND – kein passender Originalbeleg vorhanden.'), { code: 'OUTLOOK_SENT_NOT_FOUND' });
+    return result;
+  }
 }
 
 export function isOutlookSentMessageNotFound(error) {
@@ -567,7 +587,7 @@ export async function sendVerifiedOutlookXlsxMessage(input = {}) {
     throw new Error('Outlook-Versand abgebrochen: Weder das exakte Outlook-Konto noch die freigegebene macOS-Oberflächenprüfung ist verfügbar.');
   }
   try {
-    const sentFolder = await verifyOutlookSentMessage({ ...message, lookbackSeconds: sentVerificationLookbackSeconds });
+    const sentFolder = await verifyOutlookSentMessage({ ...message, lookbackSeconds: sentVerificationLookbackSeconds, notBefore: input.sentVerificationNotBefore, notAfter: input.sentVerificationNotAfter });
     return { ...sent, sentFolderVerified: true, sentFolder };
   } catch (error) {
     return {
