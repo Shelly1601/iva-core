@@ -1,0 +1,110 @@
+{
+  "product": {
+    "id": "product-fixture",
+    "projectId": "project-fixture",
+    "type": "course",
+    "title": "Klar beraten. Besser entscheiden.",
+    "audience": "Für Beraterinnen und Berater, die ihre Kundengespräche verständlicher und wirksamer gestalten möchten.",
+    "brief": "INTERNAL_CREATOR_BRIEF_DO_NOT_PUBLISH: Erstelle einen Kurs und nutze eine klare Gesprächsstruktur. Dies ist ein interner Auftrag, kein Text für Teilnehmende.",
+    "status": "ready"
+  },
+  "version": {
+    "id": "version-fixture-01",
+    "createdAt": "2026-09-15T12:00:00Z",
+    "stage": "complete",
+    "title": "Geprüfte Kursfassung",
+    "outline": [
+      {
+        "id": "one",
+        "title": "Vom Anliegen zur klaren Frage",
+        "objective": "Das eigentliche Anliegen erkennen und in eine konkrete Beratungsfrage übersetzen."
+      },
+      {
+        "id": "two",
+        "title": "Optionen verständlich erklären",
+        "objective": "Vor- und Nachteile verschiedener Möglichkeiten mit einer einheitlichen Struktur erläutern."
+      },
+      {
+        "id": "three",
+        "title": "Vom Gespräch zur Umsetzung",
+        "objective": "Einen verbindlichen, überschaubaren nächsten Schritt gemeinsam festhalten."
+      }
+    ],
+    "units": [
+      {
+        "id": "one",
+        "title": "Vom Anliegen zur klaren Frage",
+        "content": "## Erst verstehen, dann einordnen\n\nEin gutes Gespräch beginnt mit Aufmerksamkeit. Was beschäftigt den Kunden gerade? Welche Veränderung ist für ihn wichtig? Eine offene Frage schafft Raum für die Antwort.\n\n### Drei Schritte für den Einstieg\n\n1. Das Anliegen in eigenen Worten zusammenfassen.\n2. Nachfragen, was sich konkret verbessern soll.\n3. Gemeinsam festlegen, woran ein gutes Ergebnis erkennbar wäre.\n\n> Verständlichkeit entsteht, wenn wir eine Sache nach der anderen klären.\n\nAchten Sie auf die tatsächlichen Antworten. Begriffe wie Sicherheit, Freiheit und Entlastung können für verschiedene Menschen sehr unterschiedliche Bedeutungen haben.",
+        "examples": [
+          "**Kundin:** Ich möchte endlich Ordnung in meine Unterlagen bringen.\n\n**Berater:** Woran würden Sie in vier Wochen merken, dass Ihre Unterlagen gut geordnet sind?"
+        ],
+        "exercises": [
+          "Formulieren Sie drei offene Fragen zu einem typischen Anliegen aus Ihrem Alltag. Vermeiden Sie Fragen, die nur mit Ja oder Nein beantwortet werden können."
+        ],
+        "sourceIds": [
+          "source-fixture"
+        ],
+        "exactSnippetIds": []
+      },
+      {
+        "id": "two",
+        "title": "Optionen verständlich erklären",
+        "content": "## Ein einheitlicher Vergleich hilft\n\nStellen Sie jede Möglichkeit anhand derselben Kriterien vor: Nutzen, Aufwand, Grenzen und nächster Schritt. So wird der Vergleich nachvollziehbar.\n\n### Die vier Fragen\n\n- Was verbessert sich?\n- Welche Kosten und welcher Aufwand entstehen?\n- Wo liegen Grenzen und offene Punkte?\n- Was müsste als Nächstes geklärt werden?\n\nVergessen Sie die Null-Option nicht: Manchmal ist es sinnvoll, vorerst nichts zu verändern und zu einem späteren Zeitpunkt erneut zu prüfen.",
+        "examples": [
+          "Eine Kundin vergleicht zwei organisatorische Lösungen. Eine bietet mehr Komfort, die andere geringere laufende Kosten. Beide werden mit denselben Kriterien und demselben Zeitraum beschrieben."
+        ],
+        "exercises": [
+          "Wählen Sie zwei alltägliche Optionen. Beschreiben Sie jede mit den vier Fragen und markieren Sie alle Annahmen, für die Ihnen noch Belege fehlen."
+        ],
+        "sourceIds": [
+          "source-fixture"
+        ],
+        "exactSnippetIds": []
+      },
+      {
+        "id": "three",
+        "title": "Vom Gespräch zur Umsetzung",
+        "content": "## Ein guter Abschluss ist konkret\n\nHalten Sie fest, wer was bis wann übernimmt. Ein kurzer gemeinsamer Rückblick macht sichtbar, ob beide Seiten dasselbe verstanden haben.\n\n### Abschluss-Checkliste\n\n- Das Ziel ist in einem Satz beschrieben.\n- Der nächste Schritt ist klein genug, um begonnen zu werden.\n- Eine verantwortliche Person und ein Zeitpunkt sind benannt.\n- Offene Fragen bleiben ausdrücklich offen.\n\n## Nachhalten ohne Druck\n\nEine freundliche Erinnerung unterstützt die Umsetzung. Sie benennt den vereinbarten nächsten Schritt und ermöglicht eine einfache Rückmeldung. Ein verlässlicher Umgang mit Änderungen stärkt die Zusammenarbeit.",
+        "examples": [],
+        "exercises": [
+          "Schreiben Sie eine kurze Gesprächszusammenfassung mit Ziel, nächstem Schritt, verantwortlicher Person und Termin.",
+          "Überlegen Sie, welche Rückmeldung Sie benötigen, bevor Sie eine vereinbarte Maßnahme als abgeschlossen markieren."
+        ],
+        "sourceIds": [
+          "source-fixture"
+        ],
+        "exactSnippetIds": []
+      }
+    ],
+    "sourceSnapshots": [
+      {
+        "id": "source-fixture",
+        "type": "note",
+        "originalId": "synthetic-note",
+        "title": "Synthetische Übungsnotiz zur Gesprächsführung",
+        "url": "https://example.test/creator-source",
+        "content": "PRIVATE_ORIGINAL_SOURCE_DO_NOT_EXPORT",
+        "sha256": "79018ed2b2e3d5f368caafb414ed6d71555aadcffb9536134859e2a728f8e537",
+        "importedAt": "2026-09-15T11:00:00Z",
+        "rights": {
+          "status": "user-confirmed",
+          "attribution": "Synthetisches Beispiel für die technische Exportprüfung, erstellt für diesen Test.",
+          "usage": "own",
+          "rightsConfirmed": true,
+          "rightsBasis": "Eigene synthetische Testnotiz für die Exportprüfung selbst verfasst."
+        }
+      }
+    ],
+    "exactSnippets": [],
+    "plan": {
+      "positioning": "Klare Gespräche schaffen Orientierung und erleichtern gemeinsame Entscheidungen.",
+      "promise": "Sie entwickeln eine einfache Gesprächsroutine vom ersten Anliegen bis zum vereinbarten nächsten Schritt.",
+      "approach": "Jede Lektion verbindet verständliche Erläuterungen mit konkreten Beispielen. Die Übungen übertragen das Gelernte auf Ihren eigenen Alltag.",
+      "learningObjectives": [
+        "Das eigentliche Anliegen mit offenen Fragen erkennen.",
+        "Möglichkeiten verständlich und einheitlich vergleichen.",
+        "Einen konkreten nächsten Schritt gemeinsam festhalten."
+      ]
+    }
+  }
+}

@@ -146,7 +146,7 @@ function opportunityCard(item) {
     <div class="section"><b>7-Tage-Test</b><p>${esc(item.firstValidation || 'noch festzulegen')}</p></div>
     <div class="section"><b>Belege & Grenzen</b><p>${esc(item.evidence || 'noch nicht ausreichend belegt')}</p>${item.evidenceLimits ? `<p class="muted">Grenze: ${esc(item.evidenceLimits)}</p>` : ''}<div class="sources">${sourceLinks(item)}</div></div>
     ${item.risks ? `<div class="notice"><b>Haken:</b> ${esc(item.risks)}</div>` : ''}
-    <div class="actions"><button class="btn" data-action="watch">Beobachten</button><button class="btn" data-action="validate">7-Tage-Test</button><button class="btn danger" data-action="rejected">Verwerfen</button>${item.projectId ? `<a class="btn primary" href="/projects?id=${encodeURIComponent(item.projectId)}">Projekt öffnen</a>` : `<button class="btn primary" data-action="handoff">${high ? 'Hat Potenzial · Projekt erstellen?' : 'Projekt aus Idee erstellen?'}</button>`}</div><div class="handoff-result"></div></div></details>
+    <div class="actions"><a class="btn primary" href="/product-creator?opportunityId=${encodeURIComponent(item.id)}${item.projectId ? '&projectId=' + encodeURIComponent(item.projectId) : ''}">Als Produkt umsetzen</a><button class="btn" data-action="watch">Beobachten</button><button class="btn" data-action="validate">7-Tage-Test</button><button class="btn danger" data-action="rejected">Verwerfen</button>${item.projectId ? `<a class="btn primary" href="/projects?id=${encodeURIComponent(item.projectId)}">Projekt öffnen</a>` : `<button class="btn primary" data-action="handoff">${high ? 'Hat Potenzial · Projekt erstellen?' : 'Projekt aus Idee erstellen?'}</button>`}</div><div class="handoff-result"></div></div></details>
   </article>`;
 }
 
@@ -249,7 +249,7 @@ function linkResultHtml(item) {
     ${dimensionsHtml(assessment, sources, prefix)}
     <div class="link-columns"><div><div class="section"><b>Direkt belegt</b>${listHtml(assessment.evidence)}</div><div class="section"><b>Passung & Nutzen</b>${listHtml(assessment.fit)}</div></div><div><div class="section"><b>Annahmen & Datenlücken</b>${listHtml([...(assessment.assumptions || []), ...(assessment.gaps || [])])}</div><div class="section"><b>Risiken</b>${listHtml(assessment.risks)}</div></div></div>
     <div class="section"><b>Kosten & Aufwand</b><p>${esc(assessment.costsAndEffort || 'Noch zu verifizieren.')}</p></div>
-    ${researchHtml(assessment, research, prefix)}${riskMatrixHtml(assessment, sources, prefix)}${implementationHtml(assessment)}</div></details></article>`;
+    ${researchHtml(assessment, research, prefix)}${riskMatrixHtml(assessment, sources, prefix)}${implementationHtml(assessment)}<div class="actions"><a class="btn primary" href="/product-creator?opportunityId=${encodeURIComponent(item.id)}">Idee als Produkt ausarbeiten</a></div></div></details></article>`;
 }
 
 function renderLinkResults(items) {

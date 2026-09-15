@@ -86,6 +86,7 @@
       if (visibleProjectId !== project.id) return;
       const enabled = new Set(array(state.config?.modules));
       const websiteLink = document.getElementById('websiteStudioEntry'); if (websiteLink) websiteLink.hidden = !enabled.has('websites');
+      const creatorLink = document.getElementById('productCreatorEntry'); if (creatorLink) creatorLink.hidden = !enabled.has('creator');
       const team = document.getElementById('projectTeam')?.closest('.project-team-host'); if (team) team.hidden = !enabled.has('team');
     }
     async function load() {

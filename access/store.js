@@ -19,6 +19,7 @@ export const PROJECT_MODULES = Object.freeze([
   { id: 'team', label: 'Projektteam', externalAvailable: false },
   { id: 'instagram', label: 'Instagram', externalAvailable: false },
   { id: 'knowledge', label: 'Wissen', externalAvailable: false },
+  { id: 'creator', label: 'Produkt-Creator', externalAvailable: false },
   { id: 'marketing', label: 'Marketing', externalAvailable: false },
   { id: 'crm', label: 'CRM', externalAvailable: false },
   { id: 'accounting', label: 'Buchhaltung', externalAvailable: false },

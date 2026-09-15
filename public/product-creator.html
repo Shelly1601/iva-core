@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0a111a">
+<meta name="referrer" content="same-origin">
+<title>IVA · Product Creator</title>
+<link rel="stylesheet" href="/product-creator.css">
+<script src="/product-creator.js" defer></script>
+</head>
+<body>
+<div class="creator-app">
+<header class="topbar">
+  <a class="brand" href="/cockpit" aria-label="Zum IVA-Cockpit">i<span>va</span></a><span class="topbar-divider"></span>
+  <div class="studio-title"><strong>Product Creator</strong><span>Aus Wissen wird etwas Eigenes.</span></div>
+  <label class="project-picker"><span class="sr-only">Projekt auswählen</span><select id="projectSelect"><option value="">Projekte laden …</option></select></label>
+  <div class="top-actions"><button class="button subtle" id="connectionsButton" type="button">Verbindungen</button><button class="button primary" id="newProductButton" type="button">＋ Neues Produkt</button></div>
+</header>
+<div class="mobile-library"><button id="mobileLibraryButton" type="button" aria-expanded="false">Meine Produkte <span id="mobileProductCount">0</span><span aria-hidden="true">⌄</span></button></div>
+<div class="workspace" id="workspace">
+  <aside class="library" id="library" aria-label="Produkte im Projekt"><div class="library-heading"><div><span class="eyebrow">Deine Werkstatt</span><h2>Meine Produkte <span id="productCount">0</span></h2></div><button class="icon-button" id="refreshProducts" aria-label="Produkte aktualisieren" title="Aktualisieren">↻</button></div><label class="product-search"><span class="sr-only">Produkte durchsuchen</span><input type="search" id="productSearch" placeholder="Produkt suchen …"></label><div class="product-list" id="productList"><p class="subtle-copy">Deine Produkte werden geladen.</p></div><div class="library-bottom"><a id="knowledgeLink" href="/knowledge.html">Wissensdatenbank <span aria-hidden="true">↗</span></a><a id="radarLink" href="/opportunities.html">Chancenradar <span aria-hidden="true">↗</span></a><div class="library-note"><span class="note-dot"></span><p>Quellen, Versionen und Ergebnisse bleiben bei deinem Projekt.</p></div></div></aside>
+  <main class="creator-main" id="creatorMain" tabindex="-1"><div class="loading-state" role="status"><span class="spinner"></span><p>Deine Werkstatt wird vorbereitet.</p></div></main>
+</div>
+</div>
+<dialog id="connectionsDialog"><div class="dialog-content"><div class="dialog-heading"><div><p class="eyebrow">Echter Betriebsstatus</p><h2>Deine Verbindungen</h2></div><button type="button" class="icon-button" data-close aria-label="Schließen">×</button></div><div id="connectionRows"></div></div></dialog>
+<dialog id="authDialog"><form id="authForm" class="dialog-content"><div class="dialog-heading"><div><p class="eyebrow">Dein geschützter Arbeitsbereich</p><h2>Mit IVA verbinden</h2></div></div><p class="subtle-copy">Verwende deinen IVA-Zugang, um deine Projekte und Inhalte zu öffnen.</p><label class="field"><span>IVA-Zugang</span><input type="password" id="authToken" required autocomplete="current-password"></label><p class="form-feedback" id="authFeedback" role="status"></p><div class="dialog-actions"><a class="button subtle" href="/cockpit">Zum Cockpit</a><button class="button primary" type="submit">Verbinden</button></div></form></dialog>
+<div class="toast" id="toast" role="status" hidden></div>
+</body>
+</html>

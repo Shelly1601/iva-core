@@ -1,0 +1,38 @@
+import { createHash } from 'node:crypto';
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const list = value => Array.isArray(value) ? value : [];
+const text = value => typeof value === 'string' ? value : value?.title || value?.text || '';
+const typeNames = { course: 'Onlinekurs', book: 'Buch', workbook: 'Workbook', checklist: 'Checkliste', 'sales-guide': 'Sales-Guide' };
+export function creatorLandingFiles({ product, version }) {
+  const title = version.title || product.title;
+  const units = list(version.units);
+  const outcomes = list(version.plan?.learningObjectives || version.plan?.learningOutcomes || version.plan?.outcomes).slice(0, 6);
+  const links = list(product.salesLinks).map(item => {
+    let url; try { url = new URL(item.url); } catch { return null; }
+    return url.protocol === 'https:' && !url.username && !url.password ? { label: text(item.label || item.platform || 'Zum Angebot'), url: url.href } : null;
+  }).filter(Boolean);
+  return [{ path: 'index.html', encoding: 'utf8', content: `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>${esc(title)}</title><style>
+  :root{color-scheme:light;--ink:#142c38;--muted:#556974;--accent:#127a72;--paper:#f6f5f0}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.65 system-ui,-apple-system,sans-serif}a{color:inherit}.wrap{max-width:1100px;margin:auto;padding:24px}header{display:flex;gap:20px;justify-content:space-between;border-bottom:1px solid #d5dddb;padding:24px 0;font-size:14px}header b{max-width:70%;overflow-wrap:anywhere}.tag{text-transform:uppercase;letter-spacing:.15em;font-size:11px;color:var(--accent);font-weight:800}.hero{padding:85px 0 60px;display:grid;grid-template-columns:1.2fr .8fr;gap:50px;align-items:center}h1{font-family:Georgia,serif;font-weight:400;font-size:clamp(36px,5vw,66px);line-height:1.05;letter-spacing:-.035em;margin:18px 0;overflow-wrap:anywhere}h2{font-size:30px;line-height:1.2;margin:0 0 18px}p{color:var(--muted)}.lead{font-size:19px}.cover{background:var(--ink);color:#fff;border-radius:8px;padding:48px 35px;min-height:320px;box-shadow:15px 20px 0 #dbe9e3;display:flex;flex-direction:column;justify-content:space-between}.cover b{font:36px/1.1 Georgia,serif;overflow-wrap:anywhere}.cover small{color:#98d6bc}.actions{display:flex;flex-wrap:wrap;gap:12px;margin:26px 0}.btn{display:inline-block;padding:13px 20px;border-radius:8px;background:var(--accent);color:#fff;text-decoration:none;font-weight:700}.btn.secondary{background:transparent;color:var(--ink);border:1px solid #b8ccc4}.section{padding:45px 0;border-top:1px solid #d5dddb}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.card{padding:25px;background:#fff;border:1px solid #e1e5de;border-radius:12px;overflow-wrap:anywhere}.card h3{margin:8px 0;font-size:21px}.card p{margin-bottom:0}li{margin:8px 0}footer{padding:35px 0;font-size:13px;color:var(--muted)}@media(max-width:680px){.hero{padding:42px 0;grid-template-columns:1fr;gap:24px}.cover{min-height:240px;margin-right:14px}.grid{grid-template-columns:1fr}.wrap{padding:18px}header{padding:12px 0}}
+  </style></head><body><div class="wrap"><header><b>${esc(product.brandName || title)}</b><span>${esc(typeNames[product.type] || 'Digitales Produkt')}</span></header><main><section class="hero"><div><div class="tag">Wissen praktisch anwenden</div><h1>${esc(title)}</h1><p class="lead">${esc(version.plan?.promise || version.plan?.summary || product.brief)}</p>${product.audience ? `<p>Für ${esc(product.audience)}</p>` : ''}<div class="actions"><a class="btn" href="#inhalt">Inhalte entdecken</a>${links.map(link => `<a class="btn secondary" rel="noopener noreferrer" href="${esc(link.url)}">${esc(link.label)}</a>`).join('')}</div></div><aside class="cover" aria-label="Produktcover"><small>${esc(typeNames[product.type] || 'Digitales Produkt')}</small><b>${esc(title)}</b><small>${units.length} ${product.type === 'course' ? 'Lektionen' : 'Kapitel und Abschnitte'}</small></aside></section>${outcomes.length ? `<section class="section"><h2>Das nimmst du mit</h2><ul>${outcomes.map(value => `<li>${esc(text(value))}</li>`).join('')}</ul></section>` : ''}<section class="section" id="inhalt"><div class="tag">Ein Blick hinein</div><h2>Die Inhalte</h2><div class="grid">${units.map((unit, index) => `<article class="card"><span class="tag">${String(index + 1).padStart(2, '0')}</span><h3>${esc(unit.title)}</h3><p>${esc(unit.objective || list(version.outline).find(row => row.id === unit.id)?.objective || list(unit.learningOutcomes).map(text).join(' · '))}</p>${list(unit.exercises).length ? `<p>${list(unit.exercises).length} praktische ${list(unit.exercises).length === 1 ? 'Übung' : 'Übungen'}</p>` : ''}</article>`).join('')}</div></section>${links.length ? `<section class="section"><h2>Dein nächster Schritt</h2><p>Alle Informationen zu Preis, Kauf und Zugang findest du beim jeweiligen Angebot.</p><div class="actions">${links.map(link => `<a class="btn" rel="noopener noreferrer" href="${esc(link.url)}">${esc(link.label)}</a>`).join('')}</div></section>` : ''}</main><footer>${esc(title)} · ${esc(typeNames[product.type] || 'Digitales Produkt')}</footer></div></body></html>` }];
+}
+
+export function createCreatorLanding({ service, websiteService }) {
+  const pending = new Map();
+  async function create(scope, productId, input) {
+    const exported = await service.exportData(scope, productId, { versionId: input.versionId });
+    const { product, version } = exported;
+    if (product.status !== 'ready' || version.stage !== 'complete' || !list(version.units).length) throw Object.assign(new Error('Für die Verkaufsseite zuerst alle Produktinhalte ausarbeiten.'), {status:409});
+    const files = creatorLandingFiles(exported);
+    const hash = createHash('sha256').update(JSON.stringify(files)).digest('hex').slice(0, 16);
+    const description = `IVA Creator · ${product.id} · ${version.id} · ${hash}`;
+    let site = (await websiteService.list(scope.projectId)).find(row => row.description === description);
+    const reused = Boolean(site?.draftRevisionId);
+    if (!site) site = await websiteService.create({ projectId: scope.projectId, name: product.title + ' · Verkaufsseite', description });
+    if (!site.draftRevisionId) await websiteService.store.saveRevision(scope.projectId, site.id, { baseRevisionId: null, files, summary: 'Verkaufsseite aus einer vollständigen Produktversion.', source: { type: 'creator', name: productId, revisionId: version.id } });
+    const preview = await websiteService.preview(scope.projectId, site.id);
+    if (preview.status !== 'ready') throw Object.assign(new Error('Die Verkaufsseite wurde gespeichert, konnte aber noch nicht gebaut werden.'), { status: 422 });
+    site = await websiteService.site(scope.projectId, site.id);
+    return { site, revision: { id: preview.revisionId }, websiteStudioUrl: `/website-studio?projectId=${encodeURIComponent(scope.projectId)}&siteId=${encodeURIComponent(site.id)}`, published: Boolean(site.publication?.status === 'published'), reused, message: 'Verkaufsseite im Website Studio bereit. Dort lassen sich Marke, Anbieterangaben und Gestaltung ergänzen und die Seite veröffentlichen.' };
+  }
+  return (scope, id, input = {}) => { const key = scope.projectId + '/' + id + '/' + (input.versionId || 'latest'); if (pending.has(key)) return pending.get(key); const job = create(scope, id, input).finally(() => pending.delete(key)); pending.set(key, job); return job; };
+}

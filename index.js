@@ -11,6 +11,11 @@ import { createCustomerCareCustomers, createCustomerCareDelivery } from './custo
 import { registerCustomerCareRoutes, registerCustomerCarePublicRoutes, createCustomerCareScheduler } from './customer-care/routes.js';
 import { createCustomerCareLanding } from './customer-care/landing.js';
 import { customerCareSkill } from './customer-care/tools.js';
+import { createCreatorService } from './creator/service.js';
+import { createCreatorContext } from './creator/context.js';
+import { createCreatorLanding } from './creator/landing.js';
+import { registerCreatorRoutes } from './creator/routes.js';
+import { creatorSkill } from './creator/tools.js';
 import { createCustomerCareQuotes } from './customer-care/quotes.js';
 import { adviceCalculatorReadiness } from './advice/calculator-audit.js';
 import { createProjectAccessStore } from './access/store.js';
@@ -392,6 +397,15 @@ async function requireCareProject(id) {
 const customerCareQuotes = createCustomerCareQuotes({dataDir:DATA_DIR,customers:customerCareCustomers,getWorkspace:workspaces.getWorkspace,readWorkspaceFile:workspaces.readWorkspaceFile});
 const customerCareService = createCustomerCareService({dataDir:DATA_DIR,getCustomers:customerCareCustomers,getProject:requireCareProject,deliver:customerCareDelivery.deliver,getOptimizationQuote:customerCareQuotes.get,publicOrigin:coreOrigin});
 const customerCareLanding = createCustomerCareLanding({coreOrigin,getProject});
+async function requireCreatorProject(id) {
+  const project = await getProject(id); if (!project) return null;
+  const access = await projectAccess.getProjectAccess(id);
+  if (!access.modules.includes('creator')) throw Object.assign(new Error('Produkt-Creator ist für dieses Projekt nicht freigegeben.'), {status:403});
+  return project;
+}
+const creatorContext = createCreatorContext({listProjects,access:projectAccess,listKnowledgeEntries,listOpportunities,listOpportunityLinkChecks,getOpportunity});
+const creatorService = createCreatorService({dataDir:DATA_DIR,getProject:requireCreatorProject,listKnowledgeEntries,getKnowledgeEntry,getOpportunity:creatorContext.resolveOpportunity});
+const creatorLanding = createCreatorLanding({service:creatorService,websiteService});
 const app = express();
 registerCustomerCarePublicRoutes(app,{service:customerCareService});
 registerWebsitePublicationRoute(app, websiteService);
@@ -1077,6 +1091,7 @@ async function contextToolMap(agent, {sessionId='default',runId='',projectId='',
     env={...env,TAVILY_API_KEY:process.env.TAVILY_API_KEY,FAL_KEY:process.env.FAL_KEY};
   }
   Object.assign(all, websiteSkill({service:websiteService,projectId}));
+  Object.assign(all, creatorSkill({service:creatorService,context:creatorContext.context,landing:creatorLanding,projectId}));
   Object.assign(all, customerCareSkill({service:customerCareService,projectId,landing:customerCareLanding,websiteService,calculatorReadiness:adviceCalculatorReadiness}));
   if(allowDelegation)for(const [name,value] of Object.entries(specialistSkill({runner:specialistRunner,parentRunId:runId,projectId,context:`${project?projectContext(project):''}\nAktueller Nutzerauftrag: ${String(userText).slice(0,4000)}`})))all[name]={...value,iva:{skillId:'specialists'}};
   return {all,env};
@@ -1879,6 +1894,7 @@ investment.registerRoutes(app);
 registerProjectProviderRoutes(app,projectProviders);
 registerProjectMarketingRoutes(app,{service:projectMarketing,authorizeProject:requireMarketingProject});
 registerWebsiteRoutes(app, websiteService);
+registerCreatorRoutes(app,{service:creatorService,context:creatorContext.context,landing:creatorLanding});
 registerCustomerCareRoutes(app,{service:customerCareService,listProjects,access:projectAccess,customers:customerCareCustomers,readiness:customerCareDelivery.readiness,calculatorReadiness:adviceCalculatorReadiness,websiteService,landing:customerCareLanding,quotes:customerCareQuotes});
 const customerCareScheduler = createCustomerCareScheduler({service:customerCareService,listProjects,authorize:async id=>{const access=await projectAccess.getProjectAccess(id);return access.modules.includes('crm')||access.modules.includes('marketing');},reconcile:customerCareDelivery.reconcile,onError:()=>console.error('Kundenbetreuung: Projektlauf noch offen; gespeicherter Stand bleibt erhalten.')});
 app.get('/api/customer-care/scheduler-status',(_q,r)=>r.json(customerCareScheduler.status()));
@@ -3783,7 +3799,7 @@ automationCatchUpInterval.unref?.();
 const __dirnameIva = path.dirname(fileURLToPath(import.meta.url));
 app.use(express.static(path.join(__dirnameIva, 'public'), {
   setHeaders(res, filePath) {
-    if (filePath.endsWith(`${path.sep}cockpit.html`)) res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
+    if ([`${path.sep}cockpit.html`, `${path.sep}product-creator.html`, `${path.sep}product-creator.js`, `${path.sep}product-creator.css`].some(suffix => filePath.endsWith(suffix))) res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
   },
 }));
 app.get('/cockpit', (_req, res) => {
@@ -3815,6 +3831,7 @@ app.get('/control', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public'
 app.get('/projects', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'projects.html')));
 app.get('/recruiting', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'recruiting.html')));
 app.get('/investment', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'investment.html')));
+app.get('/product-creator', (_req, res) => { res.set('Cache-Control','no-store'); res.sendFile(path.join(__dirnameIva, 'public', 'product-creator.html')); });
 app.get('/knowledge', (_req, res) => {
   res.set('Cache-Control', 'no-store, max-age=0, must-revalidate');
   res.sendFile(path.join(__dirnameIva, 'public', 'knowledge.html'));

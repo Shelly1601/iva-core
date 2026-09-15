@@ -907,3 +907,6 @@ load();
 // Keep the Website Studio entry bound to the currently visible project.
 const websiteStudioEntry = document.getElementById("websiteStudioEntry");
 if (websiteStudioEntry) websiteStudioEntry.addEventListener("click", () => { const p = new URLSearchParams(location.search).get("id"); websiteStudioEntry.href = "/website-studio" + (p ? "?projectId=" + encodeURIComponent(p) : ""); });
+
+const productCreatorEntry = document.getElementById('productCreatorEntry');
+if (productCreatorEntry) productCreatorEntry.addEventListener('click', () => { const p = new URLSearchParams(location.search).get('id'); productCreatorEntry.href = '/product-creator' + (p ? '?projectId=' + encodeURIComponent(p) : ''); });
