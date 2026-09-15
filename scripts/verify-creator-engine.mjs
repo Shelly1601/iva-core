@@ -108,6 +108,33 @@ test('manual edits are new complete versions and stale saves are rejected', asyn
   await assert.rejects(f.service.update(f.scope, f.product.id, { baseVersionId: before.id, units }), { status: 409 });
 });
 
+test('concept corrections preserve units and immutable exports; invalid or stale corrections fail', async t => {
+  const f = await fixture(t); await done(f.service, f.scope, await f.service.startJob(f.scope, f.product.id));
+  const before = (await f.service.get(f.scope, f.product.id)).latestVersion;
+  const corrected = { ...before.plan, promise: 'Eine praxisorientierte Struktur hilft, nächste Schritte nachvollziehbar zu vereinbaren.' };
+  await f.service.update(f.scope, f.product.id, { baseVersionId: before.id, plan: corrected });
+  const after = (await f.service.exportData(f.scope, f.product.id)).version;
+  assert.notEqual(after.id, before.id); assert.deepEqual(after.units, before.units); assert.deepEqual(after.plan, corrected);
+  assert.deepEqual((await f.service.exportData(f.scope, f.product.id, { versionId: before.id })).version.plan, before.plan);
+  await assert.rejects(f.service.update(f.scope, f.product.id, { baseVersionId: before.id, plan: corrected }), { status: 409 });
+  await assert.rejects(f.service.update(f.scope, f.product.id, { baseVersionId: after.id, plan: { ...corrected, promise: '' } }), { status: 422 });
+  assert.equal((await f.service.get(f.scope, f.product.id)).latestVersion.id, after.id);
+  const units = structuredClone(after.units); units[0].examples[0] = 'Fiktives Beispiel: Lea hält fest, welche Annahme noch geprüft werden muss.';
+  await f.service.update(f.scope, f.product.id, { baseVersionId: after.id, plan: corrected, units });
+  assert.equal((await f.service.get(f.scope, f.product.id)).latestVersion.units[0].examples[0], units[0].examples[0]);
+});
+
+test('concept edits cannot mark an unfinished product complete or import an unapproved source passage', async t => {
+  const f = await fixture(t); await f.service.addSources(f.scope, f.product.id, { knowledgeIds: ['reference'] });
+  await done(f.service, f.scope, await f.service.startJob(f.scope, f.product.id, { mode: 'outline' }));
+  const incomplete = (await f.service.get(f.scope, f.product.id)).latestVersion;
+  await assert.rejects(f.service.update(f.scope, f.product.id, { baseVersionId: incomplete.id, plan }));
+  await done(f.service, f.scope, await f.service.startJob(f.scope, f.product.id, { mode: 'resume' }));
+  const before = (await f.service.get(f.scope, f.product.id)).latestVersion;
+  await assert.rejects(f.service.update(f.scope, f.product.id, { baseVersionId: before.id, plan: { ...plan, approach: before.sourceSnapshots[0].content } }), { code: 'CREATOR_SOURCE_OVERLAP' });
+  assert.equal((await f.service.get(f.scope, f.product.id)).latestVersion.id, before.id);
+});
+
 test('crashed persisted jobs become interrupted with honest checkpoint', async t => {
   const f = await fixture(t), store = createCreatorStore(f.dependencies);
   await store.mutate('alpha', state => { state.jobs.push({ id: 'dead-job', projectId: 'alpha', productId: f.product.id, status: 'running', ownerPid: 99999999, createdAt: new Date().toISOString(), completedUnits: 0 }); state.products[0].status = 'generating'; });

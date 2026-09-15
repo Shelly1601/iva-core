@@ -111,6 +111,7 @@ function unitMarkdown(unit, data) {
   return rows.filter(Boolean).join('\n\n') + '\n';
 }
 function sourceMarkdown(data) {
+  if (!data.sources.length) return '# Entstehungsnachweis\n\nKeine externen Quellen für diese Fassung hinterlegt.\n';
   return ['# Quellen und Entstehungsnachweis', 'Originaltexte der Wissensbasis werden nicht mit diesem Produkt exportiert.', ...data.sources.map(source => `## ${headingText(source.title)}\n\n${source.attribution}${source.url ? `\n\n${source.url}` : ''}\n\nQuellen-ID: ${source.id}\n\nSHA-256: ${source.sha256}\n\nDokumentierter Rechtestatus: ${headingText(source.rightsStatus)}`)].join('\n\n') + '\n';
 }
 function fullMarkdown(data) {
@@ -210,12 +211,19 @@ async function pdf(data, { workbook = false } = {}) {
         if (!workbook) content(unit.content);
         if (!workbook && unit.examples.length) { heading('Beispiele'); unit.examples.forEach((example, index) => { heading(`Beispiel ${index + 1}`, 3); content(example); }); }
         if (unit.exercises.length) {
-          heading('Übungen und Umsetzung');
           unit.exercises.forEach((exercise, index) => {
             const answerHeight = workbook ? 124 : 85;
             doc.font('Body').fontSize(10.7);
             const questionHeight = doc.heightOfString(plain(exercise), { width, lineGap: 3.1 }) + 45;
-            if (questionHeight + answerHeight < 640) ensure(questionHeight + answerHeight);
+            // Reserve the first exercise before printing its section heading.
+            // A multi-page exercise keeps a meaningful opening on this page.
+            const exerciseStart = questionHeight + answerHeight < 640 ? questionHeight + answerHeight : 160;
+            if (index === 0) {
+              doc.font('Strong').fontSize(16);
+              const sectionHeight = doc.heightOfString('Übungen und Umsetzung', { width, lineGap: 3.1 }) + 11;
+              ensure(sectionHeight + exerciseStart);
+              heading('Übungen und Umsetzung');
+            } else ensure(exerciseStart);
             heading(`Übung ${index + 1}`, 3); content(exercise); ensure(answerHeight);
             paragraph('Meine Antwort / nächste Schritte', { size: 9, color: muted });
             for (let line = 0; line < (workbook ? 3 : 2); line++) { doc.strokeColor('#CCDADD').lineWidth(0.6).moveTo(60, doc.y + 12).lineTo(535, doc.y + 12).stroke(); doc.y += workbook ? 28 : 24; }
@@ -223,7 +231,7 @@ async function pdf(data, { workbook = false } = {}) {
           });
         }
       }
-      if (!workbook) {
+      if (!workbook && data.sources.length) {
         currentLabel = 'Quellen und Nachweise'; doc.addPage(); heading('Quellen und Entstehungsnachweis', 1);
         paragraph('Die Originaltexte der Wissensbasis sind nicht Bestandteil dieses Exports. Verwendete Fassungen sind anhand ihrer Prüfsummen nachvollziehbar.', { color: muted });
         for (const source of data.sources) {

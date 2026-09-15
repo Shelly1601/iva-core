@@ -107,6 +107,31 @@ test('long paragraphs and long headings flow across pages with no missing final 
   const extracted = (await extractText(new Uint8Array(result.buffer), { mergePages: true })).text;
   assert.match(extracted, /Abschnitt 85/); assert.ok(extracted.includes(data.version.units.at(-1).title));
 });
+test('exercise section heading stays with the first exercise and its beginning near page boundaries', async () => {
+  for (const paragraphs of [7, 9, 11, 13, 15, 17, 19]) {
+    for (const oversized of [false, true]) {
+      const data = fresh(); data.version.outline = data.version.outline.slice(0, 1); data.version.units = data.version.units.slice(0, 1);
+      const unit = data.version.units[0]; unit.examples = [];
+      unit.content = Array(paragraphs).fill('Ein klarer Gedanke braucht eine verständliche Erklärung. Beschreiben Sie eine Beobachtung und halten Sie anschließend den nächsten Schritt fest.').join('\n\n');
+      unit.exercises = ['PRAXISSTART: Formulieren Sie einen nächsten Schritt.\n\n' + 'Beschreiben Sie das gewünschte Ergebnis und prüfen Sie, woran Sie den Fortschritt erkennen. '.repeat(oversized ? 80 : 4)];
+      const result = await exportCreatorProduct({ ...data, format: 'pdf' });
+      const pages = (await extractText(new Uint8Array(result.buffer), { mergePages: false })).text;
+      const exercisePage = pages.find(page => page.includes('Übungen und Umsetzung'));
+      assert.ok(exercisePage?.includes('Übung 1'), `section orphaned at ${paragraphs} paragraphs; oversized=${oversized}`);
+      assert.ok(exercisePage.includes('PRAXISSTART'), `exercise beginning orphaned at ${paragraphs} paragraphs; oversized=${oversized}`);
+      if (!oversized) assert.ok(exercisePage.includes('Meine Antwort / nächste Schritte'), 'a short exercise retains its response space');
+    }
+  }
+});
+test('products with no external sources do not add an empty PDF appendix', async () => {
+  const data = fresh(); data.version.sourceSnapshots = []; data.version.units.forEach(unit => unit.sourceIds = []);
+  const result = await exportCreatorProduct({ ...data, format: 'zip' }), files = unzip(result.buffer);
+  const pages = (await extractText(new Uint8Array(files.get('produkt.pdf')), { mergePages: false })).text;
+  assert.ok(pages.every(page => !page.includes('Quellen und Entstehungsnachweis')));
+  assert.match(files.get('quellen.md').toString(), /Keine externen Quellen/);
+  assert.doesNotMatch(files.get('produkt.md').toString(), /# Quellen und Entstehungsnachweis/);
+  assert.deepEqual(JSON.parse(files.get('manifest.json')).sources, []);
+});
 test('an unsupported glyph reports a concrete issue instead of silent black boxes', async () => {
   const data = fresh(); data.version.units[0].content += '\n\n🦄';
   await assert.rejects(exportCreatorProduct({ ...data, format: 'pdf' }), error => error.code === 'CREATOR_EXPORT_UNSUPPORTED_GLYPH');

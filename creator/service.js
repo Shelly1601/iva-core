@@ -69,14 +69,17 @@ export function createCreatorService({ dataDir, getProject, listKnowledgeEntries
     return store.mutate(projectId, state => {
       const p = productIn(state, id); editable(state, p);
       const previous = p.versions.at(-1), next = metadata(input, { type: p.type, title: p.title, brief: p.brief, audience: p.audience, unitCount: p.unitCount, salesLinks: p.salesLinks });
-      if ('units' in input) {
+      if ('units' in input || 'plan' in input) {
         if (!previous || input.baseVersionId !== previous.id) throw creatorError('Die Fassung wurde inzwischen geändert. Bitte die aktuelle Fassung laden.', 409);
-        if (!Array.isArray(input.units) || input.units.length !== previous.outline.length || new Set(input.units.map(u => u.id)).size !== input.units.length) throw creatorError('Bitte alle Einheiten der aktuellen Gliederung speichern.');
-        const units = previous.outline.map(outline => { const unit = input.units.find(u => u.id === outline.id); if (!unit) throw creatorError('Eine Einheit fehlt.'); return normalizeCreatorUnit(unit, outline, next, previous.sourceSnapshots, previous.exactSnippets); });
+        const submittedUnits = 'units' in input ? input.units : previous.units;
+        if (!Array.isArray(submittedUnits) || !previous.outline.length || submittedUnits.length !== previous.outline.length || new Set(submittedUnits.map(u => u.id)).size !== submittedUnits.length) throw creatorError('Bitte alle Einheiten der aktuellen Gliederung speichern.');
+        const units = previous.outline.map(outline => { const unit = submittedUnits.find(u => u.id === outline.id); if (!unit) throw creatorError('Eine Einheit fehlt.'); return normalizeCreatorUnit(unit, outline, next, previous.sourceSnapshots, previous.exactSnippets); });
+        const plan = 'plan' in input ? normalizeCreatorPlan(input.plan, previous.sourceSnapshots) : previous.plan;
+        checkCreatorOriginality([{ content: JSON.stringify(plan) }], previous.sourceSnapshots, []);
         const originality = checkCreatorOriginality(units, previous.sourceSnapshots, previous.exactSnippets);
-        completeVersion({ ...previous, units, stage: 'complete' });
+        completeVersion({ ...previous, plan, units, stage: 'complete' });
         Object.assign(p, next, { revision: p.revision + 1, status: 'ready' });
-        appendVersion(p, { ...previous, productRevision: p.revision, productSnapshot: { ...next, id, projectId }, title: next.title, units, stage: 'complete', edited: true, originality });
+        appendVersion(p, { ...previous, productRevision: p.revision, productSnapshot: { ...next, id, projectId }, title: next.title, plan, units, stage: 'complete', edited: true, originality });
       } else if ('salesLinks' in input && !['type', 'title', 'brief', 'audience', 'unitCount'].some(k => k in input) && previous?.stage === 'complete' && previous.productRevision === p.revision) {
         Object.assign(p, next, { revision: p.revision + 1, status: 'ready' });
         appendVersion(p, { ...previous, productRevision: p.revision, productSnapshot: { ...next, id, projectId }, edited: true });
