@@ -15,6 +15,8 @@ export const ADVICE_GROUPS = [
 ];
 
 export const ADVICE_MODULES = [
+  { id: 'financial-plan-workbench', group: 'finance', icon: '↗', title: 'Finanzplanung mit Kunden-PDF', short: 'Ansparen, Kosten, Kaufkraft und Entnahmen gemeinsam planen; nachvollziehbare Rechnung mit Verlauf und PDF.', status: 'ready', badge: 'Modell & PDF', launchMode: 'advice-workbench', launchPath: '/advice-workbench', workbenchKind: 'finance', sections: [] },
+  { id: 'insurance-workbench', group: 'insurance', icon: '≠', title: 'Belegter Versicherungsvergleich', short: 'Sach, KV, LV und Kfz: Altvertrag, dokumentierte Angebote, eigene Kriterien und Projektfavoriten vergleichen.', status: 'knowledge-needed', badge: 'Dokumentvergleich', launchMode: 'advice-workbench', launchPath: '/advice-workbench', workbenchKind: 'insurance', sections: [] },
   {
     id: 'financial-holistic', group: 'finance', icon: '◎', title: 'Ganzheitliche Finanzberatung', short: 'Finanzen vollständig erfassen, priorisieren und in einen Maßnahmenplan überführen.', status: 'ready', badge: 'Startklar',
     sections: [

@@ -356,6 +356,8 @@ function renderDetail(detail, listId) {
       <div class="quick-start-grid">
         <button class="service primary-action" id="tmbAssistantBtn"><b>⌁ TMB geführt aufnehmen</b><small>CRM- und PLAUD-Daten übernehmen, nur Lücken abfragen, danach alles prüfen</small></button>
         <button class="service" id="newConsultationBtn"><b>◌ Beratung starten</b><small>Beratung mit diesem Kunden vorausfüllen</small></button>
+        <button class="service" id="customerComparisonBtn"><b>◈ Verträge vergleichen & Finanzplan</b><small>Altvertrag, Angebote, Kriterien und Kunden-PDF</small></button>
+        <button class="service" id="customerCoachBtn"><b>◎ Gespräch aufnehmen & coachen</b><small>Sprecher benennen und Gespräch in dieser Akte ablegen</small></button>
         <button class="service" id="uploadDocumentBtn"><b>＋ Dokumente hinzufügen</b><small>Mehrere Dateien auswählen oder hineinziehen</small></button>
       </div>
     </section>
@@ -410,6 +412,9 @@ function renderDetail(detail, listId) {
   $('emptyState').hidden = true;
   detailRoot.hidden = false;
   bindDetailEvents(listId);
+  for(const [buttonId,page,param] of [['customerComparisonBtn','advice-workbench','customerId'],['customerCoachBtn','sales-coach','workspaceId']]){
+    $(buttonId).onclick=async()=>{const button=$(buttonId);button.disabled=true;try{const w=await ensureWorkspace(customer);if(state.current?.listId!==listId)return;const projects=customerProjects(w),projectId=projects.includes(state.projectId)?state.projectId:projects[0];if(!projectId)throw new Error('Bitte die Kundenakte zuerst einem Projekt zuordnen.');location.href='/'+page+'?'+new URLSearchParams({projectId,[param]:w.id});}catch(e){showNotice(e.message,'error');}finally{button.disabled=false;}};
+  }
   state.careMount?.destroy?.();
   $('customerCareSection').addEventListener('toggle', async event=>{
     if(!event.target.open || state.careMount?.root === $('customerCareRoot'))return;

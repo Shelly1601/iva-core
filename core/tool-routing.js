@@ -2,7 +2,7 @@
 // distinct from verified availability; neither descriptions nor model claims
 // can grant new access or turn an unknown tool into a read-only tool.
 export const TOOL_ROUTING_VERSION = '1.0.0';
-const readTools = new Set(`getCalendar getCalendly getIvaAppointmentTypes getMails getLeads findHeatHeroLeads getPipedriveStatus searchPipedriveDeals listPipedriveDeals getPipedriveDeal getAirtableStatus listAirtableInstallationQueue listAirtableWorkflowStage searchAirtableWorkflowRecords getAirtableWorkflowRecord listCampaigns listBrands listContentWorkbench getProjectMarketing analyzeReferences askArchitect listWorkspaces getWorkspace listAdviceModules searchAdviceKnowledge listOpportunities listOpportunityWatchSources listOpportunityProjects getAccountingSummary listAccountingEntities listAccountingDocuments getAccountingDocument getEnergyTariffConnectorStatus qonektoStatus listQonektoTools callQonektoReadTool getLumitWorkflow listLumitServicedApplications getKnowledgeLibraryStatus listKnowledgeLibrary getPersonalKnowledgeBaseStatus searchPersonalKnowledgeBase getInvestmentStatus getInvestmentMonitoring getInvestmentPortfolio getInvestmentRiskReport searchSaxoInstruments getInvestmentKnowledgeStatus getInvestmentMandate listInvestmentAnalyses listInvestmentJournal listInvestmentWatchlist listInvestmentOrderDrafts listCapabilityReviews getImacCommandStatus getImacTaskStatus checkIvaBuildDispatch checkIvaBuildTask getInstagramConnectionStatus readInstagramReference listOwnInstagramMedia readOwnInstagramComments getMetaAdsInsights getIvaConnectionStatus getIvaAgentRoster listIvaWebsites getIvaWebsite getCurrentProject readCurrentProjectFile listCurrentProjectConnections listAdviceModules createCandidateSearchPlan screenResumeAgainstCriteria createInterviewGuide`.split(' '));
+const readTools = new Set(`listProspectingCampaigns getProspectingCampaign getTaxPreparation getTaxPreparationEntities listSalesCoachSessions getSalesCoachSession getCalendar getCalendly getIvaAppointmentTypes getMails getLeads findHeatHeroLeads getPipedriveStatus searchPipedriveDeals listPipedriveDeals getPipedriveDeal getAirtableStatus listAirtableInstallationQueue listAirtableWorkflowStage searchAirtableWorkflowRecords getAirtableWorkflowRecord listCampaigns listBrands listContentWorkbench getProjectMarketing analyzeReferences askArchitect listWorkspaces getWorkspace listAdviceModules searchAdviceKnowledge listOpportunities listOpportunityWatchSources listOpportunityProjects getAccountingSummary listAccountingEntities listAccountingDocuments getAccountingDocument getEnergyTariffConnectorStatus qonektoStatus listQonektoTools callQonektoReadTool getLumitWorkflow listLumitServicedApplications getKnowledgeLibraryStatus listKnowledgeLibrary getPersonalKnowledgeBaseStatus searchPersonalKnowledgeBase getInvestmentStatus getInvestmentMonitoring getInvestmentPortfolio getInvestmentRiskReport searchSaxoInstruments getInvestmentKnowledgeStatus getInvestmentMandate listInvestmentAnalyses listInvestmentJournal listInvestmentWatchlist listInvestmentOrderDrafts listCapabilityReviews getImacCommandStatus getImacTaskStatus checkIvaBuildDispatch checkIvaBuildTask getInstagramConnectionStatus readInstagramReference listOwnInstagramMedia readOwnInstagramComments getMetaAdsInsights getIvaConnectionStatus getIvaAgentRoster listIvaWebsites getIvaWebsite getCurrentProject readCurrentProjectFile listCurrentProjectConnections listAdviceModules createCandidateSearchPlan screenResumeAgainstCriteria createInterviewGuide`.split(' '));
 const groups = {
   memory: ['iva', 'local', 'notizen todos erinnerung'],
   calendar: ['calendar', 'api', 'kalender termine buchungen calendly'],
@@ -17,6 +17,9 @@ const groups = {
   advice: ['iva', 'local', 'versicherung tarif beratung fachvergleich vorsorge'],
   opportunities: ['iva', 'local', 'chancenradar chancen opportunity projekte'],
   accounting: ['iva', 'local', 'buchhaltung beleg rechnung vollstandigkeit steuerberater'],
+  taxPreparation: ['iva', 'local', 'steuer steuererklarung absetzen ausgaben jahrespaket steuerjahr belege selbststandig'],
+  salesCoach: ['iva', 'local', 'sales coach gesprach transkript sprecher notizen aufnahme kundenakte'],
+  prospecting: ['iva', 'local', 'leads coldcall recruiting linkedin entscheider zielgruppe firmen recherche'],
   energyTariffs: ['energy', 'api', 'stromtarif gas energie tarifvergleich'],
   qonekto: ['qonekto', 'mcp', 'qonekto blau direkt ameise kundenstamm police vertrag dokument'],
   lumit: ['iva', 'local', 'lumit mannheimer servicierter antrag'],
@@ -47,9 +50,9 @@ const roles = {
   'iva-customer': ['pipedrive', 'airtable', 'qonekto', 'mails', 'calendar', 'workspaces'],
   'iva-finance': ['advice', 'research', 'qonekto'], 'iva-investment': ['investment', 'research'],
   'iva-marketing': ['instagram', 'marketing', 'research', 'opportunities'],
-  'iva-energy': ['workspaces', 'energyTariffs', 'research'], 'iva-accounting': ['accounting'],
-  'iva-sales': ['crm', 'pipedrive', 'advice', 'research'], 'iva-knowledge': ['knowledgeLibrary', 'research'],
-  'iva-recruiting': ['recruiting', 'knowledgeLibrary', 'research'], 'iva-builder': ['websites', 'builder', 'deviceControl', 'research'],
+  'iva-energy': ['workspaces', 'energyTariffs', 'research'], 'iva-accounting': ['accounting','taxPreparation'],
+  'iva-sales': ['crm', 'pipedrive', 'advice', 'research','salesCoach','prospecting'], 'iva-knowledge': ['knowledgeLibrary', 'research'],
+  'iva-recruiting': ['recruiting', 'knowledgeLibrary', 'research','prospecting'], 'iva-builder': ['websites', 'builder', 'deviceControl', 'research'],
 };
 const requirements = {
   apify: [['APIFY_TOKEN']], research: [['TAVILY_API_KEY']], pipedrive: [['PIPEDRIVE_API_TOKEN']],

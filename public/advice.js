@@ -82,7 +82,9 @@ function moduleUrl(moduleId) {
     query.set('customerId', customer.id || ''); query.set('customerName', customer.name || ''); query.set('customerEmail', customer.email || '');
     query.set('customerPhone', customer.mobile || customer.phone || ''); query.set('customerAddress', customer.address || '');
   }
-  return '/workspace?' + query;
+  if (params.get('projectId')) query.set('projectId', params.get('projectId'));
+  if (module.workbenchKind) query.set('kind', module.workbenchKind);
+  return (module.launchPath || '/workspace') + '?' + query;
 }
 
 function renderModules() {
@@ -110,9 +112,9 @@ async function loadCatalog() {
   if (state.catalog.groups.some(group => group.id === requestedGroup)) state.group = requestedGroup;
   renderFilters(); renderModules();
   const gkv = state.catalog.connectors?.gkv || {};
-  $('gkvDot').classList.toggle('on', Boolean(gkv.configured));
-  $('gkvTitle').textContent = gkv.configured ? `${gkv.provider || 'GKV-Portal'} verbunden` : 'Noch nicht verbunden';
-  $('gkvCopy').textContent = gkv.configured ? 'Der Vergleichsrechner kann mit der Beratungsakte geöffnet werden.' : 'Benötigt später Anbieter und Start-/API-URL.';
+  $('gkvDot').classList.toggle('on', Boolean(gkv.comparisonEnabled && gkv.resultReadbackVerified));
+  $('gkvTitle').textContent = gkv.configured ? `${gkv.provider || 'GKV'}: Originalportal hinterlegt` : 'Noch nicht verbunden';
+  $('gkvCopy').textContent = gkv.configured ? 'Das Originalportal kann geöffnet werden. Ein geprüfter Tarifrücklauf in IVA ist noch nicht eingerichtet.' : 'Projektbezogenen Anbieterzugang und geprüften Tarifrücklauf einrichten.';
   $('openGkv').hidden = !gkv.configured;
   if (gkv.configured) $('openGkv').href = gkv.launchUrl;
   const energy = state.catalog.connectors?.energyTariffs || {};

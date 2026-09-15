@@ -155,7 +155,11 @@ export async function credentialServiceStatus(serviceId, options = {}) {
     loginMode: service.loginMode,
     configured,
     missingRequiredFields,
-    keychainReady: missingRequiredFields.length === 0,
+    keychainReady: Boolean(configured.username && configured.password && missingRequiredFields.length === 0),
+    hasStoredCredentials: Object.values(configured).some(Boolean),
+    browserSessionVerified: false,
+    storage: 'iva-keychain-items',
+    applePasswordsDatabaseVerified: false,
     externalAuthenticator: service.externalAuthenticator || null,
     secretValuesReturned: false,
   };

@@ -32,6 +32,9 @@ export function hasMacMiniCockpitAccess(headers = {}, token = process.env.MACMIN
 export function macMiniAccessMiddleware(req, res, next) {
   // Device routes use a separate, newly issued credential and hardware binding.
   if (req.path.startsWith('/device-agent/')) return next();
+  // Meta authenticates this exact endpoint by its challenge or signed body.
+  // The handlers reject unverified requests before any durable work.
+  if (req.path === '/webhooks/whatsapp' && ['GET','POST'].includes(req.method)) return next();
   if (req.path === '/health') return res.status(200).json({service:'IVA', mode:'remote-cockpit-mac-mini-execution'});
   if (req.path === '/' && ['GET', 'HEAD'].includes(req.method)) return res.redirect('/cockpit');
   if (hasMacMiniCockpitAccess(req.headers) || hasRemoteCockpitAccess(req.headers)) return next();

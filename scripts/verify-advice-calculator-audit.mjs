@@ -143,7 +143,8 @@ test('readiness never mistakes a link or credentials for working provider quotes
     process.env.GKV_COMPARE_URL = 'javascript:alert(1)'; assert.equal(adviceConnectorStatus().gkv.configured, false);
     process.env.GKV_COMPARE_URL = 'https://example.test/';
     const report = adviceCalculatorReadiness();
-    assert.equal(report.modules.length, 12);
+    assert.equal(report.modules.length, 14);
+    assert.equal(report.modules.find(module => module.id === 'insurance-workbench').calculationKind, 'document-comparison');
     assert.equal(report.providers.gkv.status, 'portal-link-only');
     assert.ok(Object.values(report.providers).every(provider => provider.liveQuotes === false));
     assert.equal(report.modules.find(module => module.id === 'energy-tariff-comparison').trafficLight, 'red');

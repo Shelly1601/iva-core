@@ -63,6 +63,12 @@ export function normalizePlanbarAddress(address = {}) {
   return [street, place].filter(Boolean).join(', ') || 'Nicht angegeben';
 }
 
+export function normalizePlanbarPhone(value) {
+  const values = Array.isArray(value) ? value : [value];
+  const phones = values.map(item => clean(typeof item === 'object' && item ? item.value || item.number : item)).filter(item => /^\+?[\d\s()/.-]{6,50}$/.test(item) && item.replace(/\D/g, '').length >= 6);
+  return [...new Set(phones)].slice(0, 3).join(' / ') || 'Nicht angegeben';
+}
+
 export function normalizePlanbarManufacturer(task) {
   const value = clean(task);
   return MANUFACTURERS.find(item => item.pattern.test(value))?.name || 'Nicht angegeben';
@@ -172,6 +178,7 @@ export function buildPlanbarForecast(rawEntries, {
         kalenderwoche: `KW ${week}`,
         kalenderwocheNummer: week,
         kunde: customer,
+        telefon: normalizePlanbarPhone([entry.customerPhone, entry.phone, entry.telephone].flat().filter(Boolean)),
         adresse: address,
         anlage: system,
         hersteller: manufacturer,
@@ -182,6 +189,7 @@ export function buildPlanbarForecast(rawEntries, {
         sourceRows.push({
           calendarWeek: row.kalenderwoche,
           customer: row.kunde,
+          phone: row.telefon,
           address: row.adresse,
           system: row.anlage,
           manufacturer: row.hersteller,
@@ -205,7 +213,12 @@ export function buildPlanbarForecast(rawEntries, {
   for (const row of rows) {
     const key = [row.kalenderwocheNummer, normalizedComparable(row.kunde), normalizedComparable(row.adresse)].join('|');
     const existing = deduplicated.get(key);
-    if (!existing || (existing.anlage === 'Nicht angegeben' && row.anlage !== 'Nicht angegeben')) deduplicated.set(key, row);
+    if (!existing) deduplicated.set(key, row);
+    else {
+      const selected = existing.anlage === 'Nicht angegeben' && row.anlage !== 'Nicht angegeben' ? row : existing;
+      selected.telefon = normalizePlanbarPhone([existing.telefon, row.telefon].flatMap(value => value.split(' / ')));
+      deduplicated.set(key, selected);
+    }
   }
   const finalRows = [...deduplicated.values()].sort((left, right) => (
     left.kalenderwocheNummer - right.kalenderwocheNummer
@@ -285,6 +298,7 @@ export async function collectPlanbarForecastSource({
         end: clean(entry.end),
         entryCustomerName: clean(entry.customer_name),
         customerName: clean([entry.tooltipdata?.customer?.firstname, entry.tooltipdata?.customer?.lastname].filter(Boolean).join(' ') || entry.tooltipdata?.customer?.name || entry.customer_name),
+        customerPhone: [entry.tooltipdata?.customer?.phone, entry.tooltipdata?.customer?.mobile, entry.tooltipdata?.customer?.telephone, entry.tooltipdata?.customer?.phone_number, entry.tooltipdata?.customer?.mobile_phone].flat().filter(Boolean),
         workAddress: entry.tooltipdata?.work_address || {},
         task: String(entry.tooltipdata?.task || '').trim(),
       })),

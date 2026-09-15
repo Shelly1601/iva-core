@@ -3,7 +3,7 @@ import { ADVICE_CALCULATION_VERSION } from '../public/advice-calculators.js';
 import { FUNDING_RULES_VERSION, FUNDING_RULES_CHECKED_AT } from '../workspaces/energy-calculations.js';
 import { PV_PRICE_VERSION } from '../workspaces/pv-price-calculator.js';
 
-export const CALCULATOR_AUDIT_CHECKED_AT = '2026-09-15';
+export const CALCULATOR_AUDIT_CHECKED_AT = '2026-09-16';
 export const COMPARISON_PROVIDER_SOURCES = [
   { provider: 'NAFI', title: 'NAFI API für Portale', url: 'https://www.nafi.de/Produkte/Portale', checkedAt: CALCULATOR_AUDIT_CHECKED_AT },
   { provider: 'NAFI', title: 'NAFI Schnittstellen', url: 'https://www.nafi.de/Dienstleistungen/Schnittstellen', checkedAt: CALCULATOR_AUDIT_CHECKED_AT },
@@ -12,6 +12,8 @@ export const COMPARISON_PROVIDER_SOURCES = [
 ];
 
 const MODULE_READINESS = {
+  'financial-plan-workbench': ['conditional', 'manual-scenario', true, 'Anspar- und Entnahmephase, effektive Rendite, konkrete Kostenannahmen und Kaufkraft sind getrennt berechnet und als Kunden-PDF verfügbar. Produktspezifische Steuern, Garantien und Kursschwankungen bleiben außerhalb der Modellrechnung.'],
+  'insurance-workbench': ['conditional', 'document-comparison', true, 'Original-PDF/Text, wörtlich belegte Kriterien, Gewichtung, aktuelle Dokumentangebote, Ranking und Projektfavoriten sind implementiert. Anbieterzugänge und automatischer Live-Tarifrücklauf sind nicht verifiziert.'],
   'financial-holistic': ['works', 'arithmetic-summary', true, 'Cashflow, Nettovermögen und Rücklagenreichweite werden aus den vollständig erfassten Werten berechnet.'],
   'din-77230': ['conditional', 'structured-intake', true, 'Grundrechnungen funktionieren; für eine DIN-konforme Analyse fehlt das lizenzierte Regelwerk mit fachlicher Abnahme.'],
   'din-77235': ['conditional', 'structured-intake', true, 'Liquidität und Umsatz je Beschäftigtem werden berechnet; die vollständige DIN-Analyse ist nicht freigeschaltet.'],

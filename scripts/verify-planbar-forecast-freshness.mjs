@@ -108,7 +108,7 @@ test('CLI emits a real persisted rebuild marker and repeated attempts remain bou
   const outputRoot = await temporary(t), directory = path.join(outputRoot, '2026-09-15-kw38-47'); await mkdir(directory);
   const filenames = ['Planbar_Gesamtliste_KW38-47_2026.xlsx', 'Planbar_Midea_KW38-47_2026.xlsx'];
   await Promise.all(filenames.map(name => writeFile(path.join(directory, name), 'fixture')));
-  const headers = ['Kalenderwoche', 'Kunde', 'Adresse', 'Anlage'];
+  const headers = ['Kalenderwoche', 'Kunde', 'Telefon', 'Adresse', 'Anlage'];
   await writeFile(path.join(directory, 'manifest.json'), JSON.stringify({ period: 'KW 38-47 / 2026', files: filenames.map((file, i) => ({ file, label: i ? 'Midea' : 'Gesamtliste', rows: 1 })), verification: { readBack: true, formulaErrors: 0, exactHeaders: headers, renderedSheets: 2, excludedResources: ['David Service', 'Dawid Service', 'Antonio Lausic', 'Antonio Lausich', 'Antonio Lausitsch'], excludedResourceLeaks: 0 } }));
   await writeFile(path.join(directory, 'qa.json'), '[{},{}]');
   await writeFile(path.join(directory, 'forecast-data.json'), JSON.stringify({ source: { entries: [example], collectedAt: new Date().toISOString(), cacheBypass: true }, forecast: { rows } }));

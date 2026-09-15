@@ -25,15 +25,25 @@ function normalizeAnswers(value) {
 }
 
 export function normalizeWhatsAppProfile(input = {}, current = {}) {
+  const projectId = clean(input.projectId ?? current.projectId, 120);
+  if (projectId && (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$/.test(projectId) || ['__proto__', 'constructor', 'prototype'].includes(projectId))) throw new Error('Ungültige Projektkennung.');
+  const task = ['appointment', 'claim', 'service'].includes(input.task) ? input.task : current.task || (input.mode === 'service' || current.mode === 'service' ? 'service' : 'appointment');
+  const eventTypeUri = clean(input.calendlyEventTypeUri ?? current.calendlyEventTypeUri, 300);
+  if (eventTypeUri && !/^https:\/\/api\.calendly\.com\/event_types\/[A-Za-z0-9_-]+$/.test(eventTypeUri)) throw new Error('Calendly-Ereignis aus der geprüften Ereignisliste wählen.');
+  const appointmentUrl = clean(input.appointmentUrl ?? current.appointmentUrl, 1000);
+  if (appointmentUrl) { const url = new URL(appointmentUrl); if (url.protocol !== 'https:' || url.username || url.password) throw new Error('Terminlink muss eine HTTPS-Adresse ohne Zugangsdaten sein.'); }
+  const timezone = clean(input.timezone ?? current.timezone, 80) || 'Europe/Berlin';
+  try { new Intl.DateTimeFormat('de-DE', { timeZone: timezone }); } catch { throw new Error('Ungültige Zeitzone.'); }
   return {
     id: current.id || clean(input.id, 100) || crypto.randomUUID(),
     name: clean(input.name, 160) || current.name || 'Neues WhatsApp-Profil',
-    enabled: input.enabled === undefined ? (current.enabled ?? false) : input.enabled === true,
+    enabled: Boolean(projectId) && (input.enabled === undefined ? (current.enabled ?? false) : input.enabled === true),
+    projectId, task, calendlyEventTypeUri: eventTypeUri, timezone,
     mode: MODES.includes(input.mode) ? input.mode : (current.mode || 'lead'),
     campaignId: clean(input.campaignId, 120) || (input.campaignId === '' ? '' : current.campaignId || ''),
     phoneNumberId: clean(input.phoneNumberId, 160) || (input.phoneNumberId === '' ? '' : current.phoneNumberId || ''),
     businessName: clean(input.businessName, 160) || (input.businessName === '' ? '' : current.businessName || 'IVA'),
-    appointmentUrl: clean(input.appointmentUrl, 1000) || (input.appointmentUrl === '' ? '' : current.appointmentUrl || ''),
+    appointmentUrl,
     objective: clean(input.objective, 1000) || (input.objective === '' ? '' : current.objective || 'Passenden Termin vereinbaren'),
     welcomeText: clean(input.welcomeText, 2000) || (input.welcomeText === '' ? '' : current.welcomeText || ''),
     handoffText: clean(input.handoffText, 2000) || (input.handoffText === '' ? '' : current.handoffText || 'Ich gebe das sicherheitshalber persönlich weiter.'),
@@ -55,13 +65,13 @@ async function load() {
       claimIntakes: Array.isArray(data.claimIntakes) ? data.claimIntakes : [],
       handoffTickets: Array.isArray(data.handoffTickets) ? data.handoffTickets : [],
     };
-  } catch { return initialData(); }
+  } catch (error) { if (error.code === 'ENOENT') return initialData(); throw new Error('Die WhatsApp-Ablage ist nicht lesbar. Vorhandene Daten bleiben erhalten.'); }
 }
 
 async function save(data) {
   await fs.mkdir(DATA_DIR, { recursive: true }).catch(() => {});
   const temp = `${FILE}.${process.pid}.tmp`;
-  await fs.writeFile(temp, JSON.stringify(data, null, 2));
+  await fs.writeFile(temp, JSON.stringify(data, null, 2), { mode: 0o600 });
   await fs.rename(temp, FILE);
 }
 
@@ -88,6 +98,9 @@ export async function getWhatsAppProfile(id) {
 export async function createWhatsAppProfile(input = {}) {
   return mutate(data => {
     const profile = normalizeWhatsAppProfile(input);
+    if (data.profiles.some(p => p.id === profile.id)) throw new Error('Diese Profilkennung ist bereits vergeben.');
+    if (profile.enabled && (!profile.phoneNumberId || !/^\d{5,30}$/.test(profile.phoneNumberId))) throw new Error('Ein aktives Profil benötigt die Meta Phone Number ID.');
+    if (profile.enabled && data.profiles.some(p => p.enabled && p.phoneNumberId === profile.phoneNumberId)) throw new Error('Diese WhatsApp-Nummer ist bereits einem aktiven Profil zugeordnet.');
     data.profiles.push(profile);
     return profile;
   });
@@ -97,7 +110,11 @@ export async function updateWhatsAppProfile(id, patch = {}) {
   return mutate(data => {
     const index = data.profiles.findIndex(item => item.id === id);
     if (index < 0) return null;
-    data.profiles[index] = normalizeWhatsAppProfile(patch, data.profiles[index]);
+    const current = data.profiles[index], next = normalizeWhatsAppProfile(patch, current);
+    if (current.projectId && next.projectId !== current.projectId) throw new Error('Für ein anderes Projekt bitte ein neues Profil anlegen; bestehende Kundenverläufe behalten ihre Zuordnung.');
+    if (current.phoneNumberId && next.phoneNumberId !== current.phoneNumberId) throw new Error('Für eine andere WhatsApp-Nummer bitte ein neues Profil anlegen.');
+    if (next.enabled && (!/^\d{5,30}$/.test(next.phoneNumberId) || data.profiles.some(p => p.id !== id && p.enabled && p.phoneNumberId === next.phoneNumberId))) throw new Error('Eine eindeutige Meta-Nummer für das aktive Profil fehlt.');
+    data.profiles[index] = next;
     return data.profiles[index];
   });
 }
@@ -113,7 +130,7 @@ export async function deleteWhatsAppProfile(id) {
 export async function resolveWhatsAppProfile({ profileId = '', phoneNumberId = '', campaignId = '' } = {}) {
   const profiles = await listWhatsAppProfiles();
   if (profileId) return profiles.find(item => item.id === profileId) || null;
-  if (phoneNumberId) return profiles.find(item => item.enabled && item.phoneNumberId === phoneNumberId) || null;
+  if (phoneNumberId) { const matches = profiles.filter(item => item.enabled && item.phoneNumberId === phoneNumberId); return matches.length === 1 ? matches[0] : null; }
   if (campaignId) return profiles.find(item => item.enabled && item.campaignId === campaignId) || null;
   const defaultId = clean(process.env.WHATSAPP_DEFAULT_PROFILE_ID, 100);
   return profiles.find(item => defaultId && item.enabled && item.id === defaultId) || null;

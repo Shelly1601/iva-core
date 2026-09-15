@@ -7,7 +7,7 @@ Stand: 15.09.2026 · Ausführung ausschließlich auf dem attestierten Mac Mini g
 1. Der **erste fachliche Schritt** ist Planbar im eigenen Chrome-Arbeitsfenster auf dem Mac Mini: den Kalender vollständig neu laden und auf ein neues, vollständig geladenes Dokument mit sichtbarer Plantafel warten. Ein einzelnes Display genügt; fremde Fenster bleiben unangetastet. Der deterministische Collector erzwingt diesen Reload vor jedem Snapshot und zeichnet `planbarRefreshedAt` sowie `reloadVerified` auf.
 2. Die Forecast-Daten werden danach cachefrei neu aus Planbar eingelesen. `forecast-data.json` und `data.json` müssen im aktuellen Laufordner entstehen. `--from-existing`, ältere Quelldateien und vorbereitete Exporte sind technisch gesperrt.
 3. Quelle, XLSX-Erzeugung, technische und visuelle Prüfung sowie Versand müssen in demselben Lauf liegen. Der belegte Planbar-Snapshot darf beim Versand höchstens 15 Minuten alt sein.
-4. Unmittelbar bevor Outlook geöffnet wird, fragt der deterministische Sender denselben Zeitraum nochmals cachefrei aus Planbar ab. Die exportrelevanten Termine müssen einschließlich Kalenderwoche, Kunde, Adresse, Anlage, Hersteller und Quell-ID exakt mit dem Export-Snapshot übereinstimmen. Die Gesamtzahl und die Herstellergruppen müssen ebenfalls identisch sein.
+4. Unmittelbar bevor Outlook geöffnet wird, fragt der deterministische Sender denselben Zeitraum nochmals cachefrei aus Planbar ab. Die exportrelevanten Termine müssen einschließlich Kalenderwoche, Kunde, Telefonnummer, Adresse, Anlage, Hersteller und Quell-ID exakt mit dem Export-Snapshot übereinstimmen. Die Gesamtzahl und die Herstellergruppen müssen ebenfalls identisch sein.
 5. Eine Verschiebung, Löschung, Neuanlage oder ein zu alter Export führt zu `PLANBAR_FORECAST_REBUILD_REQUIRED` (CLI-Exitcode 3). Dies ist eine konkrete Fortsetzungsaktion: **denselben Auftrag und dieselbe Versand-ID behalten**, Plantafel neu laden, Daten + XLSX + QA neu erzeugen und den Sender erneut aufrufen. Der Sender speichert `forecast-rebuild-required.json` im Laufordner sowie einen auftragsbezogenen Marker in `rebuild-requests/`. Höchstens drei Neuaufbauten je Auftrag; bei weiter wechselnden Daten bleibt der Auftrag mit `PLANBAR_FORECAST_SOURCE_UNSTABLE` nachvollziehbar offen. Ein bloßes „Änderung gefunden“ ist kein Abschluss.
 
 ## Zeitplan und Empfänger
@@ -37,8 +37,11 @@ Jede Herstellerdatei enthält genau die Spalten:
 
 - `Kalenderwoche`
 - `Kunde`
+- `Telefon`
 - `Adresse`
 - `Anlage`
+
+Telefonnummern stammen aus dem verknüpften Planbar-Kundendatensatz (Festnetz und/oder Mobilnummer). Werte als Text speichern, damit führende Nullen und +49 erhalten bleiben. Fehlende Nummern mit `Nicht angegeben` ausweisen; keine Nummer aus einem ähnlich benannten fremden Kunden übernehmen. Die internen Zeilen enthalten `telefon`, die Exportquelle `phone`.
 
 Die Zeilen sind nach Kalenderwoche und Kunde sortiert. Kopfzeile und Filter bleiben beim Scrollen nutzbar. Die Gesamtdatei verwendet dieselbe Kernstruktur.
 

@@ -10,7 +10,9 @@ try {
   const catalog = await import('../advice/catalog.js');
   const knowledge = await import('../advice/knowledge-store.js');
   const publicCatalog = catalog.publicAdviceCatalog();
-  assert.equal(publicCatalog.modules.length, 12);
+  assert.equal(publicCatalog.modules.length, 14);
+  assert.equal(catalog.getAdviceModule('financial-plan-workbench')?.launchPath, '/advice-workbench');
+  assert.equal(catalog.getAdviceModule('insurance-workbench')?.workbenchKind, 'insurance');
   assert.ok(catalog.getAdviceModule('din-77230'));
   assert.ok(catalog.getAdviceModule('din-77235'));
   assert.ok(catalog.getAdviceModule('contract-comparison')?.knowledgeSearch);
@@ -46,7 +48,7 @@ try {
   assert.equal(found.sources[0].status, 'pending-review');
 
   await assert.rejects(() => knowledge.addAdviceKnowledgeSource({ title: 'Unsicher', url: 'javascript:alert(1)' }), /HTTP/);
-  console.log('PASS Beratung: 12 Module, Energie nur über Beratung, Arbeitsbereiche ohne Browser-Pop-ups, DIN-Trennung, Quellenbibliothek und Connector-Basis');
+  console.log('PASS Beratung: 14 Module, Energie nur über Beratung, Arbeitsbereiche ohne Browser-Pop-ups, DIN-Trennung, Quellenbibliothek und Connector-Basis');
 } finally {
   await fs.rm(temp, { recursive: true, force: true });
 }

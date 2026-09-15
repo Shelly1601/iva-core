@@ -1,0 +1,10 @@
+import express from 'express';
+import {fail} from './store.js';
+const scope=req=>{if(req.query.projectId&&req.body?.projectId&&req.query.projectId!==req.body.projectId)throw fail('Projektangaben widersprechen sich.');const projectId=req.query.projectId||req.body?.projectId;if(typeof projectId!=='string'||!projectId)throw fail('Bitte Projekt wählen.');return{projectId};};
+const wrap=fn=>async(req,res)=>{res.set({'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});try{await fn(req,res);}catch(error){if(!res.destroyed)res.status(error.status||500).json({error:error.status?error.message:'Der Auftrag konnte nicht bestätigt werden. Gespeicherte Abschnitte bleiben erhalten.',code:error.code||'SALES_COACH_ERROR'});}};
+// Owner-only API guard must already be mounted. Never expose to a public portal.
+export function registerSalesCoachRoutes(app,{service,context=service.context}){
+ const base='/api/sales-coach';app.get(base+'/context',wrap(async(q,r)=>r.json(await context(q.query.projectId))));app.get(base+'/sessions',wrap(async(q,r)=>r.json({sessions:await service.list(scope(q))})));app.post(base+'/sessions',wrap(async(q,r)=>r.status(201).json(await service.create(scope(q),q.body||{}))));app.get(base+'/sessions/:id',wrap(async(q,r)=>r.json(await service.get(scope(q),q.params.id))));app.patch(base+'/sessions/:id',wrap(async(q,r)=>r.json(await service.update(scope(q),q.params.id,q.body||{}))));
+ app.post(base+'/sessions/:id/audio',express.raw({type:['audio/*','application/octet-stream'],limit:'20mb'}),wrap(async(q,r)=>{const controller=new AbortController(),close=()=>{if(!r.writableEnded)controller.abort();};r.once('close',close);try{const result=await service.ingestAudio(scope(q),q.params.id,q.body,{clipId:q.query.clipId,mime:q.headers['content-type'],fileName:q.get('X-File-Name'),coachEnabled:q.get('X-Coach-Enabled')==='true'},controller.signal);if(!r.destroyed)r.json(result);}finally{r.off('close',close);}}));
+ app.post(base+'/sessions/:id/meeting',wrap(async(q,r)=>r.json(await service.saveMeeting(scope(q),q.params.id,q.body||{}))));
+}

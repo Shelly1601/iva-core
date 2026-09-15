@@ -6,6 +6,7 @@ import {
   isoWeekMonday,
   normalizePlanbarCustomerName,
   normalizePlanbarManufacturer,
+  normalizePlanbarPhone,
 } from '../local-mac-helper/planbar-forecast.mjs';
 import { verifyOutlookXlsxComposeSnapshot } from '../local-mac-helper/macos-ui.mjs';
 import { buildSentVerificationAppleScript, buildVerifiedSendAppleScript } from '../local-mac-helper/outlook.mjs';
@@ -31,6 +32,7 @@ assert.equal(isExcludedPlanbarForecastEntry({ team: 'Team Vitalij 1', task: 'URL
 
 const base = {
   team: 'Team Vitalij 1',
+  customerPhone: ['+49 30 123456', '030 987654'],
   start: '2026-09-07 08:00:00',
   end: '2026-09-11 18:00:00',
   customerName: 'HH Peter Galle',
@@ -45,6 +47,15 @@ const forecast = buildPlanbarForecast([
   { ...base, id: 'vacation', customerName: 'gelöscht', entryCustomerName: 'URLAUB', task: 'URLAUB' },
   { ...base, id: 'antonio', team: 'Antonio Lausich', customerName: 'Manfred Ulrich' },
 ]);
+assert.equal(normalizePlanbarPhone(''), 'Nicht angegeben');
+assert.equal(normalizePlanbarPhone({value:'030 123456'}), '030 123456');
+assert.equal(normalizePlanbarPhone('keine Telefonnummer'), 'Nicht angegeben');
+assert.equal(forecast.rows[1].telefon, '+49 30 123456 / 030 987654');
+assert.equal(forecast.sourceRows.find(row=>row.customer==='Peter Galle').phone, forecast.rows[1].telefon);
+assert.throws(()=>assertPlanbarForecastRowsCurrent(forecast.rows,forecast.rows.map(row=>({...row,telefon:'030 654321'}))), /geändert/);
+const mergedPhones=buildPlanbarForecast([{...base,id:'missing-phone',customerPhone:[]},{...base,id:'with-phone'}]);
+assert.equal(mergedPhones.rows[0].telefon,'+49 30 123456 / 030 987654');
+assert.equal(mergedPhones.rowCount,1);
 assert.equal(forecast.rowCount, 2);
 assert.equal(forecast.rows[0].kalenderwoche, 'KW 36');
 assert.equal(forecast.rows[1].kunde, 'Peter Galle');

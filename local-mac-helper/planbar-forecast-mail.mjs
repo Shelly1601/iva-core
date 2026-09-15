@@ -13,7 +13,7 @@ const REPO_ROOT = path.resolve(process.env.IVA_DEVICE_WORKSPACE || path.join(pat
 const OUTPUT_ROOT = path.resolve(process.env.IVA_PLANBAR_OUTPUT_ROOT || path.join(REPO_ROOT, 'outputs', 'planbar-weekly'));
 const SEND_LOG = path.join(OUTPUT_ROOT, 'send-log.json');
 const REQUIRED_EXCLUSIONS = Object.freeze(['David Service', 'Dawid Service', 'Antonio Lausic', 'Antonio Lausich', 'Antonio Lausitsch']);
-const EXACT_HEADERS = Object.freeze(['Kalenderwoche', 'Kunde', 'Adresse', 'Anlage']);
+const EXACT_HEADERS = Object.freeze(['Kalenderwoche', 'Kunde', 'Telefon', 'Adresse', 'Anlage']);
 const MAX_PREPARED_RUN_AGE_MS = 15 * 60_000;
 const MAX_LIVE_SOURCE_AGE_MS = 2 * 60_000;
 
@@ -62,6 +62,7 @@ function normalizedForecastRow(row = {}) {
     kalenderwoche: String(row.kalenderwoche || '').trim(),
     kalenderwocheNummer: Number(row.kalenderwocheNummer),
     kunde: String(row.kunde || '').replace(/\s+/g, ' ').trim(),
+    telefon: String(row.telefon || 'Nicht angegeben').replace(/\s+/g, ' ').trim(),
     adresse: String(row.adresse || '').replace(/\s+/g, ' ').trim(),
     anlage: String(row.anlage || '').replace(/\s+/g, ' ').trim(),
     hersteller: String(row.hersteller || '').replace(/\s+/g, ' ').trim(),
@@ -70,7 +71,7 @@ function normalizedForecastRow(row = {}) {
 }
 
 function forecastRowKey(row) {
-  return [row.sourceId, row.kalenderwocheNummer, row.kalenderwoche, row.kunde, row.adresse, row.anlage, row.hersteller].join('|');
+  return [row.sourceId, row.kalenderwocheNummer, row.kalenderwoche, row.kunde, row.telefon, row.adresse, row.anlage, row.hersteller].join('|');
 }
 
 export function assertPlanbarForecastRowsCurrent(exportRows, currentRows) {

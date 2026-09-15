@@ -7,7 +7,7 @@ import { searchEvidence } from './opportunities/evidence.js';
 import { createOpportunityJobs } from './opportunities/jobs.js';
 import { createOpportunityScheduler } from './opportunities/scheduler.js';
 import { createCustomerCareService } from './customer-care/service.js';
-import { createCustomerCareCustomers, createCustomerCareDelivery } from './customer-care/adapters.js';
+import { createCustomerCareCustomers, createCustomerCareDelivery, workspaceProjectIds } from './customer-care/adapters.js';
 import { registerCustomerCareRoutes, registerCustomerCarePublicRoutes, createCustomerCareScheduler } from './customer-care/routes.js';
 import { createCustomerCareLanding } from './customer-care/landing.js';
 import { customerCareSkill } from './customer-care/tools.js';
@@ -18,6 +18,20 @@ import { registerCreatorRoutes } from './creator/routes.js';
 import { creatorSkill } from './creator/tools.js';
 import { createCustomerCareQuotes } from './customer-care/quotes.js';
 import { adviceCalculatorReadiness } from './advice/calculator-audit.js';
+import { createAdviceWorkbench } from './advice/workbench.js';
+import { registerAdviceWorkbenchRoutes } from './advice/routes.js';
+import { createSalesCoachService } from './sales-coach/service.js';
+import { registerSalesCoachRoutes } from './sales-coach/routes.js';
+import { salesCoachSkill } from './sales-coach/tools.js';
+import { createTaxPreparation } from './tax-preparation/service.js';
+import { registerTaxPreparationRoutes } from './tax-preparation/routes.js';
+import { taxPreparationSkill } from './tax-preparation/tools.js';
+import { createProspectingService } from './prospecting/service.js';
+import { registerProspectingRoutes } from './prospecting/routes.js';
+import { prospectingSkill } from './prospecting/tools.js';
+import { createWhatsAppEngine, createWhatsAppCustomers } from './integrations/whatsapp-engine.js';
+import { registerWhatsAppAutomationRoutes } from './integrations/whatsapp-routes.js';
+import { hasMacMiniCockpitAccess as hasOperationsCockpitAccess } from './device-control/macmini-access.js';
 import { createProjectAccessStore } from './access/store.js';
 import { registerProjectAccessAdminRoutes, registerPortalRoutes } from './access/routes.js';
 import { createWebsiteService } from './websites/service.js';
@@ -80,6 +94,7 @@ import { builderSkill } from './skills/builder.js';
 import { planbarSkill } from './skills/planbar.js';
 import { investmentSkill } from './skills/investment.js';
 import { incidentMemorySkill } from './skills/incident-memory.js';
+import { getAgent } from './agents/registry.js';
 import { WORKFLOW_INTERFACE_SKILLS, getInterfaceAccessPolicy, listAgents, routeAgent } from './agents/registry.js';
 import { marketAnalysis } from './marketing/market.js';
 import { fetchMetaAdsInsights, marketingConnectorStatus } from './marketing/connectors.js';
@@ -302,7 +317,7 @@ import {
   validateLumitStartDate,
 } from './integrations/lumit.js';
 import { createLumitCustomerPackagePdf } from './integrations/lumit-package.js';
-import { extractWhatsAppMessages, sendWhatsAppText, verifyWhatsAppChallenge, verifyWhatsAppSignature, whatsappStatus } from './integrations/whatsapp.js';
+import { extractWhatsAppMessages, extractWhatsAppStatuses, verifyWhatsAppChallenge, verifyWhatsAppSignature, whatsappStatus } from './integrations/whatsapp.js';
 import {
   getWhatsAppHubMe,
   listWhatsAppHubAccounts,
@@ -310,7 +325,6 @@ import {
   listWhatsAppHubTemplates,
   whatsappHubStatus,
 } from './integrations/whatsapp-hub.js';
-import { handleWhatsAppMessage } from './integrations/whatsapp-agent.js';
 import {
   createWhatsAppProfile,
   deleteWhatsAppProfile,
@@ -406,10 +420,36 @@ async function requireCreatorProject(id) {
 const creatorContext = createCreatorContext({listProjects,access:projectAccess,listKnowledgeEntries,listOpportunities,listOpportunityLinkChecks,getOpportunity});
 const creatorService = createCreatorService({dataDir:DATA_DIR,getProject:requireCreatorProject,listKnowledgeEntries,getKnowledgeEntry,getOpportunity:creatorContext.resolveOpportunity});
 const creatorLanding = createCreatorLanding({service:creatorService,websiteService});
+async function requireOperationsProject(id, module) {
+  const project = await getProject(id); if (!project) return null;
+  const access = await projectAccess.getProjectAccess(id);
+  if (!access.modules.includes(module)) throw Object.assign(new Error('Dieser Bereich ist für das Projekt nicht freigegeben.'), {status:403});
+  return project;
+}
+async function adviceCustomer(projectId, customerId) {
+  const workspace = await workspaces.getWorkspace(customerId); if (!workspace) return null;
+  if (!workspaceProjectIds(workspace, await listProjects()).includes(projectId)) return null;
+  return { ...workspace.customer, id:workspace.id, projectId, name:workspace.customer?.name || workspace.title, data:workspace.data, notes:workspace.notes || [] };
+}
+const adviceWorkbench = createAdviceWorkbench({dataDir:DATA_DIR,getProject:id=>requireOperationsProject(id,'advice'),getCustomer:adviceCustomer});
+const salesCoach = createSalesCoachService({dataDir:DATA_DIR,getProject:id=>requireOperationsProject(id,'sales-coach'),getWorkspace:workspaces.getWorkspace,addWorkspaceMeeting:workspaces.addWorkspaceMeeting,updateWorkspaceMeeting:workspaces.updateWorkspaceMeeting,listProjects,listWorkspaces:workspaces.listWorkspaces});
+const taxPreparation = createTaxPreparation({dataDir:DATA_DIR,getProject:id=>requireOperationsProject(id,'accounting'),listEntities:listAccountingEntities,listDocuments:listAccountingDocuments});
+const prospectingService = createProspectingService({dataDir:DATA_DIR,getProject:id=>requireOperationsProject(id,'prospecting'),listProjects});
+const whatsAppEngine = createWhatsAppEngine({dataDir:DATA_DIR,getProject:id=>requireOperationsProject(id,'whatsapp'),getCustomers:createWhatsAppCustomers({listWorkspaces:workspaces.listWorkspaces,listProjects})});
+
 const app = express();
 registerCustomerCarePublicRoutes(app,{service:customerCareService});
 registerWebsitePublicationRoute(app, websiteService);
 registerPortalRoutes(app, {access:projectAccess,websites:websiteService,coreOrigin});
+// Contract PDFs are base64-encoded by the authenticated comparison editor.
+// Permit its bounded 8 MB original without increasing every API's body limit.
+app.use('/api/advice/workbench/cases/:id/documents', (req,res,next)=>{
+  if(hasOperationsCockpitAccess(req.headers))return next();
+  const expected=process.env.API_TOKEN;
+  if(!expected&&(process.env.RAILWAY_ENVIRONMENT||process.env.RAILWAY_PUBLIC_DOMAIN))return res.status(503).json({error:'API_TOKEN fehlt in der Produktionsumgebung.'});
+  if(expected&&req.headers.authorization!=='Bearer '+expected)return res.status(401).json({error:'unauthorized'});
+  next();
+},express.json({limit:'12mb'}));
 app.use(express.json({
   // Authenticated iMac snapshots can contain several hundred Planbar entries.
   // Keep a bounded allowance above Express' 100 KB default; the agent also
@@ -1091,6 +1131,9 @@ async function contextToolMap(agent, {sessionId='default',runId='',projectId='',
     env={...env,TAVILY_API_KEY:process.env.TAVILY_API_KEY,FAL_KEY:process.env.FAL_KEY};
   }
   Object.assign(all, websiteSkill({service:websiteService,projectId}));
+  Object.assign(all, taxPreparationSkill({service:taxPreparation,projectId}));
+  Object.assign(all, salesCoachSkill({service:salesCoach,projectId}));
+  Object.assign(all, prospectingSkill({service:prospectingService,projectId}));
   Object.assign(all, creatorSkill({service:creatorService,context:creatorContext.context,landing:creatorLanding,projectId}));
   Object.assign(all, customerCareSkill({service:customerCareService,projectId,landing:customerCareLanding,websiteService,calculatorReadiness:adviceCalculatorReadiness}));
   if(allowDelegation)for(const [name,value] of Object.entries(specialistSkill({runner:specialistRunner,parentRunId:runId,projectId,context:`${project?projectContext(project):''}\nAktueller Nutzerauftrag: ${String(userText).slice(0,4000)}`})))all[name]={...value,iva:{skillId:'specialists'}};
@@ -1370,26 +1413,18 @@ app.get('/webhooks/whatsapp', (req, res) => {
   if (challenge === null) return res.sendStatus(403);
   res.type('text/plain').send(challenge);
 });
-app.post('/webhooks/whatsapp', (req, res) => {
+app.post('/webhooks/whatsapp', async (req, res) => {
   if (!verifyWhatsAppSignature(req.rawBody, req.headers['x-hub-signature-256'])) return res.sendStatus(401);
-  const messages = extractWhatsAppMessages(req.body || {});
-  res.sendStatus(200);
-  void (async () => {
-    for (const message of messages) {
-      try {
-        const result = await handleWhatsAppMessage({
-          phoneNumberId: message.phoneNumberId,
-          sender: message.sender,
-          text: message.text,
-          messageId: message.id,
-        });
-        if (result.duplicate) continue;
-        await sendWhatsAppText({ to: message.sender, text: result.reply, phoneNumberId: message.phoneNumberId });
-      } catch (error) {
-        console.error('WhatsApp-Nachricht:', error.message);
-      }
+  try {
+    for (const message of extractWhatsAppMessages(req.body || {})) {
+      await whatsAppEngine.enqueueVerified({...message,messageId:message.id,verified:true});
     }
-  })();
+    await whatsAppEngine.acceptStatuses(extractWhatsAppStatuses(req.body || {}),{verified:true});
+    res.sendStatus(200);
+    void whatsAppEngine.tick().catch(()=>console.error('WhatsApp: gespeicherter Vorgang wird im nächsten Prüflauf fortgesetzt.'));
+  } catch {
+    res.sendStatus(503);
+  }
 });
 
 function authorizedImacAgent(req) {
@@ -1895,6 +1930,18 @@ registerProjectProviderRoutes(app,projectProviders);
 registerProjectMarketingRoutes(app,{service:projectMarketing,authorizeProject:requireMarketingProject});
 registerWebsiteRoutes(app, websiteService);
 registerCreatorRoutes(app,{service:creatorService,context:creatorContext.context,landing:creatorLanding});
+registerAdviceWorkbenchRoutes(app,{service:adviceWorkbench,saveCustomerFile:async({projectId,customerId,filename,contentType,buffer})=>{
+  if(!await requireOperationsProject(projectId,'advice')||!await adviceCustomer(projectId,customerId))throw Object.assign(new Error('Kundenakte nicht in diesem Projekt verfügbar.'),{status:404});
+  const file=await workspaces.storeWorkspaceFile(customerId,{name:filename,mime:contentType,kind:'document',category:'offer',buffer});
+  if(!file)throw Object.assign(new Error('Kundenakte nicht mehr verfügbar.'),{status:404});return file;
+}});
+registerSalesCoachRoutes(app,{service:salesCoach});
+registerTaxPreparationRoutes(app,{service:taxPreparation});
+registerProspectingRoutes(app,{service:prospectingService});
+registerWhatsAppAutomationRoutes(app,{engine:whatsAppEngine,listProjects});
+const whatsAppTimer=setInterval(()=>{void whatsAppEngine.tick().catch(()=>console.error('WhatsApp: offener Vorgang bleibt gespeichert.'));},30_000);whatsAppTimer.unref();
+app.get('/api/advice/workbench/context',async(q,r)=>{try{if(!await requireOperationsProject(q.query.projectId,'advice'))throw Object.assign(new Error('Projekt nicht gefunden.'),{status:404});const [projects,customers]=await Promise.all([listProjects(),customerCareCustomers({projectId:q.query.projectId})]);r.set('Cache-Control','no-store').json({projects:projects.map(p=>({id:p.id,name:p.name})),customers});}catch(e){r.status(e.status||500).json({error:e.status?e.message:'Beratungskontext nicht verfügbar.'});}});
+
 registerCustomerCareRoutes(app,{service:customerCareService,listProjects,access:projectAccess,customers:customerCareCustomers,readiness:customerCareDelivery.readiness,calculatorReadiness:adviceCalculatorReadiness,websiteService,landing:customerCareLanding,quotes:customerCareQuotes});
 const customerCareScheduler = createCustomerCareScheduler({service:customerCareService,listProjects,authorize:async id=>{const access=await projectAccess.getProjectAccess(id);return access.modules.includes('crm')||access.modules.includes('marketing');},reconcile:customerCareDelivery.reconcile,onError:()=>console.error('Kundenbetreuung: Projektlauf noch offen; gespeicherter Stand bleibt erhalten.')});
 app.get('/api/customer-care/scheduler-status',(_q,r)=>r.json(customerCareScheduler.status()));
@@ -3421,7 +3468,8 @@ app.get('/api/whatsapp/status', (_req, res) => {
   const hub = whatsappHubStatus();
   res.json({
     configured: meta.configured || hub.readReady,
-    liveReady: meta.configured,
+    liveReady: false,
+    readinessDetail: 'Konfiguration allein bestätigt keinen Nachrichtenfluss. Kanalprüfung pro Nummer im WhatsApp-Bereich öffnen.',
     provider: hub.readReady ? 'hub-read-only' : (meta.configured ? 'meta' : 'none'),
     meta,
     hub,
@@ -3443,18 +3491,18 @@ app.get('/api/whatsapp/hub/templates', async (_req, res) => {
   try { res.json(await listWhatsAppHubTemplates()); }
   catch (e) { res.status(502).json({ error: e.message }); }
 });
-app.get('/api/whatsapp/profiles', async (_req, res) => res.json(await listWhatsAppProfiles()));
+app.get('/api/whatsapp/profiles', async (_req, res) => res.json(await whatsAppEngine.listProfiles()));
 app.post('/api/whatsapp/profiles', async (req, res) => {
-  try { res.status(201).json(await createWhatsAppProfile(req.body || {})); }
+  try { res.status(201).json(await whatsAppEngine.saveProfile(null, req.body || {})); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.patch('/api/whatsapp/profiles/:id', async (req, res) => {
   try {
-    const profile = await updateWhatsAppProfile(req.params.id, req.body || {});
+    const profile = await whatsAppEngine.saveProfile(req.params.id, req.body || {});
     res.status(profile ? 200 : 404).json(profile || { error: 'not found' });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
-app.delete('/api/whatsapp/profiles/:id', async (req, res) => res.json({ ok: await deleteWhatsAppProfile(req.params.id) }));
+app.delete('/api/whatsapp/profiles/:id', async (req, res) => { try { res.json(await whatsAppEngine.removeProfile(req.params.id)); } catch(e) { res.status(e.status||400).json({error:e.message}); } });
 app.get('/api/whatsapp/claims', async (req, res) => res.json(await listClaimIntakes({ status: String(req.query?.status || ''), limit: req.query?.limit })));
 app.get('/api/whatsapp/handoffs', async (req, res) => res.json(await listWhatsAppHandoffs({ status: String(req.query?.status || ''), limit: req.query?.limit })));
 app.patch('/api/whatsapp/handoffs/:id', async (req, res) => {
@@ -3464,16 +3512,10 @@ app.patch('/api/whatsapp/handoffs/:id', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/whatsapp/simulate', async (req, res) => {
-  try {
-    res.json(await handleWhatsAppMessage({
-      profileId: String(req.body?.profileId || ''),
-      campaignId: String(req.body?.campaignId || ''),
-      sender: String(req.body?.sender || '491700000000'),
-      text: String(req.body?.message || '').slice(0, 6000),
-      simulate: true,
-    }));
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  try { res.json(await whatsAppEngine.receive({profileId:String(req.body?.profileId||''),sender:String(req.body?.sender||'491700000000'),text:String(req.body?.message||'').slice(0,6000),messageId:String(req.body?.messageId||''),simulate:true},{simulate:true})); }
+  catch (e) { res.status(e.status||400).json({error:e.status?e.message:'Simulation konnte nicht abgeschlossen werden.'}); }
 });
+
 app.get('/api/brands', async (_req, res) => res.json(await brands.listBrands()));
 app.get('/api/brands/:id', async (req, res) => { const b = await brands.getBrand(req.params.id); res.status(b ? 200 : 404).json(b || { error: 'not found' }); });
 app.post('/api/brands', async (req, res) => res.json(await brands.createBrand(req.body || {})));
@@ -3825,6 +3867,7 @@ app.get('/advice', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public',
 app.get('/whatsapp', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'whatsapp.html')));
 app.get('/marketing', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'marketing.html')));
 app.get('/accounting', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'accounting.html')));
+for (const page of ['sales-coach','advice-workbench','tax-preparation','prospecting']) app.get('/'+page,(_q,r)=>r.set('Cache-Control','no-store').sendFile(path.join(__dirnameIva,'public',page+'.html')));
 app.get('/opportunities', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'opportunities.html')));
 app.get('/voice-lab', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'voice-lab.html')));
 app.get('/control', (_req, res) => res.sendFile(path.join(__dirnameIva, 'public', 'control.html')));

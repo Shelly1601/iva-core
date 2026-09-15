@@ -22,6 +22,10 @@ export const PROJECT_MODULES = Object.freeze([
   { id: 'creator', label: 'Produkt-Creator', externalAvailable: false },
   { id: 'marketing', label: 'Marketing', externalAvailable: false },
   { id: 'crm', label: 'CRM', externalAvailable: false },
+  { id: 'advice', label: 'Beratung & Vergleiche', externalAvailable: false },
+  { id: 'sales-coach', label: 'Sales-Coach & Gesprächsnotizen', externalAvailable: false },
+  { id: 'whatsapp', label: 'WhatsApp-Service', externalAvailable: false },
+  { id: 'prospecting', label: 'Leads & Recruiting', externalAvailable: false },
   { id: 'accounting', label: 'Buchhaltung', externalAvailable: false },
   { id: 'energy', label: 'Energie', externalAvailable: false },
 ].map(Object.freeze));
