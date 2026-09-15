@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { requestDisplaySleepAfterRun } from './display-sleep-policy.mjs';
+import { withMacWakeGuard } from './mac-wake-guard.mjs';
 
 function parseArguments(argv) {
   const separator = argv.indexOf('--');
@@ -38,16 +38,6 @@ function killProcessGroup(child, signal) {
   catch { try { child.kill(signal); } catch {} }
 }
 
-async function stopCaffeinate(child) {
-  if (!child || child.exitCode !== null) return;
-  child.kill('SIGTERM');
-  await Promise.race([
-    closeResult(child).catch(() => null),
-    new Promise(resolve => setTimeout(resolve, 1500)),
-  ]);
-  if (child.exitCode === null) child.kill('SIGKILL');
-}
-
 async function main() {
   const options = parseArguments(process.argv.slice(2));
   const startedAt = new Date();
@@ -63,44 +53,36 @@ async function main() {
     return;
   }
 
-  const wakeLock = spawn('/usr/bin/caffeinate', ['-dimsu', '-t', String(options.maxSeconds + 10)], { stdio: 'ignore' });
-  await new Promise((resolve, reject) => {
-    wakeLock.once('spawn', resolve);
-    wakeLock.once('error', reject);
-  }).catch(error => { throw new Error(`Wachschutz konnte nicht gestartet werden: ${error.message}`); });
-
-  const task = spawn(options.command, options.args, {
-    detached: true,
-    env: { ...process.env, IVA_MAC_WAKE_GUARD_ACTIVE: '1' },
-    stdio: 'inherit',
-  });
-  const taskResult = closeResult(task);
   let timedOut = false;
-  let forceTimer = null;
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    console.error(`Workflow-Fenster: Zeitlimit von ${options.maxSeconds} Sekunden erreicht.`);
-    killProcessGroup(task, 'SIGTERM');
-    forceTimer = setTimeout(() => killProcessGroup(task, 'SIGKILL'), 5000);
-    forceTimer.unref?.();
-  }, options.maxSeconds * 1000);
-  timeout.unref?.();
+  let displaySleepDecision = { requested: false, reason: 'inherited-wake-guard' };
+  const result = await withMacWakeGuard(async () => {
+    const task = spawn(options.command, options.args, {
+      detached: true,
+      env: { ...process.env, IVA_MAC_WAKE_GUARD_ACTIVE: '1' },
+      stdio: 'inherit',
+    });
+    const taskResult = closeResult(task);
+    let forceTimer = null;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      console.error(`Workflow-Fenster: Zeitlimit von ${options.maxSeconds} Sekunden erreicht.`);
+      killProcessGroup(task, 'SIGTERM');
+      forceTimer = setTimeout(() => killProcessGroup(task, 'SIGKILL'), 5000);
+      forceTimer.unref?.();
+    }, options.maxSeconds * 1000);
+    timeout.unref?.();
 
-  let result;
-  let displaySleepDecision = { requested: false, reason: 'disabled' };
-  try {
-    result = await taskResult;
-  } finally {
-    clearTimeout(timeout);
-    if (forceTimer) clearTimeout(forceTimer);
-    await stopCaffeinate(wakeLock);
-    if (options.sleepDisplays) {
-      displaySleepDecision = await requestDisplaySleepAfterRun().catch(error => {
-        console.error(`Workflow-Fenster: Display-Regel konnte nicht geprüft werden: ${error.message}`);
-        return { requested: false, reason: 'policy-check-failed' };
-      });
+    try {
+      return await taskResult;
+    } finally {
+      clearTimeout(timeout);
+      if (forceTimer) clearTimeout(forceTimer);
     }
-  }
+  }, {
+    maxSeconds: options.maxSeconds + 10,
+    sleepDisplays: options.sleepDisplays,
+    onDisplaySleepDecision: decision => { displaySleepDecision = decision; },
+  });
 
   const summary = {
     status: timedOut ? 'timed_out' : result.code === 0 ? 'completed' : 'failed',

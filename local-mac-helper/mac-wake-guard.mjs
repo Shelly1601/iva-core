@@ -9,6 +9,7 @@ import { DISPLAY_SLEEP_POLICY, requestDisplaySleepAfterRun } from './display-sle
 const execFileAsync = promisify(execFile);
 const WAKE_ROOT = process.env.IVA_MAC_WAKE_ROOT || path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper', 'wake-guards');
 const RELEASE_LOCK = path.join(WAKE_ROOT, '.release-lock');
+const DISPLAY_SLEPT = path.join(WAKE_ROOT, '.display-slept');
 
 function processIsAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 1) return false;
@@ -19,12 +20,18 @@ async function createWakeLease() {
   await mkdir(WAKE_ROOT, { recursive: true, mode: 0o700 });
   const id = crypto.randomUUID();
   const file = path.join(WAKE_ROOT, `${id}.json`);
-  await writeFile(file, `${JSON.stringify({ id, pid: process.pid, startedAt: new Date().toISOString() })}\n`, { mode: 0o600 });
+  if (!await acquireReleaseLock()) throw new Error('Display-Koordination ist noch belegt.');
+  try {
+    await writeFile(file, `${JSON.stringify({ id, pid: process.pid, startedAt: new Date().toISOString() })}\n`, { mode: 0o600 });
+    await unlink(DISPLAY_SLEPT).catch(error => { if (error.code !== 'ENOENT') throw error; });
+  } finally { await rmdir(RELEASE_LOCK).catch(() => {}); }
   return file;
 }
 
 async function acquireReleaseLock() {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  // The final ioreg + pmset check has two bounded 10-second calls. A newly
+  // arriving task must be allowed to wait for it rather than fail after 4 seconds.
+  for (let attempt = 0; attempt < 400; attempt += 1) {
     try {
       await mkdir(RELEASE_LOCK, { mode: 0o700 });
       return true;
@@ -51,19 +58,33 @@ async function activeWakeLeases() {
   return active;
 }
 
-async function releaseWakeLease(file, { sleepDisplays, exec, displaySleepOptions }) {
+async function releaseWakeLease(file, { sleepDisplays, exec, displaySleepOptions, onDisplaySleepDecision }) {
   const locked = await acquireReleaseLock();
   if (!locked) return;
   try {
     await unlink(file).catch(() => {});
-    // Ein gerade gestarteter, abgekoppelter Codex-Lauf bekommt kurz Zeit, seine
-    // eigene Lease anzulegen. So flackert das Display zwischen Übergabe und Lauf nicht.
-    await new Promise(resolve => setTimeout(resolve, 700));
-    const active = await activeWakeLeases();
-    if (sleepDisplays && active.length === 0) await requestDisplaySleepAfterRun({ ...displaySleepOptions, exec });
   } finally {
     await rmdir(RELEASE_LOCK).catch(() => {});
   }
+  // Release the mutex first, so a just-started child can actually register its
+  // lease during this handoff interval.
+  await new Promise(resolve => setTimeout(resolve, 700));
+  if (!sleepDisplays) return;
+  const decision = await requestDisplaySleepAfterRun({
+    ...displaySleepOptions,
+    exec,
+    finalize: async action => {
+      if (!await acquireReleaseLock()) return { requested: false, reason: 'display-coordinator-busy' };
+      try {
+        if ((await activeWakeLeases()).length) return { requested: false, reason: 'other-ui-work' };
+        if (await stat(DISPLAY_SLEPT).catch(() => null)) return { requested: false, reason: 'already-requested' };
+        const result = await action();
+        if (result.requested) await writeFile(DISPLAY_SLEPT, `${new Date().toISOString()}\n`, { mode: 0o600 });
+        return result;
+      } finally { await rmdir(RELEASE_LOCK).catch(() => {}); }
+    },
+  });
+  onDisplaySleepDecision(decision);
 }
 
 function closeResult(child) {
@@ -87,6 +108,7 @@ export async function withMacWakeGuard(task, {
   sleepDisplays = true,
   displaySleepOptions = {},
   onCleanupWarning = message => console.warn(message),
+  onDisplaySleepDecision = () => {},
 } = {}) {
   if (typeof task !== 'function') throw new Error('Mac-Wachschutz benötigt einen lokalen Arbeitslauf.');
   if (process.env.IVA_MAC_WAKE_GUARD_ACTIVE === '1') return task();
@@ -112,7 +134,7 @@ export async function withMacWakeGuard(task, {
     await stopProcess(wakeLock).catch(error => {
       try { onCleanupWarning(`IVA-Wachschutz: ${error.message}`); } catch {}
     });
-    await releaseWakeLease(leaseFile, { sleepDisplays, exec, displaySleepOptions })
+    await releaseWakeLease(leaseFile, { sleepDisplays, exec, displaySleepOptions, onDisplaySleepDecision })
       .catch(error => { try { onCleanupWarning(`Display konnte nach dem IVA-Lauf nicht sauber freigegeben werden: ${error.message}`); } catch {} });
   }
 }

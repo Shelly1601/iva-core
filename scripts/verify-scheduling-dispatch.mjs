@@ -207,7 +207,7 @@ const wakeOptions = {
     if (command === '/usr/sbin/ioreg') return { stdout: '"HIDIdleTime" = 7200000000000' };
     throw new Error('Fixture pmset Fehler');
   },
-  displaySleepOptions: { now: new Date(2026, 7, 30, 23, 30), platform: 'darwin' },
+  displaySleepOptions: { now: new Date(2026, 7, 30, 23, 30), platform: 'darwin', assessWork: async () => ({ busy: false }) },
   onCleanupWarning: warning => warnings.push(warning),
 };
 const inheritedWakeGuard = process.env.IVA_MAC_WAKE_GUARD_ACTIVE;
