@@ -1,3 +1,11 @@
+import { createProjectProviderStore, registerProjectProviderRoutes } from './integrations/project-providers.js';
+import { createProjectMarketingService } from './marketing/project-service.js';
+import { registerProjectMarketingRoutes } from './marketing/project-routes.js';
+import { verifyHiggsfieldConnection } from './marketing/higgsfield.js';
+import { readMediaEvidence } from './integrations/media-evidence.js';
+import { searchEvidence } from './opportunities/evidence.js';
+import { createOpportunityJobs } from './opportunities/jobs.js';
+import { createOpportunityScheduler } from './opportunities/scheduler.js';
 import { createProjectAccessStore } from './access/store.js';
 import { registerProjectAccessAdminRoutes, registerPortalRoutes } from './access/routes.js';
 import { createWebsiteService } from './websites/service.js';
@@ -42,7 +50,7 @@ import { mailsSkill } from './skills/mails.js';
 import { crmSkill } from './skills/crm.js';
 import { pipedriveSkill } from './skills/pipedrive.js';
 import { airtableSkill } from './skills/airtable.js';
-import { marketingSkill } from './skills/marketing.js';
+import { marketingSkill, projectMarketingSkill } from './skills/marketing.js';
 import { researchSkill } from './skills/research.js';
 import { workspacesSkill } from './skills/workspaces.js';
 import { qonektoSkill } from './skills/qonekto.js';
@@ -380,6 +388,17 @@ app.use(express.json({
 createPublicScheduling().registerRoutes(app);
 
 const projectConnections = createProjectConnectionStore({dataDir:DATA_DIR,env:process.env,getProject});
+const projectProviders = createProjectProviderStore({dataDir:DATA_DIR,env:process.env,getProject,verifiers:{higgsfield:verifyHiggsfieldConnection}});
+async function requireMarketingProject(projectId){
+  const project=await getProject(projectId);if(!project)return null;
+  const config=await projectAccess.getProjectAccess(projectId);
+  if(!config.modules.includes('marketing'))throw Object.assign(new Error('Marketing ist für dieses Projekt nicht freigegeben.'),{status:403,code:'MARKETING_DISABLED'});
+  return project;
+}
+const projectMarketing = createProjectMarketingService({dataDir:DATA_DIR,getProject:requireMarketingProject,listProjects:async()=>{const projects=await listProjects();const enabled=await Promise.all(projects.map(async p=>(await projectAccess.getProjectAccess(p.id)).modules.includes('marketing')?p:null));return enabled.filter(Boolean);},providers:projectProviders,readMediaEvidence,search:searchEvidence});
+const opportunityJobs = createOpportunityJobs({dataDir:DATA_DIR,handlers:{'check-link':(input,context)=>checkOpportunityLink(input,context),scout:(input,context)=>runOpportunityScout({trigger:'manual'},context),'market-research':(input,context)=>runOpportunityMarketResearch(input,context)}});
+const opportunityScheduler = createOpportunityScheduler({dataDir:DATA_DIR,getSettings:getOpportunitySettings,runScout:runOpportunityScout,autoStart:true});
+
 const MEM_FILE = DATA_DIR + '/memory.json';
 const tooOftenReplyStore = createTooOftenReplyStore({ dataDir: DATA_DIR });
 const investment = createInvestmentModule({ dataDir: DATA_DIR });
@@ -1025,6 +1044,14 @@ async function contextToolMap(agent, {sessionId='default',runId='',projectId='',
     const boundInstagram=Object.fromEntries(Object.entries(instagramSkill(createInstagramConnector({env}))).map(([name,value])=>[name,{...value,projectId,iva:{skillId:'instagram'}}]));
     const projectTools=projectSkill({projectId,getProject,readProjectFile,addProjectNote,connections:projectConnections});
     all=filterProjectTools(all,{projectId,projectTools,instagramTools:boundInstagram});
+    if(agent.allowedSkills.includes('marketing')){
+      const access=await projectAccess.getProjectAccess(projectId);
+      if(access.modules.includes('marketing')){
+        for(const [name,value]of Object.entries(projectMarketingSkill({service:projectMarketing,projectId})))all[name]={...value,projectId,iva:{...value.iva,skillId:'marketing'}};
+        env={...env,...await projectProviders.resolveEnv(projectId,'meta-ads')};
+        all.getMetaAdsInsights={...tool({description:'Liest Werbekennzahlen ausschließlich aus dem im aktiven Projekt verbundenen Meta-Werbekonto. Keine Kampagnen- oder Budgetänderung.',parameters:z.object({datePreset:z.enum(['yesterday','today','last_7d','last_30d']).optional(),level:z.enum(['account','campaign','adset','ad']).optional(),limit:z.number().int().min(1).max(100).optional()}),execute:async input=>{await requireMarketingProject(projectId);return projectProviders.readMetaAdsInsights(projectId,input);}}),projectId,iva:{skillId:'toolRouting'}};
+      }
+    }
     // Shared compute is available, but no private global account is inherited.
     env={...env,TAVILY_API_KEY:process.env.TAVILY_API_KEY,FAL_KEY:process.env.FAL_KEY};
   }
@@ -1271,13 +1298,8 @@ async function sendMarketingMorningReport() {
 }
 
 async function sendWeeklyOpportunityPitch() {
-  const settings = await getOpportunitySettings();
-  if (!settings.weeklyEnabled) return { status: 'skipped', summary: 'Wochenlauf ist im Chancenradar-Suchprofil ausgeschaltet.' };
-  if (!process.env.APIFY_TOKEN) return { status: 'blocked', summary: 'Chancenradar kann ohne APIFY_TOKEN nicht automatisch laufen.', error: 'APIFY_TOKEN fehlt.' };
-  const result = await runOpportunityScout({ trigger: 'weekly' });
-  const mem = await loadMemory();
-  if (mem.chatId) await sendTelegram(mem.chatId, result.pitch);
-  return { ...result, summary: mem.chatId ? 'Chancenradar abgeschlossen und Wochenpitch zugestellt.' : 'Chancenradar abgeschlossen; Telegram-Chat-ID fehlt.' };
+  // The persistent scheduler owns the configured cadence and deduplication.
+  return opportunityScheduler.tick();
 }
 
 app.post('/telegram', async (req, res) => {
@@ -1818,6 +1840,8 @@ app.use('/api', (req, res, next) => {
 });
 
 investment.registerRoutes(app);
+registerProjectProviderRoutes(app,projectProviders);
+registerProjectMarketingRoutes(app,{service:projectMarketing,authorizeProject:requireMarketingProject});
 registerWebsiteRoutes(app, websiteService);
 registerProjectAccessAdminRoutes(app,{access:projectAccess,coreOrigin});
 
@@ -3271,7 +3295,10 @@ app.post('/api/recruiting/interview-guide', (req, res) => {
 });
 
 // --- Chancen-Agent: Instagram-Signale -> Quellencheck -> Potenzialranking ---
-app.get('/api/opportunities/status', async (_req, res) => res.json(await opportunityRadarStatus()));
+app.get('/api/opportunities/status', async (_req, res) => {try{res.json({...await opportunityRadarStatus(),schedule:await opportunityScheduler.status()});}catch(error){res.status(503).json({ready:false,error:'Der Radarstatus konnte nicht gelesen werden.'});}});
+app.post('/api/opportunities/jobs',async(req,res)=>{try{res.status(202).json({job:await opportunityJobs.submit(req.body?.kind,req.body?.input||{})});}catch(error){res.status(error.status||400).json({error:error.message});}});
+app.get('/api/opportunities/jobs',async(_req,res)=>{try{res.json({jobs:await opportunityJobs.list()});}catch{res.status(503).json({error:'Die Aufträge konnten nicht gelesen werden.'});}});
+app.get('/api/opportunities/jobs/:id',async(req,res)=>{try{const job=await opportunityJobs.get(req.params.id);res.status(job?200:404).json(job?{job}:{error:'Auftrag nicht gefunden.'});}catch{res.status(503).json({error:'Der Auftrag konnte nicht gelesen werden.'});}});
 app.get('/api/opportunities/settings', async (_req, res) => res.json(await getOpportunitySettings()));
 app.patch('/api/opportunities/settings', async (req, res) => {
   try { res.json(await updateOpportunitySettings(req.body || {})); }

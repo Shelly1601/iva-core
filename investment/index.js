@@ -2,6 +2,7 @@ import { createInvestmentStore } from './store.js';
 import { analyzePortfolio, LEVERAGED_ASSET_TYPES } from './risk.js';
 import { createSaxoClient } from './saxo.js';
 import { createInvestmentIntelligence } from './intelligence.js';
+import { createInvestmentMonitor } from './monitor.js';
 
 const clean = (value, max = 2000) => String(value ?? '').trim().slice(0, max);
 
@@ -26,6 +27,7 @@ export function createInvestmentModule({ dataDir = process.env.DATA_DIR || '/dat
   const store = createInvestmentStore({ dataDir });
   const saxo = createSaxoClient({ dataDir, env, fetchImpl });
   const intelligence = createInvestmentIntelligence({ saxo, store });
+  const monitor = createInvestmentMonitor({ dataDir, saxo, store });
   let monitorRunning = false;
 
   function berlinClock() {
@@ -57,15 +59,16 @@ export function createInvestmentModule({ dataDir = process.env.DATA_DIR || '/dat
   monitorStartup.unref?.();
 
   async function status(options = {}) {
-    const [connection, local] = await Promise.all([saxo.status(options), store.summary()]);
+    const [connection, local, monitoring] = await Promise.all([saxo.status(options), store.summary(), monitor.status()]);
     return {
       connection,
       local,
+      monitoring: { config: monitoring.config, connection: monitoring.connection, transport: monitoring.transport, liveOrderExecutionEnabled: false },
       capabilities: [
         'Saxo OAuth', 'Depot und Konten lesen', 'Performance', 'Positions- und Konzentrationsrisiken',
         'Multi-Timeframe-Chartanalyse und Mustererkennung', 'Automatischer Chancenmonitor nach Mandats-Takt', 'Quellengepruefter Investment-Research',
         'Chancen-Ranking der Watchlist', 'Monatliches Investment-Mandat', 'Prognose- und Kalibrierungsjournal',
-        'Watchlist', 'Orderentwuerfe', 'Saxo Order-Precheck',
+        'Watchlist', 'Orderentwuerfe', 'Saxo Order-Precheck', 'REST-Kursmonitor mit Kursalter', 'Lokales Paper-Depot mit harten Kapitalgrenzen und Fehlerjournal',
       ],
       safeguards: [
         connection.saxoAppTradingPermission
@@ -196,8 +199,8 @@ export function createInvestmentModule({ dataDir = process.env.DATA_DIR || '/dat
       });
     });
 
-    app.get('/api/investment/status', async (_req, res) => {
-      try { res.json(await status({ probe: false })); }
+    app.get('/api/investment/status', async (req, res) => {
+      try { res.json(await status({ probe: req.query?.probe === 'true' })); }
       catch (error) { res.status(500).json({ error: error.message }); }
     });
     app.get('/api/investment/saxo/auth-url', (_req, res) => {
@@ -206,7 +209,7 @@ export function createInvestmentModule({ dataDir = process.env.DATA_DIR || '/dat
     });
     app.post('/api/investment/saxo/disconnect', async (req, res) => {
       if (req.body?.confirmation !== 'SAXO VERBINDUNG TRENNEN') return res.status(400).json({ error: 'Exakte Bestaetigung fehlt.' });
-      try { res.json(await saxo.disconnect()); }
+      try { await monitor.pause(); res.json(await saxo.disconnect()); }
       catch (error) { res.status(500).json({ error: error.message }); }
     });
     app.get('/api/investment/portfolio', async (_req, res) => {
@@ -295,6 +298,16 @@ export function createInvestmentModule({ dataDir = process.env.DATA_DIR || '/dat
       } catch (error) { res.status(400).json({ error: error.message }); }
     });
     app.get('/api/investment/audit', async (req, res) => res.json({ items: await store.listAudit({ limit: req.query?.limit }) }));
+    const monitoringRoute = handler => async (req, res) => {
+      res.set('Cache-Control', 'no-store');
+      try { res.json(await handler(req)); }
+      catch (error) { const status = Number(error.status) || 400; res.status(status).json({ error: status >= 500 ? 'Monitoring momentan nicht verfügbar. Bitte erneut prüfen.' : error.message }); }
+    };
+    app.get('/api/investment/monitor', monitoringRoute(() => monitor.status()));
+    app.patch('/api/investment/monitor', monitoringRoute(req => monitor.configure(req.body || {}, { actor: 'owner' })));
+    app.post('/api/investment/monitor/refresh', monitoringRoute(() => monitor.poll({ manual: true })));
+    app.post('/api/investment/monitor/paper-deposits', monitoringRoute(req => monitor.deposit(req.body || {})));
+    app.post('/api/investment/monitor/journal/:id/review', monitoringRoute(req => monitor.review(req.params.id, req.body || {})));
   }
 
   return {
@@ -320,5 +333,8 @@ export function createInvestmentModule({ dataDir = process.env.DATA_DIR || '/dat
     calibrationSummary: store.calibrationSummary,
     listOrderDrafts: store.listOrderDrafts,
     createOrderDraft: store.createOrderDraft,
+    getMonitoring: monitor.status,
+    refreshMonitoring: () => monitor.poll({ manual: true }),
+    close: () => { clearInterval(monitorTimer); clearTimeout(monitorStartup); monitor.close(); },
   };
 }

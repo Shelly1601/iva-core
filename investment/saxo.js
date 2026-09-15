@@ -30,11 +30,10 @@ function decryptJson(payload, secret) {
   return JSON.parse(Buffer.concat([decipher.update(Buffer.from(payload.ciphertext, 'base64url')), decipher.final()]).toString('utf8'));
 }
 
-function safeErrorPayload(text) {
-  try {
-    const parsed = JSON.parse(text);
-    return clean(parsed?.ErrorInfo?.Message || parsed?.Message || parsed?.error_description || parsed?.error || text, 500);
-  } catch { return clean(text, 500); }
+function saxoError(status, response) {
+  const retry = Number(response?.headers?.get('retry-after') || response?.headers?.get('x-ratelimit-session-reset'));
+  const message = status === 401 ? 'Saxo-Sitzung abgelaufen. Bitte erneut verbinden.' : status === 403 ? 'Saxo-Zugriff nicht freigegeben. App- und Marktdatenrechte bei Saxo prüfen.' : status === 429 ? 'Saxo begrenzt die Abfragen. IVA wartet vor dem nächsten Versuch.' : `Saxo konnte die Anfrage nicht abschließen (HTTP ${status}).`;
+  return Object.assign(new Error(message), { status: status === 429 ? 429 : 503, providerStatus: status, retryAfterSeconds: Number.isFinite(retry) && retry > 0 ? Math.min(retry, 3600) : 60 });
 }
 
 export function createSaxoClient({ dataDir = process.env.DATA_DIR || '/data', env = process.env, fetchImpl = globalThis.fetch } = {}) {
@@ -47,6 +46,10 @@ export function createSaxoClient({ dataDir = process.env.DATA_DIR || '/data', en
   const saxoAppTradingPermission = clean(env.SAXO_TRADING_ENABLED, 10).toLowerCase() === 'true';
   const tokenFile = path.join(dataDir, `saxo-${environment}-oauth.enc.json`);
   let refreshQueue = Promise.resolve();
+  let tokenWriteQueue = Promise.resolve();
+  let sessionGeneration = 0;
+  const pendingStates = new Map();
+  let lastProbe = null;
 
   const missing = () => [
     !appKey && 'SAXO_APP_KEY',
@@ -61,17 +64,28 @@ export function createSaxoClient({ dataDir = process.env.DATA_DIR || '/data', en
     catch { return null; }
   }
 
-  async function writeToken(token) {
-    await fs.mkdir(dataDir, { recursive: true });
-    const temporary = `${tokenFile}.${process.pid}.tmp`;
-    await fs.writeFile(temporary, JSON.stringify(encryptJson(token, tokenKey)), { mode: 0o600 });
-    await fs.rename(temporary, tokenFile);
+  async function writeToken(token, generation) {
+    const pending = tokenWriteQueue.catch(() => {}).then(async () => {
+      if (generation !== sessionGeneration) throw new Error('Saxo-Verbindung wurde zwischenzeitlich getrennt.');
+      await fs.mkdir(dataDir, { recursive: true, mode: 0o700 });
+      const temporary = `${tokenFile}.${crypto.randomUUID()}.tmp`;
+      try {
+        await fs.writeFile(temporary, JSON.stringify(encryptJson(token, tokenKey)), { mode: 0o600, flag: 'wx' });
+        if (generation !== sessionGeneration) throw new Error('Saxo-Verbindung wurde zwischenzeitlich getrennt.');
+        await fs.rename(temporary, tokenFile);
+      } finally { await fs.rm(temporary, { force: true }); }
+    });
+    tokenWriteQueue = pending.catch(() => {});
+    await pending;
   }
 
   function signedState() {
     if (missing().length) throw new Error(`Saxo ist noch nicht konfiguriert: ${missing().join(', ')}`);
     const payload = Buffer.from(JSON.stringify({ nonce: crypto.randomBytes(18).toString('base64url'), issuedAt: Date.now(), environment })).toString('base64url');
     const signature = crypto.createHmac('sha256', tokenKey).update(payload).digest('base64url');
+    for (const [key, timestamp] of pendingStates) if (Date.now() - timestamp > 10 * 60_000) pendingStates.delete(key);
+    if (pendingStates.size >= 20) pendingStates.delete(pendingStates.keys().next().value);
+    pendingStates.set(payload, Date.now());
     return `${payload}.${signature}`;
   }
 
@@ -82,7 +96,8 @@ export function createSaxoClient({ dataDir = process.env.DATA_DIR || '/data', en
     const actual = Buffer.from(supplied, 'base64url');
     if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) throw new Error('Saxo-OAuth-State ist ungueltig.');
     const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    if (parsed.environment !== environment || Date.now() - Number(parsed.issuedAt) > 10 * 60_000) throw new Error('Saxo-OAuth-State ist abgelaufen.');
+    if (parsed.environment !== environment || !pendingStates.has(payload) || Date.now() - Number(parsed.issuedAt) > 10 * 60_000 || Number(parsed.issuedAt) > Date.now() + 10_000) throw new Error('Saxo-OAuth-State ist abgelaufen oder wurde bereits verwendet. Bitte Verbindung neu starten.');
+    pendingStates.delete(payload);
     return parsed;
   }
 
@@ -104,17 +119,21 @@ export function createSaxoClient({ dataDir = process.env.DATA_DIR || '/data', en
         Accept: 'application/json',
       },
       body: new URLSearchParams(body),
+      signal: AbortSignal.timeout(15_000), redirect: 'error',
     });
     const text = await response.text();
-    if (!response.ok) throw new Error(`Saxo-Tokenfehler (${response.status}): ${safeErrorPayload(text)}`);
-    const token = JSON.parse(text);
+    if (!response.ok) throw saxoError(response.status, response);
+    let token;
+    try { token = JSON.parse(text); } catch { throw new Error('Saxo hat keine lesbare Sitzung geliefert. Bitte neu verbinden.'); }
+    if (typeof token.access_token !== 'string' || !token.access_token || typeof token.refresh_token !== 'string' || !token.refresh_token || !Number.isFinite(Number(token.expires_in)) || !(Number(token.expires_in) > 0)) throw new Error('Saxo hat keine vollständige Sitzung geliefert. Bitte neu verbinden.');
+    const refreshSeconds = Number(token.refresh_token_expires_in);
     const now = Date.now();
     return {
       accessToken: token.access_token,
       refreshToken: token.refresh_token,
       tokenType: token.token_type || 'Bearer',
-      expiresAt: now + Math.max(60, Number(token.expires_in) || 1200) * 1000,
-      refreshExpiresAt: now + Math.max(60, Number(token.refresh_token_expires_in) || 2400) * 1000,
+      expiresAt: now + Number(token.expires_in) * 1000,
+      refreshExpiresAt: Number.isFinite(refreshSeconds) && refreshSeconds > 0 ? now + refreshSeconds * 1000 : now,
       environment,
       updatedAt: new Date(now).toISOString(),
     };
@@ -122,9 +141,10 @@ export function createSaxoClient({ dataDir = process.env.DATA_DIR || '/data', en
 
   async function completeOAuth({ code, state }) {
     verifyState(state);
+    const generation = sessionGeneration;
     if (!clean(code, 2000)) throw new Error('Saxo-Autorisierungscode fehlt.');
     const token = await tokenRequest({ grant_type: 'authorization_code', code: clean(code, 2000), redirect_uri: redirectUri });
-    await writeToken(token);
+    await writeToken(token, generation);
     return { connected: true, environment, expiresAt: token.expiresAt, refreshExpiresAt: token.refreshExpiresAt };
   }
 
@@ -137,8 +157,9 @@ export function createSaxoClient({ dataDir = process.env.DATA_DIR || '/data', en
       const latest = await readToken();
       if (latest && Number(latest.expiresAt) > Date.now() + 60_000) { refreshed = latest; return; }
       if (!latest?.refreshToken || Number(latest.refreshExpiresAt) <= Date.now()) throw new Error('Die Saxo-Sitzung ist abgelaufen. Bitte neu verbinden.');
+      const generation = sessionGeneration;
       refreshed = await tokenRequest({ grant_type: 'refresh_token', refresh_token: latest.refreshToken, redirect_uri: redirectUri });
-      await writeToken(refreshed);
+      await writeToken(refreshed, generation);
     });
     refreshQueue = job.catch(() => {});
     await job;
@@ -146,43 +167,62 @@ export function createSaxoClient({ dataDir = process.env.DATA_DIR || '/data', en
   }
 
   async function request(apiPath, { method = 'GET', body } = {}) {
+    // This client has no order execution, transfer or session-upgrade path.
+    // Keep the existing, manually invoked order precheck as the only API write.
+    const target = String(apiPath).replace(/^\/+/, '');
+    if (/^[a-z]+:/i.test(target) || /[\\\x00-\x20]/.test(target) || target.split('?')[0].split('/').includes('..') || (method !== 'GET' && !(method === 'POST' && target === 'trade/v2/orders/precheck'))) throw new Error('Diese Saxo-Aktion ist in IVA gesperrt. Keine Orders, Einzahlungen oder Änderungen der Session-Rechte.');
     const token = await validToken();
-    const response = await fetchImpl(`${endpoints.apiBaseUrl}/${String(apiPath).replace(/^\/+/, '')}`, {
+    const response = await fetchImpl(`${endpoints.apiBaseUrl}/${target}`, {
       method,
       headers: { Authorization: `${token.tokenType} ${token.accessToken}`, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(15_000), redirect: 'error',
     });
     const text = await response.text();
-    if (!response.ok) throw new Error(`Saxo OpenAPI (${response.status}): ${safeErrorPayload(text)}`);
-    return text ? JSON.parse(text) : {};
+    if (!response.ok) throw saxoError(response.status, response);
+    if (!text) return {};
+    try { return JSON.parse(text); } catch { throw new Error('Saxo hat keine lesbare API-Antwort geliefert.'); }
   }
 
   async function status({ probe = false } = {}) {
     const problems = missing();
     const token = await readToken();
+    const usable = Boolean(token && (Number(token.expiresAt) > Date.now() || token.refreshToken && Number(token.refreshExpiresAt) > Date.now()));
     const result = {
       provider: 'Saxo OpenAPI', environment, configured: problems.length === 0,
-      authorized: Boolean(token), ready: problems.length === 0 && Boolean(token), missing: problems,
+      authorized: usable, ready: problems.length === 0 && usable, needsReauthorization: Boolean(token) && !usable, missing: problems,
       expiresAt: token?.expiresAt || null, refreshExpiresAt: token?.refreshExpiresAt || null,
       saxoAppTradingPermission,
       tradingEnabled: false,
       orderExecutionEnabled: false,
       mode: 'read-analyze-precheck',
+      transport: 'REST', streamingConnected: false, lastProbe,
+      marketDataNotice: 'API-Marktdaten müssen bei Saxo freigegeben sein. Daten können fehlen, verzögert oder indikativ sein; SIM ist keine echte Orderausführung.',
+      documentation: { setup: 'https://www.developer.saxo/openapi/learn/oauth-authorization-code-grant', marketData: 'https://www.developer.saxo/excel/user-guide/enabling-market-data', streaming: 'https://www.developer.saxo/openapi/learn/streaming' },
       setup: environment === 'sim'
         ? 'SIM-App testen; danach LIVE-App bei Saxo beantragen.'
-        : 'LIVE-App verbunden. Orderausfuehrung bleibt in IVA weiterhin gesperrt.',
+        : 'LIVE-Umgebung ausgewählt. Orderausfuehrung bleibt in IVA weiterhin gesperrt.',
     };
     if (probe && result.ready) {
       try {
         const user = await request('port/v1/users/me');
         result.reachable = user.Active === true;
         result.connectedName = clean(user.Name, 200);
-      } catch (error) { result.reachable = false; result.error = error.message; }
+        result.marketDataTermsAccepted = user.MarketDataViaOpenApiTermsAccepted === true;
+        lastProbe = { checkedAt: new Date().toISOString(), reachable: result.reachable, marketDataTermsAccepted: result.marketDataTermsAccepted };
+      } catch (error) {
+        result.reachable = false; result.error = 'Saxo ist nicht erreichbar oder die Sitzung muss erneuert werden.';
+        if (error.providerStatus === 401) { result.needsReauthorization = true; result.ready = false; result.authorized = false; }
+        lastProbe = { checkedAt: new Date().toISOString(), reachable: false };
+      }
+      result.lastProbe = lastProbe;
     }
     return result;
   }
 
   async function disconnect() {
+    sessionGeneration++; pendingStates.clear();
+    await tokenWriteQueue;
     await fs.rm(tokenFile, { force: true });
     return { connected: false, environment };
   }
@@ -262,6 +302,35 @@ export function createSaxoClient({ dataDir = process.env.DATA_DIR || '/data', en
     return request(`chart/v3/charts?${params}`);
   }
 
+  async function quotes(instruments = []) {
+    if (!Array.isArray(instruments) || instruments.length > 20) throw new Error('Das Kursmonitoring unterstützt bis zu 20 Watchlist-Werte.');
+    const groups = new Map();
+    for (const item of instruments) {
+      if (!Number.isSafeInteger(item.uic) || item.uic <= 0 || !['Stock', 'Etf', 'MutualFund', 'Bond'].includes(item.assetType)) throw new Error('Für die Kursabfrage fehlt ein unterstütztes, eindeutig identifiziertes Instrument.');
+      const list = groups.get(item.assetType) || []; list.push(item); groups.set(item.assetType, list);
+    }
+    const rows = [];
+    for (const [assetType, items] of groups) {
+      const params = new URLSearchParams({ AssetType: assetType, Uics: [...new Set(items.map(item => item.uic))].join(','), FieldGroups: 'Quote,DisplayAndFormat,PriceInfo,PriceInfoDetails,InstrumentPriceDetails' });
+      const result = await request(`trade/v1/infoprices/list?${params}`);
+      const receivedAt = new Date().toISOString();
+      for (const item of items) {
+        const raw = (result.Data || []).find(row => Number(row.Uic) === item.uic && row.AssetType === assetType);
+        const quote = raw?.Quote || {};
+        const number = value => value !== null && value !== '' && value !== undefined && Number.isFinite(Number(value)) ? Number(value) : null;
+        const stamp = Date.parse(raw?.LastUpdated);
+        rows.push({ key: `${assetType}:${item.uic}`, uic: item.uic, assetType, symbol: clean(raw?.DisplayAndFormat?.Symbol || item.symbol, 120), currency: clean(raw?.DisplayAndFormat?.Currency || item.currency, 3).toUpperCase(),
+          bid: number(quote.Bid), ask: number(quote.Ask), mid: number(quote.Mid), last: number(raw?.PriceInfoDetails?.LastTraded),
+          updatedAt: Number.isFinite(stamp) && stamp > Date.UTC(2000, 0, 1) ? new Date(stamp).toISOString() : null, receivedAt,
+          delayedByMinutes: number(quote.DelayedByMinutes), priceTypeBid: clean(quote.PriceTypeBid, 50), priceTypeAsk: clean(quote.PriceTypeAsk, 50),
+          marketOpen: typeof raw?.InstrumentPriceDetails?.IsMarketOpen === 'boolean' ? raw.InstrumentPriceDetails.IsMarketOpen : null,
+          errorCode: clean(quote.ErrorCode || (raw ? '' : 'NoData'), 80), environment, source: 'Saxo OpenAPI InfoPrices',
+        });
+      }
+    }
+    return rows;
+  }
+
   async function precheckOrder(draft) {
     if (!draft?.accountKey) throw new Error('Fuer den Saxo-Precheck muss ein Konto ausgewaehlt sein.');
     const body = {
@@ -280,7 +349,7 @@ export function createSaxoClient({ dataDir = process.env.DATA_DIR || '/data', en
     return request('trade/v2/orders/precheck', { method: 'POST', body });
   }
 
-  return { status, createAuthUrl, completeOAuth, disconnect, portfolio, searchInstruments, instrumentDetails, chart, precheckOrder, request };
+  return { status, createAuthUrl, completeOAuth, disconnect, portfolio, searchInstruments, instrumentDetails, chart, quotes, precheckOrder, request };
 }
 
 export { environmentConfig };

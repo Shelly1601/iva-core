@@ -3,7 +3,7 @@ const token = () => localStorage.getItem('iva_token') || '';
 const state = {
   status: null, portfolio: null, settings: null, mandate: null, readiness: null, knowledge: null,
   watchlist: [], drafts: [], analyses: [], journal: [], calibration: null, opportunities: [],
-  selectedInstrument: null, analysisInstrument: null, currentAnalysis: null,
+  selectedInstrument: null, analysisInstrument: null, currentAnalysis: null, monitoring: null,
 };
 const esc = value => String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
 const euro = (value, currency = 'EUR') => new Intl.NumberFormat('de-DE', { style: 'currency', currency: currency || 'EUR', maximumFractionDigits: 2 }).format(Number(value) || 0);
@@ -36,15 +36,15 @@ function renderMetrics() {
 function renderConnection() {
   const c = state.status?.connection || {};
   $('connect').hidden = !c.configured || c.authorized;
-  const badge = c.authorized ? `<span class="badge green"><i class="dot"></i>${esc(c.environment)} verbunden</span>` : c.configured ? '<span class="badge yellow"><i class="dot"></i>Verbindung offen</span>' : '<span class="badge red"><i class="dot"></i>Setup fehlt</span>';
+  const badge = c.reachable === false ? '<span class="badge red"><i class="dot"></i>Verbindung nicht bestätigt</span>' : c.authorized ? `<span class="badge ${c.reachable === true ? 'green' : 'yellow'}"><i class="dot"></i>${esc(c.environment)} ${c.reachable === true ? 'erreichbar' : 'autorisiert · ungeprüft'}</span>` : c.configured ? '<span class="badge yellow"><i class="dot"></i>Verbindung offen</span>' : '<span class="badge red"><i class="dot"></i>Setup fehlt</span>';
   if (!c.configured) {
-    $('connectionCard').innerHTML = `<div class="card-head"><div><h2>Saxo OpenAPI einrichten</h2><div class="muted small">Der Saxo-Handelsaccount allein enthält noch keine API-App.</div></div>${badge}</div><ol class="setup-steps"><li>Im Saxo Developer Portal zuerst eine persönliche <b>SIM-App</b> mit Authorization Code Grant anlegen.</li><li>Redirect-URL exakt als <b>https://iva-core-production.up.railway.app/oauth/saxo/callback</b> eintragen.</li><li>App Key, Secret und einen neuen Token-Schlüssel als Railway-Secrets setzen.</li><li>Nach grünem SIM-Test und finanziertem Konto bei Saxo die separate LIVE-App beantragen.</li></ol><div class="notice error">Noch fehlend: ${esc((c.missing || []).join(', ') || 'Konfiguration')}</div>`;
+    $('connectionCard').innerHTML = `<div class="card-head"><div><h2>Saxo OpenAPI einrichten</h2><div class="muted small">Der Saxo-Handelsaccount allein enthält noch keine API-App.</div></div>${badge}</div><ol class="setup-steps"><li>Im <a class="muted" href="https://www.developer.saxo/openapi/learn/oauth-authorization-code-grant" target="_blank" rel="noopener noreferrer">Saxo Developer Portal</a> eine eigene App mit Authorization Code Grant einrichten.</li><li>Redirect-URL für dieses IVA exakt als <b>${esc(location.origin + '/oauth/saxo/callback')}</b> hinterlegen.</li><li>App Key, App Secret, Redirect-URL und einen neuen Token-Schlüssel nur in IVAs Server-Konfiguration setzen.</li><li>SIM und LIVE benötigen getrennte App-Zugänge. Ein SIM-Login verbindet nicht automatisch dein echtes Saxo-Konto.</li><li>OpenAPI-Marktdaten bei Saxo freigeben und Datenrechte prüfen. Gerade SIM kann für Aktien keine Kurse liefern.</li></ol><div class="notice error">Noch fehlend: ${esc((c.missing || []).join(', ') || 'Konfiguration')}</div>`;
     return;
   }
   const permissionNote = c.saxoAppTradingPermission
     ? '<div class="notice">Die Saxo-App besitzt Handelsberechtigung. IVAs eigener Orderversand bleibt dennoch technisch gesperrt.</div>'
     : '';
-  $('connectionCard').innerHTML = `<div class="card-head"><div><h2>Saxo-Verbindung</h2><div class="muted small">${esc(c.setup || '')}</div></div>${badge}</div>${permissionNote}${c.authorized ? `<div class="notice good">OAuth-Tokens liegen verschlüsselt im Railway-Volume. Modus: lesen, analysieren und Saxo-Precheck.</div><button class="btn danger" id="disconnect">Verbindung trennen</button>` : '<div class="notice">Klicke oben auf „Saxo verbinden“. Login und Freigabe erfolgen ausschließlich bei Saxo.</div>'}`;
+  $('connectionCard').innerHTML = `<div class="card-head"><div><h2>Saxo-Verbindung</h2><div class="muted small">${esc(c.setup || '')}</div></div>${badge}</div>${permissionNote}${c.error ? `<div class="notice error">${esc(c.error)}</div>` : ''}${c.authorized ? `<div class="notice">OAuth-Tokens liegen verschlüsselt im Server-Volume. Modus: lesen, analysieren und manueller Saxo-Precheck.</div><button class="btn danger" id="disconnect">Verbindung trennen</button>` : '<div class="notice">Klicke oben auf „Saxo verbinden“. Login und Freigabe erfolgen ausschließlich bei Saxo.</div>'}<div class="notice">${esc(c.marketDataNotice || '')} <a class="muted" href="https://www.developer.saxo/excel/user-guide/enabling-market-data" target="_blank" rel="noopener noreferrer">Saxo-Marktdaten freigeben</a></div>`;
   $('disconnect')?.addEventListener('click', disconnect);
 }
 
@@ -156,13 +156,15 @@ async function loadPortfolio() {
 }
 async function loadAll() {
   try {
-    const [status, settings, watch, drafts, mandate, readiness, analyses, journal, knowledge, opportunities] = await Promise.all([
-      api('/api/investment/status'), api('/api/investment/settings'), api('/api/investment/watchlist'), api('/api/investment/order-drafts'),
+    const [status, settings, watch, drafts, mandate, readiness, analyses, journal, knowledge, opportunities, monitoring] = await Promise.all([
+      api('/api/investment/status?probe=true'), api('/api/investment/settings'), api('/api/investment/watchlist'), api('/api/investment/order-drafts'),
       api('/api/investment/mandate'), api('/api/investment/autonomy-readiness'), api('/api/investment/analyses?limit=50'), api('/api/investment/journal?limit=200'), api('/api/investment/knowledge'), api('/api/investment/opportunities/latest'),
+      api('/api/investment/monitor'),
     ]);
     state.status = status; state.settings = settings; state.watchlist = watch.items || []; state.drafts = drafts.items || [];
     state.mandate = mandate; state.readiness = readiness; state.analyses = analyses.items || []; state.journal = journal.items || []; state.calibration = journal.calibration; state.knowledge = knowledge;
     state.opportunities = opportunities.item?.candidates || [];
+    state.monitoring = monitoring; renderMonitoring(true);
     renderConnection(); renderMetrics(); fillSettings(); renderWatchlist(); renderDrafts(); renderKnowledge(); renderAnalysisHistory(); fillMandate(); renderReadiness(); renderJournal(); if (opportunities.item) renderOpportunities(opportunities.item); await loadPortfolio();
   } catch (error) { notify(token() ? error.message : 'Bitte zuerst im IVA-Cockpit den API-Token hinterlegen.', 'error'); }
 }
@@ -191,6 +193,46 @@ async function reviewJournal(id) { const actualPrice = Number(prompt('Schlusskur
 async function saveDraft(event) { event.preventDefault(); if (!state.selectedInstrument) { $('draftState').textContent = 'Bitte zuerst ein Instrument über die Suche oder Watchlist auswählen.'; return; } const button = event.submitter; busy(button, true, 'Speichert …'); const account = $('draftAccount').selectedOptions[0]; try { await api('/api/investment/order-drafts', { method: 'POST', body: JSON.stringify({ instrument: state.selectedInstrument, accountKey: $('draftAccount').value, accountId: account?.dataset.id || '', direction: $('draftDirection').value, amount: Number($('draftAmount').value), orderType: $('draftType').value, orderPrice: $('draftType').value === 'Limit' ? Number($('draftPrice').value) : undefined, durationType: $('draftDuration').value, thesis: $('draftThesis').value, invalidation: $('draftInvalidation').value, horizon: $('draftHorizon').value }) }); ({ items: state.drafts } = await api('/api/investment/order-drafts')); renderDrafts(); $('draftForm').reset(); state.selectedInstrument = null; $('draftInstrument').value = ''; renderAccounts(); $('draftState').textContent = 'Entwurf gespeichert – noch nichts an Saxo gesendet.'; } catch (error) { $('draftState').textContent = error.message; } finally { busy(button, false); } }
 async function precheck(id, button) { busy(button, true, 'Saxo prüft …'); try { await api(`/api/investment/order-drafts/${encodeURIComponent(id)}/precheck`, { method: 'POST', body: '{}' }); ({ items: state.drafts } = await api('/api/investment/order-drafts')); renderDrafts(); notify('Precheck abgeschlossen. Es wurde keine Order gesendet.', 'good'); } catch (error) { notify(error.message, 'error'); busy(button, false); } }
 
+const monitorFields = { pollIntervalSeconds: 'monitorInterval', maxQuoteAgeSeconds: 'monitorQuoteAge', monthlyDepositLimit: 'monitorMonthly', capitalLimit: 'monitorCapital', maxOrderValue: 'monitorOrder', maxPositionValue: 'monitorPosition', maxDailyLoss: 'monitorDailyLoss', maxDrawdownPct: 'monitorDrawdown', feePerOrder: 'monitorFee', slippageBps: 'monitorSlippage' };
+function renderMonitoring(fill = false) {
+  const data = state.monitoring; if (!data) return;
+  const config = data.config, connection = data.connection, currency = config.currency;
+  const labels = { disabled: 'Ausgeschaltet', waiting: 'Watchlist erforderlich', connected: 'Saxo-Abfrage bestätigt', disconnected: 'Verbindung unterbrochen', stale: 'Letzter Abruf ist veraltet' };
+  $('monitorConnection').className = `notice ${connection.status === 'connected' ? 'good' : ['stale', 'disconnected'].includes(connection.status) ? 'error' : ''}`;
+  $('monitorConnection').textContent = `${labels[connection.status] || 'Noch nicht geprüft'} · ${data.transport} alle ${config.pollIntervalSeconds} Sekunden. ${connection.lastSuccessAt ? 'Letzter Erfolg: ' + new Date(connection.lastSuccessAt).toLocaleString('de-DE') + '. ' : ''}${connection.error || ''}${connection.retryAt ? ' Nächster Versuch frühestens ' + new Date(connection.retryAt).toLocaleTimeString('de-DE') : ''}`;
+  $('monitorRefresh').disabled = !config.enabled;
+  $('monitorQuotes').innerHTML = data.quotes.length ? `<table class="table"><thead><tr><th>Wert</th><th>Geld / Brief</th><th>Datenstand</th></tr></thead><tbody>${data.quotes.map(quote => `<tr><td><b>${esc(quote.symbol || quote.key)}</b><small>${esc(quote.environment?.toUpperCase())} · ${esc(quote.currency)}</small></td><td>${quote.bid === null ? '–' : esc(num(quote.bid, 6))} / ${quote.ask === null ? '–' : esc(num(quote.ask, 6))}</td><td><small>${quote.ageSeconds === null ? 'Kurszeitpunkt fehlt' : esc(num(quote.ageSeconds, 0)) + ' Sekunden alt'}</small><small>${quote.usable ? 'Aktuell für Paper-Regeln' : esc(quote.reasons.join(' '))}</small></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Noch keine bestätigten Watchlist-Kurse.</div>';
+  if (fill) {
+    $('monitorEnabled').checked = config.enabled; $('monitorMode').value = config.mode; $('monitorCurrency').value = currency;
+    for (const [name, id] of Object.entries(monitorFields)) $(id).value = config[name] ?? '';
+  }
+  const selected = $('monitorRuleInstrument').value;
+  $('monitorRuleInstrument').innerHTML = '<option value="">Watchlist-Wert wählen</option>' + state.watchlist.map(item => `<option value="${esc(item.key)}">${esc(item.description || item.symbol || item.key)} · ${esc(item.currency)}</option>`).join('');
+  $('monitorRuleInstrument').value = selected;
+  $('monitorRules').innerHTML = data.rules.length ? data.rules.map(rule => `<div class="item"><b>${esc(rule.instrument.symbol || rule.key)} · ${esc(rule.action === 'alert' ? 'Alarm' : rule.action === 'paper-buy' ? 'Paper-Kauf' : 'Paper-Verkauf')}</b><small>${rule.condition === 'at-or-below' ? '≤' : '≥'} ${esc(num(rule.price, 6))}${rule.amount ? ' · ' + esc(rule.amount) + ' Stück' : ''} · ${rule.triggeredAt ? 'bereits ausgelöst' : rule.enabled ? 'bereit' : 'deaktiviert'}</small>${rule.lastBlocked ? `<small>${esc(rule.lastBlocked)}</small>` : ''}<button class="btn" data-remove-monitor-rule="${esc(rule.id)}">Regel entfernen</button></div>`).join('') : '<div class="empty">Keine automatischen Regeln hinterlegt.</div>';
+  const paper = data.paper;
+  $('monitorPaper').innerHTML = `<div class="analysis-metrics"><div><b>${esc(euro(paper.cash, currency))}</b><small>Virtuell verfügbar</small></div><div><b>${esc(euro(paper.equity, currency))}</b><small>${paper.current ? 'Paper-Wert' : 'Paper-Schätzwert · Kurse fehlen'}</small></div><div><b>${esc(euro(paper.netProfitLoss, currency))}</b><small>Simulierter G/V nach Annahmen</small></div><div><b>${esc(num(paper.drawdownPct))} %</b><small>Paper-Drawdown</small></div></div>${paper.halted ? `<div class="notice error">Neue Paper-Käufe blockiert: ${esc(paper.reasons.join(' '))}</div>` : ''}${paper.positions.map(position => `<div class="item"><b>${esc(position.symbol || position.key)}</b><small>${esc(position.amount)} virtuelle Stück · Einstand ${esc(euro(position.averagePrice, currency))}</small></div>`).join('')}`;
+  $('monitorLearning').textContent = `${data.learning.errors} Fehler-/Grenzereignisse · ${data.learning.reviewed} besprochen. Erkenntnisse ändern keine Limits automatisch.`;
+  $('monitorJournal').innerHTML = data.journal.length ? data.journal.slice(0, 30).map(item => `<div class="item"><b>${esc(item.message)}</b><small>${esc(new Date(item.createdAt).toLocaleString('de-DE'))} · ${esc(item.type)}</small>${item.type !== 'review' ? `<button class="btn" data-review-monitor="${esc(item.id)}">Erkenntnis festhalten</button>` : ''}</div>`).join('') : '<div class="empty">Hier erscheinen Verbindungsfehler, Alarme und Paper-Entscheidungen.</div>';
+}
+async function monitorRequest(path, body, method = 'POST', button) {
+  busy(button, true); $('monitorFeedback').textContent = '';
+  try { state.monitoring = await api('/api/investment/monitor' + path, { method, body: JSON.stringify(body) }); renderMonitoring(true); return true; }
+  catch (error) { $('monitorFeedback').textContent = error.message; return false; }
+  finally { busy(button, false); }
+}
+async function saveMonitoring(event) {
+  event.preventDefault(); if (!state.monitoring) return;
+  const config = { enabled: $('monitorEnabled').checked, mode: $('monitorMode').value, currency: $('monitorCurrency').value.trim().toUpperCase() };
+  for (const [name, id] of Object.entries(monitorFields)) config[name] = $(id).value === '' ? null : Number($(id).value);
+  if (await monitorRequest('', { baseRevision: state.monitoring.revision, config }, 'PATCH', event.submitter)) $('monitorFeedback').textContent = 'Grenzen gespeichert. Es wurde keine echte Order oder Einzahlung ausgeführt.';
+}
+async function saveMonitorRule(event) {
+  event.preventDefault(); if (!state.monitoring) return;
+  const rule = { key: $('monitorRuleInstrument').value, condition: $('monitorRuleCondition').value, price: Number($('monitorRulePrice').value), action: $('monitorRuleAction').value, amount: Number($('monitorRuleAmount').value), enabled: true };
+  if (await monitorRequest('', { baseRevision: state.monitoring.revision, rules: [...state.monitoring.rules, rule] }, 'PATCH', event.submitter)) $('monitorRuleForm').reset();
+}
+
 document.querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('[data-tab]').forEach(item => item.classList.toggle('active', item === button)); document.querySelectorAll('[data-panel]').forEach(panel => { panel.hidden = panel.dataset.panel !== button.dataset.tab; }); }));
 $('connect').addEventListener('click', connect); $('refresh').addEventListener('click', loadAll); $('settingsForm').addEventListener('submit', saveSettings); $('instrumentSearch').addEventListener('click', searchInstruments); $('instrumentQuery').addEventListener('keydown', event => { if (event.key === 'Enter') searchInstruments(); }); $('draftType').addEventListener('change', () => { $('draftPrice').disabled = $('draftType').value !== 'Limit'; }); $('draftForm').addEventListener('submit', saveDraft); $('runAnalysis').addEventListener('click', runAnalysis); $('runResearch').addEventListener('click', runResearch); $('scanOpportunities').addEventListener('click', scanOpportunities); $('mandateForm').addEventListener('submit', saveMandate); $('journalForm').addEventListener('submit', saveJournal);
 $('instrumentResults').addEventListener('click', event => { const analyze = event.target.closest('[data-analyze-result]'); const watch = event.target.closest('[data-watch-result]'); const draft = event.target.closest('[data-draft-result]'); if (analyze) selectAnalysisInstrument(resultItem(analyze.dataset.analyzeResult)); if (watch) void addWatch(resultItem(watch.dataset.watchResult)); if (draft) selectDraftInstrument(resultItem(draft.dataset.draftResult)); });
@@ -199,5 +241,12 @@ $('drafts').addEventListener('click', event => { const button = event.target.clo
 $('analysisHistory').addEventListener('click', event => { const button = event.target.closest('[data-analysis-id]'); if (!button) return; const item = state.analyses.find(analysis => analysis.id === button.dataset.analysisId); if (item) { state.analysisInstrument = item.instrument; $('analysisInstrument').value = `${item.instrument.description || item.instrument.symbol} · ${item.instrument.symbol || item.instrument.uic} · ${item.instrument.assetType}`; renderAnalysis(item); } });
 $('opportunityResults').addEventListener('click', event => { const button = event.target.closest('[data-opportunity-analysis]'); if (!button) return; const item = state.opportunities[Number(button.dataset.opportunityAnalysis)]; if (item?.instrument) selectAnalysisInstrument(item.instrument); });
 $('journalItems').addEventListener('click', event => { const button = event.target.closest('[data-review-journal]'); if (button) void reviewJournal(button.dataset.reviewJournal); });
+$('monitorForm').addEventListener('submit', saveMonitoring);
+$('monitorRuleForm').addEventListener('submit', saveMonitorRule);
+$('monitorRefresh').addEventListener('click', event => void monitorRequest('/refresh', {}, 'POST', event.currentTarget));
+$('monitorDepositForm').addEventListener('submit', event => { event.preventDefault(); void monitorRequest('/paper-deposits', { amount: Number($('monitorDeposit').value) }, 'POST', event.submitter); });
+$('monitorRules').addEventListener('click', event => { const button = event.target.closest('[data-remove-monitor-rule]'); if (button && state.monitoring) void monitorRequest('', { baseRevision: state.monitoring.revision, rules: state.monitoring.rules.filter(rule => rule.id !== button.dataset.removeMonitorRule) }, 'PATCH', button); });
+$('monitorJournal').addEventListener('click', event => { const button = event.target.closest('[data-review-monitor]'); if (!button) return; const lesson = prompt('Was ist passiert und was möchtest du künftig beachten? Die Grenzen werden dadurch nicht verändert.', ''); if (lesson) void monitorRequest(`/journal/${encodeURIComponent(button.dataset.reviewMonitor)}/review`, { lesson }, 'POST', button); });
+setInterval(async () => { if (document.hidden || !state.monitoring || document.querySelector('[data-panel="monitor"]').hidden) return; try { state.monitoring = await api('/api/investment/monitor'); renderMonitoring(false); } catch { $('monitorConnection').textContent = 'IVA-Verbindung unterbrochen. Angezeigte Kurse werden nicht als frisch bestätigt.'; } }, 15_000);
 const callback = new URLSearchParams(location.search).get('saxo'); if (callback === 'connected') notify('Saxo wurde verbunden. Depotdaten werden jetzt geladen.', 'good'); else if (callback === 'denied') notify('Die Saxo-Freigabe wurde nicht erteilt.', 'error'); else if (callback === 'error') notify('Die Saxo-Verbindung konnte nicht abgeschlossen werden. Prüfe App und Redirect-URL.', 'error');
 void loadAll();

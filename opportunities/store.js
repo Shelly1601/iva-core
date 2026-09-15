@@ -1,4 +1,6 @@
 import fs from 'fs/promises';
+import { randomUUID } from 'node:crypto';
+import { normalizeEvidenceAssessment, cleanEvidence, publicEvidenceUrl } from './evidence.js';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const FILE = DATA_DIR + '/opportunity-radar.json';
@@ -6,7 +8,7 @@ const STATUSES = new Set(['new', 'watch', 'validate', 'rejected', 'selected']);
 const LINK_CHECK_MODES = new Set(['iva-integration', 'business']);
 const LINK_CHECK_REQUESTED_MODES = new Set(['auto', 'iva-integration', 'business']);
 const LINK_CHECK_STATUSES = new Set(['complete', 'failed']);
-const MARKET_SOURCE_TYPES = new Set(['instagram', 'website', 'newsletter', 'youtube', 'linkedin', 'podcast', 'other']);
+const MARKET_SOURCE_TYPES = new Set(['instagram', 'tiktok', 'website', 'newsletter', 'youtube', 'linkedin', 'podcast', 'other']);
 const MARKET_ANALYSIS_STATUSES = new Set(['complete', 'failed']);
 let mutationQueue = Promise.resolve();
 
@@ -14,6 +16,10 @@ const DEFAULT_SETTINGS = Object.freeze({
   weeklyEnabled: true,
   weeklyDay: 'monday',
   weeklyTime: '08:30',
+  cadence: 'daily',
+  keywords: [],
+  tiktokAccounts: [],
+  includeCurated: false,
   hashtags: ['aibusinessideen', 'passiveseinkommen', 'digitalesprodukt', 'microsaas', 'facelessmarketing', 'kionlinebusiness'],
   seedAccounts: [],
   maxInitialBudgetEur: 500,
@@ -21,7 +27,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   maxOngoingHoursPerWeek: 3,
   maxSourcesPerRun: 80,
   topIdeasPerPitch: 5,
-  notes: 'KI-gestuetzte, legal umsetzbare Modelle mit wenig laufender Pflege. Keine Einkommensversprechen.',
+  notes: 'Pragmatische KI-gestützte Geschäftsmodelle. Funktionsweise, Nachfrage, Aufwand und konkrete Risiken getrennt bewerten; Umsetzungsvarianten und verbleibende Unsicherheit erklären.',
 });
 
 function emptyStore() {
@@ -56,15 +62,16 @@ async function load() {
       marketAnalyses: Array.isArray(data.marketAnalyses) ? data.marketAnalyses : [],
       watchSources: Array.isArray(data.watchSources) ? data.watchSources : [],
     };
-  } catch {
-    return emptyStore();
+  } catch (error) {
+    if (error.code === 'ENOENT') return emptyStore();
+    throw new Error('Der gespeicherte Chancenradar konnte nicht gelesen werden. Vorhandene Daten werden nicht überschrieben.');
   }
 }
 
 async function save(data) {
   await fs.mkdir(DATA_DIR, { recursive: true });
-  const tmp = `${FILE}.${process.pid}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(data, null, 2));
+  const tmp = `${FILE}.${randomUUID()}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(data, null, 2), {mode:0o600,flag:'wx'});
   await fs.rename(tmp, FILE);
 }
 
@@ -94,6 +101,12 @@ export async function updateOpportunitySettings(input = {}) {
     data.settings = {
       ...current,
       weeklyEnabled: input.weeklyEnabled === undefined ? current.weeklyEnabled : input.weeklyEnabled === true,
+      cadence: input.cadence === undefined ? current.cadence : ['daily','weekly'].includes(input.cadence) ? input.cadence : (()=>{throw new Error('Bitte täglich oder wöchentlich wählen.');})(),
+      weeklyDay: input.weeklyDay === undefined ? current.weeklyDay : ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'].includes(input.weeklyDay) ? input.weeklyDay : (()=>{throw new Error('Bitte einen gültigen Wochentag wählen.');})(),
+      weeklyTime: input.weeklyTime === undefined ? current.weeklyTime : /^([01]\d|2[0-3]):[0-5]\d$/.test(input.weeklyTime) ? input.weeklyTime : (()=>{throw new Error('Bitte eine gültige Uhrzeit wählen.');})(),
+      keywords: input.keywords === undefined ? current.keywords : uniq(input.keywords).slice(0,20),
+      tiktokAccounts: input.tiktokAccounts === undefined ? current.tiktokAccounts : uniq(input.tiktokAccounts).slice(0,20),
+      includeCurated: input.includeCurated === undefined ? current.includeCurated : input.includeCurated === true,
       hashtags: input.hashtags === undefined ? current.hashtags : uniq(input.hashtags).slice(0, 20),
       seedAccounts: input.seedAccounts === undefined ? current.seedAccounts : uniq(input.seedAccounts).slice(0, 20),
       maxInitialBudgetEur: Math.max(0, Math.min(100_000, finite(input.maxInitialBudgetEur, current.maxInitialBudgetEur))),
@@ -210,6 +223,11 @@ export async function listOpportunityRuns({ limit = 30 } = {}) {
 function normalizedLinkCheck(input = {}) {
   const now = new Date().toISOString();
   const assessment = input.assessment && typeof input.assessment === 'object' ? input.assessment : {};
+  const research = {sources:(Array.isArray(input.research?.sources)?input.research.sources:[]).slice(0,7).map(item=>({id:clean(item.id,12),url:publicEvidenceUrl(item.url),title:clean(item.title,300),domain:clean(item.domain,250),kind:clean(item.kind,40),purpose:clean(item.purpose,30),text:clean(item.text,3500),publishedAt:clean(item.publishedAt,80),retrievedAt:clean(item.retrievedAt,80)})).filter(item=>item.url),queries:(Array.isArray(input.research?.queries)?input.research.queries:[]).slice(0,4).map(item=>({query:clean(item.query,450),purpose:clean(item.purpose,30)})),warnings:(input.research?.warnings||[]).slice(0,10).map(item=>clean(item,800)),independentDomainCount:Math.max(0,finite(input.research?.independentDomainCount)),readSourceCount:Math.max(0,finite(input.research?.readSourceCount)),checkedAt:clean(input.research?.checkedAt,80)};
+  const media={isVideo:input.media?.isVideo===true,coverage:Object.fromEntries(['caption','transcript','visual','audio','page'].map(key=>[key,input.media?.coverage?.[key]===true])),transcript:cleanEvidence(typeof input.media?.transcript==='string'?input.media.transcript:JSON.stringify(input.media?.transcript||[]),16000),claims:(Array.isArray(input.media?.claims)?input.media.claims:[]).slice(0,15).map(item=>typeof item==='string'?clean(item,1200):{text:clean(item.text||item.claim,1200),timestamp:clean(item.timestamp||item.at||(Number.isFinite(item.startSeconds)?String(item.startSeconds)+'–'+String(item.endSeconds)+'s':''),80),kind:clean(item.kind||item.basis,80)}),provider:clean(input.media?.provider,160),warnings:(input.media?.warnings||[]).slice(0,10).map(item=>clean(item,800))};
+  const timed=items=>(Array.isArray(items)?items:[]).slice(0,80).map(item=>({startSeconds:Number.isFinite(item.startSeconds)?item.startSeconds:null,endSeconds:Number.isFinite(item.endSeconds)?item.endSeconds:null,text:cleanEvidence(item.text,1500),kind:clean(item.kind,40),id:clean(item.id,80)}));
+  Object.assign(media,{gaps:(input.media?.gaps||[]).slice(0,10).map(item=>clean(item,800)),coverageDetails:{complete:input.media?.coverageDetails?.complete===true,basis:clean(input.media?.coverageDetails?.basis,500),observations:clean(input.media?.coverageDetails?.observations,1000),frameSampling:clean(input.media?.coverageDetails?.frameSampling,1000)},transcriptSegments:timed(input.media?.transcriptSegments),visualObservations:timed(input.media?.visualObservations),audioObservations:timed(input.media?.audioObservations),evidence:timed(input.media?.evidence)});
+  const normalized=normalizeEvidenceAssessment(assessment,research,media);
   const stringList = (values, maxItems = 10, maxLength = 500) => (Array.isArray(values) ? values : [])
     .map(value => clean(value, maxLength)).filter(Boolean).slice(0, maxItems);
   return {
@@ -224,17 +242,19 @@ function normalizedLinkCheck(input = {}) {
     sourceType: clean(input.sourceType, 80),
     sourceTitle: clean(input.sourceTitle, 300),
     sourceExcerpt: clean(input.sourceExcerpt, 1800),
+    question:clean(input.question,1800),research,media,model:clean(input.model,160),checkedAt:clean(input.checkedAt,80)||now,
     error: clean(input.error, 800),
     assessment: {
+      ...normalized,
       headline: clean(assessment.headline, 240),
-      verdict: clean(assessment.verdict, 80),
-      score: Math.max(0, Math.min(100, finite(assessment.score))),
+      verdict: normalized.verdict,
+      score: normalized.score,
       summary: clean(assessment.summary, 1800),
       whatItIs: clean(assessment.whatItIs, 1200),
       evidence: stringList(assessment.evidence, 10, 600),
       assumptions: stringList(assessment.assumptions, 10, 600),
       fit: stringList(assessment.fit, 10, 600),
-      gaps: stringList(assessment.gaps, 10, 600),
+      gaps: [...new Set(stringList(normalized.gaps, 16, 800))],
       risks: stringList(assessment.risks, 10, 600),
       costsAndEffort: clean(assessment.costsAndEffort, 1000),
       nextTest: clean(assessment.nextTest, 1200),
@@ -278,7 +298,7 @@ function normalizedMarketSource(input = {}) {
     topics: stringList(input.topics),
     contentPatterns: stringList(input.contentPatterns),
     evidence: stringList(input.evidence),
-    cadence: ['weekly', 'monthly', 'quarterly'].includes(input.cadence) ? input.cadence : 'monthly',
+    cadence: ['daily','weekly', 'monthly', 'quarterly'].includes(input.cadence) ? input.cadence : 'weekly',
     monitoringValue: ['high', 'medium', 'low'].includes(input.monitoringValue) ? input.monitoringValue : 'medium',
     sampleSize: Math.max(0, Math.min(500, Math.round(finite(input.sampleSize)))),
     latestObservedAt: clean(input.latestObservedAt, 80),

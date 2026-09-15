@@ -249,6 +249,7 @@ Nenne höchstens 12 Top-Quellen. Der Score von 0 bis 100 bewertet ausschließlic
 }
 
 async function executeOpportunityMarketResearch(input = {}, dependencies = {}) {
+  const signal=dependencies.signal; signal?.throwIfAborted();
   const request = normalizeInput(input);
   const queries = searchQueries(request);
   const search = dependencies.search || searchWebCandidates;
@@ -262,7 +263,8 @@ async function executeOpportunityMarketResearch(input = {}, dependencies = {}) {
   try {
     if (!dependencies.search && !process.env.TAVILY_API_KEY) throw new Error('TAVILY_API_KEY fehlt für die Themen- und Profilsuche.');
     const batches = await mapLimit(queries, 2, async (query, queryIndex) => {
-      const results = await search(query, { limit: 8 });
+      signal?.throwIfAborted();
+      const results = await search(query, { limit: 8, signal });
       return (Array.isArray(results) ? results : []).map(result => candidateFromResult(result, queryIndex)).filter(Boolean);
     });
     for (const batch of batches.filter(value => !Array.isArray(value))) warnings.push(`Websuche: ${batch.warning || 'Teilabfrage fehlgeschlagen.'}`);
@@ -270,10 +272,13 @@ async function executeOpportunityMarketResearch(input = {}, dependencies = {}) {
     if (!candidates.length) throw new Error('Die Websuche hat zu diesem Thema keine auswertbaren Quellen gefunden.');
     const enriched = await enrichCandidates(candidates, { fetchSource, scrape }, warnings);
     if (!enriched.length) throw new Error('Die gefundenen Quellen konnten nicht gelesen werden.');
+    signal?.throwIfAborted();
     const result = normalizeAnalysis(await analyze(request, enriched), enriched);
+    signal?.throwIfAborted();
     if (!result.sources.length) throw new Error('Die Analyse konnte keine belastbare Beobachtungsquelle ableiten.');
     return await record({ ...request, ...result, status: 'complete', searchQueries: queries, warnings });
   } catch (error) {
+    if(signal?.aborted)throw error;
     const failed = await record({ ...request, status: 'failed', searchQueries: queries, warnings, error: error.message });
     error.marketAnalysis = failed;
     throw error;

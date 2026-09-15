@@ -3,7 +3,8 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 
-export function marketingSkill({ campaigns, brands, analyzeReferences, generateImage, generateContent }) {
+export function marketingSkill({ campaigns, brands, analyzeReferences, generateImage, generateContent, projectService, projectId }) {
+  if (projectService && projectId) return projectMarketingSkill({ service: projectService, projectId });
   return {
     listCampaigns: tool({
       description: 'Listet alle Marketing-Kampagnen.',
@@ -99,3 +100,36 @@ export const marketingSkillMeta = {
   id: 'marketing',
   toolNames: ['listCampaigns', 'createCampaign', 'analyzeReferences', 'analyzeCampaign', 'generateImage', 'generateContent', 'listBrands', 'createBrand', 'updateBrand'],
 };
+
+
+// Bind the project on the server. The model cannot substitute another project ID.
+export function projectMarketingSkill({ service, projectId }) {
+  if (!service || !projectId) throw new Error('Projekt und Marketingdienst fehlen.');
+  return {
+    getProjectMarketing: tool({
+      description: 'Liest ausschließlich das aktive Projekt: Markenprofil, echte Wettbewerberanalysen, Entwürfe, Verbindungen und Videoaufträge. Laufende Aufträge sind noch keine fertigen Ergebnisse.',
+      parameters: z.object({}),
+      execute: async () => service.snapshot(projectId),
+    }),
+    saveProjectMarketingProfile: tool({
+      description: 'Speichert vom Nutzer angegebene Firmendaten, Angebot, Zielgruppe und Markenregeln im aktiven Projekt. Keine Fakten, Profiladressen oder Farben erfinden.',
+      parameters: z.object({ name: z.string().optional(), company: z.string().optional(), offer: z.string().optional(), audience: z.string().optional(), industry: z.string().optional(), region: z.string().optional(), website: z.string().optional(), instagram: z.string().optional(), linkedin: z.string().optional(), colors: z.array(z.string()).optional(), tone: z.string().optional(), rules: z.string().optional() }),
+      execute: async input => service.saveProfile(projectId, input),
+    }),
+    researchProjectCompetitors: tool({
+      description: 'Startet echte öffentliche Wettbewerberrecherche für das aktive Projekt. URLs oder automatische Suche anhand von Angebot/Zielgruppe. Gefundene Links sind erst nach erfolgreichem Lesen inhaltliche Belege. Gibt einen laufenden Auftrag zurück; später getProjectMarketing abfragen.',
+      parameters: z.object({ urls: z.array(z.string()).max(12).optional(), automatic: z.boolean().optional(), briefing: z.string().optional() }),
+      execute: async input => service.startJob(projectId, 'research', input),
+    }),
+    draftProjectMarketingContent: tool({
+      description: 'Erstellt eigenständige Contententwürfe oder Kampagnenkonzepte aus dem aktiven Projektprofil und optional einer abgeschlossenen Analyse dieses Projekts. Keine Veröffentlichung oder Nachrichten. Gibt zunächst einen laufenden Auftrag zurück.',
+      parameters: z.object({ researchId: z.string().optional(), briefing: z.string().optional(), format: z.enum(['reel', 'ugc', 'carousel', 'campaign', 'linkedin']).optional() }),
+      execute: async input => service.startJob(projectId, 'content', input),
+    }),
+    estimateProjectMarketingVideo: tool({
+      description: 'Fragt den realen Higgsfield-Preis für einen konkreten Videoentwurf im aktiven Projekt ab. Erzeugt noch kein Video. Kostenangebot zeigen und zur Bestätigung auf /marketing?projectId=' + encodeURIComponent(projectId) + ' verweisen.',
+      parameters: z.object({ prompt: z.string(), model: z.enum(['veo-3.1', 'veo-3.1-image', 'veo-3.1-fast']).optional(), duration: z.enum(['4', '6', '8']).optional(), aspectRatio: z.enum(['9:16','16:9']).optional(), imageUrl: z.string().optional() }),
+      execute: async input => service.quoteVideo(projectId, input),
+    }),
+  };
+}

@@ -181,7 +181,7 @@ assert.match(html, /Charts lesen/);
 assert.match(html, /Analyse-Labor/);
 assert.match(html, /Chancen & Mandat/);
 assert.match(html, /Lernjournal/);
-assert.match(html, /LIVE-Orderversand bleibt bis zur Bewährung gesperrt/);
+assert.match(html, /LIVE-Orderversand bleibt gesperrt/);
 assert.match(html, /iva-face/);
 assert.match(browserJs, /Saxo-Precheck/);
 assert.match(browserJs, /Analysiert Charts/);

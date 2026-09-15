@@ -17,6 +17,16 @@ export function investmentSkill({ investment }) {
       parameters: z.object({}),
       execute: async () => await investment.status({ probe: false }),
     }),
+    getInvestmentMonitoring: tool({
+      description: 'Liest Kursmonitor, Saxo-Verbindungszustand, tatsächliches Kursalter, hinterlegte Kapital-/Risikogrenzen, lokales Paper-Depot und Fehlerjournal. Standardmäßig deaktiviert. Paper-Ergebnisse sind Simulationen, keine Gewinne oder Saxo-Fills. Grenzen werden ausschließlich im Admin-Formular geändert; das Tool darf keine Limits erhöhen, Einzahlungen oder Echtorders ausführen.',
+      parameters: z.object({}),
+      execute: async () => await investment.getMonitoring(),
+    }),
+    refreshInvestmentMonitoring: tool({
+      description: 'Aktualisiert bei bereits eingeschaltetem Monitor die Saxo-Watchlist-Kurse. Darf nur die vorher durch den Nutzer eingerichteten Alarm-/Paper-Regeln anwenden. Aktiviert keine Überwachung, verändert keine Grenzen und führt keine Saxo-Order oder Einzahlung aus. Liefert Kursalter, Verzögerung und Verbindungsfehler ausdrücklich mit.',
+      parameters: z.object({}),
+      execute: async () => await investment.refreshMonitoring(),
+    }),
     getInvestmentPortfolio: tool({
       description: 'Liest das aktuelle Saxo-Depot mit Kontowert, Liquiditaet, Positionen, offenen Orders, Performance und IVAs regelbasierter Risikoanalyse. Liefert Daten von Saxo, aber keine Renditegarantie und sendet keine Order.',
       parameters: z.object({}),
@@ -134,7 +144,7 @@ export function investmentSkill({ investment }) {
 export const investmentSkillMeta = {
   id: 'investment',
   toolNames: [
-    'getInvestmentStatus', 'getInvestmentPortfolio', 'getInvestmentRiskReport', 'searchSaxoInstruments',
+    'getInvestmentStatus', 'getInvestmentMonitoring', 'refreshInvestmentMonitoring', 'getInvestmentPortfolio', 'getInvestmentRiskReport', 'searchSaxoInstruments',
     'getInvestmentKnowledgeStatus', 'analyzeInvestmentInstrument', 'researchInvestmentInstrument', 'scanInvestmentOpportunities',
     'getInvestmentMandate', 'updateInvestmentMandate', 'listInvestmentAnalyses', 'listInvestmentJournal', 'createInvestmentJournalEntry', 'reviewInvestmentJournalEntry',
     'listInvestmentWatchlist', 'addInvestmentWatchlistItem', 'listInvestmentOrderDrafts', 'createInvestmentOrderDraft',

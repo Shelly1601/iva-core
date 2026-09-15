@@ -1,3 +1,4 @@
+if (new URLSearchParams(location.search).get('legacy') === '1') {
 const $ = id => document.getElementById(id);
 const state = { status: null, brands: [], campaigns: [], research: [], companies: [], contentPlans: [], emails: [], ads: [], reports: [] };
 const titles = {
@@ -131,3 +132,5 @@ $('generateReport').addEventListener('click', async () => {
 
 $('contentStart').value = new Date().toISOString().slice(0, 10);
 loadAll().catch(error => { $('pageIntro').textContent = `Marketing-Zentrale konnte nicht geladen werden: ${error.message}. Prüfe den API-Token im Cockpit.`; });
+
+}

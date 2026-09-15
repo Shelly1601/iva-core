@@ -204,7 +204,7 @@ assert.match(html, /Marktanalyse & Quellenradar/);
 assert.match(html, /Nach deinem Ja übernimmt IVA die komplette Chance in eine Projektakte/);
 assert.match(html, /Links prüfen & automatisch einsortieren/);
 assert.match(html, /id="linkUrls"/);
-assert.match(html, /höchstens zehn|Bis zu zehn/);
+assert.match(html, /Links einfügen und IVAs Einschätzung/);
 assert.match(js, /mode: 'auto'/);
 assert.match(js, /Business-Chance/);
 assert.match(js, /IVA-Erweiterung/);
