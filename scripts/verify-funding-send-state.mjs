@@ -117,11 +117,11 @@ test('native Outlook adapter contract supports historical pre-send search and ex
     const row={description:'Betreff: '+metadata.subject+', Ordner: Gesendet, Fixture',conversation:false,visible:true};
     const adapter=createOutlookUiMailbox({now:()=>NOW,assertHost:()=>{},withLease:fn=>fn(),sleep:async()=>{},dataDir:path.join(path.dirname(filePath),'native'),parseSource:async()=>metadata,
       bridge:async([action,...args])=>{
-        if(action==='doctor')return{focusedWindowTitle:'Gesendet • Förderung | HEAT HERO'};
+        if(['doctor','mailbox-ui-window'].includes(action))return{focusedWindowTitle:'Gesendet • Förderung | HEAT HERO'};
         if(action==='mailbox-ui-search'){query=args[0];return{};}
         if(action==='mailbox-ui-list')return{scope:'Aktueller Ordner',query,rows:found?[row]:[],visibleIndices:found?[0]:[],rowCount:found?1:0,emptyVerified:!found,loading:false};
         if(action==='mailbox-ui-source')return{sourcePath:'/fixture-original.mime'};
-        if(['open-account-folder','mailbox-ui-next'].includes(action))return{};
+        if(['open-account-folder','mailbox-ui-next','mailbox-ui-clear-search','mailbox-ui-close-source'].includes(action))return{};
         throw new Error('Unexpected fixture UI action: '+action);
       }});
     const store=createFundingSendStore({filePath,now:()=>NOW,verifySent:adapter.verifyFundingSentMessage,readSentById:adapter.verifyFundingSentMessage});

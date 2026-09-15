@@ -829,7 +829,14 @@ do {
     }
 
     let root = command == "menu-items" ? appElement : focusedRoot(appElement)
-    let nodes = command.hasPrefix("mailbox-ui-") ? uniqueAXNodes(collect(root)) : collect(root)
+    let nodes = command.hasPrefix("mailbox-ui-") ? uniqueAXNodes(collect(appElement)) : collect(root)
+
+
+    if command == "mailbox-ui-window" {
+        let windows = nodes.filter { $0.role == "AXWindow" && $0.identifier == "OutlookWindow" }
+        guard windows.count == 1 else { throw HelperError.message("OUTLOOK_UI_WINDOW_AMBIGUOUS") }
+        try writeJSON(["focusedWindowTitle": windows[0].title]); exit(0)
+    }
 
     if command == "mailbox-ui-clear-search" {
         let buttons = nodes.filter { $0.role == "AXButton" && $0.identifier == "Cancel Search Button" }
@@ -837,8 +844,10 @@ do {
         if let button = buttons.first {
             activateApplication(app)
             let pressed = AXUIElementPerformAction(button.element, kAXPressAction as CFString)
-            if pressed != .success { try click(button.element) }
-            usleep(400_000)
+            usleep(300_000)
+            if pressed != .success || focusedWindowTitle(appElement).localizedCaseInsensitiveContains("durchsuch") {
+                try click(button.element); usleep(500_000)
+            }
         }
         try writeJSON(["cleared": !buttons.isEmpty]); exit(0)
     }
@@ -891,14 +900,14 @@ do {
         guard candidates.count == 1 else { throw HelperError.message("OUTLOOK_UI_CONVERSATION_AMBIGUOUS") }
         activateApplication(app)
         try click(candidates[0].element); usleep(200_000); try keyboardEvent(124); usleep(500_000)
-        let updated = uniqueAXNodes(collect(focusedRoot(appElement)))
+        let updated = uniqueAXNodes(collect(appElement))
         guard updated.contains(where: { $0.role == "AXCell" && $0.description.contains("Erweitert,") && $0.description.contains("Unterhaltung,") }) else { throw HelperError.message("OUTLOOK_UI_CONVERSATION_NOT_EXPANDED") }
         try writeJSON(["expanded": true]); exit(0)
     }
 
     if command == "mailbox-ui-search" {
         guard arguments.count == 2, arguments[1].count <= 700, !arguments[1].contains("\n"), !arguments[1].contains("\r") else { throw HelperError.message("OUTLOOK_UI_BAD_QUERY") }
-        guard focusedWindowTitle(appElement).contains(" • ") else { throw HelperError.message("OUTLOOK_UI_FOLDER_REQUIRED") }
+        guard nodes.contains(where: { $0.role == "AXWindow" && $0.identifier == "OutlookWindow" && $0.title.contains(" • ") }) else { throw HelperError.message("OUTLOOK_UI_FOLDER_REQUIRED") }
         let fields = nodes.filter { $0.identifier == "Search Bar" && ($0.role == "AXSearchField" || $0.role == "AXTextField") }
         guard fields.count == 1 else { throw HelperError.message("OUTLOOK_UI_SEARCH_UNAVAILABLE") }
         activateApplication(app)
@@ -909,7 +918,7 @@ do {
         var scopes: [AXNode] = []
         for _ in 0..<30 {
             usleep(200_000)
-            let searched = uniqueAXNodes(collect(focusedRoot(appElement)))
+            let searched = uniqueAXNodes(collect(appElement))
             scopes = searched.filter { $0.identifier == "searchScopeButton" && $0.role == "AXPopUpButton" }
             if scopes.count == 1 { break }
         }
@@ -921,7 +930,7 @@ do {
             guard options.count == 1 else { throw HelperError.message("OUTLOOK_UI_SEARCH_SCOPE_UNAVAILABLE") }
             try click(options[0].element); usleep(100_000); try click(options[0].element); usleep(600_000)
         }
-        let verified = uniqueAXNodes(collect(focusedRoot(appElement)))
+        let verified = uniqueAXNodes(collect(appElement))
         guard verified.contains(where: { $0.identifier == "searchScopeButton" && $0.role == "AXPopUpButton" && safeValue($0.element) == "Aktueller Ordner" }) else { throw HelperError.message("OUTLOOK_UI_SEARCH_SCOPE_UNVERIFIED") }
         try writeJSON(["searched": true, "scope": "Aktueller Ordner", "query": arguments[1]]); exit(0)
     }

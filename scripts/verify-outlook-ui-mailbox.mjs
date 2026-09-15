@@ -15,7 +15,7 @@ async function fixture(t,items=[],options={}) {
   const bridge=async args=>{
     calls.push(args);
     if(args[0]==='open-account-folder') {currentFolder=args[2];query='';return {};}
-    if(args[0]==='doctor')return {focusedWindowTitle:options.badFolder?'Posteingang • Wrong':currentFolder+' • Förderung | HEAT HERO'};
+    if(['doctor','mailbox-ui-window'].includes(args[0]))return {focusedWindowTitle:options.badFolder?'Posteingang • Wrong':currentFolder+' • Förderung | HEAT HERO'};
     if(args[0]==='mailbox-ui-search'){query=args[1];return {};}
     if(args[0]==='mailbox-ui-expand'){expanded=true;return {};}
     if(['mailbox-ui-next','mailbox-ui-clear-search','mailbox-ui-close-source'].includes(args[0]))return {};

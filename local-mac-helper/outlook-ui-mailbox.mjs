@@ -82,11 +82,14 @@ export function createOutlookUiMailbox({bridge=runMacUiBridge,parseSource=parseO
   const indexFile=id=>path.join(dataDir,'identities',hash(id)+'.json');
   async function open(from,folder) {
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(from) || !allowedFolders.has(folder)) throw error('OUTLOOK_UI_SCOPE_DENIED','Das Postfach oder der Leseordner ist nicht zulässig.');
-    const before=await bridge(['doctor']);
-    if(/durchsuch/i.test(before.focusedWindowTitle||'')) await bridge(['mailbox-ui-clear-search']);
-    await bridge(['open-account-folder',accountLabel(from),folder],{timeoutMs:30000});
-    const state=await bridge(['doctor']);
-    if(!(state.focusedWindowTitle || '').startsWith(folder+' • '+accountLabel(from))) throw error('OUTLOOK_UI_SCOPE_UNVERIFIED','Der richtige Kontoordner ist nicht belegt.');
+    for (let attempt=0;attempt<3;attempt++) {
+      await bridge(['mailbox-ui-clear-search']);
+      await bridge(['open-account-folder',accountLabel(from),folder],{timeoutMs:30000});
+      const state=await bridge(['mailbox-ui-window']);
+      if((state.focusedWindowTitle || '').startsWith(folder+' • '+accountLabel(from))) return;
+      await sleep(300);
+    }
+    throw error('OUTLOOK_UI_SCOPE_UNVERIFIED','Der richtige Kontoordner ist nicht belegt.');
   }
   async function capture(from,folder,row) {
     if(row.conversation || !folderMatches(row.description,folder)) throw error('OUTLOOK_UI_SINGLE_MESSAGE_REQUIRED','Die Mail muss als einzelne Nachricht im richtigen Ordner sichtbar sein.');
