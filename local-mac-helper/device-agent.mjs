@@ -7,6 +7,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { access, readFile, stat } from 'node:fs/promises';
+import { credentialEnvelopeMetadata } from './secret-envelope.mjs';
 import { cleanupExpiredDewarmteLocalData, storeDewarmteLocalSupplement } from './dewarmte-local-retention.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -47,6 +48,7 @@ const ALLOWED_ACTIONS = Object.freeze([
   'project.workflow.run',
   'portal.credentials.status',
   'portal.login',
+  'knowledge.import.start',
   'codex.task.start',
   'codex.task.status',
   'app.open',
@@ -86,6 +88,7 @@ export function imacDeviceAgentMetadata() {
     workspace: AGENT_WORKSPACE,
     iCloudAuthoritative: isAuthoritativeIcloudWorkspace(),
     allowedActions: [...ALLOWED_ACTIONS],
+    credentialEnvelope: isAllowedImacExecutionHost() ? credentialEnvelopeMetadata() : null,
   });
 }
 
@@ -224,6 +227,12 @@ export async function fetchFundingRuntimeReconcileStatus() {
 
 export async function reportOperationalRun(input = {}) {
   return request(`/device-agent/${IMAC_DEVICE_ID}/operational-runs`, { method: 'POST', body: input });
+}
+
+export async function reportKnowledgeImportCompletion(importId, input = {}) {
+  const safeId = String(importId || '').trim();
+  if (!/^[a-f0-9-]{36}$/i.test(safeId)) throw new Error('Ungültiger Wissensimport.');
+  return request(`/device-agent/${IMAC_DEVICE_ID}/knowledge-imports/${safeId}/complete`, { method: 'POST', body: input });
 }
 
 export async function fetchIncidentPreventions(input = {}) {
@@ -432,6 +441,10 @@ async function executeDeviceCommand(command) {
   if (command.action === 'portal.login') {
     const { ensurePortalLogin } = await import('./portal-auth.mjs');
     return ensurePortalLogin(command.payload?.service);
+  }
+  if (command.action === 'knowledge.import.start') {
+    const { startKnowledgeImportTask } = await import('./knowledge-import.mjs');
+    return startKnowledgeImportTask(command.payload);
   }
   if (command.action === 'codex.task.start') {
     const { startCodexTask } = await import('./codex-tasks.mjs');

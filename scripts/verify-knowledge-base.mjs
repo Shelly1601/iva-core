@@ -10,6 +10,15 @@ const queued = await store.createKnowledgeEntry({ title: 'Vertriebskurs', kind: 
 assert.equal(queued.status, 'needs-material');
 assert.equal((await store.knowledgeBaseStatus()).needsMaterial, 1);
 
+const linkOnly = await store.createKnowledgeEntry({ category: 'Vertrieb', sourceUrl: 'https://www.instagram.com/reel/TestReel123/' });
+assert.equal(linkOnly.title, 'Instagram-Reel · TestReel123');
+assert.equal(linkOnly.status, 'needs-material', 'a link is not yet learned content');
+const textOnly = await store.createKnowledgeEntry({ content: '# Bedarf vor Angebot\nZunächst die Situation verstehen.', category: 'Vertrieb' });
+assert.equal(textOnly.title, 'Bedarf vor Angebot');
+const fileDraft = await store.createKnowledgeEntry({ kind: 'document', documentName: 'Beratungsleitfaden.pdf' });
+assert.equal(fileDraft.title, 'Beratungsleitfaden');
+await assert.rejects(() => store.createKnowledgeEntry({ category: 'Vertrieb' }), /Link, Text oder eine Datei/);
+
 const learned = await store.updateKnowledgeEntry(queued.id, { content: 'Die Bedarfsermittlung beginnt mit offenen Fragen. Danach werden Ziele priorisiert.', tags: ['Beratung', 'Bedarf'] });
 assert.equal(learned.status, 'ready');
 assert.ok(learned.wordCount >= 8);
@@ -41,8 +50,16 @@ assert.doesNotThrow(() => new Function(js));
 assert.match(html, /id="entryForm"/);
 assert.match(html, /accept="application\/pdf,text\/plain,text\/markdown/);
 assert.match(html, /Dein eigener Wissensspeicher/);
+assert.match(html, /Den Titel vergibt IVA automatisch/);
+assert.match(html, /Nur in IVA aufnehmen/);
+assert.match(html, /IVA \+ Google Drive/);
+assert.match(html, /id="loginPassword" type="password"/);
+assert.match(html, /id="importJobs"/);
+assert.match(js, /encryptCredentials/);
+assert.match(js, /role="progressbar"/);
 assert.match(cockpit, /id="openKnowledge" href="\/knowledge" onclick="event\.stopPropagation\(\)"/);
 for (const endpoint of ["/api/knowledge/status", "/api/knowledge',", "/api/knowledge/:id", "/api/knowledge/:id/document"]) assert.match(server, new RegExp(endpoint.replace(/[/:]/g, match => `\\${match}`)));
+for (const endpoint of ["/api/knowledge/import-capabilities", "/api/knowledge/imports", "/api/knowledge/imports/:id/resume"]) assert.match(server, new RegExp(endpoint.replace(/[/:]/g, match => `\\${match}`)));
 assert.match(server, /searchPersonalKnowledgeBase/);
 assert.match(server, /addPersonalKnowledge/);
 assert.equal((server.match(/buildKnowledgePromptContext\(userText\)/g) || []).length, 2);

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { extractText } from 'unpdf';
+import { deriveKnowledgeTitle } from '../local-mac-helper/knowledge-source.mjs';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const STORE_FILE = path.join(DATA_DIR, 'knowledge-base.json');
@@ -59,11 +60,11 @@ async function mutate(fn) {
 
 function normalizeEntry(input = {}, existing = {}) {
   const now = new Date().toISOString();
-  const title = clean(input.title ?? existing.title, 240);
-  if (!title) throw new Error('Ein Titel fehlt.');
   const sourceUrl = input.sourceUrl === undefined ? existing.sourceUrl || '' : normalizeUrl(input.sourceUrl);
   if (clean(input.sourceUrl, 1800) && !sourceUrl) throw new Error('Bitte eine gültige http- oder https-Adresse verwenden.');
   const content = clean(input.content ?? existing.content, MAX_TEXT);
+  const title = deriveKnowledgeTitle({ title: input.title ?? existing.title, content, sourceUrl, documentName: input.documentName ?? existing.document?.name });
+  if (!title) throw new Error('Bitte einen Link, Text oder eine Datei hinzufügen.');
   const documentText = clean(existing.documentText, MAX_TEXT);
   const hasKnowledge = Boolean(content || documentText);
   return {
