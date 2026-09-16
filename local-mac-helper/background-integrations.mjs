@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, lstat, writeFile } from 'node:fs/promises';
 import { classifyFundingDocumentName } from './funding-document-extractor.mjs';
+import { validateKfwCustomerCredentials } from './funding-kfw-credentials.mjs';
 import { assertImacExecutionHost, imacDeviceAgentMetadata } from './device-agent.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -204,6 +205,31 @@ export async function completePipedriveFundingHandoff({ dealId, documentReview, 
   return request(`/device-agent/${DEVICE_ID}/background/pipedrive/deals/${id}/funding-handoff`, {
     method: 'POST', body: { documentReview, result }, timeoutMs: 90_000,
   });
+}
+
+export async function writePipedriveKfwCustomerCredentials({ dealId, kfwCredentials, confirmApply = false, reconcileOnly = false } = {}, { requestImpl = request } = {}) {
+  if (confirmApply !== true) throw new Error('KfW-Kundenzugang nicht gespeichert: confirmApply=true fehlt.');
+  const credentials = validateKfwCustomerCredentials(kfwCredentials, dealId);
+  try {
+    const receipt = await requestImpl(`/device-agent/${DEVICE_ID}/background/pipedrive/deals/${credentials.dealId}/kfw-credentials`, {
+      method: 'POST', body: { kfwCredentials: credentials, reconcileOnly }, timeoutMs: 60_000,
+    });
+    const noteId = /^\d+$/.test(String(receipt?.noteId || '')) ? String(receipt.noteId) : null;
+    if (receipt?.verified === true && !noteId) throw new Error('invalid_receipt');
+    return { dealId: credentials.dealId, noteId, created: receipt?.created === true,
+      alreadyPresent: receipt?.alreadyPresent === true, verified: receipt?.verified === true, writeAttempted: receipt?.writeAttempted === true,
+      source: 'iva-core-pipedrive-api' };
+  } catch { throw new Error('KfW-Kundenzugang konnte nicht bestätigt werden; vorhandene Notiz vor einem erneuten Schreiben abgleichen.'); }
+}
+
+export async function amendPipedriveFundingHandoff({ dealId, handoffId, noteId, requestId, expectedContentSha256, documentReview, result, confirmApply = false } = {}, { requestImpl = request } = {}) {
+  if (confirmApply !== true) throw new Error('Die Fördernotiz wurde nicht korrigiert: confirmApply=true fehlt.');
+  if (!/^\d+$/.test(String(dealId || '')) || !/^\d+$/.test(String(noteId || ''))) throw new Error('Die eindeutige Deal- oder Fördernotiz-ID fehlt.');
+  try {
+    return await requestImpl(`/device-agent/${DEVICE_ID}/background/pipedrive/deals/${dealId}/funding-handoff/note`, {
+      method: 'PATCH', body: { handoffId, noteId, requestId, expectedContentSha256, documentReview, result }, timeoutMs: 90_000,
+    });
+  } catch { throw new Error('Die Fördernotiz-Korrektur ist noch nicht bestätigt; denselben Vorgang anhand seiner Kennung rücklesen.'); }
 }
 
 export async function listPipedriveFundingHandoffs() {

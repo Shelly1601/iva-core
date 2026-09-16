@@ -301,7 +301,10 @@ async function main() {
   }
   if (command === 'create-pipedrive-funding-info-note') {
     if (confirmation !== '--commit') throw new Error('Die Pipedrive-Information wurde nicht erstellt. Zum Bestätigen --commit anhängen.');
-    return console.log(JSON.stringify(await createPipedriveFundingInformationNote(await readJson(filePath)), null, 2));
+    let input;
+    try { input = filePath === '-' ? JSON.parse(await readFile('/dev/stdin', 'utf8')) : await readJson(filePath); }
+    catch { throw new Error('Die Pipedrive-Information enthält kein lesbares JSON; Eingabeinhalt wird nicht ausgegeben.'); }
+    return console.log(JSON.stringify(await createPipedriveFundingInformationNote({ ...input, confirmApply: true }), null, 2));
   }
   if (command === 'update-pipedrive-funding-notes') {
     if (confirmation !== '--commit') throw new Error('Pipedrive-Notizen wurden nicht aktualisiert. Zum Bestätigen --commit anhängen.');

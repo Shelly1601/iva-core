@@ -129,3 +129,18 @@ test('stored state contains separate source, review and completeness and no raw 
   assert.equal(record.sourceState.notesFingerprint, input.snapshot.fundingHandoffNotesFingerprint);
   assert.doesNotMatch(await readFile(path.join(directory, 'funding-case-reviews.json'), 'utf8'), /RAW PRIVATE BODY/);
 });
+
+test('readiness requires credential evidence in the matching snapshot beyond a reviewed login status', async () => {
+  const input = fixture(); input.snapshot.phoneNumber = '0123456789';
+  input.review.reviewStatus = 'reviewed'; input.review.completeness = 'complete'; input.review.openPoints = [];
+  input.review.snapshotFingerprint = fundingDocumentReviewFingerprint(input.snapshot);
+  await assert.rejects(recordFundingCaseReview(input), /KfW-Kundenzugangspaar/);
+  input.snapshot.kfwAccountConfirmedByCredentials = true; input.snapshot.kfwCredentialEvidenceNoteIds = ['91'];
+  input.review.snapshotFingerprint = fundingDocumentReviewFingerprint(input.snapshot);
+  const record = await saved(input);
+  assert.equal(record.completeness, 'complete');
+  input.snapshot.kfwCredentialEvidenceNoteIds = [];
+  const changed = assessFundingCaseReview(input.snapshot, record);
+  assert.equal(changed.caseReviewRequired, true); assert.equal(changed.reviewCompleteness, 'incomplete');
+  assert.deepEqual(changed.documentIdsRequiringReview, [], 'unchanged PDFs do not need another review');
+});

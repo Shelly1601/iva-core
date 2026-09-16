@@ -286,6 +286,7 @@ import {
   createPipedriveAuthUrl,
   createPipedriveDealNote,
   completePipedriveFundingHandoffApi,
+  amendPipedriveFundingHandoffApi,
   listPipedriveFundingHandoffs,
   downloadPipedriveDealFile,
   getPipedriveDealBundle,
@@ -1532,6 +1533,21 @@ app.post('/device-agent/:deviceId/background/pipedrive/deals/:dealId/funding-han
   try { res.json(await completePipedriveFundingHandoffApi({ dealId: req.params.dealId, documentReview: req.body?.documentReview, result: req.body?.result, confirmation: 'Pipedrive schreiben' })); }
   catch (error) { res.status(409).json({ error: error.message }); }
 });
+app.post('/device-agent/:deviceId/background/pipedrive/deals/:dealId/kfw-credentials', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
+  try { res.set('Cache-Control', 'no-store').json(await createPipedriveDealNote({ dealId: req.params.dealId,
+    kfwCredentials: req.body?.kfwCredentials, reconcileOnly: req.body?.reconcileOnly === true, confirmation: 'Pipedrive schreiben' })); }
+  catch { res.status(409).json({ error: 'KfW-Kundenzugangsnotiz konnte nicht bestätigt werden.' }); }
+});
+app.patch('/device-agent/:deviceId/background/pipedrive/deals/:dealId/funding-handoff/note', async (req, res) => {
+  if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
+  try { res.set('Cache-Control', 'no-store').json(await amendPipedriveFundingHandoffApi({ dealId: req.params.dealId,
+    handoffId: req.body?.handoffId, noteId: req.body?.noteId, requestId: req.body?.requestId,
+    expectedContentSha256: req.body?.expectedContentSha256, documentReview: req.body?.documentReview, result: req.body?.result,
+    confirmation: 'Pipedrive schreiben' })); }
+  catch (error) { res.status(409).json({ error: 'Die Fördernotiz-Korrektur ist noch nicht bestätigt.',
+    code: /^FUNDING_HANDOFF_AMENDMENT_[A-Z_]+$/.test(error?.code || '') ? error.code : 'FUNDING_HANDOFF_AMENDMENT_UNVERIFIED' }); }
+});
 app.get('/device-agent/:deviceId/background/pipedrive/funding-handoffs', async (req, res) => {
   if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
   try { res.set('Cache-Control', 'no-store').json(await listPipedriveFundingHandoffs()); }
@@ -2549,6 +2565,7 @@ app.post('/api/pipedrive/deals/:id/notes', async (req, res) => {
     res.status(201).json(await createPipedriveDealNote({
       dealId: req.params.id,
       text: req.body?.text,
+      kfwCredentials: req.body?.kfwCredentials,
       confirmation: req.body?.confirmation,
     }));
   } catch (error) { res.status(error.message.includes('freigeschaltet') ? 409 : 400).json({ error: error.message }); }

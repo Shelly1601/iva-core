@@ -7,6 +7,7 @@ import { classifyFundingDocumentName } from './funding-document-extractor.mjs';
 import { resolveFundingSupervisor } from './funding.mjs';
 import { resolveFundingStage } from './pipedrive-funding.mjs';
 import { isFundingCalculationNote } from './funding-workflows.mjs';
+import { renderKfwCustomerCredentialsNote, kfwCredentialNoteHasPair } from './funding-kfw-credentials.mjs';
 import { chromeBoundsAppleScript, requireRightDisplayWorkspace } from './display-workspace.mjs';
 import { withPipedriveBrowserLock } from './pipedrive-browser-lock.mjs';
 
@@ -768,7 +769,7 @@ export async function readPipedriveFundingDealsViaApi({ dealIds, batchSize = 8, 
           const notes = notesResult || [];
           const noteEvidence = notes.map(note => {
             const content = String(note?.content || '');
-            const document = new DOMParser().parseFromString(content, 'text/html');
+            const document = new DOMParser().parseFromString(content.replace(/<br\s*\/?\s*>/gi, '\n'), 'text/html');
             const text = clean(document.body?.textContent || content);
             const marker = content.match(/IVA-FUNDING-REQUEST:\d+:[0-9a-f]{24}/i)?.[0] || null;
             const kfwEvidenceMarker = content.match(/IVA-KFW-EVIDENCE:\d+:[0-9a-f]{24}/i)?.[0] || null;
@@ -776,14 +777,8 @@ export async function readPipedriveFundingDealsViaApi({ dealIds, batchSize = 8, 
             const humanReadableIvaRequest = /^fehlende unterlagen:/i.test(text)
               && /angefragt\./i.test(text)
               && text.toLowerCase().replace(/\(notiz von nadine via ki\)$/, '(notiz von nadine)').endsWith(ivaNoteSignature.toLowerCase());
-            const kfwEmailMatch = text.match(/[a-z0-9.!#$%&'*+/=?^_{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
-            const kfwSecretAfterEmail = kfwEmailMatch
-              ? text.slice((kfwEmailMatch.index || 0) + kfwEmailMatch[0].length).trim().match(/^(\S{6,})/)?.[1] || ''
-              : '';
-            const hasExplicitKfwCredentials = Boolean(kfwEmailMatch)
-              && (/(?:passwort|kennwort)\s*[:=\-]\s*\S{3,}/i.test(text)
-                || (/kfw.{0,30}konto/i.test(text) && /[A-Za-z]/.test(kfwSecretAfterEmail) && /\d/.test(kfwSecretAfterEmail)));
-            const redactedExcerpt = hasExplicitKfwCredentials
+            const hasExplicitKfwCredentials = (${kfwCredentialNoteHasPair.toString()})(document.body?.textContent || content);
+            const redactedExcerpt = hasExplicitKfwCredentials || /passwort|kennwort|password|otp|einmalcode|totp/i.test(text)
               ? 'KfW-Zugangsdaten in der Notiz vorhanden; E-Mail-Adresse und Passwort vollständig ausgeblendet.'
               : text
                 .replace(/[a-z0-9.!#$%&'*+/=?^_{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/ig, '[E-Mail ausgeblendet]')
@@ -1169,7 +1164,8 @@ function preparePipedriveFundingRequestNoteUpdate({ dealId, noteId, marker, miss
   return { dealId: id, noteId: safeNoteId, marker: safeMarker, content };
 }
 
-export function renderPipedriveFundingInformationNote({ heading, details } = {}) {
+export function renderPipedriveFundingInformationNote({ dealId, heading, details, kfwCredentials } = {}) {
+  if (kfwCredentials !== undefined) return renderKfwCustomerCredentialsNote(kfwCredentials, dealId);
   const safeHeading = String(heading || '').replace(/\s+/g, ' ').trim().slice(0, 160);
   if (!safeHeading) throw new Error('Für die Pipedrive-Information fehlt eine Überschrift.');
   const safeDetails = (Array.isArray(details) ? details : []).map(item => {
@@ -1180,9 +1176,9 @@ export function renderPipedriveFundingInformationNote({ heading, details } = {})
     };
   }).filter(item => item.value).slice(0, 30);
   if (!safeDetails.length) throw new Error('Für die Pipedrive-Information fehlen konkrete Inhalte.');
+  const containsSecret = safeDetails.some(item => /passwort|kennwort|password|otp|einmalcode|totp/i.test(`${item.label} ${item.value}`));
+  if (containsSecret) throw new Error('KfW-Kundenzugangsdaten über den zugeordneten kfwCredentials-Payload und den bestätigten API-Weg speichern; keine Systempasswörter oder Einmalcodes.');
   if (/kfw/i.test(safeHeading)) {
-    const containsSecret = safeDetails.some(item => /passwort|kennwort|otp|einmalcode|totp/i.test(`${item.label} ${item.value}`));
-    if (containsSecret) throw new Error('KfW-Passwörter und Einmalcodes dürfen niemals in einer Pipedrive-Notiz gespeichert werden.');
     const labels = safeDetails.map(item => item.label.toLowerCase());
     if (!labels.some(label => /status|ergebnis/.test(label))) throw new Error('Eine KfW-Prüfnotiz muss den konkreten Login-Prüfstatus ausweisen.');
   }
@@ -1190,10 +1186,15 @@ export function renderPipedriveFundingInformationNote({ heading, details } = {})
   return { heading: safeHeading, details: safeDetails, content };
 }
 
-export async function createPipedriveFundingInformationNote({ dealId, heading, details } = {}) {
+export async function createPipedriveFundingInformationNote({ dealId, heading, details, kfwCredentials, confirmApply = false, reconcileOnly = false } = {}, dependencies = {}) {
+  if (kfwCredentials !== undefined && !/^\d+$/.test(String(dealId || ''))) throw new Error('Für die KfW-Kundenzugangsnotiz fehlt eine eindeutige Deal-ID.');
   const id = String(dealId || '').replace(/\D/g, '');
   if (!id) throw new Error('Für die Pipedrive-Information fehlt eine gültige Deal-ID.');
-  const rendered = renderPipedriveFundingInformationNote({ heading, details });
+  const rendered = renderPipedriveFundingInformationNote({ dealId: id, heading, details, kfwCredentials });
+  if (rendered.containsCustomerCredentials) {
+    const write = dependencies.writeKfwCredentials || (await import('./background-integrations.mjs')).writePipedriveKfwCustomerCredentials;
+    return write({ dealId: id, kfwCredentials, confirmApply, reconcileOnly });
+  }
   if (isFundingCalculationNote(rendered.content)) throw new Error('Förderhöhen-Notizen erst nach vollständiger Unterlagenprüfung gemeinsam mit dem bestätigten Phasenwechsel über complete-pipedrive-funding-handoff speichern.');
   const result = JSON.parse(await executePipedriveJavaScript(String.raw`(() => {
       const dealId = ${JSON.stringify(id)};

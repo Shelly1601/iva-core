@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { withFundingFileLock } from './funding-intake-state.mjs';
 import { FUNDING_REQUIRED_FIELDS, missingFundingRequiredFields } from './funding-required-fields.mjs';
+import { hasStoredKfwCustomerCredentials } from './funding-kfw-credentials.mjs';
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const text = value => typeof value === 'string' ? value.trim() : '';
@@ -64,18 +65,21 @@ export function assessFundingCaseReview(snapshot, record, { now = Date.now(), ch
   const previousEvidence = reusableFileEvidence(record, sourceState);
   const reusableDocumentEvidence = previousEvidence.filter(item => item.status === 'reviewed');
   const sourceReviewRequired = !record || sourceChanged || sourceUnavailable || changedByMail;
+  const missingStoredKfwCredentials = !hasStoredKfwCustomerCredentials(snapshot);
+  const credentialReviewRequired = record?.completeness === 'complete' && missingStoredKfwCredentials;
   const documentIdsRequiringReview = sourceState.files.filter(file => !previousEvidence.some(proof => proof.fileId === file.id)).map(file => file.id);
   return {
-    caseReviewRequired: sourceReviewRequired || due,
+    caseReviewRequired: sourceReviewRequired || due || credentialReviewRequired,
+    missingStoredKfwCredentials,
     sourceReviewRequired,
     sourceChanged,
     sourceUnavailable,
     changedByMail,
     due,
-    reviewStatus: !record ? 'not_reviewed' : sourceChanged || changedByMail ? 'changed' : due ? 'due' : 'reviewed_unchanged',
+    reviewStatus: !record ? 'not_reviewed' : sourceChanged || changedByMail ? 'changed' : due ? 'due' : credentialReviewRequired ? 'credentials_missing' : 'reviewed_unchanged',
     recordedReviewStatus: record?.reviewStatus || null,
     reviewedAt: record?.checkedAt || null,
-    reviewCompleteness: record?.completeness || null,
+    reviewCompleteness: credentialReviewRequired ? 'incomplete' : record?.completeness || null,
     // Open points remain visible even when their source has not changed.
     openPoints: record?.openPoints || [],
     nextReviewAt: record?.nextReviewAt || null,
@@ -128,6 +132,7 @@ export async function recordFundingCaseReview({ snapshot, review } = {}, { file 
   if (review.nextReviewAt != null && !timestamp(review.nextReviewAt)) throw new Error('Der nächste fällige Schritt benötigt einen gültigen Zeitpunkt.');
   const missingRequiredFields = missingFundingRequiredFields(snapshot);
   if (review.completeness === 'complete' && (missingRequiredFields.length || review.openPoints.length)) throw new Error('Ein Fall mit fehlenden Pflichtfeldern oder offenen Punkten darf nicht als vollständig gespeichert werden.');
+  if (review.completeness === 'complete' && !hasStoredKfwCustomerCredentials(snapshot)) throw new Error('Für Vollständigkeit fehlt das im zugehörigen Deal gespeicherte und rückgelesene KfW-Kundenzugangspaar.');
   if ((review.reviewStatus === 'waiting_external' || missingRequiredFields.length) && !review.openPoints.length) throw new Error('Ein wartender oder unvollständiger Fall benötigt Hindernis und nächste Aktion.');
   return withFundingFileLock(file, async () => {
     const state = await loadFundingCaseReviews(file);

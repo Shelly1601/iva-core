@@ -82,7 +82,7 @@ import { loadFundingReview, saveFundingReview } from '../local-mac-helper/fundin
 import { cleanupCompletedFundingReview, fundingLocalCleanupPolicy, recordFundingReviewCompletion } from '../local-mac-helper/funding-local-cleanup.mjs';
 import { FUNDING_DONE_FOLDER, validateFundingMailCompletion } from '../local-mac-helper/funding-mail-completion.mjs';
 
-assert.equal(Object.keys(FUNDING_DOCUMENTS).length, 7);
+assert.equal(Object.keys(FUNDING_DOCUMENTS).length, 8);
 assert.equal(FUNDING_SENDER_EMAIL, 'foerderung@heat-hero.com');
 assert.equal(FUNDING_PRIMARY_RECIPIENT_EMAIL, 'p.germer@heat-hero.com');
 assert.equal(FUNDING_SUPERVISORS.ekd.email, 'k.bolz@heat-hero.com');
@@ -343,7 +343,7 @@ assert.doesNotMatch(kfwInformationNote.content, /IVA-(?:FUNDING|KFW)-/);
 assert.throws(() => renderPipedriveFundingInformationNote({
   heading: 'KfW-Kontobestätigung',
   details: [{ label: 'Passwort', value: 'NurEinTest123!' }, { label: 'Status', value: 'geprüft' }],
-}), /niemals in einer Pipedrive-Notiz/);
+}), /kfwCredentials-Payload/);
 assert.throws(() => renderPipedriveFundingInformationNote({
   heading: 'KfW-Kontobestätigung',
   details: [{ label: 'E-Mail-Adresse', value: 'kunde@example.com' }],

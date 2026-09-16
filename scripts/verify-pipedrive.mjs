@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
 
 process.env.DATA_DIR = await fs.mkdtemp(path.join(os.tmpdir(), 'iva-pipedrive-'));
 process.env.PIPEDRIVE_CLIENT_ID = 'iva-pipedrive-test-client';
@@ -46,6 +47,8 @@ let failPersonFetch = false;
 let personValues = { id: 5, name: 'Max Muster', emails: [{ value: 'kunde@example.test', primary: true }], phones: [{ value: '+4912345', primary: true }] };
 let personPatches = 0;
 let paginateFunding = false, invalidFundingPage = false;
+let credentialNoteFailure = null;
+let notePuts = 0, noteReads = 0, stagePatches = 0, changeNoteOnSecondRead = false, uncertainNotePut = false;
 const fileContents = new Map([['44', Buffer.from('%PDF-pipedrive-test')]]);
 let filePosts = 0, corruptUploadedFile = false, omitUploadedId = false, wrongUploadedId = false;
 
@@ -87,6 +90,7 @@ globalThis.fetch = async (input, options = {}) => {
     { 'x-ratelimit-limit': '80', 'x-ratelimit-remaining': '79' },
   );
   if (url.pathname === '/api/v2/deals/123' && String(options.method || 'GET').toUpperCase() === 'PATCH') {
+    stagePatches++;
     const body = JSON.parse(String(options.body || '{}'));
     if (Object.hasOwn(body, 'stage_id')) dealStage = Number(body.stage_id);
     dealValues = {
@@ -108,6 +112,7 @@ globalThis.fetch = async (input, options = {}) => {
   if (url.pathname === '/api/v2/organizations/7') return ok({ id: 7, name: 'Muster GmbH' });
   if (url.pathname === '/api/v1/notes' && String(options.method || 'GET').toUpperCase() === 'POST') {
     const body = JSON.parse(String(options.body || '{}'));
+    if (credentialNoteFailure) return json({ success: false, error: credentialNoteFailure }, 500);
     const note = { id: notes.length + 1, deal_id: body.deal_id, content: body.content };
     notes.push(note);
     return ok(note);
@@ -117,6 +122,21 @@ globalThis.fetch = async (input, options = {}) => {
     if (!paginateFunding) return ok(rows);
     const start = Number(url.searchParams.get('start') || 0), data = rows.slice(start, start + 2);
     return json({ success: true, data, additional_data: { pagination: { more_items_in_collection: start + 2 < rows.length, next_start: invalidFundingPage ? start : start + 2 } } });
+  }
+  const noteId = url.pathname.match(/^\/api\/v1\/notes\/(\d+)$/)?.[1];
+  if (noteId) {
+    const note = notes.find(item => String(item.id) === noteId);
+    if (!note) return json({ success: false, error: 'missing note' }, 404);
+    if (String(options.method || 'GET').toUpperCase() === 'PUT') {
+      notePuts++; const body = JSON.parse(String(options.body || '{}'));
+      assert.deepEqual(Object.keys(body), ['content'], 'amount update never reassigns deal or creates a note');
+      note.content = body.content;
+      if (uncertainNotePut) return json({ success: false, error: 'uncertain response after PUT' }, 500);
+    } else {
+      noteReads++;
+      if (changeNoteOnSecondRead && noteReads === 2) note.content += '<p>Concurrent human edit</p>';
+    }
+    return ok(note);
   }
   const downloadId = url.pathname.match(/^\/api\/v1\/files\/(\d+)\/download$/)?.[1];
   if (downloadId) return fileContents.has(downloadId)
@@ -140,6 +160,7 @@ const {
   createPipedriveAuthUrl,
   createPipedriveDealNote,
   completePipedriveFundingHandoffApi,
+  amendPipedriveFundingHandoffApi,
   listPipedriveFundingHandoffs,
   downloadPipedriveDealFile,
   getPipedriveDealBundle,
@@ -316,6 +337,41 @@ try {
   const duplicateNote = await createPipedriveDealNote({ dealId: 123, text: 'Geprüfter Test', confirmation: PIPEDRIVE_WRITE_CONFIRMATION });
   assert.equal(duplicateNote.alreadyPresent, true);
 
+  const kfwCredentials = { scope: 'customer-kfw', dealId: '123', customerPersonId: '5', sourceIdentityVerified: true,
+    email: 'fixture-kfw@example.test', password: `Fixture-${randomUUID()} & < > two  spaces` };
+  notes.push({ id: notes.length + 1, deal_id: 123, content: 'KfW Login erfolgreich; fixture-kfw@example.test; Passwort: vorhanden' });
+  assert.equal((await getPipedriveFundingSnapshot(123)).kfwAccountConfirmedByCredentials, false, 'status-only note is not a stored pair');
+  notes.pop();
+  const credentialInput = { dealId: '123', kfwCredentials, confirmation: PIPEDRIVE_WRITE_CONFIRMATION };
+  const notesBeforeCredentials = notes.length;
+  const absentCredentials = await createPipedriveDealNote({ ...credentialInput, reconcileOnly: true });
+  assert.equal(absentCredentials.verified, false); assert.equal(notes.length, notesBeforeCredentials);
+  await assert.rejects(createPipedriveDealNote({ ...credentialInput, kfwCredentials: { ...kfwCredentials, customerPersonId: '999' } }), { code: 'KFW_CREDENTIAL_NOTE_UNVERIFIED' });
+  assert.equal(notes.length, notesBeforeCredentials, 'foreign customer contact cannot receive the note');
+  credentialNoteFailure = kfwCredentials.password;
+  await assert.rejects(createPipedriveDealNote(credentialInput), error => error.code === 'KFW_CREDENTIAL_NOTE_UNVERIFIED' && !JSON.stringify(error).includes(kfwCredentials.password) && !error.message.includes(kfwCredentials.password));
+  credentialNoteFailure = null;
+  const credentialReceipt = await createPipedriveDealNote(credentialInput);
+  assert.equal(credentialReceipt.created, true); assert.equal(credentialReceipt.verified, true);
+  assert.equal(notes.length, notesBeforeCredentials + 1);
+  assert.match(notes.at(-1).content, /&amp; &lt; &gt; two  spaces/);
+  assert.ok(!JSON.stringify(credentialReceipt).includes(kfwCredentials.password));
+  notes.at(-1).content = notes.at(-1).content.replace(/<br>/g, '<br />');
+  const repeatedCredentialReceipt = await createPipedriveDealNote(credentialInput);
+  assert.equal(repeatedCredentialReceipt.alreadyPresent, true); assert.equal(notes.length, notesBeforeCredentials + 1);
+  await createPipedriveDealNote({ ...credentialInput, kfwCredentials: { ...kfwCredentials, password: 'Fixture-&lt;123' } });
+  const entityCollision = await createPipedriveDealNote({ ...credentialInput, reconcileOnly: true,
+    kfwCredentials: { ...kfwCredentials, password: 'Fixture-<123' } });
+  assert.equal(entityCollision.verified, false, 'literal HTML-entity password is different from the decoded symbol password');
+  assert.equal(entityCollision.alreadyPresent, false); assert.equal(notes.length, notesBeforeCredentials + 2);
+  notes.pop();
+  const credentialSnapshot = await getPipedriveFundingSnapshot(123);
+  assert.equal(credentialSnapshot.kfwAccountConfirmedByCredentials, true);
+  assert.deepEqual(credentialSnapshot.kfwCredentialEvidenceNoteIds, [credentialReceipt.noteId]);
+  assert.ok(!JSON.stringify(credentialSnapshot).includes(kfwCredentials.password));
+  assert.ok(!JSON.stringify(credentialSnapshot).includes(kfwCredentials.email));
+  assert.ok(!JSON.stringify(credentialSnapshot).includes('two spaces'));
+
   const moved = await updatePipedriveDealStage({ dealId: 123, expectedStageId: 20, targetStageId: 19, confirmation: PIPEDRIVE_WRITE_CONFIRMATION });
   assert.equal(moved.changed, true);
   assert.equal(moved.verified, true);
@@ -399,6 +455,36 @@ try {
   assert.deepEqual((await listPipedriveFundingHandoffs()).handoffs, []);
   const missingReconciliation = await createPipedriveDealNote({ dealId: '123', text: 'Noch nicht sichtbare Informationsnotiz', reconcileOnly: true, confirmation: PIPEDRIVE_WRITE_CONFIRMATION });
   assert.equal(missingReconciliation.verified, false); assert.equal(notes.length, noteCountBeforeHandoff + 1);
+
+  // Amend only the original owned note after new source evidence. The second
+  // direct GET protects the exact PUT from an intervening human note edit.
+  const { calculateKfw458Funding } = await import('../workspaces/energy-calculations.js');
+  const amountNote = notes.find(note => String(note.id) === handoff.noteId), previousContent = amountNote.content;
+  notes.push({ id: notes.length + 1, deal_id: 123, content: 'Neue geprüfte Quelle für den Klimabonus.' });
+  const amendmentSnapshot = await getPipedriveFundingSnapshot(123);
+  const amendedCalculation = { ...calculateKfw458Funding({ applicantType: 'private-owner', selfUsed: true, units: 1,
+    projectCosts: 30000, existingBuildingAgeYears: 30, applicationDate: new Date().toISOString().slice(0, 10), incomeBonusRequested: false,
+    climateBonusEligible: true, contractConditional: true, applicationBeforeStart: true, hydraulicBalancingPlanned: true }), calculatedAt: new Date().toISOString() };
+  const amendmentInput = { dealId: '123', handoffId: handoff.handoffId, noteId: handoff.noteId, requestId: 'fixture-source-change',
+    confirmation: PIPEDRIVE_WRITE_CONFIRMATION, expectedContentSha256: createHash('sha256').update(previousContent).digest('hex'),
+    result: amendedCalculation, documentReview: { ...documentReview, checkedAt: new Date().toISOString(), snapshotFingerprint: fundingHandoffSnapshotFingerprint(amendmentSnapshot) } };
+  const amendmentNoteCount = notes.length, previousStagePatches = stagePatches;
+  noteReads = 0; changeNoteOnSecondRead = true;
+  await assert.rejects(amendPipedriveFundingHandoffApi(amendmentInput), { code: 'FUNDING_HANDOFF_AMENDMENT_NOT_ATTEMPTED' });
+  assert.equal(notePuts, 0, 'changed original content stops before PUT');
+  let amendmentLedger = JSON.parse(await fs.readFile(path.join(process.env.DATA_DIR, 'pipedrive-funding-handoff.json')));
+  assert.equal(amendmentLedger.deals['123'].amendments.at(-1).status, 'prepared');
+  amountNote.content = previousContent; changeNoteOnSecondRead = false; uncertainNotePut = true;
+  const amended = await amendPipedriveFundingHandoffApi(amendmentInput);
+  assert.equal(amended.verified, true); assert.equal(amended.noteCreated, false); assert.equal(amended.stageChanged, false);
+  assert.equal(notePuts, 1); assert.equal(notes.length, amendmentNoteCount); assert.equal(stagePatches, previousStagePatches);
+  assert.equal((amountNote.content.match(/\(Notiz von Nadine\)/g) || []).length, 1, 'exactly one existing signature is retained');
+  const amendmentReplay = await amendPipedriveFundingHandoffApi({ dealId: '123', handoffId: handoff.handoffId, noteId: handoff.noteId,
+    requestId: 'fixture-source-change', confirmation: PIPEDRIVE_WRITE_CONFIRMATION });
+  assert.equal(amendmentReplay.alreadyPresent, true); assert.equal(notePuts, 1);
+  amendmentLedger = JSON.parse(await fs.readFile(path.join(process.env.DATA_DIR, 'pipedrive-funding-handoff.json')));
+  assert.equal(amendmentLedger.deals['123'].amendments.at(-1).status, 'completed');
+  assert.equal(amendmentLedger.deals['123'].noteId, handoff.noteId);
 
   const authHeader = `Basic ${Buffer.from('iva-webhook:webhook-test-password').toString('base64')}`;
   assert.equal(authorizePipedriveWebhook(authHeader), true);

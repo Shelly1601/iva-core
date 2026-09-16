@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { missingFundingRequiredFields } from './funding-required-fields.mjs';
 import { fundingApplicationRequiredDocumentIds } from './funding-document-requirements.mjs';
+import { hasStoredKfwCustomerCredentials } from './funding-kfw-credentials.mjs';
 
 export const FUNDING_HANDOFF_SOURCE = 'Auftrag eingereicht / Förderunterlagen einreichen';
 export const FUNDING_HANDOFF_TARGET = 'Förderung beantragen';
@@ -23,7 +24,8 @@ export function fundingHandoffSnapshotFingerprint(snapshot = {}) {
     orderNumber: clean(snapshot.orderNumber), customerEmail: clean(snapshot.customerEmail), phoneNumber: clean(snapshot.phoneNumber), plant: clean(snapshot.plant),
     incomeBonusRequested: snapshot.incomeBonusRequested ?? null, requiredFieldSources: snapshot.requiredFieldSources || null,
     fundingHandoffNotesFingerprint: snapshot.fundingHandoffNotesFingerprint ?? null,
-    kfwAccountConfirmedByCredentials: snapshot.kfwAccountConfirmedByCredentials === true, files })).digest('hex');
+    kfwAccountConfirmedByCredentials: snapshot.kfwAccountConfirmedByCredentials === true,
+    kfwCredentialEvidenceNoteIds: [...(snapshot.kfwCredentialEvidenceNoteIds || [])].map(String).sort(), files })).digest('hex');
 }
 
 export function validateFundingHandoffReview({ dealId, snapshot, documentReview, now = Date.now() } = {}) {
@@ -38,6 +40,7 @@ export function validateFundingHandoffReview({ dealId, snapshot, documentReview,
     throw fundingHandoffError('INCOME_BONUS', 'Ein gespeicherter Einkommensbonus-Wunsch darf in der Unterlagenprüfung nicht übergangen werden.');
   const missing = missingFundingRequiredFields(snapshot);
   if (missing.length) throw fundingHandoffError('REQUIRED_FIELDS', `Vor der Förderübergabe fehlen gespeicherte Pflichtangaben: ${missing.join(', ')}.`);
+  if (!hasStoredKfwCustomerCredentials(snapshot)) throw fundingHandoffError('KFW_CREDENTIALS', 'Das KfW-Kundenzugangspaar aus E-Mail und Passwort muss im zugehörigen Deal frisch rückgelesen sein; eine Login-Statusnotiz allein genügt nicht.');
   const files = snapshot.fileRecords, reviewed = review.files;
   if (!Array.isArray(files) || !files.length || files.some(file => !/^\d+$/.test(clean(file.id))) || !Array.isArray(reviewed)
     || reviewed.length !== files.length || new Set(reviewed.map(file => clean(file.fileId))).size !== reviewed.length

@@ -15,6 +15,7 @@ function fixture() {
   let clock = Date.parse('2026-09-16T12:00:00Z'), noteSequence = 100;
   const file = path.join(directory, randomUUID(), 'handoff.json'), events = [], notes = new Map();
   const snapshot = { dealId: '123', customerPersonId: '77', pipeline: 'Auftragsmachbarkeit', stage: 'Auftrag eingereicht / Förderunterlagen einreichen',
+    kfwAccountConfirmedByCredentials: true, kfwCredentialEvidenceNoteIds: ['71'],
     orderNumber: 'HH-AB-1234', customerEmail: 'fixture@example.test', phoneNumber: '0123456789', plant: 'Testanlage', incomeBonusRequested: false,
     fileRecords: ['Angebot', 'Ausweis', 'Meldebescheinigung', 'Grundbuch', 'KfW'].map((name, i) => ({ id: String(i + 1), name: `${name}.pdf`, size: 100 + i })) };
   const review = () => ({ dealId: '123', checkedAt: new Date(clock).toISOString(), complete: true, sourceNotesChecked: true, incomeBonusRequested: false,
@@ -73,6 +74,18 @@ test('all four canonical CRM fields remain a hard handoff gate', async () => {
     const f = fixture(); f.snapshot[field] = null;
     await assert.rejects(f.run(), { code: 'FUNDING_HANDOFF_REQUIRED_FIELDS' }); assert.equal(f.events.includes('transition'), false);
   }
+});
+
+test('a login-status note or claimed KfW document alone cannot replace credentials freshly stored in the deal', async () => {
+  for (const patch of [{ kfwAccountConfirmedByCredentials: false }, { kfwCredentialEvidenceNoteIds: [] }, { kfwCredentialEvidenceNoteIds: ['unknown'] }]) {
+    const f = fixture(); Object.assign(f.snapshot, patch);
+    await assert.rejects(f.run(), { code: 'FUNDING_HANDOFF_KFW_CREDENTIALS' });
+    assert.deepEqual(f.events, ['read']); assert.equal(f.notes.size, 0);
+  }
+  const f = fixture(), input = f.input();
+  f.snapshot.kfwCredentialEvidenceNoteIds = [];
+  await assert.rejects(f.run(input), { code: 'FUNDING_HANDOFF_KFW_CREDENTIALS' });
+  assert.equal(f.events.includes('transition'), false, 'fresh snapshot overrides an earlier positive review');
 });
 
 test('old phase18 without own persisted handoff does not create an amount note', async () => {

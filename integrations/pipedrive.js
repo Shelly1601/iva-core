@@ -6,6 +6,8 @@ import { PIPEDRIVE_COMPANY_DOMAIN, PIPEDRIVE_LAYOUT, comparePipedriveLayout } fr
 import { FUNDING_REQUIRED_FIELDS } from '../local-mac-helper/funding-required-fields.mjs';
 import { isFundingCalculationNote } from '../local-mac-helper/funding-workflows.mjs';
 import { completePipedriveFundingHandoff, listPendingFundingHandoffs } from './pipedrive-funding-handoff.js';
+import { amendPipedriveFundingHandoff } from './pipedrive-funding-amendment.js';
+import { renderKfwCustomerCredentialsNote, validateKfwCustomerCredentials, kfwCredentialNoteHasPair } from '../local-mac-helper/funding-kfw-credentials.mjs';
 
 const OAUTH_AUTHORIZE_URL = 'https://oauth.pipedrive.com/oauth/authorize';
 const OAUTH_TOKEN_URL = 'https://oauth.pipedrive.com/oauth/token';
@@ -311,7 +313,7 @@ function safeError(payload, response) {
   return clean(payload?.error_info || payload?.error || payload?.message || `Pipedrive API HTTP ${response.status}`, 600);
 }
 
-export async function pipedriveRequest(pathname, { method = 'GET', body, write = false } = {}) {
+export async function pipedriveRequest(pathname, { method = 'GET', body, write = false, onWriteAttempt } = {}) {
   const verb = String(method || 'GET').toUpperCase();
   if (verb === 'DELETE') throw new Error('Pipedrive-Löschaktionen sind in IVA gesperrt.');
   if (!['GET', 'HEAD'].includes(verb)) {
@@ -321,6 +323,7 @@ export async function pipedriveRequest(pathname, { method = 'GET', body, write =
   const credential = await validCredential();
   const requestUrl = new URL(`${safeApiDomain(credential.apiDomain)}${pathname}`);
   if (credential.mode === 'api-token') requestUrl.searchParams.set('api_token', credential.apiToken);
+  if (!['GET', 'HEAD'].includes(verb)) onWriteAttempt?.();
   const response = await fetch(requestUrl, {
     method: verb,
     headers: {
@@ -506,13 +509,7 @@ function fundingNoteEvidence(note) {
   const humanReadableIvaRequest = /^fehlende unterlagen:/i.test(text)
     && /angefragt\./i.test(text)
     && IVA_NOTE_SUFFIX_PATTERN.test(text);
-  const kfwEmailMatch = text.match(/[a-z0-9.!#$%&'*+/=?^_{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
-  const kfwSecretAfterEmail = kfwEmailMatch
-    ? text.slice((kfwEmailMatch.index || 0) + kfwEmailMatch[0].length).trim().match(/^(\S{6,})/)?.[1] || ''
-    : '';
-  const hasKfwCredentials = Boolean(kfwEmailMatch)
-    && (/(?:passwort|kennwort)\s*[:=\-]\s*\S{3,}/i.test(text)
-      || (/kfw.{0,30}konto/i.test(text) && /[A-Za-z]/.test(kfwSecretAfterEmail) && /\d/.test(kfwSecretAfterEmail)));
+  const hasKfwCredentials = kfwCredentialNoteHasPair(htmlText(content, true));
   return {
     noteId: String(note?.id || ''),
     addTime: note?.add_time || note?.addTime || null,
@@ -523,7 +520,7 @@ function fundingNoteEvidence(note) {
     marker,
     kfwEvidenceMarker,
     includesKfwMissing: (Boolean(marker) || humanReadableIvaRequest) && /(?:kfw.{0,60}(?:konto|bestätigung|bestatigung|bestaetigung|zugang)|bestätigung.{0,60}kfw|bestatigung.{0,60}kfw|bestaetigung.{0,60}kfw)/i.test(text),
-    redactedExcerpt: hasKfwCredentials
+    redactedExcerpt: hasKfwCredentials || /passwort|kennwort|password|otp|einmalcode|totp/i.test(text)
       ? 'KfW-Zugangsdaten in der Notiz vorhanden; E-Mail-Adresse und Passwort vollständig ausgeblendet.'
       : text.replace(/[a-z0-9.!#$%&'*+/=?^_{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/ig, '[E-Mail ausgeblendet]')
         .replace(/((?:passwort|kennwort)\s*[:=\-]\s*)\S+/ig, '$1[ausgeblendet]').slice(0, 600),
@@ -807,6 +804,40 @@ export async function completePipedriveFundingHandoffApi(input = {}) {
   });
 }
 
+async function readFundingAmountNote({ dealId, noteId }) {
+  if (!/^\d+$/.test(String(dealId)) || !/^\d+$/.test(String(noteId))) throw new Error('Die Identität der Fördernotiz fehlt.');
+  const note = (await pipedriveRequest(`/api/v1/notes/${noteId}`)).data;
+  if (!note || String(note.id) !== String(noteId) || String(note.deal_id) !== String(dealId) || typeof note.content !== 'string')
+    throw new Error('Die Fördernotiz gehört nicht zum erwarteten Deal.');
+  return { dealId: String(dealId), noteId: String(noteId), content: note.content, text: htmlText(note.content, true) };
+}
+
+async function updateFundingAmountNote({ dealId, noteId, text, expectedContentSha256, expectedText, confirmation }) {
+  let writeAttempted = false;
+  try {
+    assertConfirmedWrite(confirmation);
+    if (!/^\d+$/.test(String(dealId)) || !/^\d+$/.test(String(noteId)) || !/^[a-f0-9]{64}$/.test(String(expectedContentSha256))
+      || typeof expectedText !== 'string' || typeof text !== 'string' || !isFundingCalculationNote(text)) throw new Error('invalid_amendment');
+    const deal = (await pipedriveRequest(`/api/v2/deals/${dealId}`)).data;
+    if (String(deal?.id) !== String(dealId) || Number(deal?.stage_id) !== PIPEDRIVE_LAYOUT.stages.applyFunding.id) throw new Error('deal_changed');
+    const before = await readFundingAmountNote({ dealId, noteId });
+    if (crypto.createHash('sha256').update(before.content).digest('hex') !== expectedContentSha256
+      || before.text.replace(/\s+/g, ' ').trim() !== expectedText.replace(/\s+/g, ' ').trim()) throw new Error('note_changed');
+    const noteText = text.replace(IVA_NOTE_SUFFIX_PATTERN, '').trim();
+    const content = `<p>${escapeHtml(noteText).replace(/\n/g, '<br>')}</p><p>${IVA_NOTE_SIGNATURE}</p>`;
+    await pipedriveRequest(`/api/v1/notes/${noteId}`, { method: 'PUT', body: { content }, write: true,
+      onWriteAttempt: () => { writeAttempted = true; } });
+    return { dealId: String(dealId), noteId: String(noteId), writeAttempted: true };
+  } catch { throw Object.assign(new Error('Die bestehende Fördernotiz konnte nicht sicher korrigiert werden.'), { writeAttempted }); }
+}
+
+export async function amendPipedriveFundingHandoffApi(input = {}) {
+  assertConfirmedWrite(input.confirmation);
+  return amendPipedriveFundingHandoff(input, {
+    readSnapshot: getPipedriveFundingSnapshot, readNote: readFundingAmountNote, updateExistingNote: updateFundingAmountNote,
+  });
+}
+
 export async function listPipedriveFundingHandoffs() {
   return { handoffs: await listPendingFundingHandoffs() };
 }
@@ -853,20 +884,16 @@ export async function uploadPipedriveDealFile({ dealId, filename, buffer } = {})
   return { ...receipt, fileId: uploadedId, uploaded: true, alreadyPresent: false, verified: true, contentVerified: true };
 }
 
-function htmlText(value) {
-  return String(value || '')
+function htmlText(value, preserveWhitespace = false) {
+  const text = String(value || '')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/p>/gi, '\n')
     .replace(/<li\b[^>]*>/gi, '- ')
     .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/&(nbsp|amp|lt|gt|quot|apos|#39);/gi, (_, entity) => ({
+      nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", '#39': "'",
+    }[entity.toLowerCase()]));
+  return (preserveWhitespace ? text : text.replace(/\s+/g, ' ')).trim();
 }
 
 function escapeHtml(value) {
@@ -877,8 +904,28 @@ function assertConfirmedWrite(confirmation) {
   if (confirmation !== PIPEDRIVE_WRITE_CONFIRMATION) throw new Error(`Pipedrive-Schreibbestätigung fehlt: „${PIPEDRIVE_WRITE_CONFIRMATION}“.`);
 }
 
-export async function createPipedriveDealNote({ dealId, text, confirmation, reconcileOnly = false } = {}, authority) {
+export async function createPipedriveDealNote({ dealId, text, confirmation, reconcileOnly = false, kfwCredentials } = {}, authority) {
   assertConfirmedWrite(confirmation);
+  if (kfwCredentials !== undefined) {
+    const credentials = validateKfwCustomerCredentials(kfwCredentials, dealId);
+    const rendered = renderKfwCustomerCredentialsNote(credentials, dealId);
+    let writeAttempted = false;
+    try {
+      const deal = (await pipedriveRequest(`/api/v2/deals/${credentials.dealId}`)).data || {};
+      if (String(deal.id) !== credentials.dealId || personIdOf(deal) !== credentials.customerPersonId) throw new Error('customer_identity_changed');
+      const notePath = `/api/v1/notes?deal_id=${credentials.dealId}`;
+      const matches = note => htmlText(note.content, true) === htmlText(rendered.content, true)
+        && (note.deal_id == null || String(note.deal_id) === credentials.dealId);
+      const existing = (await readCompletePipedriveV1Collection(notePath)).find(matches);
+      if (existing) return { created: false, alreadyPresent: true, noteId: String(existing.id), verified: true, writeAttempted: false };
+      if (reconcileOnly) return { created: false, alreadyPresent: false, noteId: null, verified: false, writeAttempted: false, reconcileOnly: true };
+      writeAttempted = true;
+      await pipedriveRequest('/api/v1/notes', { method: 'POST', body: { deal_id: Number(credentials.dealId), content: rendered.content }, write: true });
+      const verified = (await readCompletePipedriveV1Collection(notePath)).find(matches);
+      if (!verified) throw new Error('credential_note_not_verified');
+      return { created: true, alreadyPresent: false, noteId: String(verified.id), verified: true, writeAttempted: true };
+    } catch { throw Object.assign(new Error('KfW-Kundenzugangsnotiz oder zugehöriger Kundenkontakt konnte nicht bestätigt werden.'), { code: 'KFW_CREDENTIAL_NOTE_UNVERIFIED', writeAttempted }); }
+  }
   if (isFundingCalculationNote(text) && authority !== FUNDING_HANDOFF_AUTHORITY) throw handoffRequired();
   const id = clean(dealId, 40);
   const noteText = String(text || '').replace(/\u0000/g, '').replace(/\r\n?/g, '\n').replace(/[^\S\n]+/g, ' ').trim().slice(0, 20_000).replace(IVA_NOTE_SUFFIX_PATTERN, '').trim();
