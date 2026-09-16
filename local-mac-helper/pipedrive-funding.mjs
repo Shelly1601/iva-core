@@ -1,4 +1,5 @@
 import { FUNDING_DOCUMENTS } from './funding.mjs';
+import { missingFundingRequiredFields } from './funding-required-fields.mjs';
 
 export const PIPEDRIVE_FUNDING_CONFIG = Object.freeze({
   host: 'simplegategmbh.pipedrive.com',
@@ -106,7 +107,7 @@ function normalizeDocumentEvidence(value) {
   return Object.values(FUNDING_DOCUMENT_STATE).includes(raw) ? raw : FUNDING_DOCUMENT_STATE.missing;
 }
 
-export function decideFundingDealAction(stageValue, { incomeBonusRequested, documentEvidence = {} } = {}) {
+export function decideFundingDealAction(stageValue, { incomeBonusRequested, documentEvidence = {}, snapshot = {} } = {}) {
   const checklist = buildFundingStageChecklist(stageValue, { incomeBonusRequested });
   const documents = checklist.requiredDocuments.map(document => ({
     ...document,
@@ -120,10 +121,12 @@ export function decideFundingDealAction(stageValue, { incomeBonusRequested, docu
   ].includes(document.status));
   const hasOpenQuestions = checklist.openQuestions.length > 0;
   const documentsCompleteInPipedrive = completeInPipedrive.length === documents.length && !hasOpenQuestions;
+  const missingRequiredFields = missingFundingRequiredFields(snapshot);
 
   let action = 'prepare_missing_documents_draft';
   if (hasOpenQuestions) action = 'resolve_open_questions';
   else if (uploadFromEmail.length) action = 'upload_email_documents_then_recheck';
+  else if (!blockingDocuments.length && documentsCompleteInPipedrive && missingRequiredFields.length) action = 'complete_required_fields_then_recheck';
   else if (!blockingDocuments.length && documentsCompleteInPipedrive) {
     action = checklist.stage.stayInStage
       ? 'keep_in_funding_requested'
@@ -141,12 +144,15 @@ export function decideFundingDealAction(stageValue, { incomeBonusRequested, docu
     blockingDocuments,
     openQuestions: checklist.openQuestions,
     documentsCompleteInPipedrive,
+    missingRequiredFields,
+    requiredFieldsComplete: missingRequiredFields.length === 0,
     moveAllowed: ['move_to_documents', 'move_to_funding_requested'].includes(action),
     targetStage: ['move_to_documents', 'move_to_funding_requested'].includes(action) ? checklist.stage.moveWhenCompleteTo : null,
     stageLocked: checklist.stage.stayInStage,
     rules: [
       'Ein Dokument aus einer E-Mail gilt erst nach erfolgreichem Upload in den richtigen Pipedrive-Deal als vollständig.',
       'Nach jedem Upload wird die vollständige Checkliste erneut geprüft.',
+      'Telefonnummer, Kunden-E-Mail, Anlage und Auftragsnummer müssen in den kanonischen CRM-Feldern gespeichert und rückgelesen sein.',
       checklist.movementRule,
     ],
   };

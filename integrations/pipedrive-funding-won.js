@@ -2,16 +2,14 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { withFundingFileLock } from '../local-mac-helper/funding-intake-state.mjs';
+import { missingFundingRequiredFields } from '../local-mac-helper/funding-required-fields.mjs';
+export { missingFundingRequiredFields } from '../local-mac-helper/funding-required-fields.mjs';
 
 // Official API v2 fields: label_ids and status, verified 2026-09-15.
 // https://developers.pipedrive.com/docs/api/v1/Deals#updateDeal
 const normalize = value => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 const idOf = value => String(value?.value ?? value?.id ?? value ?? '');
 const fault = (code, message) => Object.assign(new Error(message), { code });
-export function missingFundingRequiredFields(snapshot = {}) {
-  return [['customerEmail', 'E-Mail'], ['phoneNumber', 'Telefonnummer'], ['plant', 'Anlage'], ['orderNumber', 'Auftragsnummer']]
-    .filter(([key]) => !String(snapshot[key] ?? '').trim()).map(([, label]) => label);
-}
 
 const labels = deal => {
   if (deal.label_ids === null) return [];

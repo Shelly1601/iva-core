@@ -16,7 +16,14 @@ process.env.PIPEDRIVE_WRITE_ENABLED = 'false';
 const { PIPEDRIVE_LAYOUT } = await import('../integrations/pipedrive-layout.js');
 const pipelines = Object.values(PIPEDRIVE_LAYOUT.pipelines).map(item => ({ id: item.id, name: item.name, active: true }));
 const stages = Object.values(PIPEDRIVE_LAYOUT.stages).map(item => ({ id: item.id, pipeline_id: item.pipelineId, name: item.name, active_flag: true }));
-const dealFields = Object.values(PIPEDRIVE_LAYOUT.dealFields).map(item => ({ id: item.id, key: item.key, name: item.name, field_type: 'varchar', active_flag: true }));
+const dealFields = Object.values(PIPEDRIVE_LAYOUT.dealFields).map(item => ({
+  id: item.id,
+  key: item.key,
+  name: item.name,
+  field_type: item.name === 'Anlage' ? 'enum' : 'varchar',
+  active_flag: true,
+  ...(item.name === 'Anlage' ? { options: [{ id: 42, label: 'Vaillant 5 kW' }] } : {}),
+}));
 let notes = [];
 let files = [{ id: 44, name: 'Angebot.pdf' }];
 let dealStage = 20;
@@ -29,11 +36,15 @@ let dealValues = {
   custom_fields: {
     [PIPEDRIVE_LAYOUT.dealFields.orderNumber.key]: 'HH-100',
     [PIPEDRIVE_LAYOUT.dealFields.installationWeek.key]: null,
+    [PIPEDRIVE_LAYOUT.dealFields.plant.key]: { id: 42, label: 'Vaillant 5 kW' },
   },
 };
 let tokenRefreshes = 0;
 let lastApiTokenQuery = '';
 let lastDealCustomFields = '';
+let failPersonFetch = false;
+let personValues = { id: 5, name: 'Max Muster', emails: [{ value: 'kunde@example.test', primary: true }], phones: [{ value: '+4912345', primary: true }] };
+let personPatches = 0;
 
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, options = {}) => {
@@ -83,7 +94,14 @@ globalThis.fetch = async (input, options = {}) => {
     return ok({ id: 123, ...dealValues, stage_id: dealStage });
   }
   if (url.pathname === '/api/v2/deals/123') return ok({ id: 123, ...dealValues, stage_id: dealStage, person_id: 5, org_id: 7 });
-  if (url.pathname === '/api/v2/persons/5') return ok({ id: 5, name: 'Max Muster' });
+  if (url.pathname === '/api/v2/persons/5') {
+    if (failPersonFetch) return json({ success: false, error: 'rate limited' }, 429);
+    if (String(options.method || 'GET').toUpperCase() === 'PATCH') {
+      personPatches += 1;
+      personValues = { ...personValues, ...JSON.parse(options.body) };
+    }
+    return ok(personValues);
+  }
   if (url.pathname === '/api/v2/organizations/7') return ok({ id: 7, name: 'Muster GmbH' });
   if (url.pathname === '/api/v1/notes' && String(options.method || 'GET').toUpperCase() === 'POST') {
     const body = JSON.parse(String(options.body || '{}'));
@@ -114,6 +132,7 @@ const {
   getPipedriveStructure,
   listPipedriveFundingBoard,
   listPipedriveDeals,
+  missingPipedriveFundingRequiredFields,
   pipedriveRequest,
   pipedriveStatus,
   pipedriveWebhookStatus,
@@ -166,14 +185,41 @@ try {
   assert.equal(bundle.person.name, 'Max Muster');
   assert.equal(bundle.files[0].name, 'Angebot.pdf');
   assert.equal(bundle.activities[0].subject, 'Nachfassen');
-  const fundingBoard = await listPipedriveFundingBoard();
+  const fundingBoard = await listPipedriveFundingBoard({ includeOffers: true });
   assert.equal(fundingBoard.source, 'iva-core-pipedrive-api');
   assert.equal(fundingBoard.stages['Angebot veröffentlicht'][0].id, '123');
   const fundingSnapshot = await getPipedriveFundingSnapshot(123);
   assert.equal(fundingSnapshot.customerName, 'Max Muster');
+  assert.equal(fundingSnapshot.customerEmail, 'kunde@example.test');
+  assert.equal(fundingSnapshot.phoneNumber, '+4912345');
   assert.equal(fundingSnapshot.orderNumber, 'HH-100');
+  assert.equal(fundingSnapshot.plant, 'Vaillant 5 kW');
   assert.equal(fundingSnapshot.fileRecords[0].id, '44');
   assert.equal(fundingSnapshot.source, 'iva-core-pipedrive-api');
+  assert.equal(fundingSnapshot.requiredFieldSources.phoneNumber, 'person');
+  assert.equal(fundingSnapshot.requiredFieldSources.customerEmail, 'person');
+  // A number in the title is a lookup hint, not a saved order field.
+  dealValues.title = 'Max Muster - HH-AN-4-26-1234';
+  dealValues.custom_fields[PIPEDRIVE_LAYOUT.dealFields.orderNumber.key] = null;
+  personValues.phones = [];
+  const incompleteSnapshot = await getPipedriveFundingSnapshot(123);
+  assert.equal(incompleteSnapshot.titleOrderNumberHint, 'HH-AN-4-26-1234');
+  assert.equal(incompleteSnapshot.orderNumber, null);
+  assert.equal(incompleteSnapshot.phoneNumber, null);
+  assert.deepEqual(missingPipedriveFundingRequiredFields(incompleteSnapshot), ['Telefonnummer', 'Auftragsnummer']);
+  dealValues.title = 'Testdeal';
+  dealValues.custom_fields[PIPEDRIVE_LAYOUT.dealFields.orderNumber.key] = 'HH-100';
+  personValues.phones = [{ value: '+4912345', primary: true }];
+  assert.deepEqual(missingPipedriveFundingRequiredFields({
+    customerEmail: 'kunde@example.test', phoneNumber: '+4912345', plant: 'Vaillant 5 kW', orderNumber: 'HH-100',
+  }), []);
+  assert.deepEqual(missingPipedriveFundingRequiredFields({
+    customerEmail: '', phoneNumber: null, plant: '  ', orderNumber: 'HH-100',
+  }), ['E-Mail', 'Telefonnummer', 'Anlage']);
+  failPersonFetch = true;
+  await assert.rejects(getPipedriveFundingSnapshot(123), /rate limited/,
+    'ein technischer Kontaktabruf-Fehler darf nicht als leere Kundendaten erscheinen');
+  failPersonFetch = false;
   const downloaded = await downloadPipedriveDealFile({ dealId: 123, fileId: 44 });
   assert.equal(downloaded.buffer.toString(), '%PDF-pipedrive-test');
 
@@ -186,6 +232,28 @@ try {
   const fieldBatch = await updatePipedriveDealFieldsByName({ dealId: 123, updates: [{ field: 'Auftragsnummer', value: 'HH-200' }], confirmation: PIPEDRIVE_WRITE_CONFIRMATION });
   assert.equal(fieldBatch.fullyVerified, true);
   assert.equal(fieldBatch.results[0].status, 'updated_and_verified');
+  personValues.phones = [];
+  await assert.rejects(updatePipedriveDealStage({ dealId: 123, expectedStageId: 20, targetStageId: 19, confirmation: PIPEDRIVE_WRITE_CONFIRMATION }), { code: 'FUNDING_REQUIRED_FIELDS_MISSING' });
+  assert.equal(dealStage, 20);
+  const phoneRepair = await updatePipedriveDealFieldsByName({ dealId: 123, updates: [{ field: 'Telefonnummer', value: '0123456789' }], confirmation: PIPEDRIVE_WRITE_CONFIRMATION });
+  assert.equal(phoneRepair.fullyVerified, true);
+  assert.equal(phoneRepair.results[0].entity, 'person');
+  assert.equal(personPatches, 1);
+  assert.equal((await getPipedriveFundingSnapshot(123)).phoneNumber, '0123456789');
+  assert.equal(personValues.emails[0].value, 'kunde@example.test', 'phone repair leaves customer email unchanged');
+  const repeatPhone = await updatePipedriveDealFieldsByName({ dealId: 123, updates: [{ field: 'Telefonnummer', value: '+49 123456789' }], confirmation: PIPEDRIVE_WRITE_CONFIRMATION });
+  assert.equal(repeatPhone.fullyVerified, true);
+  assert.equal(personPatches, 1, 'already present phone is not written twice');
+  const conflictingPhone = await updatePipedriveDealFieldsByName({ dealId: 123, updates: [{ field: 'Telefonnummer', value: '0999999999' }], confirmation: PIPEDRIVE_WRITE_CONFIRMATION });
+  assert.equal(conflictingPhone.fullyVerified, false);
+  assert.equal(conflictingPhone.results[0].status, 'existing_value_conflict');
+  assert.equal(personPatches, 1, 'a conflicting existing phone must be preserved');
+  personValues.emails = [];
+  const emailRepair = await updatePipedriveDealFieldsByName({ dealId: 123, updates: [{ field: 'E-Mail', value: 'kunde@example.test' }], confirmation: PIPEDRIVE_WRITE_CONFIRMATION });
+  assert.equal(emailRepair.fullyVerified, true);
+  assert.equal(emailRepair.results[0].entity, 'person');
+  assert.equal(personValues.phones[0].value, '0123456789');
+  assert.equal(personPatches, 2);
   const uploadedFile = await uploadPipedriveDealFile({ dealId: 123, filename: 'Korrektur.pdf', buffer: Buffer.from('%PDF-upload') });
   assert.equal(uploadedFile.uploaded, true);
   assert.equal(uploadedFile.verified, true);
@@ -199,6 +267,9 @@ try {
   assert.equal(moved.changed, true);
   assert.equal(moved.verified, true);
   assert.equal(dealStage, 19);
+  personValues.phones = [];
+  await assert.rejects(updatePipedriveDealStage({ dealId: 123, expectedStageId: 20, targetStageId: 19, confirmation: PIPEDRIVE_WRITE_CONFIRMATION }), { code: 'FUNDING_REQUIRED_FIELDS_MISSING' }, 'an already advanced but incomplete deal cannot report verified completion');
+  personValues.phones = [{ value: '0123456789', primary: true }];
 
   const titleUpdate = await updatePipedriveDealField({
     dealId: 123,

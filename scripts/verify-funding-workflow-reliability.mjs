@@ -102,8 +102,12 @@ try {
   const pipedriveApiSource = await readFile(new URL('../integrations/pipedrive.js', import.meta.url), 'utf8');
   assert.ok(/completePipedriveFundingWon\(input,/.test(pipedriveApiSource) && /missingFields: missingFundingRequiredFields/.test(pipedriveApiSource),
     'der API-Schreibweg muss den Gewonnen-Übergang bei fehlenden Pflichtfeldern sperren');
-  const wonSource = await readFile(new URL('../integrations/pipedrive-funding-won.js', import.meta.url), 'utf8');
-  assert.match(wonSource, /email|phone/);
+  const { missingFundingRequiredFields: requiredFields } = await import('../integrations/pipedrive-funding-won.js');
+  const completeFields = { customerEmail: 'kunde@example.test', phoneNumber: '+49123456789', plant: 'Vaillant 10 kW', orderNumber: 'HH-AN-4-26-1234' };
+  assert.deepEqual(requiredFields(completeFields), []);
+  for (const [key, label] of Object.entries({ customerEmail: 'E-Mail', phoneNumber: 'Telefonnummer', plant: 'Anlage', orderNumber: 'Auftragsnummer' })) {
+    assert.deepEqual(requiredFields({ ...completeFields, [key]: '' }), [label], 'jedes Pflichtfeld muss einzeln die Weitergabe sperren');
+  }
   const fundingNoteSource = pipedriveSource.slice(
     pipedriveSource.indexOf('export async function createPipedriveFundingRequestNote'),
     pipedriveSource.indexOf('async function readPipedriveApiBatchAsync'),

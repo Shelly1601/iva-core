@@ -15,7 +15,7 @@ import { FUNDING_WORKFLOW_POLICY, buildFundingCalculationNote } from '../local-m
 import { cleanupCompletedFundingReview, recordFundingReviewCompletion } from '../local-mac-helper/funding-local-cleanup.mjs';
 import { saveFundingReview } from '../local-mac-helper/funding-review-queue.mjs';
 import { detectNewFundingMessages } from '../local-mac-helper/funding-monitor-state.mjs';
-import { scanPipedriveFundingBoard, recordFundingDocumentReview } from '../local-mac-helper/funding-scan.mjs';
+import { scanPipedriveFundingBoard, recordFundingDocumentReview, fundingDocumentReviewFingerprint } from '../local-mac-helper/funding-scan.mjs';
 
 const directory = await mkdtemp(path.join(os.tmpdir(), 'iva-funding-intake-test-'));
 process.env.IVA_MAC_HELPER_DATA_DIR = directory;
@@ -152,13 +152,26 @@ test('independent CLI processes complete different IDs without losing receipts',
 });
 
 test('daily deal scan ignores offer history and skips PDF rereads only after verified review', async () => {
-  const snapshot = { dealId: '100', stage: 'Förderung beantragen', customerName: 'Fixture', customerPersonId: '77', orderNumber: 'HH-AB-1234', documents: [{ type: 'identity_card', confidence: 1, fileName: 'Ausweis.pdf' }], files: ['Ausweis.pdf'], fileRecords: [{ id: '55', name: 'Ausweis.pdf', size: 100 }], noteCount: 1, latestNoteAt: '2026-09-01T10:00:00Z' };
+  const snapshot = { dealId: '100', stage: 'Förderung beantragen', customerName: 'Fixture', customerPersonId: '77', orderNumber: 'HH-AB-1234', customerEmail: 'fixture@example.test', phoneNumber: '0123456789', plant: 'Fixture Anlage', documents: [{ type: 'identity_card', confidence: 1, fileName: 'Ausweis.pdf' }], files: ['Ausweis.pdf'], fileRecords: [{ id: '55', name: 'Ausweis.pdf', size: 100 }], noteCount: 1, latestNoteAt: '2026-09-01T10:00:00Z' };
   let requested;
   const dependencies = { persist: false, collectBoard: async () => ({ stages: { 'Angebot veröffentlicht': [{ id: '9999' }], 'Förderung beantragen': [{ id: '100' }], 'Auftrag eingereicht / Förderunterlagen einreichen': [] } }), readDeals: async ({ dealIds }) => { requested = dealIds; return { read: 1, failed: 0, requested: 1, errors: [], snapshots: [structuredClone(snapshot)] }; } };
   assert.equal((await scanPipedriveFundingBoard(dependencies)).cases[0].documentContentReviewRequired, true);
   assert.deepEqual(requested, ['100']);
   await recordFundingDocumentReview({ snapshot, review: { complete: true, sourceNotesChecked: true, files: [{ fileId: '55', readable: true, identityVerified: true }] } });
   assert.equal((await scanPipedriveFundingBoard(dependencies)).cases[0].documentContentReviewRequired, false);
+  const completeFingerprint = fundingDocumentReviewFingerprint(snapshot);
+  for (const field of ['phoneNumber', 'customerEmail', 'plant', 'orderNumber']) {
+    const original = snapshot[field];
+    snapshot[field] = null;
+    assert.notEqual(fundingDocumentReviewFingerprint(snapshot), completeFingerprint);
+    const report = await scanPipedriveFundingBoard(dependencies);
+    assert.equal(report.cases[0].requiredFieldsComplete, false);
+    assert.equal(report.cases[0].missingRequiredFields.length, 1);
+    assert.equal(report.cases[0].documentContentReviewRequired, true);
+    assert.equal(report.summary.casesWithMissingRequiredFields, 1);
+    await assert.rejects(recordFundingDocumentReview({ snapshot, review: { complete: true, sourceNotesChecked: true, files: [{ fileId: '55', readable: true, identityVerified: true }] } }), /Förderprüfung noch offen/);
+    snapshot[field] = original;
+  }
   snapshot.fileRecords[0].id = '56';
   assert.equal((await scanPipedriveFundingBoard(dependencies)).cases[0].documentContentReviewRequired, true);
 });

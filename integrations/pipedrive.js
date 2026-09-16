@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { completePipedriveFundingWon, missingFundingRequiredFields } from './pipedrive-funding-won.js';
 import { PIPEDRIVE_COMPANY_DOMAIN, PIPEDRIVE_LAYOUT, comparePipedriveLayout } from './pipedrive-layout.js';
+import { FUNDING_REQUIRED_FIELDS } from '../local-mac-helper/funding-required-fields.mjs';
 
 const OAUTH_AUTHORIZE_URL = 'https://oauth.pipedrive.com/oauth/authorize';
 const OAUTH_TOKEN_URL = 'https://oauth.pipedrive.com/oauth/token';
@@ -14,6 +15,11 @@ const IVA_NOTE_SIGNATURE = '(Notiz von Nadine)';
 const IVA_NOTE_SUFFIX_PATTERN = /(?:\s*\(Notiz von Nadine(?: via KI)?\))+\s*$/i;
 const DEAL_CUSTOM_FIELD_KEYS = Object.values(PIPEDRIVE_LAYOUT.dealFields).map(field => field.key).join(',');
 export const PIPEDRIVE_WRITE_CONFIRMATION = 'Pipedrive schreiben';
+export const PIPEDRIVE_FUNDING_REQUIRED_FIELDS = FUNDING_REQUIRED_FIELDS;
+
+export function missingPipedriveFundingRequiredFields(snapshot = {}) {
+  return missingFundingRequiredFields(snapshot);
+}
 
 const STANDARD_EDITABLE_DEAL_FIELDS = Object.freeze({
   title: Object.freeze({ apiKey: 'title', name: 'Deal-Titel', type: 'text' }),
@@ -432,8 +438,8 @@ export async function getPipedriveDealBundle(id, { customFieldKeys = DEAL_CUSTOM
   const personId = deal.person_id?.value || deal.person_id || null;
   const organizationId = deal.org_id?.value || deal.org_id || null;
   const [person, organization, notes, files, activities] = await Promise.all([
-    personId ? pipedriveRequest(`/api/v2/persons/${encodeURIComponent(personId)}`).then(result => result.data).catch(() => null) : null,
-    organizationId ? pipedriveRequest(`/api/v2/organizations/${encodeURIComponent(organizationId)}`).then(result => result.data).catch(() => null) : null,
+    personId ? pipedriveRequest(`/api/v2/persons/${encodeURIComponent(personId)}`).then(result => result.data) : null,
+    organizationId ? pipedriveRequest(`/api/v2/organizations/${encodeURIComponent(organizationId)}`).then(result => result.data) : null,
     pipedriveRequest(`/api/v1/notes?deal_id=${dealId}&start=0&limit=500`).then(result => result.data || []),
     pipedriveRequest(`/api/v1/deals/${dealId}/files?start=0&limit=500`).then(result => result.data || []),
     pipedriveRequest(`/api/v2/activities?deal_id=${dealId}&limit=500`).then(result => result.data || []),
@@ -442,8 +448,26 @@ export async function getPipedriveDealBundle(id, { customFieldKeys = DEAL_CUSTOM
 }
 
 function primaryEmail(record) {
-  const emails = Array.isArray(record?.email) ? record.email : [];
-  return clean(emails.find(item => item?.primary && item?.value)?.value || emails.find(item => item?.value)?.value, 500) || null;
+  const emails = Array.isArray(record?.emails) ? record.emails : Array.isArray(record?.email) ? record.email : [];
+  const populated = emails.filter(item => clean(item?.value, 500));
+  return clean(populated.find(item => item?.primary)?.value || populated[0]?.value, 500) || null;
+}
+
+function primaryPhone(record) {
+  const phones = Array.isArray(record?.phones) ? record.phones : Array.isArray(record?.phone) ? record.phone : [];
+  const populated = phones.filter(item => clean(item?.value, 200));
+  return clean(populated.find(item => item?.primary)?.value || populated[0]?.value, 200) || null;
+}
+
+const FUNDING_CONTACT_FIELDS = Object.freeze({
+  'E-Mail': { aliases: ['E-Mail', 'E-Mail-Adresse', 'Email'], personField: 'emails', read: primaryEmail },
+  'Telefonnummer': { aliases: ['Telefonnummer', 'Telefon', 'Mobilnummer'], personField: 'phones', read: primaryPhone },
+});
+const personIdOf = deal => clean(deal?.person_id?.value ?? deal?.person_id?.id ?? deal?.person_id, 40);
+function sameContactValue(field, left, right) {
+  const normalize = value => field === 'E-Mail' ? clean(value).toLowerCase()
+    : clean(value).replace(/[\s()./-]/g, '').replace(/^00/, '+').replace(/^0(?=\d)/, '+49');
+  return normalize(left) === normalize(right);
 }
 
 function fundingNoteEvidence(note) {
@@ -490,7 +514,14 @@ export async function getPipedriveFundingSnapshot(id) {
     const definition = field(...names);
     return definition ? deal?.custom_fields?.[definition.key] ?? deal?.[definition.key] ?? null : null;
   };
-  const enumLabel = (rawValue, definition) => definition?.options?.find(option => String(option.id) === String(rawValue))?.label || rawValue || null;
+  const enumLabel = (rawValue, definition) => {
+    if (rawValue && typeof rawValue === 'object') {
+      const embeddedLabel = clean(rawValue.label || rawValue.name, 500);
+      if (embeddedLabel) return embeddedLabel;
+      rawValue = rawValue.id ?? rawValue.value ?? null;
+    }
+    return definition?.options?.find(option => String(option.id) === String(rawValue))?.label || rawValue || null;
+  };
   const stageName = structure.stages.find(stage => String(stage.id) === String(deal.stage_id))?.name || String(deal.stage_id || '');
   const customerName = clean(deal.person_name || person?.name, 500) || null;
   const title = clean(deal.title, 1000);
@@ -510,6 +541,8 @@ export async function getPipedriveFundingSnapshot(id) {
       : /^(nein|no|nicht beantragt|false|0)$/i.test(String(incomeBonusValue).trim()) ? false : null;
   const evidence = notes.map(fundingNoteEvidence);
   const plantField = field('Anlage');
+  const emailField = field(...FUNDING_CONTACT_FIELDS['E-Mail'].aliases);
+  const phoneField = field(...FUNDING_CONTACT_FIELDS.Telefonnummer.aliases);
   return {
     dealId: String(deal.id || id),
     url: `https://${config().allowedCompanyDomain}/deal/${String(deal.id || id)}`,
@@ -517,12 +550,16 @@ export async function getPipedriveFundingSnapshot(id) {
     pipeline: structure.pipelines.find(item => String(item.id) === String(deal.pipeline_id))?.name || String(deal.pipeline_id || ''),
     stage: stageName,
     customerName,
-    customerPersonId: deal.person_id?.value ? String(deal.person_id.value) : deal.person_id ? String(deal.person_id) : null,
-    customerEmail: clean(value('E-Mail', 'E-Mail-Adresse', 'Email'), 500) || primaryEmail(person),
-    orderNumber: clean(value('Auftragsnummer', 'Angebotsnummer', 'Angebotsnummer (sevdesk)'), 200) || titleOrderNumber,
+    customerPersonId: personIdOf(deal) || null,
+    // HEAT HERO stores contacts on the linked person. If a deal contact field
+    // exists, its empty value must not be concealed by a person fallback.
+    customerEmail: emailField ? clean(value(...FUNDING_CONTACT_FIELDS['E-Mail'].aliases), 500) || null : primaryEmail(person),
+    orderNumber: clean(value('Auftragsnummer', 'Angebotsnummer', 'Angebotsnummer (sevdesk)'), 200) || null,
+    titleOrderNumberHint: titleOrderNumber,
     customerNumber: clean(value('Kundennummer', 'Kunden-Nr.'), 200) || null,
-    phoneNumber: clean(value('Telefonnummer', 'Telefon', 'Mobilnummer'), 200) || null,
+    phoneNumber: phoneField ? clean(value(...FUNDING_CONTACT_FIELDS.Telefonnummer.aliases), 200) || null : primaryPhone(person),
     plant: clean(enumLabel(value('Anlage'), plantField), 500) || null,
+    requiredFieldSources: { customerEmail: emailField ? 'deal' : 'person', phoneNumber: phoneField ? 'deal' : 'person', plant: 'deal', orderNumber: 'deal' },
     incomeBonusRequested,
     location,
     vpName: clean(vp?.name || (typeof vpId === 'string' && vpId.includes('@') ? vpId : ''), 500) || null,
@@ -632,46 +669,83 @@ export async function updatePipedriveDealFieldsByName({ dealId, updates, confirm
   if (!/^\d+$/.test(id)) throw new Error('Ungültige Pipedrive-Deal-ID.');
   const allowed = new Set(['Auftragsnummer', 'Kundennummer', 'Telefonnummer', 'E-Mail', 'Anlage']);
   const requested = (Array.isArray(updates) ? updates : []).map(item => ({ field: clean(item?.field, 100), value: clean(item?.value, 500) })).filter(item => allowed.has(item.field) && item.value);
-  if (!requested.length || requested.length > allowed.size) throw new Error('Keine gültigen Pipedrive-Feldänderungen übergeben.');
+  if (!requested.length || requested.length > allowed.size || new Set(requested.map(item => item.field)).size !== requested.length) throw new Error('Keine eindeutigen Pipedrive-Feldänderungen übergeben.');
   const structure = await getPipedriveStructure();
   const descriptors = requested.map(item => {
-    const matches = structure.dealFields.filter(field => clean(field.name) === item.field);
-    if (matches.length !== 1) throw new Error(`Pipedrive-Feld „${item.field}“ fehlt oder ist nicht eindeutig.`);
-    return { ...item, descriptor: matches[0] };
-  });
-  const keys = descriptors.map(item => item.descriptor.key).join(',');
-  const before = (await pipedriveRequest(`/api/v2/deals/${id}${queryString({ custom_fields: keys, include_option_labels: true })}`)).data || {};
-  const changes = {};
-  const results = [];
-  for (const item of descriptors) {
-    const current = before.custom_fields?.[item.descriptor.key] ?? before[item.descriptor.key] ?? null;
-    if (current !== null && current !== undefined && String(current).trim() !== '') {
-      results.push({ field: item.field, status: 'existing_value_present', mutated: false });
-      continue;
+    const contact = FUNDING_CONTACT_FIELDS[item.field];
+    let matches = [];
+    for (const name of contact?.aliases || [item.field]) {
+      matches = structure.dealFields.filter(field => clean(field.name).toLowerCase() === name.toLowerCase());
+      if (matches.length) break;
     }
+    if (matches.length > 1 || (!matches.length && !contact)) throw new Error(`Pipedrive-Feld „${item.field}“ fehlt oder ist nicht eindeutig.`);
+    if (contact && (item.field === 'E-Mail' ? !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item.value) : !/^\+?[\d ()/.-]{6,30}$/.test(item.value))) throw new Error(`Ungültiger Kontaktwert für „${item.field}“.`);
+    return { ...item, descriptor: matches[0] || null, contact, entity: matches.length ? 'deal' : 'person' };
+  });
+  const keys = descriptors.flatMap(item => item.descriptor ? [item.descriptor.key] : []).join(',');
+  const dealPath = `/api/v2/deals/${id}${queryString({ custom_fields: keys || undefined, include_option_labels: true })}`;
+  const before = (await pipedriveRequest(dealPath)).data || {};
+  if (String(before.id) !== id) throw new Error('Pipedrive-Deal konnte nicht eindeutig rückgelesen werden.');
+  const personItems = descriptors.filter(item => item.entity === 'person'), personId = personIdOf(before);
+  if (personItems.length && !/^\d+$/.test(personId)) throw new Error('Dem Deal fehlt der eindeutig verknüpfte Kundenkontakt.');
+  const changes = {}, results = [];
+  for (const item of descriptors.filter(item => item.entity === 'deal')) {
     let value = item.value;
     if (item.field === 'Anlage' && Array.isArray(item.descriptor.options)) {
       const options = item.descriptor.options.filter(option => clean(option.label).toLocaleLowerCase('de-DE') === item.value.toLocaleLowerCase('de-DE'));
       if (options.length !== 1) {
-        results.push({ field: item.field, status: options.length ? 'ambiguous_select_option' : 'select_option_not_found', mutated: false });
+        results.push({ field: item.field, entity: 'deal', status: options.length ? 'ambiguous_select_option' : 'select_option_not_found', mutated: false, verified: false });
         continue;
       }
       value = options[0].id;
     }
+    const current = before.custom_fields?.[item.descriptor.key] ?? before[item.descriptor.key] ?? null;
+    if (current !== null && current !== undefined && String(current).trim() !== '') {
+      const verified = item.contact ? sameContactValue(item.field, current, value) : sameFieldValue(current, value);
+      results.push({ field: item.field, entity: 'deal', status: verified ? 'existing_value_present' : 'existing_value_conflict', mutated: false, verified });
+      continue;
+    }
     changes[item.descriptor.key] = value;
-    results.push({ field: item.field, status: 'prepared', mutated: false });
+    results.push({ field: item.field, entity: 'deal', status: 'prepared', mutated: false });
   }
   if (Object.keys(changes).length) await pipedriveRequest(`/api/v2/deals/${id}`, { method: 'PATCH', body: { custom_fields: changes }, write: true });
-  const after = (await pipedriveRequest(`/api/v2/deals/${id}${queryString({ custom_fields: keys, include_option_labels: true })}`)).data || {};
-  for (const result of results.filter(item => item.status === 'prepared')) {
-    const item = descriptors.find(candidate => candidate.field === result.field);
-    const expected = changes[item.descriptor.key];
-    const actual = after.custom_fields?.[item.descriptor.key] ?? after[item.descriptor.key] ?? null;
-    result.status = sameFieldValue(actual, expected) ? 'updated_and_verified' : 'update_not_verified';
-    result.mutated = actual !== null && actual !== undefined && String(actual).trim() !== '';
-    result.verified = sameFieldValue(actual, expected);
+  if (personItems.length) {
+    // Official Persons API v2 uses phones/emails. Read the relationship and
+    // contact immediately before writing; never replace an existing value.
+    const linked = (await pipedriveRequest(`/api/v2/deals/${id}`)).data || {};
+    if (String(linked.id) !== id || personIdOf(linked) !== personId) throw new Error('Der verknüpfte Kundenkontakt hat sich geändert.');
+    const person = (await pipedriveRequest(`/api/v2/persons/${personId}`)).data || {};
+    if (String(person.id) !== personId) throw new Error('Der Kundenkontakt konnte nicht eindeutig gelesen werden.');
+    const contactChanges = {};
+    for (const item of personItems) {
+      const current = item.contact.read(person);
+      if (current) {
+        const verified = sameContactValue(item.field, current, item.value);
+        results.push({ field: item.field, entity: 'person', status: verified ? 'existing_value_present' : 'existing_value_conflict', mutated: false, verified });
+      } else {
+        contactChanges[item.contact.personField] = [{ value: item.value, primary: true }];
+        results.push({ field: item.field, entity: 'person', status: 'prepared', mutated: false });
+      }
+    }
+    if (Object.keys(contactChanges).length) await pipedriveRequest(`/api/v2/persons/${personId}`, { method: 'PATCH', body: contactChanges, write: true });
+    const afterPerson = (await pipedriveRequest(`/api/v2/persons/${personId}`)).data || {};
+    for (const result of results.filter(item => item.entity === 'person' && item.status === 'prepared')) {
+      const item = personItems.find(candidate => candidate.field === result.field);
+      result.verified = String(afterPerson.id) === personId && sameContactValue(item.field, item.contact.read(afterPerson), item.value);
+      result.status = result.verified ? 'updated_and_verified' : 'update_not_verified';
+      result.mutated = Boolean(item.contact.read(afterPerson));
+    }
   }
-  return { dealId: id, results, mutated: results.some(item => item.mutated), fullyVerified: results.filter(item => item.status !== 'existing_value_present').every(item => item.verified === true), source: 'iva-core-pipedrive-api' };
+  const after = (await pipedriveRequest(dealPath)).data || {};
+  if (String(after.id) !== id || (personItems.length && personIdOf(after) !== personId)) throw new Error('Der Deal oder Kundenkontakt hat sich während der Feldpflege geändert.');
+  for (const result of results.filter(item => item.entity === 'deal' && item.status === 'prepared')) {
+    const item = descriptors.find(candidate => candidate.field === result.field);
+    const actual = after.custom_fields?.[item.descriptor.key] ?? after[item.descriptor.key] ?? null;
+    result.verified = sameFieldValue(actual, changes[item.descriptor.key]);
+    result.status = result.verified ? 'updated_and_verified' : 'update_not_verified';
+    result.mutated = actual !== null && actual !== undefined && String(actual).trim() !== '';
+  }
+  return { dealId: id, results, mutated: results.some(item => item.mutated), fullyVerified: results.every(item => item.verified === true), source: 'iva-core-pipedrive-api' };
 }
 
 export async function transitionPipedriveFundingStageApi({ dealId, fromStage, toStage, confirmation } = {}) {
@@ -769,12 +843,19 @@ export async function updatePipedriveDealStage({ dealId, expectedStageId, target
   const target = Number(targetStageId);
   const allowedStages = new Set(Object.values(PIPEDRIVE_LAYOUT.stages).map(stage => stage.id));
   if (!/^\d+$/.test(id) || !allowedStages.has(expected) || !allowedStages.has(target) || expected === target) throw new Error('Ungültige oder nicht freigegebene Pipedrive-Phasenänderung.');
+  const fundingTarget = [PIPEDRIVE_LAYOUT.stages.submitOrderDocuments.id, PIPEDRIVE_LAYOUT.stages.applyFunding.id].includes(target);
+  const requireFundingFields = async () => {
+    const missing = missingPipedriveFundingRequiredFields(await getPipedriveFundingSnapshot(id));
+    if (missing.length) throw Object.assign(new Error(`Förder-Deal unvollständig: ${missing.join(', ')} aus TMB beziehungsweise unterschriebenem Angebot ergänzen und rücklesen.`), { code: 'FUNDING_REQUIRED_FIELDS_MISSING', missingFields: missing });
+  };
+  if (fundingTarget) await requireFundingFields();
   const before = (await pipedriveRequest(`/api/v2/deals/${id}`)).data || {};
   if (Number(before.stage_id) === target) return { changed: false, alreadyPresent: true, verified: true, fromStageId: target, toStageId: target };
   if (Number(before.stage_id) !== expected) throw new Error(`Pipedrive-Deal steht unerwartet in Phase ${before.stage_id}.`);
   await pipedriveRequest(`/api/v2/deals/${id}`, { method: 'PATCH', body: { stage_id: target }, write: true });
   const after = (await pipedriveRequest(`/api/v2/deals/${id}`)).data || {};
   if (Number(after.stage_id) !== target) throw new Error('Pipedrive-Phasenänderung wurde nicht bestätigt.');
+  if (fundingTarget) await requireFundingFields();
   return { changed: true, alreadyPresent: false, verified: true, fromStageId: expected, toStageId: target };
 }
 

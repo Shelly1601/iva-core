@@ -212,25 +212,38 @@ const allBaseDocuments = Object.fromEntries([
   'land_register',
   'kfw_account_confirmation',
 ].map(id => [id, FUNDING_DOCUMENT_STATE.presentInPipedrive]));
+const requiredFundingFields = { customerEmail: 'fixture@example.test', phoneNumber: '0123456789', plant: 'Fixture Anlage', orderNumber: 'HH-AB-12345' };
 const moveDecision = decideFundingDealAction('Antrag eingereicht / Förderunterlagen einreichen', {
+  snapshot: requiredFundingFields,
   incomeBonusRequested: false,
   documentEvidence: allBaseDocuments,
 });
 assert.equal(moveDecision.action, 'move_to_funding_requested');
 assert.equal(moveDecision.moveAllowed, true);
 assert.equal(moveDecision.targetStage, 'Förderung beantragen');
+for (const field of Object.keys(requiredFundingFields)) {
+  const incomplete = decideFundingDealAction('Auftrag eingereicht / Förderunterlagen einreichen', {
+    snapshot: { ...requiredFundingFields, [field]: null }, documentEvidence: allBaseDocuments,
+  });
+  assert.equal(incomplete.action, 'complete_required_fields_then_recheck');
+  assert.equal(incomplete.moveAllowed, false);
+  assert.equal(incomplete.missingRequiredFields.length, 1);
+}
 const offerMoveDecision = decideFundingDealAction('Angebot veröffentlicht', {
+  snapshot: requiredFundingFields,
   documentEvidence: { signed_offer: FUNDING_DOCUMENT_STATE.presentInPipedrive },
 });
 assert.equal(offerMoveDecision.action, 'move_to_documents');
 assert.equal(offerMoveDecision.targetStage, 'Auftrag eingereicht / Förderunterlagen einreichen');
 const uploadDecision = decideFundingDealAction('Antrag eingereicht / Förderunterlagen einreichen', {
+  snapshot: requiredFundingFields,
   incomeBonusRequested: false,
   documentEvidence: { ...allBaseDocuments, identity_card: FUNDING_DOCUMENT_STATE.availableInEmail },
 });
 assert.equal(uploadDecision.action, 'upload_email_documents_then_recheck');
 assert.equal(uploadDecision.moveAllowed, false);
 const lockedDecision = decideFundingDealAction('Förderung beantragt', {
+  snapshot: requiredFundingFields,
   incomeBonusRequested: false,
   documentEvidence: allBaseDocuments,
 });

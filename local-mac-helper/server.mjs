@@ -114,6 +114,7 @@ export function createMacHelperServer() {
         const input = await body(req);
         const snapshot = validatePipedriveFundingSnapshot(input);
         const decision = decideFundingDealAction(snapshot.stage, {
+          snapshot,
           incomeBonusRequested: input.incomeBonusRequested,
           documentEvidence: input.documentEvidence,
         });

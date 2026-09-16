@@ -4,6 +4,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { collectPipedriveFundingDealIds, readPipedriveFundingDealsViaApi } from './background-integrations.mjs';
 import { withFundingFileLock } from './funding-intake-state.mjs';
+import { FUNDING_REQUIRED_FIELDS, missingFundingRequiredFields } from './funding-required-fields.mjs';
 
 export const FUNDING_BASE_REQUIRED_DOCUMENTS = Object.freeze([
   'signed_offer',
@@ -23,6 +24,7 @@ export function defaultFundingScanFile() {
 export function fundingDocumentReviewFingerprint(snapshot = {}) {
   return createHash('sha256').update(JSON.stringify([
     snapshot.dealId, snapshot.stage, snapshot.orderNumber, snapshot.customerPersonId, snapshot.incomeBonusRequested,
+    FUNDING_REQUIRED_FIELDS.map(({ key }) => [key, snapshot[key] ?? null, snapshot.requiredFieldSources?.[key] ?? null]),
     (snapshot.fileRecords || []).map(item => [String(item.id), item.name, Number(item.size), item.updatedAt || null]).sort((a, b) => a[0].localeCompare(b[0])),
     snapshot.noteCount, snapshot.latestNoteAt, snapshot.kfwAccountConfirmedByCredentials,
   ])).digest('hex');
@@ -31,6 +33,8 @@ function reviewCacheFile() { return path.join(path.dirname(defaultFundingScanFil
 async function loadReviewCache(file = reviewCacheFile()) { try { return JSON.parse(await readFile(file, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; return { version: 1, deals: {} }; } }
 export async function recordFundingDocumentReview({ snapshot, review } = {}, { file = reviewCacheFile() } = {}) {
   if (!/^\d+$/.test(String(snapshot?.dealId || '')) || !Array.isArray(snapshot.fileRecords) || review?.complete !== true || review?.sourceNotesChecked !== true) throw new Error('Der vollständige Förder-Dokumentreview ist nicht belegt.');
+  const missing = missingFundingRequiredFields(snapshot);
+  if (missing.length) throw new Error(`Förderprüfung noch offen: ${missing.join(', ')} müssen aus den Primärbelegen ergänzt und im CRM rückgelesen sein.`);
   const checked = Array.isArray(review.files) ? review.files : [];
   if (snapshot.fileRecords.some(file => !checked.some(item => String(item.fileId) === String(file.id) && item.readable === true && item.identityVerified === true))) throw new Error('Mindestens eine Dealdatei wurde noch nicht inhaltlich und auf Identität geprüft.');
   return withFundingFileLock(file, async () => {
@@ -56,6 +60,7 @@ function summarizeSnapshot(snapshot, reviewCache = {}) {
       ];
   const missingBaseDocumentIds = requiredDocumentIds.filter(id => !presentDocumentIds.includes(id));
   const unknownFiles = snapshot.documents.filter(document => document.type === 'unknown').map(document => document.fileName);
+  const missingRequiredFields = missingFundingRequiredFields(snapshot);
   return {
     dealId: snapshot.dealId,
     dealTitle: snapshot.dealTitle || null,
@@ -66,12 +71,15 @@ function summarizeSnapshot(snapshot, reviewCache = {}) {
     orderNumber: snapshot.orderNumber,
     phoneNumber: snapshot.phoneNumber || null,
     plant: snapshot.plant || null,
+    requiredFieldSources: snapshot.requiredFieldSources || null,
+    missingRequiredFields,
+    requiredFieldsComplete: missingRequiredFields.length === 0,
     vpName: snapshot.vpName,
     vpEmail: snapshot.vpEmail,
     files: snapshot.files,
     fileRecords: snapshot.fileRecords || [],
     contentFingerprint: fundingDocumentReviewFingerprint(snapshot),
-    documentContentReviewRequired: !Array.isArray(snapshot.fileRecords) || reviewCache[snapshot.dealId]?.fingerprint !== fundingDocumentReviewFingerprint(snapshot),
+    documentContentReviewRequired: missingRequiredFields.length > 0 || !Array.isArray(snapshot.fileRecords) || reviewCache[snapshot.dealId]?.fingerprint !== fundingDocumentReviewFingerprint(snapshot),
     noteCount: snapshot.noteCount || 0,
     latestNoteAt: snapshot.latestNoteAt || null,
     latestExternalNote: snapshot.latestExternalNote || null,
@@ -84,7 +92,7 @@ function summarizeSnapshot(snapshot, reviewCache = {}) {
     missingBaseDocumentIds,
     unknownFiles,
     incomeBonusRequested: snapshot.incomeBonusRequested ?? null,
-    reviewRequired: unknownFiles.length > 0,
+    reviewRequired: unknownFiles.length > 0 || missingRequiredFields.length > 0,
   };
 }
 
@@ -133,6 +141,7 @@ export async function scanPipedriveFundingBoard({ batchSize = 100, persist = tru
     summary: {
       casesWithMissingBaseDocuments: cases.filter(item => item.missingBaseDocumentIds.length > 0).length,
       casesWithAllBaseDocumentsByFileName: cases.filter(item => item.missingBaseDocumentIds.length === 0).length,
+      casesWithMissingRequiredFields: cases.filter(item => item.missingRequiredFields.length > 0).length,
       casesRequiringReview: cases.filter(item => item.reviewRequired).length,
     },
     cases,
