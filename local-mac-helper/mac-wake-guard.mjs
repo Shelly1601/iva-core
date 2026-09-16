@@ -143,7 +143,9 @@ export function macWakeGuardPolicy() {
   return Object.freeze({
     idleSleepPrevented: true,
     displaySleepPreventedDuringRun: true,
-    automaticLockPreventedDuringRun: true,
+    automaticLockPreventedDuringRun: false,
+    automaticUnlockAvailable: false,
+    passwordLockPolicyChanged: false,
     displaySleepAfterRun: true,
     displaySleepRequiresUnattendedNight: true,
     displaySleepMinimumIdleSeconds: DISPLAY_SLEEP_POLICY.minimumIdleSeconds,

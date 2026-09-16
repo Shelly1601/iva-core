@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { withImacExecutionLock } from './ui-execution-lock.mjs';
+import { MAC_SESSION_RECHECK_MS, readMacSessionLockStatus } from './mac-session-lock.mjs';
 import os from 'node:os';
 import { assertImacExecutionHost } from './imac-host-guard.mjs';
 import { recoveryDelayMs, hasCompletionEvidence, planbarRecoveryDelayMs } from './workflow-recovery.mjs';
@@ -10,7 +11,7 @@ import { accessSync, constants as fsConstants, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { materializeIcloudWorkspace } from './icloud-workspace.mjs';
 import { createPlanbarCompletionStore } from './planbar-completion.mjs';
-import { createFundingIntakeStore } from './funding-intake-state.mjs';
+import { createFundingIntakeStore, withFundingFileLock } from './funding-intake-state.mjs';
 import { assertImacFundingHost } from './funding-workflows.mjs';
 import { isoWeekRange, mergePlanbarSchedulingProgress, planbarSchedulingKey, planbarSchedulingSummary } from '../operations/customer-scheduling.js';
 import { validateDewarmteLinkPdfInput } from '../projects/dewarmte.js';
@@ -539,8 +540,12 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
   }
   const childEnv = { ...process.env };
   delete childEnv.IVA_MAC_WAKE_GUARD_ACTIVE;
-  const beforeLaunch = await readJson(paths.state);
-  await writeState(paths, { ...beforeLaunch, launchAttempts: Number(beforeLaunch.launchAttempts || 0) + 1, lastLaunchAt: new Date().toISOString() });
+  const launchState = await withFundingFileLock(paths.state, async () => {
+    const beforeLaunch = await readJson(paths.state);
+    if (beforeLaunch.status !== 'queued') return beforeLaunch;
+    return writeState(paths, { ...beforeLaunch, launchAttempts: Number(beforeLaunch.launchAttempts || 0) + 1, lastLaunchAt: new Date().toISOString() });
+  });
+  if (launchState.status !== 'queued') return { jobId, status: launchState.status, startedLocally: true, duplicate: true };
   const child = spawnProcess(process.execPath, [MODULE_PATH, 'run', jobId], { detached: true, stdio: 'ignore', env: childEnv });
   // spawn() allein bestätigt keinen gestarteten Prozess (z.B. EAGAIN).
   await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
@@ -980,7 +985,7 @@ export async function getCodexTaskStatus(jobId) {
   const paths = jobPaths(jobId);
   let state = await readJson(paths.state);
   const heartbeat = await readJson(paths.heartbeat).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
-  if (!TERMINAL_TASK_STATUSES.has(state.status) && heartbeat?.heartbeatAt && Date.parse(heartbeat.heartbeatAt) > Date.parse(state.updatedAt || 0)) {
+  if (state.status === 'running' && heartbeat?.heartbeatAt && Date.parse(heartbeat.heartbeatAt) > Date.parse(state.updatedAt || 0)) {
     const now = Date.parse(heartbeat.heartbeatAt);
     const startedAt = Date.parse(state.startedAt || state.createdAt || heartbeat.heartbeatAt);
     state = {
@@ -1293,17 +1298,69 @@ async function markIncidentPreventionFromCli(jobId, fingerprint, state, evidence
   }
 }
 
-export async function runCodexTask(jobId) {
+// Only the checked-in workflow definition may opt into background-only work.
+// Prompt text and caller-supplied requiresUi flags cannot disable this guard.
+export function codexTaskRequiresUi(request, workflowDefinitions = PROJECT_WORKFLOW_TASKS) {
+  if (request?.mode === 'build') return false;
+  return workflowDefinitions[request?.workflowId]?.requiresUi !== false;
+}
+
+async function deferCodexTaskUntilUnlocked(jobId, session, { report = reportTaskState, now = Date.now() } = {}) {
+  const paths = jobPaths(jobId);
+  const waiting = await withFundingFileLock(paths.state, async () => {
+    const [state, claim] = await Promise.all([readJson(paths.state), readJson(paths.executionClaim)]);
+    if (state.status !== 'running' || Number(claim.pid) !== process.pid) throw new Error('Der wartende Mac-Auftrag gehört nicht mehr zu diesem Worker.');
+    const parked = await writeState(paths, { ...state, status: 'queued', phase: 'waiting_for_unlock',
+      workerPid: null, childPid: null, completedAt: null, error: '',
+      sessionWait: { reason: session.reason, locked: session.locked, since: state.sessionWait?.since || new Date(now).toISOString() },
+      nextAttemptAt: new Date(now + MAC_SESSION_RECHECK_MS).toISOString(),
+      detail: session.locked === true
+        ? 'Mac Mini ist gesperrt. Auftrag bleibt gespeichert und wird nach dem Entsperren fortgesetzt; kein KI-Wiederanlauf während der Sperre.'
+        : 'Die lokale Mac-Sitzung ist noch nicht verlässlich verfügbar. Auftrag wartet ohne KI-Wiederanläufe auf die bestätigte entsperrte Sitzung.',
+      updatedAt: new Date(now).toISOString() });
+    // No Codex child has started. Keep the job and every business receipt; only
+    // relinquish this lightweight worker's claim so the same job can continue.
+    await archiveExecutionClaim(paths, now);
+    return parked;
+  });
+  await report(await readJson(paths.request), waiting);
+  return { jobId, status: waiting.status, phase: waiting.phase, startedLocally: false };
+}
+
+export async function runCodexTask(jobId, {
+  sessionStatus = readMacSessionLockStatus,
+  withUiLock = withImacExecutionLock,
+  withWakeGuard,
+  execute = runCodexTaskWithoutWakeGuard,
+  report = reportTaskState,
+} = {}) {
   // Permanenter, atomarer Ausführungsnachweis: doppelte Startzustellung darf
   // denselben Workflow nie zweimal ausführen, auch nicht nach einem Absturz.
-  if (!await claimCodexTaskExecution(jobId)) return { jobId, duplicate: true };
-  const stopHeartbeat = startCodexTaskHeartbeat(jobId);
+  if (!await claimCodexTaskExecution(jobId, { report })) return { jobId, duplicate: true };
+  const request = await readJson(jobPaths(jobId).request);
+  const requiresUi = codexTaskRequiresUi(request);
+  if (requiresUi) {
+    const session = await sessionStatus();
+    if (!session.usable) return deferCodexTaskUntilUnlocked(jobId, session, { report });
+  }
+  const stopHeartbeat = startCodexTaskHeartbeat(jobId, { report });
   try {
-    const { withMacWakeGuard } = await import('./mac-wake-guard.mjs');
-    return await withImacExecutionLock(() => withMacWakeGuard(() => runCodexTaskWithoutWakeGuard(jobId), {
-      maxSeconds: Math.ceil(MAX_RUNTIME_MS / 1000) + 60,
-      sleepDisplays: true,
-    }), { timeoutMs: CODEX_TASK_MAX_QUEUE_WAIT_MS });
+    if (!requiresUi && request.mode !== 'build') return await execute(jobId);
+    const wake = withWakeGuard || (await import('./mac-wake-guard.mjs')).withMacWakeGuard;
+    return await withUiLock(async () => {
+      // The screen can lock while another UI job owns the execution lock.
+      if (requiresUi) {
+        const session = await sessionStatus();
+        if (!session.usable) {
+          await stopHeartbeat();
+          return deferCodexTaskUntilUnlocked(jobId, session, { report });
+        }
+      }
+      return wake(() => execute(jobId), {
+        maxSeconds: Math.ceil(MAX_RUNTIME_MS / 1000) + 60,
+        sleepDisplays: true,
+      });
+    }, { timeoutMs: CODEX_TASK_MAX_QUEUE_WAIT_MS });
   } finally {
     await stopHeartbeat();
   }
@@ -1311,17 +1368,20 @@ export async function runCodexTask(jobId) {
 
 export async function claimCodexTaskExecution(jobId, { report = reportTaskState } = {}) {
   const paths = jobPaths(jobId);
-  const state = await readJson(paths.state);
-  if (state.status !== 'queued') return false;
-  let claim;
-  try { claim = await open(paths.executionClaim, 'wx', 0o600); }
-  catch (error) { if (error.code === 'EEXIST') return false; throw error; }
-  try { await claim.writeFile(JSON.stringify({ jobId, pid: process.pid, claimedAt: new Date().toISOString() })); }
-  finally { await claim.close(); }
-  const request = await readJson(paths.request);
-  const waiting = await writeState(paths, { ...state, status: 'running', phase: 'waiting_for_imac', workerPid: process.pid,
-    detail: 'Workflow gestartet; wartet auf den freien iMac.', updatedAt: new Date().toISOString() });
-  await report(request, waiting);
+  const waiting = await withFundingFileLock(paths.state, async () => {
+    const state = await readJson(paths.state);
+    if (state.status !== 'queued') return null;
+    let claim;
+    try { claim = await open(paths.executionClaim, 'wx', 0o600); }
+    catch (error) { if (error.code === 'EEXIST') return null; throw error; }
+    try { await claim.writeFile(JSON.stringify({ jobId, pid: process.pid, claimedAt: new Date().toISOString() })); }
+    finally { await claim.close(); }
+    return writeState(paths, { ...state, status: 'running', phase: 'waiting_for_imac', workerPid: process.pid,
+      detail: 'Workflow gestartet; wartet auf den freien iMac.', updatedAt: new Date().toISOString() });
+  });
+  if (!waiting) return false;
+  // Never hold the local state mutex during a network report or execution.
+  await report(await readJson(paths.request), waiting);
   return true;
 }
 
@@ -1339,6 +1399,7 @@ export async function syncCodexTaskStates({
   report = reportTaskState,
   launch = startCodexTask,
   processAlive = processIsAlive,
+  sessionStatus = readMacSessionLockStatus,
   force = false,
 } = {}) {
   if (!force && now - lastTaskSync < 30_000) return { checked: 0, recovered: 0, reports: 0 };
@@ -1350,11 +1411,42 @@ export async function syncCodexTaskStates({
     if (!entry.isDirectory() || !/^[a-f0-9-]{20,80}$/i.test(entry.name)) continue;
     const paths = jobPaths(entry.name);
     const request = await readJson(paths.request).catch(() => null);
-    if (!request || now - Date.parse(request.createdAt) > CODEX_TASK_RETENTION_MS) continue;
+    if (!request) continue;
     checked += 1;
     let state = await getCodexTaskStatus(entry.name).catch(() => null);
     if (!state) continue;
-    if (request.launchProtocol === 2 && state.status === 'queued' && now - Date.parse(state.lastLaunchAt || state.createdAt) > 60_000) {
+    if (now - Date.parse(request.createdAt) > CODEX_TASK_RETENTION_MS && state.phase !== 'waiting_for_unlock') continue;
+    let unlockLaunched = false;
+    if (state.status === 'queued' && state.phase === 'waiting_for_unlock') {
+      if (state.nextAttemptAt && Date.parse(state.nextAttemptAt) > now) continue;
+      const session = codexTaskRequiresUi(request) ? await sessionStatus() : { usable: true };
+      const waitTransition = await withFundingFileLock(paths.state, async () => {
+        // A manual re-delivery may have claimed the job during the OS probe.
+        // Read again under the same mutex used by claiming/parking; never
+        // replace a newer worker/child receipt with the earlier queue snapshot.
+        const current = await readJson(paths.state);
+        if (current.status !== 'queued' || current.phase !== 'waiting_for_unlock') return 'changed';
+        const claim = await readJson(paths.executionClaim).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
+        if ([claim?.pid, current.workerPid, current.childPid].some(pid => processAlive(Number(pid)))) return 'waiting';
+        if (!session.usable) {
+          // Only the next local probe changes; no repeated model/report attempt.
+          await writeState(paths, { ...current, nextAttemptAt: new Date(now + MAC_SESSION_RECHECK_MS).toISOString() });
+          return 'waiting';
+        }
+        if (claim) await archiveExecutionClaim(paths, now);
+        await writeState(paths, { ...current, phase: 'queued', sessionWait: null,
+          workerPid: null, childPid: null, nextAttemptAt: new Date(now).toISOString(),
+          detail: 'Mac Mini ist entsperrt; derselbe gespeicherte Auftrag wird fortgesetzt.', updatedAt: new Date(now).toISOString() });
+        return 'ready';
+      });
+      if (waitTransition === 'waiting') continue;
+      if (waitTransition === 'ready') {
+        unlockLaunched = true;
+        await launch(request).catch(() => {});
+      }
+      state = await getCodexTaskStatus(entry.name);
+    }
+    if (!unlockLaunched && request.launchProtocol === 2 && state.status === 'queued' && now - Date.parse(state.lastLaunchAt || state.createdAt) > 60_000) {
       const claim = await readJson(paths.executionClaim).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
       if (!claim && Number(state.launchAttempts || 0) < CODEX_TASK_MAX_LAUNCH_ATTEMPTS) {
         // Ein gestorbener Startprozess hat noch keinerlei Ausführungsfreigabe.
