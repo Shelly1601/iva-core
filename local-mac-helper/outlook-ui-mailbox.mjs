@@ -113,6 +113,8 @@ export function createOutlookUiMailbox({bridge=runMacUiBridge,parseSource=parseO
   async function search(from,folder,query,{maximum=500,budget=Infinity,known=[],onProgress=null,partial=false}={}) {
     await open(from,folder); await bridge(['mailbox-ui-search',query],{timeoutMs:20000});
     let previous='',stable=0,ended=false;
+    const expandedConversations=new Set();
+    const conversationKey=row=>hash(row.description.replace(/(?:Ungelesen,|\d+ ungelesene Nachrichten?,|Erweitert,|\(selected\))/g,'').replace(/\s+/g,' ').trim());
     const found=new Map(known.map(x=>[x.rowKey,x.item])),deadline=now()+240000; let captured=0;
     const rowKey=row=>hash(row.description.replace(/(?:Ungelesen,|\d+ ungelesene Nachrichten?,|\(selected\))/g,'').replace(/\s+/g,' ').trim());
     for(let page=0;page<300;page++) {
@@ -121,8 +123,6 @@ export function createOutlookUiMailbox({bridge=runMacUiBridge,parseSource=parseO
       if(view.scope!=='Aktueller Ordner'||view.query!==query) throw error('OUTLOOK_UI_SEARCH_SCOPE_UNVERIFIED','Der Suchbereich wurde verändert.');
       const visibleSingles=view.rows.filter(x=>x.visible&&!x.conversation&&folderMatches(x.description,folder));
       if(new Set(visibleSingles.map(rowKey)).size!==visibleSingles.length) throw error('OUTLOOK_UI_ROW_AMBIGUOUS','Gleich beschriftete Einzelmails können nicht zuverlässig unterschieden werden.');
-      const group=view.rows.find(x=>x.conversation&&!x.expanded&&x.visible);
-      if(group) { await bridge(['mailbox-ui-expand',group.description]); stable=0; continue; }
       for(const row of view.rows.filter(x=>x.visible&&!x.conversation&&folderMatches(x.description,folder))) {
         const key=rowKey(row); if(found.has(key)) continue;
         if(partial&&captured>=budget) return {items:[...found.values()],known:[...found].map(([rowKey,item])=>({rowKey,item})),complete:false};
@@ -131,6 +131,13 @@ export function createOutlookUiMailbox({bridge=runMacUiBridge,parseSource=parseO
         if(onProgress) await onProgress([...found].map(([rowKey,item])=>({rowKey,item})));
         // Source viewing opens TextEdit; listing remains app-scoped, and the
         // following source action reactivates Outlook before any pointer input.
+      }
+      const group=view.rows.find(x=>x.conversation&&!x.expanded&&x.visible);
+      if(group) {
+        const key=conversationKey(group);
+        if(expandedConversations.has(key)) throw error('OUTLOOK_UI_CONVERSATION_STALLED','Outlook zeigt dieselbe Unterhaltung erneut als geschlossen. Der Mailabruf wurde ohne weitere Fensteraktionen angehalten; die vollständige Lesedeckung ist nicht belegt.');
+        expandedConversations.add(key);
+        await bridge(['mailbox-ui-expand',group.description]); stable=0; continue;
       }
       const fingerprint=hash(JSON.stringify({rows:view.rows.map(r=>r.description),visible:view.visibleIndices,count:view.rowCount}));
       const lastVisible=Math.max(-1,...(view.visibleIndices||[]));

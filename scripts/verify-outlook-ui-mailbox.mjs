@@ -146,3 +146,28 @@ test('forward proof requires the real original ID and matching introduction',asy
   const f=await fixture(t,[m],{folder:'Gesendet'});const proof=await f.adapter.verifyFundingSentMessage({...request,body:'Einleitung',introduction:'Einleitung',originalMessageId:'<original@example.test>'});assert.equal(proof.introductionHash,hash('Einleitung'));assert.equal(proof.originalMessageId,'<original@example.test>');
   await assert.rejects(()=>f.adapter.verifyFundingSentMessage({...request,body:'Einleitung',introduction:'Einleitung',originalMessageId:'<wrong@example.test>'}),{code:'OUTLOOK_SENT_CONTENT_MISMATCH'});
 });
+
+test('conversation expansion stops on an unchanged or alternating group instead of reopening it',async t=>{
+  for(const alternating of [false,true]) {
+    const dir=await mkdtemp(path.join(os.tmpdir(),'iva-outlook-stall-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+    let query='',active=-1;const expansions=[];const reads=[];
+    const groups=['one','two'].map(id=>`Unterhaltung, Betreff: Subject ${id}, 14.09.26, Ordner: Posteingang,`);
+    const messages=['one','two'].map(id=>`Absender: Test, Betreff: Subject ${id}, 14.09.26, Ordner: Posteingang,`);
+    const bridge=async args=>{
+      if(args[0]==='mailbox-ui-window')return {focusedWindowTitle:'Posteingang • Förderung | HEAT HERO'};
+      if(args[0]==='mailbox-ui-search'){query=args[1];return {};}
+      if(args[0]==='mailbox-ui-expand'){expansions.push(args[1]);active=alternating?groups.indexOf(args[1]):-1;return {expanded:true};}
+      if(args[0]==='mailbox-ui-source'){const id=messages.indexOf(args[1]);reads.push(id);return {sourcePath:String(id)};}
+      if(args[0]==='mailbox-ui-list'){
+        const rows=(alternating?groups:groups.slice(0,1)).map((description,i)=>({description,conversation:true,expanded:i===active,visible:true}));
+        if(active>=0)rows.push({description:messages[active],conversation:false,expanded:false,visible:true});
+        return {query,scope:'Aktueller Ordner',rows,rowCount:rows.length,visibleIndices:rows.map((_,i)=>i),loading:false};
+      }
+      return {};
+    };
+    const adapter=createOutlookUiMailbox({bridge,parseSource:async p=>item(['one','two'][Number(p)]),now:()=>now,sleep:async()=>{},assertHost:async()=>{},withLease:async f=>f(),dataDir:dir});
+    await assert.rejects(()=>adapter.readFundingMailboxPage({from,folder:'Posteingang',since:'2026-08-01',mode:'initial-backfill'}),{code:'OUTLOOK_UI_CONVERSATION_STALLED'});
+    assert.equal(expansions.length,alternating?2:1);
+    assert.deepEqual(reads,alternating?[0,1]:[]);
+  }
+});
