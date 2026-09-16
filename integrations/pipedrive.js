@@ -822,7 +822,15 @@ export async function uploadPipedriveDealFile({ dealId, filename, buffer } = {})
   const safeFilename = path.basename(clean(filename, 500));
   if (!/^\d+$/.test(id) || !safeFilename || !Buffer.isBuffer(buffer) || !buffer.length || buffer.length > MAX_FILE_BYTES) throw new Error('Ungültiger Pipedrive-Dateiupload.');
   const before = await getPipedriveDealBundle(id);
-  if (before.files.some(file => clean(file.name || file.file_name) === safeFilename)) return { dealId: id, fileName: safeFilename, uploaded: false, alreadyPresent: true, verified: true };
+  const receipt = { dealId: id, fileName: safeFilename, size: buffer.length, sha256: crypto.createHash('sha256').update(buffer).digest('hex') };
+  const existing = before.files.filter(file => clean(file.name || file.file_name) === safeFilename);
+  // A filename is not a content or upload receipt. Reuse only the exact bytes
+  // from this deal, and include its ID so the mail can be completed safely.
+  for (const file of existing) {
+    const downloaded = await downloadPipedriveDealFile({ dealId: id, fileId: file.id });
+    if (downloaded.buffer.equals(buffer)) return { ...receipt, fileId: String(file.id), uploaded: false, alreadyPresent: true, verified: true, contentVerified: true };
+  }
+  if (existing.length) throw Object.assign(new Error('In diesem Deal existiert eine gleichnamige Datei mit anderem Inhalt. Die neue Fassung benötigt einen eindeutigen Dateinamen.'), { code: 'PIPEDRIVE_FILE_CONTENT_CONFLICT', status: 409 });
   const credential = await validCredential();
   if (!config().writeEnabled) throw new Error('Pipedrive-Schreibzugriff ist noch nicht freigeschaltet.');
   const url = new URL(`${safeApiDomain(credential.apiDomain)}/api/v1/files`);
@@ -833,10 +841,14 @@ export async function uploadPipedriveDealFile({ dealId, filename, buffer } = {})
   const response = await fetch(url, { method: 'POST', headers: credential.mode === 'oauth' ? { Authorization: `Bearer ${credential.accessToken}` } : {}, body: form, signal: AbortSignal.timeout(60_000) });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload?.success === false) throw new Error(safeError(payload, response));
+  const uploadedId = String(payload?.data?.id || '');
+  if (!/^\d+$/.test(uploadedId)) throw new Error('Pipedrive-Dateiupload hat keine eindeutige Datei-ID bestätigt; zuerst den Zielzustand prüfen.');
   const after = await getPipedriveDealBundle(id);
-  const matches = after.files.filter(file => clean(file.name || file.file_name) === safeFilename);
+  const matches = after.files.filter(file => String(file.id) === uploadedId && clean(file.name || file.file_name) === safeFilename);
   if (matches.length !== 1) throw new Error('Pipedrive-Dateiupload wurde nicht eindeutig bestätigt.');
-  return { dealId: id, fileName: safeFilename, fileId: String(matches[0].id || ''), uploaded: true, alreadyPresent: false, verified: true };
+  const downloaded = await downloadPipedriveDealFile({ dealId: id, fileId: uploadedId });
+  if (!downloaded.buffer.equals(buffer)) throw Object.assign(new Error('Die rückgelesene Pipedrive-Datei stimmt nicht mit dem hochgeladenen Dokument überein.'), { code: 'PIPEDRIVE_FILE_READBACK_MISMATCH' });
+  return { ...receipt, fileId: uploadedId, uploaded: true, alreadyPresent: false, verified: true, contentVerified: true };
 }
 
 function htmlText(value) {

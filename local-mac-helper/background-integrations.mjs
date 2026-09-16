@@ -142,10 +142,13 @@ export async function readPipedriveFundingDealsViaApi({ dealIds, onProgress } = 
   return { requested: ids.length, read: snapshots.length, failed: errors.length, snapshots, errors, readOnly: true, mutated: false, source: 'iva-core-pipedrive-api' };
 }
 
-export async function downloadPipedriveDealFiles({ dealId, fileIds = [] } = {}) {
+export async function downloadPipedriveDealFiles({ dealId, fileIds = [] } = {}, {
+  readSnapshot = readPipedriveFundingDeal,
+  downloadFile = (id, fileId) => request(`/device-agent/${DEVICE_ID}/background/pipedrive/deals/${id}/files/${encodeURIComponent(fileId)}`, { binary: true, timeoutMs: 60_000 }),
+} = {}) {
   const id = String(dealId || '').replace(/\D/g, '');
   if (!id) throw new Error('Für den Pipedrive-Dateidownload fehlt eine gültige Deal-ID.');
-  const snapshot = await readPipedriveFundingDeal({ dealId: id });
+  const snapshot = await readSnapshot({ dealId: id });
   const requested = new Set((Array.isArray(fileIds) ? fileIds : []).map(value => String(value).replace(/\D/g, '')).filter(Boolean));
   const records = Array.isArray(snapshot.fileRecords) ? snapshot.fileRecords : [];
   const selected = requested.size ? records.filter(file => requested.has(String(file.id))) : records;
@@ -159,8 +162,10 @@ export async function downloadPipedriveDealFiles({ dealId, fileIds = [] } = {}) 
   const failedFiles = [];
   for (const file of selected) {
     try {
-      const download = await request(`/device-agent/${DEVICE_ID}/background/pipedrive/deals/${id}/files/${encodeURIComponent(file.id)}`, { binary: true, timeoutMs: 60_000 });
-      const fileName = safeName(file.name, `pipedrive-${file.id}`);
+      const download = await downloadFile(id, file.id);
+      // Different Pipedrive records may have identical display names. Keep
+      // every record separate on disk so a complete deal review loses no file.
+      const fileName = `${file.id}-${safeName(file.name, 'document')}`;
       const filePath = path.join(directory, fileName);
       await writeFile(filePath, download.buffer, { mode: 0o600, flag: 'wx' });
       files.push({ id: String(file.id), originalName: file.name, fileName, filePath, size: download.buffer.length, contentType: download.contentType || file.mimeType || '' });
@@ -186,7 +191,9 @@ export async function uploadPipedriveDealFiles({ dealId, directory } = {}) {
     const info = await stat(filePath);
     if (!info.isFile() || info.size < 1 || info.size > MAX_FILE_BYTES) throw new Error(`${fileName}: ungültige Dateigröße.`);
     const result = await request(`/device-agent/${DEVICE_ID}/background/pipedrive/deals/${id}/files?name=${encodeURIComponent(fileName)}`, { method: 'POST', body: await readFile(filePath), timeoutMs: 90_000 });
-    results.push({ fileName, status: result.alreadyPresent ? 'already_present' : 'uploaded', uploaded: result.uploaded === true, verified: result.verified === true, fileId: result.fileId || null });
+    results.push({ fileName, status: result.alreadyPresent ? 'already_present' : 'uploaded', uploaded: result.uploaded === true,
+      verified: result.verified === true && result.contentVerified === true && Boolean(result.fileId),
+      contentVerified: result.contentVerified === true, fileId: result.fileId || null, size: result.size ?? null, sha256: result.sha256 || null });
   }
   return { dealId: id, results, uploadedCount: results.filter(item => item.uploaded).length, fullyVerified: results.every(item => item.verified), deletedFromPipedrive: false, source: 'iva-core-pipedrive-api' };
 }

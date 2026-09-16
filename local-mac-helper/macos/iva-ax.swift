@@ -369,10 +369,22 @@ func normalizedAXText(_ value: String) -> String {
         .trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
-func matchesSidebarLabel(_ node: AXNode, label: String) -> Bool {
+func outlookFolderWindowMatches(_ title: String, folder: String, account: String) -> Bool {
+    return [" • ", " - "].contains { separator in
+        let suffix = separator + account
+        guard title.hasSuffix(suffix) else { return false }
+        return normalizedAXText(String(title.dropLast(suffix.count))).lowercased() == normalizedAXText(folder).lowercased()
+    }
+}
+
+func matchesSidebarLabel(_ node: AXNode, label: String, caseInsensitive: Bool = false) -> Bool {
     guard node.role == "AXRow" || node.role == "AXCell" else { return false }
-    let expected = normalizedAXText(label)
-    let values = [node.description, node.title, safeValue(node.element)].map(normalizedAXText)
+    let normalize: (String) -> String = { value in
+        let text = normalizedAXText(value)
+        return caseInsensitive ? text.lowercased() : text
+    }
+    let expected = normalize(label)
+    let values = [node.description, node.title, safeValue(node.element)].map(normalize)
     return values.contains(expected) || values.contains { value in
         value.hasPrefix(expected + " ") || value.hasPrefix(expected + ";")
     }
@@ -384,12 +396,16 @@ func sidebarFolder(after account: AXNode, named folderName: String, in nodes: [A
     let prefix = Array(account.path.dropLast(depthToDrop))
     let indexPosition = account.path.count - depthToDrop
     let accountIndex = account.path[indexPosition]
-    return nodes.filter { node in
+    let candidates = nodes.filter { node in
         guard node.role == account.role, node.path.count == account.path.count,
               Array(node.path.dropLast(depthToDrop)) == prefix,
               node.path[indexPosition] > accountIndex else { return false }
-        return matchesSidebarLabel(node, label: folderName)
-    }.sorted { $0.path[indexPosition] < $1.path[indexPosition] }.first
+        return matchesSidebarLabel(node, label: folderName, caseInsensitive: true)
+    }.sorted { $0.path[indexPosition] < $1.path[indexPosition] }
+    // Never choose between differently cased done folders, or a done folder
+    // belonging to another visible account, by taking the first match.
+    if normalizedAXText(folderName).lowercased() == "fertig" && candidates.count != 1 { return nil }
+    return candidates.first
 }
 
 func sidebarNodesEnsuringFolder(in window: AXUIElement, account: AXNode, folderName: String, initialNodes: [AXNode]) -> [AXNode] {
@@ -1733,10 +1749,14 @@ do {
     }
 
     if command == "move-message-to-folder" {
-        guard arguments.count >= 3 else { throw HelperError.message("move-message-to-folder benötigt die exakte Nachrichtenbeschreibung und den Zielordner.") }
+        guard arguments.count == 4 else { throw HelperError.message("move-message-to-folder benötigt die exakte Nachrichtenbeschreibung, den Zielordner und das geprüfte Konto.") }
         let messageDescription = arguments[1]
         let targetFolder = normalizedAXText(arguments[2])
+        let accountName = arguments[3]
         guard !targetFolder.isEmpty else { throw HelperError.message("Der Outlook-Zielordner fehlt.") }
+        guard outlookFolderWindowMatches(focusedWindowTitle(appElement), folder: "Posteingang", account: accountName) else {
+            throw HelperError.message("Der Quellordner des geprüften Outlook-Kontos ist vor dem Verschieben nicht belegt.")
+        }
         let found = nodes.filter { matches($0, role: "AXCell", description: messageDescription) }
         guard found.count == 1 else { throw HelperError.message("Outlook-Nachricht ist vor dem Verschieben nicht eindeutig: \(found.count) Treffer.") }
         _ = AXUIElementPerformAction(found[0].element, "AXScrollToVisible" as CFString)
@@ -1760,8 +1780,8 @@ do {
         let menuNodes = collect(appElement, maxDepth: 20, maxNodes: 8000)
         let folderCandidates = menuNodes.filter { node in
             guard ["AXMenuItem", "AXCell", "AXRow", "AXStaticText"].contains(node.role) else { return false }
-            let values = [node.description, node.title, safeValue(node.element)].map(normalizedAXText)
-            return values.contains(targetFolder)
+            let values = [node.description, node.title, safeValue(node.element)].map { normalizedAXText($0).lowercased() }
+            return values.contains(targetFolder.lowercased())
         }
         guard folderCandidates.count == 1 else { throw HelperError.message("Outlooks Zielordner „\(targetFolder)“ ist im Verschieben-Menü nicht eindeutig: \(folderCandidates.count) Treffer.") }
         let folderResult = AXUIElementPerformAction(folderCandidates[0].element, kAXPressAction as CFString)
@@ -2028,7 +2048,7 @@ do {
         let accountName = arguments[1]
         let folderName = arguments[2]
         let currentTitle = focusedWindowTitle(appElement)
-        if currentTitle.hasPrefix(folderName + " • " + accountName) || currentTitle == folderName + " - " + accountName {
+        if outlookFolderWindowMatches(currentTitle, folder: folderName, account: accountName) {
             try writeJSON(["opened": true, "alreadyOpen": true, "account": accountName, "folder": folderName, "focusedWindowTitle": currentTitle])
             exit(0)
         }
@@ -2068,6 +2088,9 @@ do {
             } else { try click(folderCell.element) }
         }
         usleep(900_000)
+        guard outlookFolderWindowMatches(focusedWindowTitle(appElement), folder: folderName, account: accountName) else {
+            throw HelperError.message("Der geöffnete Outlook-Ordner gehört nicht eindeutig zum angeforderten Konto.")
+        }
         try writeJSON(["opened": true, "account": accountName, "folder": folderCell.description, "element": dictionary(folderCell)])
         exit(0)
     }

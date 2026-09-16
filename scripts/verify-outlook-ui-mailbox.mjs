@@ -1,21 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createOutlookUiMailbox, parseOutlookMimeFile } from '../local-mac-helper/outlook-ui-mailbox.mjs';
+import { moveOutlookMessageToFolder } from '../local-mac-helper/macos-ui.mjs';
+import { completeFundingMail } from '../local-mac-helper/funding-mail-completion.mjs';
+const exec = promisify(execFile);
 const hash=x=>createHash('sha256').update(x).digest('hex');
 const from='foerderung@heat-hero.com', now=Date.parse('2026-09-15T10:00:00Z');
 const item=(id,patch={})=>({messageId:`<${id}@example.test>`,subject:`Subject ${id}`,sentAt:'2026-09-14T10:00:00Z',receivedAt:'2026-09-14T10:00:01Z',sender:[from],recipients:['recipient@example.test'],cc:[],bcc:[],body:'Hallo\nText',bodyType:'text/plain',bodyHash:hash('Hallo\nText'),attachments:[],references:[],originalMessageIds:[],sourceHash:hash(id),...patch});
 async function fixture(t,items=[],options={}) {
   const dir=await mkdtemp(path.join(os.tmpdir(),'iva-outlook-ui-')); t.after(()=>rm(dir,{recursive:true,force:true}));
   let currentFolder='',query='',calls=[],expanded=false;
-  const descriptions=items.map(m=>`Absender: Test, Betreff: ${m.subject}, 14.09.26, Ordner: ${options.folder||'Posteingang'}, Nachrichtenvorschau: PRIVATE`);
+  const descriptionsFor=folder=>items.map(m=>`Absender: Test, Betreff: ${m.subject}, 14.09.26, Ordner: ${folder}, Nachrichtenvorschau: PRIVATE`);
+  let descriptions=descriptionsFor(options.folder||'Posteingang');
   const bridge=async args=>{
     calls.push(args);
-    if(args[0]==='open-account-folder') {currentFolder=args[2];query='';return {};}
-    if(['doctor','mailbox-ui-window'].includes(args[0]))return {focusedWindowTitle:options.badFolder?'Posteingang • Wrong':currentFolder+' • Förderung | HEAT HERO'};
+    if(args[0]==='open-account-folder') {currentFolder=options.nativeFolder||args[2];query='';return {};}
+    if(['doctor','mailbox-ui-window'].includes(args[0]))return {focusedWindowTitle:options.windowTitle||(options.badFolder?'Posteingang • Wrong':currentFolder+' • Förderung | HEAT HERO')};
     if(args[0]==='mailbox-ui-search'){query=args[1];return {};}
     if(args[0]==='mailbox-ui-expand'){expanded=true;return {};}
     if(['mailbox-ui-next','mailbox-ui-clear-search','mailbox-ui-close-source'].includes(args[0]))return {};
@@ -24,7 +30,7 @@ async function fixture(t,items=[],options={}) {
     throw Error('Unexpected command '+args[0]);
   };
   const adapter=createOutlookUiMailbox({bridge,parseSource:async p=>({...items[Number(p)],...(options.wrongSource?{subject:'OTHER'}:{})}),now:()=>now,sleep:async()=>{},assertHost:async()=>{},withLease:async f=>f(),dataDir:dir});
-  return {adapter,calls,dir,descriptions};
+  return {adapter,calls,dir,get descriptions(){return descriptions;},setFolder(folder){options.nativeFolder=folder;descriptions=descriptionsFor(folder);}};
 }
 test('original MIME parser reads encoded subject, recipient sets and actual attachment hashes',async t=>{
   const root=await realpath(await mkdtemp(path.join(os.tmpdir(),'iva-mime-')));t.after(()=>rm(root,{recursive:true,force:true}));
@@ -42,6 +48,69 @@ test('source identity is freshly checked before returning exact RFC ID',async t=
 test('mismatched source and wrong folder fail closed',async t=>{
   const f=await fixture(t,[item('one')],{wrongSource:true});await assert.rejects(()=>f.adapter.resolveSourceIdentity({from,description:f.descriptions[0]}),{code:'OUTLOOK_UI_SOURCE_MISMATCH'});
   const g=await fixture(t,[item('one')],{badFolder:true});await assert.rejects(()=>g.adapter.resolveSourceIdentity({from,description:g.descriptions[0]}),{code:'OUTLOOK_UI_SCOPE_UNVERIFIED'});
+});
+test('Fertig accepts the native folder casing without broadening the account or folder scope',async t=>{
+  for (const nativeFolder of ['Fertig','fertig','FERTIG']) {
+    const f=await fixture(t,[item('one')],{folder:nativeFolder,nativeFolder});
+    const result=await f.adapter.resolveSourceIdentity({from,folder:'Fertig',description:f.descriptions[0],messageId:'<one@example.test>'});
+    assert.equal(result.identityVerified,true);assert.equal(result.messageId,'<one@example.test>');
+  }
+  for (const windowTitle of ['fertig • Förderung | HEAT HERO Archiv','fertig • Other','Posteingang • Förderung | HEAT HERO']) {
+    const f=await fixture(t,[item('one')],{folder:'fertig',windowTitle});
+    await assert.rejects(()=>f.adapter.resolveSourceIdentity({from,folder:'Fertig',description:f.descriptions[0]}),{code:'OUTLOOK_UI_SCOPE_UNVERIFIED'});
+    assert.equal(f.calls.some(a=>a[0]==='mailbox-ui-source'),false);
+  }
+  const f=await fixture(t,[item('one')]);
+  await assert.rejects(()=>f.adapter.resolveSourceIdentity({from,folder:'Fertig Archiv',description:f.descriptions[0]}),{code:'OUTLOOK_UI_SCOPE_DENIED'});
+});
+test('moved mail is found by its RFC ID after the Ordner label changes, never by stale row text',async t=>{
+  const f=await fixture(t,[item('one')]);const sourceDescription=f.descriptions[0];
+  await f.adapter.resolveSourceIdentity({from,folder:'Posteingang',description:sourceDescription,messageId:'<one@example.test>'});
+  f.setFolder('fertig');
+  const result=await f.adapter.resolveSourceIdentity({from,folder:'Fertig',description:sourceDescription,messageId:'<one@example.test>'});
+  assert.equal(result.messageId,'<one@example.test>');assert.equal(result.identityVerified,true);
+  assert.notEqual(result.description,sourceDescription);assert.ok(result.description.includes('Ordner: fertig,'));
+  assert.ok(f.calls.some(a=>a[0]==='mailbox-ui-search'&&a[1].includes('subject:"Subject one"')));
+  await assert.rejects(()=>f.adapter.resolveSourceIdentity({from,folder:'Fertig',description:f.descriptions[0],messageId:'<different@example.test>'}),{code:'OUTLOOK_UI_SOURCE_ID_MISMATCH'});
+});
+test('native mover requires the verified account and delegates destination identity proof to completion',async()=>{
+  const calls=[];const messageDescription='Absender: Test, Betreff: Test, Ordner: Posteingang,';
+  const dependencies={openFolder:async input=>{calls.push(input);},bridge:async args=>{calls.push(args);return {moved:true,removedFromSource:true};}};
+  const result=await moveOutlookMessageToFolder({from,messageDescription,destinationFolder:'Fertig'},dependencies);
+  assert.deepEqual(calls,[{from,folder:'Fertig'},{from,folder:'Posteingang'},['move-message-to-folder',messageDescription,'Fertig','Förderung | HEAT HERO']]);
+  assert.equal(result.verifiedInDestination,false);assert.equal(result.requiresMessageIdReadback,true);
+  await assert.rejects(()=>moveOutlookMessageToFolder({from:'another@example.test',messageDescription,destinationFolder:'Fertig'},dependencies),/geprüftes Konto/);
+  assert.equal(calls.length,3);
+  await assert.rejects(()=>moveOutlookMessageToFolder({from,messageDescription,destinationFolder:'Fertig'},{...dependencies,openFolder:async()=>{throw new Error('destination account unverified');}}),/destination account unverified/);
+  assert.equal(calls.length,3,'no move is attempted if the destination account cannot be proved');
+});
+test('native window guard folds folder case while preserving exact mailbox identity',async t=>{
+  const source=await readFile(new URL('../local-mac-helper/macos/iva-ax.swift',import.meta.url),'utf8');
+  const helpers=['normalizedAXText','outlookFolderWindowMatches'].map(name=>source.match(new RegExp('func '+name+'\\([\\s\\S]*?\\n\\}'))?.[0]);
+  assert.ok(helpers.every(Boolean));
+  const dir=await mkdtemp(path.join(os.tmpdir(),'iva-outlook-folder-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+  const file=path.join(dir,'folder.swift');
+  await writeFile(file,'import Foundation\n'+helpers.join('\n')+`\nlet account = "Förderung | HEAT HERO"
+precondition(outlookFolderWindowMatches("fertig • " + account, folder: "Fertig", account: account))
+precondition(outlookFolderWindowMatches("FERTIG - " + account, folder: "fertig", account: account))
+precondition(!outlookFolderWindowMatches("Fertig • " + account + " Archiv", folder: "Fertig", account: account))
+precondition(!outlookFolderWindowMatches("Fertig • Förderung | Other", folder: "Fertig", account: account))
+precondition(!outlookFolderWindowMatches("Fertig Archiv • " + account, folder: "Fertig", account: account))
+`);
+  await exec('/usr/bin/swift',['-sdk',process.env.SDKROOT||'/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk',file],{timeout:60000});
+});
+test('a wrong destination Message-ID leaves the move pending and cannot trigger a blind repeat',async t=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'iva-outlook-completion-'));
+  const previousDirectory=process.env.IVA_MAC_HELPER_DATA_DIR;process.env.IVA_MAC_HELPER_DATA_DIR=dir;
+  t.after(async()=>{if(previousDirectory===undefined)delete process.env.IVA_MAC_HELPER_DATA_DIR;else process.env.IVA_MAC_HELPER_DATA_DIR=previousDirectory;await rm(dir,{recursive:true,force:true});});
+  let state={completed:[],pendingMoves:[]},moves=0,completed=0;
+  const receipt={messageId:'<one@example.test>',dealId:'123',identityVerified:true,sourceReadComplete:true,expectedAttachmentCount:1,attachmentProcessingVerified:true,uploadedFiles:[{id:'77',filename:'Unterlagen.pdf',dealId:'123',verified:true}],textRelevant:false,verifiedAt:new Date().toISOString()};
+  const input={receipt,messageDescription:'Betreff: Subject one, Ordner: Posteingang,'};
+  const dependencies={load:async()=>structuredClone(state),save:async next=>{state=structuredClone(next);},intakeStore:{completeMessage:async()=>{completed++;}},moveMessage:async()=>{moves++;return {moved:true,removedFromSource:true};},resolveIdentity:async({folder})=>({identityVerified:true,messageId:folder==='Posteingang'?receipt.messageId:'<another@example.test>',description:`Betreff: Subject one, Ordner: ${folder},`})};
+  await assert.rejects(()=>completeFundingMail(input,dependencies),/Message-ID in Fertig/);
+  assert.equal(state.pendingMoves.length,1);assert.equal(state.completed.length,0);assert.equal(moves,1);assert.equal(completed,0);
+  await assert.rejects(()=>completeFundingMail(input,dependencies),/Identität im Zielordner/);
+  assert.equal(moves,1);assert.equal(completed,0);
 });
 test('mailbox pages persist work and resume after process recreation without rereading sources',async t=>{
   const f=await fixture(t,[item('one'),item('two')]);

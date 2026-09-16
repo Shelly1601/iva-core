@@ -46,6 +46,8 @@ let failPersonFetch = false;
 let personValues = { id: 5, name: 'Max Muster', emails: [{ value: 'kunde@example.test', primary: true }], phones: [{ value: '+4912345', primary: true }] };
 let personPatches = 0;
 let paginateFunding = false, invalidFundingPage = false;
+const fileContents = new Map([['44', Buffer.from('%PDF-pipedrive-test')]]);
+let filePosts = 0, corruptUploadedFile = false, omitUploadedId = false, wrongUploadedId = false;
 
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, options = {}) => {
@@ -116,10 +118,16 @@ globalThis.fetch = async (input, options = {}) => {
     const start = Number(url.searchParams.get('start') || 0), data = rows.slice(start, start + 2);
     return json({ success: true, data, additional_data: { pagination: { more_items_in_collection: start + 2 < rows.length, next_start: invalidFundingPage ? start : start + 2 } } });
   }
-  if (url.pathname === '/api/v1/files/44/download') return new Response(Buffer.from('%PDF-pipedrive-test'), { status: 200, headers: { 'Content-Type': 'application/pdf' } });
+  const downloadId = url.pathname.match(/^\/api\/v1\/files\/(\d+)\/download$/)?.[1];
+  if (downloadId) return fileContents.has(downloadId)
+    ? new Response(fileContents.get(downloadId), { status: 200, headers: { 'Content-Type': 'application/pdf' } })
+    : json({ success: false, error: 'File missing' }, 404);
   if (url.pathname === '/api/v1/files' && String(options.method || '').toUpperCase() === 'POST') {
-    files.push({ id: 45, name: 'Korrektur.pdf' });
-    return ok(files.at(-1));
+    filePosts++;
+    const upload = options.body.get('file'), id = Math.max(44, ...files.map(file => Number(file.id))) + 1;
+    files.push({ id, name: upload.name });
+    fileContents.set(String(id), corruptUploadedFile ? Buffer.from('%PDF-unexpected-content') : Buffer.from(await upload.arrayBuffer()));
+    return ok(omitUploadedId ? {} : wrongUploadedId ? { id: id + 1000 } : files.at(-1));
   }
   if (url.pathname === '/api/v2/activities') return ok([{ id: 55, subject: 'Nachfassen' }]);
   return json({ success: false, error: `Unerwarteter Testaufruf: ${url.pathname}` }, 500);
@@ -265,6 +273,41 @@ try {
   assert.equal(personValues.phones[0].value, '0123456789');
   assert.equal(personPatches, 2);
   const uploadedFile = await uploadPipedriveDealFile({ dealId: 123, filename: 'Korrektur.pdf', buffer: Buffer.from('%PDF-upload') });
+  assert.equal(uploadedFile.fileId, '45');
+  assert.equal(uploadedFile.contentVerified, true);
+  assert.equal(uploadedFile.size, Buffer.byteLength('%PDF-upload'));
+  assert.match(uploadedFile.sha256, /^[0-9a-f]{64}$/);
+  const repeatedFile = await uploadPipedriveDealFile({ dealId: 123, filename: 'Korrektur.pdf', buffer: Buffer.from('%PDF-upload') });
+  assert.equal(repeatedFile.alreadyPresent, true);
+  assert.equal(repeatedFile.fileId, '45', 'a reused file supplies the real ID required by mail completion');
+  assert.equal(repeatedFile.contentVerified, true);
+  assert.equal(filePosts, 1, 'an identical retry must not create another file');
+  await assert.rejects(uploadPipedriveDealFile({ dealId: 123, filename: 'Korrektur.pdf', buffer: Buffer.from('%PDF-other') }), { code: 'PIPEDRIVE_FILE_CONTENT_CONFLICT' });
+  assert.equal(filePosts, 1, 'a same-name content conflict must not write or claim success');
+  files.push({ id: 46, name: 'Korrektur.pdf' });
+  fileContents.set('46', Buffer.from('%PDF-other-version'));
+  paginateFunding = true;
+  const exactExistingVersion = await uploadPipedriveDealFile({ dealId: 123, filename: 'Korrektur.pdf', buffer: Buffer.from('%PDF-other-version') });
+  assert.equal(exactExistingVersion.fileId, '46', 'duplicate names beyond the first page are resolved by exact file content');
+  paginateFunding = false;
+  assert.equal(filePosts, 1);
+  fileContents.delete('45');
+  await assert.rejects(uploadPipedriveDealFile({ dealId: 123, filename: 'Korrektur.pdf', buffer: Buffer.from('%PDF-upload') }), /nicht geladen/);
+  assert.equal(filePosts, 1, 'an unreadable existing file must not be replaced or treated as verified');
+  fileContents.set('45', Buffer.from('%PDF-upload'));
+  corruptUploadedFile = true;
+  await assert.rejects(uploadPipedriveDealFile({ dealId: 123, filename: 'Beschaedigt.pdf', buffer: Buffer.from('%PDF-upload') }), { code: 'PIPEDRIVE_FILE_READBACK_MISMATCH' });
+  corruptUploadedFile = false;
+  omitUploadedId = true;
+  await assert.rejects(uploadPipedriveDealFile({ dealId: 123, filename: 'Ohne-ID.pdf', buffer: Buffer.from('%PDF-upload') }), /keine eindeutige Datei-ID/);
+  omitUploadedId = false;
+  const reconciledFile = await uploadPipedriveDealFile({ dealId: 123, filename: 'Ohne-ID.pdf', buffer: Buffer.from('%PDF-upload') });
+  assert.equal(reconciledFile.alreadyPresent, true, 'an uncertain POST is reconciled against real content');
+  assert.equal(filePosts, 3);
+  wrongUploadedId = true;
+  await assert.rejects(uploadPipedriveDealFile({ dealId: 123, filename: 'Fremde-ID.pdf', buffer: Buffer.from('%PDF-upload') }), /nicht eindeutig bestätigt/);
+  wrongUploadedId = false;
+  files = files.filter(file => [44, 45].includes(file.id));
   assert.equal(uploadedFile.uploaded, true);
   assert.equal(uploadedFile.verified, true);
   const note = await createPipedriveDealNote({ dealId: 123, text: 'Geprüfter Test', confirmation: PIPEDRIVE_WRITE_CONFIRMATION });

@@ -1,7 +1,8 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { readdir, readFile, mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { access, readdir, readFile, mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { PDFDocument } from 'pdf-lib';
 import { analyzeFundingPdf, classifyFundingDocumentName } from './funding-document-extractor.mjs';
@@ -30,6 +31,24 @@ const OUTPUT_NAMES = Object.freeze({
   tax_assessment_2024: 'Einkommensteuerbescheid 2024',
   kfw_account_confirmation: 'KfW-Kontobestaetigung',
 });
+
+async function resolvePdfTool(name) {
+  const bundled = path.join(os.homedir(), '.cache', 'codex-runtimes', 'codex-primary-runtime', 'dependencies');
+  const candidates = [
+    process.env[`IVA_${name.toUpperCase()}_PATH`],
+    ...String(process.env.PATH || '').split(path.delimiter).filter(Boolean).map(directory => path.join(directory, name)),
+    path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper', 'tools', 'bin', name),
+    path.join(bundled, 'bin', 'override', name),
+    path.join(bundled, 'native', 'poppler', 'bin', name),
+    path.join(bundled, 'native', 'poppler', 'poppler', 'bin', name),
+    `/opt/homebrew/bin/${name}`,
+    `/usr/local/bin/${name}`,
+  ].filter(Boolean);
+  for (const candidate of [...new Set(candidates)]) {
+    try { await access(candidate, fsConstants.X_OK); return candidate; } catch {}
+  }
+  throw new Error(`Das PDF-Werkzeug ${name} ist auf diesem Mac Mini nicht verfügbar.`);
+}
 
 function run(command, args, { timeoutMs = 120000 } = {}) {
   return new Promise((resolve, reject) => {
@@ -88,7 +107,9 @@ async function normalizedPdf(inputPath, temporaryDirectory) {
     if (bytes.subarray(0, 5).toString('ascii') !== '%PDF-') throw new Error(`${path.basename(inputPath)} besitzt keinen gültigen PDF-Dateikopf.`);
     return inputPath;
   }
-  const outputPath = path.join(temporaryDirectory, `${safeSegment(path.basename(inputPath, extension), 'Bild')}.pdf`);
+  // Distinct originals may share a stem or normalize to the same safe name.
+  // Each conversion must survive independently until the final merge.
+  const outputPath = path.join(temporaryDirectory, `${randomUUID()}-${safeSegment(path.basename(inputPath, extension), 'Bild')}.pdf`);
   return imageToPdf(inputPath, outputPath);
 }
 
@@ -111,7 +132,7 @@ async function renderAndVerifyPdf(filePath, expectedPages) {
   const renderDirectory = await mkdtemp(path.join(os.tmpdir(), 'iva-funding-render-'));
   try {
     const prefix = path.join(renderDirectory, 'page');
-    await run('/opt/homebrew/bin/pdftoppm', ['-png', '-r', '120', filePath, prefix]);
+    await run(await resolvePdfTool('pdftoppm'), ['-png', '-r', '120', filePath, prefix]);
     const renders = (await readdir(renderDirectory)).filter(name => /^page-\d+\.png$/i.test(name)).sort();
     const metadata = await Promise.all(renders.map(async name => ({ name, size: (await stat(path.join(renderDirectory, name))).size })));
     const invalid = metadata.filter(item => item.size < 2500);
@@ -165,7 +186,7 @@ export function assessRegistrationCertificateDate(text, now = new Date()) {
 
 async function extractedPdfText(filePath) {
   try {
-    return await run('/opt/homebrew/bin/pdftotext', ['-layout', filePath, '-']);
+    return await run(await resolvePdfTool('pdftotext'), ['-layout', filePath, '-']);
   } catch {
     return '';
   }

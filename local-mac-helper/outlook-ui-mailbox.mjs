@@ -21,7 +21,14 @@ const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url')
 const accountLabel = from => from === 'foerderung@heat-hero.com' ? 'Förderung | HEAT HERO' : from;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const rfcId = value => /^<[^\s<>]{1,500}@[^\s<>]{1,250}>$/.test(String(value));
-const allowedFolders = new Set(['Posteingang', 'Gesendet', 'fertig']);
+const allowedFolders = new Set(['posteingang', 'gesendet', 'fertig']);
+const folderKey = value => String(value || '').trim().toLocaleLowerCase('de-DE');
+function windowMatches(title, folder, account) {
+  return [' • ', ' - '].some(separator => {
+    const suffix = separator + account;
+    return title.endsWith(suffix) && folderKey(title.slice(0, -suffix.length)) === folderKey(folder);
+  });
+}
 const day = time => new Intl.DateTimeFormat('sv-SE', {timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(time));
 const queryValue = value => '"' + String(value).replace(/["\\\r\n]/g, ' ').trim() + '"';
 function descriptionMatches(description, metadata) {
@@ -30,7 +37,7 @@ function descriptionMatches(description, metadata) {
 }
 function folderMatches(description, folder) {
   const explicit = String(description).match(/Ordner:\s*([^,]+),/);
-  return !explicit || explicit[1].trim() === folder;
+  return !explicit || folderKey(explicit[1]) === folderKey(folder);
 }
 function startTime(value) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(value || '')) {
@@ -81,12 +88,12 @@ async function uiLease(task) {
 export function createOutlookUiMailbox({bridge=runMacUiBridge,parseSource=parseOutlookMimeFile,now=()=>Date.now(),sleep=delay,assertHost=assertImacExecutionHost,withLease=uiLease,dataDir=path.join(ROOT,'outlook-mail-evidence')}={}) {
   const indexFile=id=>path.join(dataDir,'identities',hash(id)+'.json');
   async function open(from,folder) {
-    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(from) || !allowedFolders.has(folder)) throw error('OUTLOOK_UI_SCOPE_DENIED','Das Postfach oder der Leseordner ist nicht zulässig.');
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(from) || !allowedFolders.has(folderKey(folder))) throw error('OUTLOOK_UI_SCOPE_DENIED','Das Postfach oder der Leseordner ist nicht zulässig.');
     for (let attempt=0;attempt<3;attempt++) {
       await bridge(['mailbox-ui-clear-search']);
       await bridge(['open-account-folder',accountLabel(from),folder],{timeoutMs:30000});
       const state=await bridge(['mailbox-ui-window']);
-      if((state.focusedWindowTitle || '').startsWith(folder+' • '+accountLabel(from))) return;
+      if(windowMatches(state.focusedWindowTitle || '', folder, accountLabel(from))) return;
       await sleep(300);
     }
     throw error('OUTLOOK_UI_SCOPE_UNVERIFIED','Der richtige Kontoordner ist nicht belegt.');
@@ -161,7 +168,7 @@ export function createOutlookUiMailbox({bridge=runMacUiBridge,parseSource=parseO
     const key=messageId?await readFile(indexFile(messageId),'utf8').then(JSON.parse).catch(()=>null):null;
     if(!key||key.from!==from) throw error('OUTLOOK_UI_LOCATOR_REQUIRED','Zum Wiederfinden der Originalmail fehlt der verifizierte lokale Suchschlüssel.');
     const date=day(key.receivedAt||key.sentAt);
-    const found=await search(from,folder,`subject:${queryValue(key.subject)} ${folder==='Gesendet'?'sent':'received'}:${date}`);
+    const found=await search(from,folder,`subject:${queryValue(key.subject)} ${folderKey(folder)==='gesendet'?'sent':'received'}:${date}`);
     const matches=found.filter(item=>item.messageId===messageId);
     if(matches.length>1) throw error('OUTLOOK_UI_SOURCE_AMBIGUOUS','Die Originalmail ist nicht eindeutig.');
     return matches[0]||{notFound:true,messageId,searchComplete:true};
