@@ -28,7 +28,7 @@ export function kfwCredentialNoteHasPair(text) {
   if (!/kfw/i.test(value) || /\b(?:macos|windows|apple[- ]?id|systempasswort|administratorpasswort|otp|totp|einmalcode)\b/i.test(value)) return false;
   const email = value.match(/[a-z0-9.!#$%&'*+/=?^_{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
   if (!email) return false;
-  const labeled = value.match(/(?:passwort|kennwort)[ \t]*[:=\-][ \t]*([^\r\n]+)/i)?.[1]?.replace(/\s*\(Notiz von Nadine(?: via KI)?\)\s*$/i, '').trim();
+  const labeled = value.match(/\b(?:passwort|kennwort|pw)\b[ \t]*[:=\-][ \t]*([^\r\n]+)/i)?.[1]?.replace(/\s*\(Notiz von Nadine(?: via KI)?\)\s*$/i, '').trim();
   if (labeled?.length >= 3 && !/^(?:\[(?:ausgeblendet|redacted|maskiert)\]|\*{3,}(?:\s|$)|(?:ausgeblendet|redacted|maskiert|vorhanden|gespeichert|hinterlegt|gepr[üu]ft|fehlt|unbekannt|nicht|erfolgreich|g[üu]ltig|gueltig|best[äa]tigt|bestaetigt|korrekt|funktioniert|getestet|ok|aktiv|wurde|wird|login|anmeldung|pr[üu]fung)\b)/i.test(labeled)) return true;
   // Legacy notes may contain only the account email followed by one password
   // token. Additional status prose is not proof of an actual stored password.

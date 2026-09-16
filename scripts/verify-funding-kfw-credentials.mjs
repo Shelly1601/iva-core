@@ -49,6 +49,18 @@ test('login-status and redacted placeholders do not count as stored credentials'
   assert.equal(hasStoredKfwCustomerCredentials({ kfwAccountConfirmedByCredentials: true, kfwCredentialEvidenceNoteIds: [] }), false);
 });
 
+test('existing PW-labelled account note remains recognized without accepting status-only notes', () => {
+  const credentials = fixture();
+  assert.equal(kfwCredentialNoteHasPair(`KfW: ${credentials.email} PW: Fixture123 :) Konto bestätigt`), true);
+  for (const status of ['vorhanden', 'erfolgreich geprüft', 'gültig; Login erfolgreich', '[ausgeblendet]']) {
+    assert.equal(kfwCredentialNoteHasPair(`KfW: ${credentials.email} PW: ${status} :) Konto bestätigt`), false);
+    assert.equal(kfwCredentialNoteHasPair(`KfW: ${credentials.email}\nPW:\n${status}`), false);
+  }
+  const embeddedMatcher = Function(`return (${kfwCredentialNoteHasPair.toString()})`)();
+  assert.equal(embeddedMatcher(`KfW: ${credentials.email} PW: Fixture123 :) Konto bestätigt`), true,
+    'the browser-serialized matcher remains self-contained');
+});
+
 test('credential creation routes directly to the confirmed API without browser JavaScript', async () => {
   const kfwCredentials = fixture(); let calls = 0;
   const result = await createPipedriveFundingInformationNote({ dealId: '123', kfwCredentials, confirmApply: true }, {
