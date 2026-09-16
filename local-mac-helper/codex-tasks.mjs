@@ -387,13 +387,18 @@ export function buildCodexPrompt(request) {
   const displayInstruction = `Verbindliche Displayregel: Bediene ausschließlich das physisch rechte Display. Der zentrale iMac-Runner hat dessen Geometrie unmittelbar vor deinem Start geprüft und als laufzeitgebundenen Nachweis vererbt; \`right-display-check.mjs --require-second-display\` verwendet diesen Nachweis auch innerhalb der Sandbox.${fundingWindowInstruction} Öffne für IVA bei Bedarf ein eigenes zweites App-Fenster beziehungsweise eigene Tabs rechts; verwende, verschiebe oder übernimm kein Arbeitsfenster auf dem linken Display. Die lokalen Pipedrive-, Outlook- und WhatsApp-Helfer erzwingen diese Regel zusätzlich pro Zielfenster. Wenn ein Zielfenster dort nicht verifiziert werden kann, stoppe konkret statt links weiterzuarbeiten.`;
   const incidentInstruction = incidentMemoryInstructions(request);
   const completionMandate = commandCompletionMandate();
+  const fundingExecutionInstruction = FUNDING_WORKFLOW_STEPS[request.workflowId]
+    ? `
+
+Ausführungstempo und Abschluss: Node-Befehle immer mit ${JSON.stringify(process.execPath)} ausführen; ein nacktes node ist in Login-Shells nicht verlässlich verfügbar. In Schritt 1 zuerst vorhandene offene Mailbelege fortsetzen, dann neue Mails fallweise vollständig bearbeiten. Bereits verifizierte Uploads, Feldänderungen und unveränderte Dokumentreviews aus dem Auftragsstand wiederverwenden. Keine erneute Gesamtinventur nach jedem Einzelfall. Unabhängige API-Lesezugriffe bündeln; UI- und Schreibschritte geordnet. Mailabschluss und Dealabschluss sind getrennt: Sobald sämtliche Anlagen und relevanten Informationen dieser Mail zugeordnet abgelegt und rückgelesen sowie ihre konkreten Aktionen erledigt sind, complete-funding-mail mit Quell- und Zielidentität abschließen. Fehlende weitere Unterlagen oder ein offener Phasenwechsel des Deals blockieren diesen Mailabschluss allein nicht. Neue KfW-Zugangsdaten bleiben an den vorgeschriebenen einmaligen Test gebunden. Vor Uploads vorhandene Datei-IDs und Inhalte abgleichen. Fortschritt mit tatsächlich abgeschlossenen Mails, neuen Ablagen und konkreter nächster Aktion melden; bloßes running, Lesen oder Erstellen eines Berichts ist kein Fallabschluss.`
+    : '';
   if (request.mode === 'project-workflow') {
     return `Nadine hat diesen Projekt-Workflow ausdrücklich beauftragt; der Start erfolgt manuell oder über den von ihr eingerichteten Zeitplan. Führe jetzt genau einen operativen Einmallauf aus, ohne eine weitere Planbestätigung zu verlangen.
 
 Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.md vollständig. ${runtimeInstruction} ${displayInstruction} Dies ist kein Bauauftrag: ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts. Führe nur den unten genannten Workflow mit seinen dokumentierten Quellen, Sicherheitsregeln, Verifikationen, Zeitlimits, Protokollen und Rückfallwegen aus. Normale erneute Anmeldungen erledigst du mit den vorhandenen sicheren Zugangsdaten selbstständig. Bei CAPTCHA, Kontosperre oder technisch erzwungener externer Bestätigung stoppst du mit dem konkreten Blocker. Bei einem fachlichen Sicherheits-Gate rate nicht: lasse den betroffenen Fall unverändert und bearbeite alle übrigen unabhängigen Fälle weiter. Erfinde keinen Erfolg.
 
 Beauftragter Lauf:
-${request.prompt}${recoveryInstruction}
+${request.prompt}${recoveryInstruction}${fundingExecutionInstruction}
 ${request.planbar ? planbarReceiptInstructions(request) : ''}
 
 ${workflowResultInstructions(request)}
