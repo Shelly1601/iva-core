@@ -142,6 +142,10 @@ export async function scanFundingMailbox({ fundingScan, persist = true, onProgre
   const startedAt = new Date().toISOString();
   const pipedrive = fundingScan || await loadFundingScan();
   const detected = await detectMessages({ fundingRun });
+  // Only the intake's verified associations are confirmed deal changes. A
+  // preview match below is a reason to inspect identity, never an identity proof.
+  const changedDealIds = [...new Set((detected.changedDealIds || []).filter(id => /^\d+$/.test(String(id))).map(String))];
+  const changedDeals = new Set(changedDealIds);
   const messageDescriptions = detected.messages
     .map(item => String(item.description || ''))
     .filter(description => /(?:Betreff:|Kein Betreff)/i.test(description));
@@ -159,6 +163,10 @@ export async function scanFundingMailbox({ fundingScan, persist = true, onProgre
 
   const cases = pipedrive.cases.map(item => {
     const messages = correlated.get(String(item.dealId)) || [];
+    const changedByMail = changedDeals.has(String(item.dealId));
+    const mailReviewRequired = changedByMail || messages.length > 0;
+    const mailIdentityReviewRequired = messages.some(message => !detected.messages.some(source => source.description === message.description
+      && String(source.dealId || '') === String(item.dealId) && changedByMail));
     const mailEvidence = new Set();
     let incomeBonusRequested = item.incomeBonusRequested ?? null;
     const mailSummaries = messages.map(message => {
@@ -189,9 +197,14 @@ export async function scanFundingMailbox({ fundingScan, persist = true, onProgre
       : fundingApplicationRequiredDocumentIds({ incomeBonusRequested,
           documentEvidence: Object.fromEntries(presentDocumentIds.map(type => [type, 'present_in_pipedrive'])) });
     const missingBaseDocumentIds = requiredDocumentIds.filter(id => !presentDocumentIds.includes(id));
-    const ambiguousMailAttachments = mailSummaries.some(message => message.hasAttachments);
     return {
       ...item,
+      caseReviewRequired: item.caseReviewRequired === true || mailReviewRequired,
+      sourceReviewRequired: item.sourceReviewRequired === true || mailReviewRequired,
+      reviewRequired: item.reviewRequired === true || mailReviewRequired,
+      ...(mailReviewRequired ? { reviewStatus: changedByMail ? 'changed' : 'mail_identity_review_required' } : {}),
+      changedByMail: item.changedByMail === true || changedByMail,
+      mailIdentityReviewRequired,
       pipedriveDocuments: currentPipedriveDocuments,
       unknownFiles: currentPipedriveDocuments.filter(document => document.type === 'unknown').map(document => document.fileName),
       incomeBonusRequested,
@@ -201,7 +214,7 @@ export async function scanFundingMailbox({ fundingScan, persist = true, onProgre
       requiredDocumentIds,
       payoutOutstandingDocumentIds: requiredDocumentIds.includes('land_register_notification') ? ['land_register'] : [],
       missingBaseDocumentIds,
-      mailReviewRequired: ambiguousMailAttachments,
+      mailReviewRequired,
       messages: mailSummaries,
     };
   });
@@ -213,6 +226,7 @@ export async function scanFundingMailbox({ fundingScan, persist = true, onProgre
     scanComplete: detected.scanComplete === true,
     coverageVerified: detected.coverageVerified === true,
     fundingRun: detected.fundingRun,
+    changedDealIds,
     readOnly: true,
     messagesScanned: messageDescriptions.length,
     attachmentMessagesInspected: attachmentMessages.length,

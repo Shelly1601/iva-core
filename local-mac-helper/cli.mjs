@@ -31,8 +31,9 @@ import { diagnoseWhatsAppMac, syncDirectSalesRosterFromWhatsApp } from './whatsa
 import { loadDirectSalesRosterSync } from './direct-sales-roster.mjs';
 import { startMacHelperServer } from './server.mjs';
 import { analyzeFundingPdf } from './funding-document-extractor.mjs';
-import { loadFundingScan, scanPipedriveFundingBoard, recordFundingDocumentReview } from './funding-scan.mjs';
+import { loadFundingScan, scanPipedriveFundingBoard, recordFundingDocumentReview, recordFundingCaseReview } from './funding-scan.mjs';
 import { loadFundingMailScan, scanFundingMailbox } from './funding-mail-scan.mjs';
+import { recordFundingMailWaitingReview, resumeFundingWaitingMessages } from './funding-intake-state.mjs';
 import {
   acknowledgeFundingMessages,
   detectNewFundingMessages,
@@ -307,14 +308,20 @@ async function main() {
     return console.log(JSON.stringify(await updatePipedriveFundingRequestNotes(await readJson(filePath)), null, 2));
   }
   if (command === 'scan-funding-board') {
+    const input = filePath ? await readJson(filePath) : {};
     const report = await scanPipedriveFundingBoard({
+      changedDealIds: input.changedDealIds || [],
+      pendingDealIds: input.pendingDealIds || [],
       onProgress: ({ processed, total }) => console.error(`Förderprüfung: ${processed}/${total} Fälle gelesen`),
     });
     return console.log(JSON.stringify(report, null, 2));
   }
+  if (command === 'record-funding-case-review') return console.log(JSON.stringify(await recordFundingCaseReview(await readJson(filePath)), null, 2));
   if (command === 'record-funding-document-review') {
     return console.log(JSON.stringify(await recordFundingDocumentReview(await readJson(filePath)), null, 2));
   }
+  if (command === 'record-funding-mail-waiting-review') return console.log(JSON.stringify(await recordFundingMailWaitingReview(await readJson(filePath)), null, 2));
+  if (command === 'resume-funding-waiting-mail') return console.log(JSON.stringify(await resumeFundingWaitingMessages(await readJson(filePath)), null, 2));
   if (command === 'latest-funding-scan') return console.log(JSON.stringify(await loadFundingScan(), null, 2));
   if (command === 'scan-funding-mailbox') {
     const report = await scanFundingMailbox({
@@ -462,7 +469,10 @@ async function main() {
   node local-mac-helper/cli.mjs create-pipedrive-funding-notes /pfad/notizen.json --commit
   node local-mac-helper/cli.mjs create-pipedrive-funding-info-note /pfad/notiz.json --commit
   node local-mac-helper/cli.mjs update-pipedrive-funding-notes /pfad/notizen.json --commit
-  node local-mac-helper/cli.mjs scan-funding-board
+  node local-mac-helper/cli.mjs scan-funding-board [/pfad/aenderungen.json]
+  node local-mac-helper/cli.mjs record-funding-case-review /pfad/fallpruefung.json
+  node local-mac-helper/cli.mjs record-funding-mail-waiting-review /pfad/mailpruefung.json
+  node local-mac-helper/cli.mjs resume-funding-waiting-mail /pfad/aenderungsbeleg.json
   node local-mac-helper/cli.mjs latest-funding-scan
   node local-mac-helper/cli.mjs scan-funding-mailbox [--funding-run /absoluter/auftrag/request.json]
   node local-mac-helper/cli.mjs latest-funding-mail-scan

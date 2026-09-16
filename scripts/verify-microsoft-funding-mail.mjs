@@ -5,6 +5,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createMicrosoftFundingMail, MICROSOFT_FUNDING_LOGIN, MICROSOFT_FUNDING_MAILBOX, MICROSOFT_FUNDING_SCOPES } from '../integrations/microsoft-funding-mail.js';
+import { createFundingIntakeStore } from '../local-mac-helper/funding-intake-state.mjs';
+import { detectNewFundingMessages } from '../local-mac-helper/funding-monitor-state.mjs';
 
 const ROOT = await fs.mkdtemp(path.join(os.tmpdir(), 'iva-graph-funding-test-'));
 after(() => fs.rm(ROOT, { recursive: true, force: true }));
@@ -403,4 +405,54 @@ test('reconcile-only mode confirms only an existing completed move and never cre
   assert.equal(replay.verifiedInDestination, true); assert.equal(replay.moved, false); assert.equal(f.state.moveCalls, 1);
   f.state.messages[0].parentFolderId = INBOX;
   await assert.rejects(f.service.moveMessage({ ...input, reconcileOnly: true }), rejected('SOURCE_CHANGED')); assert.equal(f.state.moveCalls, 1);
+});
+
+
+test('Graph delta versions check only changed known mail and wake waiting intake only for changed content', async () => {
+  const f = await fixture(); await f.connect();
+  f.state.messages[0].changeKey = 'Version-A';
+  const delta = () => ({ value: [clone(f.state.messages[0])], '@odata.deltaLink': `https://graph.microsoft.com${BASE}/mailFolders/${INBOX}/messages/delta?$deltatoken=waiting` });
+  f.state.deltaPages.push(delta());
+  const intakeStore = createFundingIntakeStore({ filePath: path.join(f.dataDir, 'waiting-intake.json') });
+  await intakeStore.begin({ mode: 'initial-backfill' });
+  await intakeStore.recordPage(await f.service.readPage({ mode: 'initial-backfill', since: '2026-08-01' }), { mode: 'initial-backfill' });
+  const original = await f.service.readMessage({ messageId: RFC });
+  assert.match(original.sourceRevision, /^[0-9a-f]{64}$/);
+  await intakeStore.recordWaitingReview({ messageId: RFC, dealId: '1234', identityVerified: true, sourceReadComplete: true, attachmentReviewComplete: true,
+    reviewComplete: true, technicalWorkPending: false, sideEffectsVerified: true, sourceHash: original.sourceHash, reviewFingerprint: 'b'.repeat(64),
+    openPoints: ['Externe Antwort fehlt'], nextAction: 'Neue Antwort prüfen', verifiedAt: new Date().toISOString() });
+  const detailReads = () => f.state.calls.filter(call => new URL(call.url).pathname === BASE + '/messages').length;
+  const before = detailReads();
+  const detect = () => detectNewFundingMessages({ intakeStore, filePath: path.join(f.dataDir, 'absent-monitor.json'), readPage: input => f.service.readPage(input), readMessage: input => f.service.readMessage(input) });
+  f.state.deltaPages.push(delta());
+  const duplicate = await detect();
+  assert.equal(duplicate.messages.length, 0); assert.equal(duplicate.deferredMessageCount, 1); assert.equal(detailReads(), before);
+  f.state.messages[0].changeKey = 'Version-B'; f.state.messages[0].isRead = true;
+  f.state.deltaPages.push(delta());
+  const flagOnly = await detect();
+  assert.equal(flagOnly.messages.length, 0); assert.equal(flagOnly.deferredMessageCount, 1); assert.equal(detailReads(), before + 1);
+  f.state.deltaPages.push(delta());
+  assert.equal((await detect()).messages.length, 0); assert.equal(detailReads(), before + 1, 'same verified event version does not reread content');
+  assert.equal((await detect()).messages.length, 0); assert.equal(detailReads(), before + 1, 'empty daily delta does not reread waiting mail');
+  f.state.messages[0].changeKey = 'Version-C'; f.state.messages[0].body.content = 'Neue relevante Information';
+  f.state.deltaPages.push(delta());
+  const changed = await detect();
+  assert.equal(changed.messages.length, 1); assert.equal(changed.messages[0].messageId, RFC); assert.equal(changed.messages[0].resume.reason, 'source_changed');
+  assert.notEqual(changed.messages[0].sourceHash, original.sourceHash); assert.equal(detailReads(), before + 2);
+  assert.doesNotMatch(JSON.stringify(changed), /Neue relevante Information|Vollständige vertrauliche/);
+});
+
+test('legacy Graph delta without version fields checks only the event mail and never treats unreadable change as unchanged', async () => {
+  const f = await fixture(); await f.connect(); const original = await f.service.readMessage({ messageId: RFC });
+  const link = `https://graph.microsoft.com${BASE}/mailFolders/${INBOX}/messages/delta?$deltatoken=legacy`;
+  f.state.deltaPages.push({ value: [mail()], '@odata.deltaLink': link });
+  const before = f.state.calls.filter(call => new URL(call.url).pathname === BASE + '/messages').length;
+  const checked = await f.service.readPage({ mode: 'initial-backfill', since: '2026-08-01' });
+  assert.equal(checked.messages[0].sourceHash, original.sourceHash);
+  assert.equal(f.state.calls.filter(call => new URL(call.url).pathname === BASE + '/messages').length, before + 1);
+  assert.equal(checked.messages[0].body, undefined);
+  f.state.deltaPages.push({ value: [mail()], '@odata.deltaLink': link }); f.state.messages = [];
+  await assert.rejects(f.service.readPage({ mode: 'incremental', cursor: checked.checkpoint }), rejected('SOURCE_CHANGED'));
+  f.state.deltaPages.push({ value: [mail({ changeKey: 'bad\nversion' })], '@odata.deltaLink': link });
+  await assert.rejects(f.service.readPage({ mode: 'incremental', cursor: checked.checkpoint }), rejected('MESSAGE_INVALID'));
 });

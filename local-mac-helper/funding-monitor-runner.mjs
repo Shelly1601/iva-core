@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { correlateFundingMessages } from './funding-mail-scan.mjs';
 import { prepareFundingAttachments } from './funding-document-pipeline.mjs';
-import { fundingReviewExists, saveFundingReview } from './funding-review-queue.mjs';
+import { fundingReviewExists, loadFundingReview, saveFundingReview } from './funding-review-queue.mjs';
 import { scanPipedriveFundingBoard } from './funding-scan.mjs';
 import {
   acknowledgeFundingMessages,
@@ -63,12 +63,30 @@ function recommendedReviewStatus(caseSnapshot, prepared) {
 }
 
 export async function processFundingMonitorMessage(message, board, {
-  reviewExists = fundingReviewExists, acknowledge = acknowledgeFundingMessages, saveReview = saveFundingReview,
+  reviewExists = fundingReviewExists, loadReview = loadFundingReview, acknowledge = acknowledgeFundingMessages, saveReview = saveFundingReview,
   downloadGraphAttachments = downloadMicrosoftFundingAttachments, downloadUiAttachments = downloadOutlookMessageAttachments,
   prepareAttachments = prepareFundingAttachments,
 } = {}) {
   const fingerprint = message.fingerprint;
   if (await reviewExists(fingerprint)) {
+    const previous = await loadReview(fingerprint);
+    const currentHash = /^[0-9a-f]{64}$/.test(message.sourceHash || '') ? message.sourceHash : null;
+    const sourceChanged = currentHash && currentHash !== (previous.pendingReview?.sourceHash || previous.sourceHash);
+    const resume = message.resume;
+    const resumeKey = resume && ['source_changed', 'new_related_message', 'blocker_resolved', 'due_step'].includes(resume.reason)
+      && /^[0-9a-f]{64}$/.test(resume.evidenceFingerprint || '') && Number.isFinite(Date.parse(resume.at))
+      ? `${resume.reason}:${resume.evidenceFingerprint}:${resume.at}` : null;
+    const resumed = resumeKey && resumeKey !== previous.pendingReview?.resumeKey
+      && Date.parse(resume.at) > Date.parse(previous.updatedAt || previous.createdAt || '1970-01-01');
+    if (sourceChanged || resumed) {
+      // Keep the old inspected source and its attachment/CRM evidence intact.
+      // Queue only the changed source/dependency; never redownload into an old manifest.
+      await saveReview({ ...previous, updatedAt: new Date().toISOString(), status: 'targeted_review_required',
+        pendingReview: { reason: sourceChanged ? 'source_changed' : resume.reason, sourceHash: currentHash,
+          resumeKey, queuedAt: new Date().toISOString(), priorStatus: previous.pendingReview?.priorStatus || previous.status } });
+      await acknowledge([fingerprint]);
+      return { fingerprint, dealId: previous.dealId || null, status: 'targeted_review_required', acknowledged: true };
+    }
     await acknowledge([fingerprint]);
     return { fingerprint, status: 'already_queued', acknowledged: true };
   }
@@ -79,6 +97,7 @@ export async function processFundingMonitorMessage(message, board, {
       status: matched.matchCount ? 'ambiguous_case_match' : 'manual_case_match_required',
       matchCount: matched.matchCount,
       source: 'outlook-funding-inbox',
+      sourceHash: /^[0-9a-f]{64}$/.test(message.sourceHash || '') ? message.sourceHash : null,
       pipedriveMutated: false,
     });
     await acknowledge([fingerprint]);
@@ -99,6 +118,7 @@ export async function processFundingMonitorMessage(message, board, {
     source: message.source === 'microsoft-graph' ? 'microsoft-graph' : 'outlook-funding-inbox',
     pipedriveMutated: false,
     messageId: message.messageId || null,
+    sourceHash: /^[0-9a-f]{64}$/.test(message.sourceHash || '') ? message.sourceHash : null,
   };
   const direct = message.source === 'microsoft-graph' && message.identityVerified === true && /^<[^<>\r\n\0]+>$/.test(String(message.messageId || ''));
   if (message.source === 'microsoft-graph' && !direct || message.messageId && !message.uiDescriptionVerified && !direct) {
@@ -188,7 +208,7 @@ export async function runFundingMonitorOnce({ ignoreIdle = false, fundingRun = {
       await auditLog({ category: 'monitor-run', ...result, startedAt, completedAt: new Date().toISOString() });
       return result;
     }
-    const board = await scanBoard({ persist: true });
+    const board = await scanBoard({ persist: true, changedDealIds: detected.changedDealIds || [] });
     if (!detected.newMessageCount) {
       const result = {
         status: detected.scanComplete ? 'open_deals_checked_no_new_mail' : 'mail_scan_continuation_pending',

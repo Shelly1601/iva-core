@@ -1,11 +1,13 @@
 import os from 'node:os';
 import path from 'node:path';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { collectPipedriveFundingDealIds, readPipedriveFundingDealsViaApi } from './background-integrations.mjs';
 import { withFundingFileLock } from './funding-intake-state.mjs';
-import { FUNDING_REQUIRED_FIELDS, missingFundingRequiredFields } from './funding-required-fields.mjs';
+import { missingFundingRequiredFields } from './funding-required-fields.mjs';
 import { fundingApplicationRequiredDocumentIds } from './funding-document-requirements.mjs';
+import { fundingDocumentReviewFingerprint, loadFundingCaseReviews, assessFundingCaseReview } from './funding-case-review-state.mjs';
+export { fundingDocumentReviewFingerprint, recordFundingCaseReview } from './funding-case-review-state.mjs';
 export { FUNDING_BASE_REQUIRED_DOCUMENTS } from './funding-document-requirements.mjs';
 
 export function defaultFundingScanFile() {
@@ -15,14 +17,6 @@ export function defaultFundingScanFile() {
   );
 }
 
-export function fundingDocumentReviewFingerprint(snapshot = {}) {
-  return createHash('sha256').update(JSON.stringify([
-    snapshot.dealId, snapshot.stage, snapshot.orderNumber, snapshot.customerPersonId, snapshot.incomeBonusRequested,
-    FUNDING_REQUIRED_FIELDS.map(({ key }) => [key, snapshot[key] ?? null, snapshot.requiredFieldSources?.[key] ?? null]),
-    (snapshot.fileRecords || []).map(item => [String(item.id), item.name, Number(item.size), item.updatedAt || null]).sort((a, b) => a[0].localeCompare(b[0])),
-    snapshot.noteCount, snapshot.latestNoteAt, snapshot.kfwAccountConfirmedByCredentials,
-  ])).digest('hex');
-}
 function reviewCacheFile() { return path.join(path.dirname(defaultFundingScanFile()), 'funding-document-review-cache.json'); }
 async function loadReviewCache(file = reviewCacheFile()) { try { return JSON.parse(await readFile(file, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; return { version: 1, deals: {} }; } }
 export async function recordFundingDocumentReview({ snapshot, review } = {}, { file = reviewCacheFile() } = {}) {
@@ -40,7 +34,7 @@ export async function recordFundingDocumentReview({ snapshot, review } = {}, { f
   });
 }
 
-function summarizeSnapshot(snapshot, reviewCache = {}) {
+function summarizeSnapshot(snapshot, reviewCache = {}, caseReviews = {}, changedByMail = false) {
   const recognizedDocuments = snapshot.documents.filter(document => document.confidence >= 0.9 && document.type !== 'unknown');
   const presentDocumentIds = [...new Set(recognizedDocuments.map(document => document.type))];
   if (snapshot.kfwAccountConfirmedByCredentials && !presentDocumentIds.includes('kfw_account_confirmation')) {
@@ -53,6 +47,11 @@ function summarizeSnapshot(snapshot, reviewCache = {}) {
   const missingBaseDocumentIds = requiredDocumentIds.filter(id => !presentDocumentIds.includes(id));
   const unknownFiles = snapshot.documents.filter(document => document.type === 'unknown').map(document => document.fileName);
   const missingRequiredFields = missingFundingRequiredFields(snapshot);
+  const caseRecord = caseReviews[snapshot.dealId];
+  const caseReview = assessFundingCaseReview(snapshot, caseRecord, { changedByMail });
+  const documentContentReviewRequired = caseRecord
+    ? !Array.isArray(snapshot.fileRecords) || caseReview.documentIdsRequiringReview.length > 0
+    : !Array.isArray(snapshot.fileRecords) || reviewCache[snapshot.dealId]?.fingerprint !== fundingDocumentReviewFingerprint(snapshot);
   return {
     dealId: snapshot.dealId,
     dealTitle: snapshot.dealTitle || null,
@@ -70,10 +69,11 @@ function summarizeSnapshot(snapshot, reviewCache = {}) {
     vpEmail: snapshot.vpEmail,
     files: snapshot.files,
     fileRecords: snapshot.fileRecords || [],
-    contentFingerprint: fundingDocumentReviewFingerprint(snapshot),
-    documentContentReviewRequired: missingRequiredFields.length > 0 || !Array.isArray(snapshot.fileRecords) || reviewCache[snapshot.dealId]?.fingerprint !== fundingDocumentReviewFingerprint(snapshot),
+    ...caseReview,
+    documentContentReviewRequired,
     noteCount: snapshot.noteCount || 0,
     latestNoteAt: snapshot.latestNoteAt || null,
+    fundingHandoffNotesFingerprint: snapshot.fundingHandoffNotesFingerprint || null,
     latestExternalNote: snapshot.latestExternalNote || null,
     kfwAccountConfirmedByCredentials: snapshot.kfwAccountConfirmedByCredentials === true,
     kfwCredentialEvidenceNoteIds: snapshot.kfwCredentialEvidenceNoteIds || [],
@@ -85,7 +85,7 @@ function summarizeSnapshot(snapshot, reviewCache = {}) {
     missingBaseDocumentIds,
     unknownFiles,
     incomeBonusRequested: snapshot.incomeBonusRequested ?? null,
-    reviewRequired: unknownFiles.length > 0 || missingRequiredFields.length > 0,
+    reviewRequired: caseReview.caseReviewRequired,
   };
 }
 
@@ -107,18 +107,21 @@ export async function loadFundingScan(filePath = defaultFundingScanFile()) {
   return JSON.parse(await readFile(path.resolve(filePath), 'utf8'));
 }
 
-export async function scanPipedriveFundingBoard({ batchSize = 100, persist = true, onProgress, pendingDealIds = [], collectBoard = collectPipedriveFundingDealIds, readDeals = readPipedriveFundingDealsViaApi } = {}) {
+export async function scanPipedriveFundingBoard({ batchSize = 100, persist = true, onProgress, pendingDealIds = [], changedDealIds = [], collectBoard = collectPipedriveFundingDealIds, readDeals = readPipedriveFundingDealsViaApi } = {}) {
   const startedAt = new Date().toISOString();
   const board = await collectBoard();
   const entries = Object.entries(board.stages).filter(([name]) => ['auftrag eingereicht / förderunterlagen einreichen', 'antrag eingereicht / förderunterlagen einreichen', 'förderung beantragen', 'förderung beantragt'].includes(name.toLocaleLowerCase('de-DE')));
   if (!Array.isArray(pendingDealIds) || pendingDealIds.length > 200 || pendingDealIds.some(id => !/^\d+$/.test(String(id)))) throw new Error('Offene Förder-Deal-IDs sind nicht eindeutig oder zu umfangreich.');
-  const dealIds = [...new Set([...entries.flatMap(([, deals]) => deals.map(deal => String(deal.id))), ...pendingDealIds.map(String)])];
+  if (!Array.isArray(changedDealIds) || changedDealIds.length > 200 || changedDealIds.some(id => !/^\d+$/.test(String(id)))) throw new Error('Geänderte Förder-Deal-IDs sind nicht eindeutig oder zu umfangreich.');
+  const changedIds = new Set(changedDealIds.map(String));
+  const dealIds = [...new Set([...entries.flatMap(([, deals]) => deals.map(deal => String(deal.id))), ...pendingDealIds.map(String), ...changedIds])];
   const result = dealIds.length ? await readDeals({ dealIds, batchSize, onProgress }) : { read: 0, failed: 0, requested: 0, errors: [], snapshots: [] };
   if (result.read !== dealIds.length || result.failed) {
     throw new Error(`Förderprüfung unvollständig: ${result.read}/${dealIds.length} Deals gelesen, ${result.failed} Fehler. Der letzte vollständige Stand wird nicht überschrieben.`);
   }
   const reviewCache = await loadReviewCache();
-  const cases = result.snapshots.map(snapshot => summarizeSnapshot(snapshot, reviewCache.deals));
+  const caseReviews = await loadFundingCaseReviews();
+  const cases = result.snapshots.map(snapshot => summarizeSnapshot(snapshot, reviewCache.deals, caseReviews.deals, changedIds.has(String(snapshot.dealId))));
   const report = {
     version: 1,
     startedAt,
@@ -136,6 +139,7 @@ export async function scanPipedriveFundingBoard({ batchSize = 100, persist = tru
       casesWithAllBaseDocumentsByFileName: cases.filter(item => item.missingBaseDocumentIds.length === 0).length,
       casesWithMissingRequiredFields: cases.filter(item => item.missingRequiredFields.length > 0).length,
       casesRequiringReview: cases.filter(item => item.reviewRequired).length,
+      casesReviewedUnchanged: cases.filter(item => item.reviewStatus === 'reviewed_unchanged').length,
     },
     cases,
   };

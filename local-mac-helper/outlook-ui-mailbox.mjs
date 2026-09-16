@@ -199,13 +199,18 @@ export function createOutlookUiMailbox({bridge=runMacUiBridge,parseSource=parseO
       const persist=async rows=>atomic(file,{lower,upper,scanComplete:false,known:rows.map(({rowKey,item})=>({rowKey,item:safeItem(item)})),messages:[]});
       const scan=await search(from,folder,`received:${day(lower)}..${day(upper)}`,{maximum:3000,budget:limit,known,onProgress:persist,partial:true});
       const items=scan.items;
-      const messages=items.filter(x=>x.receivedAt&&Date.parse(x.receivedAt)>=lower&&Date.parse(x.receivedAt)<=upper).map(x=>({messageId:x.messageId,receivedAt:x.receivedAt,description:`Absender: ${x.sender.join(', ')}, Betreff: ${x.subject}, ${day(x.receivedAt)}, ${x.attachments.length?'Hat Dateien':'Keine Anlagen'}`,hasAttachments:x.attachments.length>0}));
+      const messages=items.filter(x=>x.receivedAt&&Date.parse(x.receivedAt)>=lower&&Date.parse(x.receivedAt)<=upper).map(x=>({messageId:x.messageId,receivedAt:x.receivedAt,description:`Absender: ${x.sender.join(', ')}, Betreff: ${x.subject}, ${day(x.receivedAt)}, ${x.attachments.length?'Hat Dateien':'Keine Anlagen'}`,hasAttachments:x.attachments.length>0,sourceHash:x.sourceHash}));
       if(items.some(x=>!x.receivedAt)) throw error('OUTLOOK_UI_RECEIVED_TIME_MISSING','Mindestens einer Originalmail fehlt ein belegter Empfangszeitpunkt.');
       snapshot={lower,upper,scanComplete:scan.complete,known:scan.known.map(({rowKey,item})=>({rowKey,item:safeItem(item)})),messages}; await atomic(file,snapshot);
     }
     const offset=cursor?.kind==='page'?cursor.offset:0;
     if(!Number.isInteger(offset)||offset<0||offset>snapshot.messages.length) throw error('OUTLOOK_UI_BAD_CURSOR','Die gespeicherte Seitenposition ist ungültig.');
-    const selected=snapshot.messages.slice(offset,offset+limit),complete=snapshot.scanComplete&&offset+selected.length===snapshot.messages.length;
+    const selected=snapshot.messages.slice(offset,offset+limit).map(message=>{
+      // Older resumable snapshots already retained the original hash in known.
+      const sourceHash=message.sourceHash||snapshot.known?.find(entry=>entry.item?.messageId===message.messageId)?.item?.sourceHash;
+      if(!/^[0-9a-f]{64}$/.test(sourceHash||'')) throw error('OUTLOOK_UI_SOURCE_HASH_MISSING','Der gespeicherte Originalmail-Prüfstand fehlt; kein unveränderter Mailstand bestätigt.');
+      return {...message,sourceHash};
+    }),complete=snapshot.scanComplete&&offset+selected.length===snapshot.messages.length;
     const base={version:2,source:'outlook-ui-mime',from,folder};
     return {messages:selected,complete,coverageVerified:true,source:'outlook-native',nextCursor:complete?null:encode({...base,kind:'page',since:lower,until:upper,offset:offset+selected.length}),checkpoint:complete?encode({...base,kind:'checkpoint',since:upper}):null,coverage:{since:new Date(lower).toISOString(),until:new Date(upper).toISOString(),scope:'outlook-ui-search-original-mime',messages:snapshot.messages.length},limitations:['Outlook-UI-Suche, kein serverseitiger Delta-Token. Später synchronisierte ältere Mails vor dem Checkpoint werden nicht durch einen täglichen Vollscan nachgeholt.']};
   }

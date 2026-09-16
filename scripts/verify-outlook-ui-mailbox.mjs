@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, rm, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, writeFile, rm, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
@@ -116,8 +116,10 @@ test('mailbox pages persist work and resume after process recreation without rer
   const f=await fixture(t,[item('one'),item('two')]);
   const first=await f.adapter.readFundingMailboxPage({from,since:'2026-09-14',mode:'initial-backfill',limit:1});
   assert.equal(first.messages.length,1);assert.equal(first.complete,false);assert.equal(first.coverageVerified,true);
+  assert.equal(first.messages[0].sourceHash,hash('one'));
   const second=await f.adapter.readFundingMailboxPage({from,since:'2026-09-14',mode:'initial-backfill',cursor:first.nextCursor,limit:1});
   assert.equal(second.complete,true);assert.equal(second.messages[0].messageId,'<two@example.test>');assert.equal(f.calls.filter(a=>a[0]==='mailbox-ui-source').length,2);
+  assert.equal(second.messages[0].sourceHash,hash('two'));
   const checkpoint=JSON.parse(Buffer.from(second.checkpoint,'base64url').toString()); assert.equal(checkpoint.since,now);
   assert.ok(!second.checkpoint.includes('PRIVATE'));assert.equal(checkpoint.kind,'checkpoint');
 });
@@ -170,4 +172,19 @@ test('conversation expansion stops on an unchanged or alternating group instead 
     assert.equal(expansions.length,alternating?2:1);
     assert.deepEqual(reads,alternating?[0,1]:[]);
   }
+});
+
+
+test('older UI page snapshots recover the verified MIME hash without reopening the mail',async t=>{
+  const f=await fixture(t,[item('one')]);
+  const input={from,since:'2026-09-14',mode:'initial-backfill'};
+  await f.adapter.readFundingMailboxPage(input);
+  const pageFile=path.join(f.dir,'pages',(await readdir(path.join(f.dir,'pages')))[0]);
+  const saved=JSON.parse(await readFile(pageFile,'utf8')); delete saved.messages[0].sourceHash;
+  await writeFile(pageFile,JSON.stringify(saved));
+  const restored=await f.adapter.readFundingMailboxPage(input);
+  assert.equal(restored.messages[0].sourceHash,hash('one'));
+  assert.equal(f.calls.filter(a=>a[0]==='mailbox-ui-source').length,1);
+  delete saved.known[0].item.sourceHash; await writeFile(pageFile,JSON.stringify(saved));
+  await assert.rejects(()=>f.adapter.readFundingMailboxPage(input),{code:'OUTLOOK_UI_SOURCE_HASH_MISSING'});
 });

@@ -17,7 +17,7 @@ const STATE_TTL = 10 * 60 * 1000;
 // without a server-side filter and discard pre-August metadata locally. Later
 // runs use the original deltaLink and do not repeat the mailbox history scan.
 const DELTA_QUERY_MODE = 'unfiltered-inbox-metadata';
-const BASIC_FIELDS = 'id,internetMessageId,parentFolderId,receivedDateTime,sentDateTime,subject,from,toRecipients,ccRecipients,hasAttachments';
+const BASIC_FIELDS = 'id,internetMessageId,parentFolderId,receivedDateTime,sentDateTime,subject,from,toRecipients,ccRecipients,hasAttachments,changeKey';
 const DETAIL_FIELDS = `${BASIC_FIELDS},body`;
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -213,7 +213,12 @@ export function createMicrosoftFundingMail({ env = process.env, fetch: fetchImpl
       throw fail('MESSAGE_INVALID', 'Eine Mail besitzt keine vollständig prüfbare Identität oder Empfangszeit.');
     const sender = addresses(row.from ? [row.from] : []), subject = normalizedText(row.subject);
     const receivedAt = new Date(row.receivedDateTime).toISOString();
-    return { messageId: row.internetMessageId, immutableId: row.id, receivedAt, sentAt: row.sentDateTime || null, sender, recipients: addresses(row.toRecipients), cc: addresses(row.ccRecipients), subject, hasAttachments: row.hasAttachments === true,
+    // The Graph version token changes for flags too; it only decides whether a
+    // delta event needs a targeted content check, never whether work is complete.
+    const version = row.changeKey ?? row['@odata.etag'];
+    if (version != null && (typeof version !== 'string' || !version || version.length > 2000 || /[\r\n\0]/.test(version))) throw fail('MESSAGE_INVALID', 'Die Microsoft-Mailversion ist nicht eindeutig prüfbar.');
+    const sourceRevision = version ? sha(JSON.stringify([row.id, version])) : null;
+    return { sourceRevision, messageId: row.internetMessageId, immutableId: row.id, receivedAt, sentAt: row.sentDateTime || null, sender, recipients: addresses(row.toRecipients), cc: addresses(row.ccRecipients), subject, hasAttachments: row.hasAttachments === true,
       description: `Absender: ${sender.join(', ')}, Betreff: ${subject.replace(/[\r\n\t]/g, ' ') || 'Kein Betreff'}, ${new Intl.DateTimeFormat('de-DE', { timeZone: 'Europe/Berlin', day: '2-digit', month: '2-digit', year: '2-digit' }).format(new Date(receivedAt))}, ${row.hasAttachments ? 'Hat Dateien' : 'Keine Anlagen gemeldet'}`,
       parentFolderId: row.parentFolderId, identityVerified: true, source: 'microsoft-graph' };
   }
@@ -267,7 +272,7 @@ export function createMicrosoftFundingMail({ env = process.env, fetch: fetchImpl
     if (markRead) await locked('identities', async () => {
       const state = await load('identities', null), entry = state?.entries?.[sha(input.messageId)];
       if (!entry || entry.immutableId !== result.immutableId) throw fail('IDENTITY_STORE_CHANGED', 'Der Nachrichtenbeleg hat sich verändert.');
-      Object.assign(entry, { sourceHash: result.sourceHash, sourceReadAt: stamp(), attachmentIds: result.attachments.map(x => x.attachmentId) });
+      Object.assign(entry, { sourceHash: result.sourceHash, sourceRevision: result.sourceRevision, sourceReadAt: stamp(), attachmentIds: result.attachments.map(x => x.attachmentId) });
       await save('identities', state);
     });
     return result;
@@ -341,6 +346,8 @@ export function createMicrosoftFundingMail({ env = process.env, fetch: fetchImpl
     collectionLink(link, deltaPath);
     if (saved?.kind === 'page' && link === saved.link) throw fail('PAGINATION_INVALID', 'Microsoft hat dieselbe offene Seite erneut geliefert.');
     const messages = [], removed = [], seen = new Set();
+    const identities = await load('identities', null);
+    if (identities && (identities.binding !== requireConfig().binding || identities.version !== 1 || !identities.entries)) throw fail('IDENTITY_STORE_CHANGED', 'Die gespeicherten Nachrichten gehören zu einer anderen Microsoft-Verbindung.');
     for (const row of response.value) {
       if (!safeId(row?.id)) throw fail('MESSAGE_INVALID', 'Eine Delta-Änderung besitzt keine prüfbare Nachrichtenkennung.');
       if (row['@removed']) { removed.push(row.id); continue; }
@@ -351,6 +358,18 @@ export function createMicrosoftFundingMail({ env = process.env, fetch: fetchImpl
       const normalized = messageRow(row);
       if (normalized.parentFolderId !== inboxId) throw fail('PAGE_SCOPE_MISMATCH', 'Die Delta-Seite enthält eine Nachricht außerhalb des Förderposteingangs.');
       if (seen.has(normalized.messageId)) throw fail('DUPLICATE_MESSAGE_ID', 'Eine Postfachseite enthält mehrfach dieselbe Nachrichten-ID.');
+      const previous = identities?.entries?.[sha(normalized.messageId)];
+      if (previous && previous.immutableId !== normalized.immutableId) throw fail('DUPLICATE_MESSAGE_ID', 'Die ursprüngliche Nachrichten-ID wurde einer anderen Mail zugeordnet.');
+      if (previous?.sourceReadAt && /^[0-9a-f]{64}$/.test(previous.sourceHash || '')) {
+        if (normalized.sourceRevision && normalized.sourceRevision === previous.sourceRevision) normalized.sourceHash = previous.sourceHash;
+        else {
+          // Only known mails actually present in this delta page are reread.
+          // Old cursors without version fields remain safe through this check.
+          const current = await detail({ messageId: normalized.messageId, folder: 'Posteingang' }, token, { markRead: true });
+          if (current.notFound || current.immutableId !== normalized.immutableId) throw fail('SOURCE_CHANGED', 'Die geänderte Fördermail konnte im Posteingang nicht eindeutig rückgelesen werden.');
+          Object.assign(normalized, { sourceHash: current.sourceHash, sourceRevision: current.sourceRevision, description: current.description, hasAttachments: current.hasAttachments });
+        }
+      }
       seen.add(normalized.messageId); messages.push(normalized);
     }
     await remember(messages);

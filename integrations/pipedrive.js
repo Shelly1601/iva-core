@@ -594,7 +594,9 @@ export async function getPipedriveFundingSnapshot(id) {
     vpPersonId: vpId ? String(vpId) : null,
     vpEmail: primaryEmail(vp) || (typeof vpId === 'string' && vpId.includes('@') ? vpId.toLowerCase() : null),
     files: files.map(file => clean(file.name || file.file_name, 500)).filter(Boolean),
-    fileRecords: files.map(file => ({ id: String(file.id || ''), name: clean(file.name || file.file_name, 500), size: Number(file.file_size || file.size || 0), mimeType: clean(file.file_type || file.mime_type, 200) })).filter(file => /^\d+$/.test(file.id) && file.name),
+    fileRecords: files.map(file => ({ id: String(file.id || ''), name: clean(file.name || file.file_name, 500), size: Number(file.file_size || file.size || 0), mimeType: clean(file.file_type || file.mime_type, 200),
+      updatedAt: clean(file.update_time || file.updateTime || file.updated_at || file.modified_at, 80) || null,
+      createdAt: clean(file.add_time || file.addTime || file.created_at, 80) || null })).filter(file => /^\d+$/.test(file.id) && file.name),
     noteCount: notes.length,
     latestNoteAt: evidence.map(note => note.updateTime || note.addTime).filter(Boolean).sort().at(-1) || null,
     fundingHandoffNotesFingerprint: crypto.createHash('sha256').update(JSON.stringify(notes

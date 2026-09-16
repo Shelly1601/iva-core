@@ -131,11 +131,12 @@ export async function detectNewFundingMessages({ filePath = defaultFundingMonito
   const run = await intakeStore.begin(fundingRun);
   const page = run.scanComplete ? null : await pageReader({ from: FUNDING_MAILBOX, folder: 'Posteingang', mode: run.mode, since: run.since, cursor: run.cursor, limit: 100 });
   const recorded = page ? await intakeStore.recordPage(page, { mode: run.mode, expectedCursor: run.cursor || null }) : { messages: [], scanComplete: true };
-  const pending = (await intakeStore.status()).pending;
+  const intake = await intakeStore.status();
+  const pending = intake.actionablePending || intake.pending;
   const messages = [...recorded.messages], pendingReadErrors = [];
   const seen = new Set(messages.map(item => item.fingerprint));
-  // Pending mail IDs survive cursor advancement. Their content is read fresh,
-  // never reconstructed from stale list previews or read/unread flags.
+  // Interrupted/unreviewed IDs survive cursor advancement and are read fresh.
+  // A verified waiting review is retained until its source, dependency or due step changes.
   for (const item of pending) {
     if (seen.has(item.fingerprint)) continue;
     if (!messageReader) throw new Error('Offene Fördermails benötigen das gezielte native Rücklesen ihrer gespeicherten Nachrichten-ID.');
@@ -162,6 +163,8 @@ export async function detectNewFundingMessages({ filePath = defaultFundingMonito
     source: page?.source || run.source || 'outlook-native', tombstoneCount: recorded.tombstoneCount || 0,
     fundingRun: { mode: run.mode, since: run.since, runId: run.runId },
     pendingReadErrors,
+    deferredMessageCount: intake.waiting?.length || 0,
+    changedDealIds: [...new Set(messages.map(item => item.dealId).filter(value => /^\d+$/.test(String(value || ''))).map(String))],
     stateMutated: true,
   };
 }
