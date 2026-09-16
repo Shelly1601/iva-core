@@ -13,12 +13,42 @@
     @media(max-width:900px){.mode-grid,.login-fields{grid-template-columns:1fr}.login-fields .wide{grid-column:auto}}
   </style>
   <style>.extra-options{border-top:1px solid var(--line);margin-top:16px;padding-top:12px}.extra-options summary{cursor:pointer;color:var(--muted);font-weight:650;padding:4px 0}.extra-options[open] summary{color:var(--text);margin-bottom:12px}.credential-toggle{display:flex;gap:9px;align-items:center;margin-top:16px}.login-fields{padding:0;border:0;min-width:0}.input+small{display:block;margin-top:7px}.mode-option:focus-within{outline:2px solid var(--cyan);outline-offset:2px}#formState,#importState{margin-top:8px;overflow-wrap:anywhere}@media(max-width:900px){input.input,select.input,textarea.input{font-size:16px}}</style>
+  <link rel="stylesheet" href="/knowledge-research.css?v=1">
 </head>
 <body>
 <main class="shell">
   <header class="top"><div><div class="eyebrow">IVA Learning Core · v1.0</div><h1>Wissensdatenbank</h1><p class="lead">Dein eigener Wissensspeicher für Kurse, Unterlagen, Links, Transkripte und direkte Notizen. Sobald Text vorhanden ist, kann IVA ihn im Chat gezielt durchsuchen und verwenden.</p></div><div class="actions"><a class="btn" href="/cockpit">← Cockpit</a><a class="btn" href="/product-creator">Produkt-Creator →</a><button class="btn primary" id="newEntry">+ Wissen hinzufügen</button></div></header>
   <section class="metrics" id="metrics"><div class="metric"><b>–</b><small>Wird geladen</small></div></section>
   <div id="globalNotice" class="notice" hidden></div>
+  <details class="card research-panel" id="researchPanel">
+    <summary><span><strong>Selbstrecherche</strong><small>IVA für einen Bereich recherchieren und Wissen ergänzen lassen</small></span><span class="tag" id="researchCount">Filter öffnen</span></summary>
+    <div class="research-layout">
+      <form id="researchForm">
+        <h2 id="researchFormTitle">Was soll IVA herausfinden?</h2>
+        <p class="muted">Kriterien festlegen. IVA recherchiert im Hintergrund und speichert die Auswertung mit Quellen in deiner Wissenskategorie.</p>
+        <div class="fields">
+          <div class="field full"><label for="researchTopic">Thema / Forschungsauftrag</label><textarea class="input" id="researchTopic" required maxlength="600" placeholder="Zum Beispiel: Neue Möglichkeiten für die Neukundengewinnung bei Wärmepumpen"></textarea></div>
+          <div class="field"><label for="researchCategory">Wissenskategorie / Bereich</label><input class="input" id="researchCategory" list="categoryOptions" maxlength="140" placeholder="Zum Beispiel Marketing"></div>
+          <div class="field"><label for="researchFrequency">Wie oft?</label><select class="input" id="researchFrequency"><option value="once">Einmalig · jetzt starten</option><option value="daily">Täglich</option><option value="weekly">Wöchentlich</option><option value="monthly">Monatlich</option></select></div>
+          <div class="field" id="researchTimeField" hidden><label for="researchTime">Uhrzeit · Berlin</label><input class="input" id="researchTime" type="time" value="09:00" required></div>
+          <div class="field" id="researchWeekdayField" hidden><label for="researchWeekday">Wochentag</label><select class="input" id="researchWeekday"><option value="1">Montag</option><option value="2">Dienstag</option><option value="3">Mittwoch</option><option value="4">Donnerstag</option><option value="5">Freitag</option><option value="6">Samstag</option><option value="7">Sonntag</option></select></div>
+          <div class="field" id="researchMonthdayField" hidden><label for="researchMonthday">Tag im Monat</label><input class="input" id="researchMonthday" type="number" min="1" max="28" value="1"></div>
+        </div>
+        <details class="extra-options" id="researchFilters"><summary>Kriterien genauer eingrenzen · optional</summary><div class="fields">
+          <div class="field full"><label for="researchKeywords">Suchbegriffe</label><input class="input" id="researchKeywords" maxlength="1200" placeholder="Zum Beispiel Empfehlungen, Social Media, UGC"><small class="muted">Mehrere Begriffe mit Komma trennen.</small></div>
+          <div class="field full"><label for="researchExclude">Ausschließen</label><input class="input" id="researchExclude" maxlength="1200" placeholder="Begriffe, die nicht vorkommen sollen"></div>
+          <div class="field full"><label for="researchDomains">Nur diese Websites durchsuchen</label><input class="input" id="researchDomains" maxlength="2000" placeholder="Zum Beispiel kfw.de, bundesregierung.de"><small class="muted">Optional. Leer lassen für eine offene Websuche. Es werden frei lesbare Webseiten ausgewertet.</small></div>
+          <div class="field"><label for="researchRegion">Region / Markt</label><input class="input" id="researchRegion" maxlength="140" placeholder="Zum Beispiel Deutschland"></div>
+          <div class="field"><label for="researchMaxSources">Maximale Quellen je Lauf</label><select class="input" id="researchMaxSources"><option value="3">3 · kompakt</option><option value="5" selected>5 · ausgewogen</option><option value="8">8 · ausführlich</option></select></div>
+          <div class="field full"><label for="researchObjective">Worauf soll IVA besonders achten?</label><textarea class="input" id="researchObjective" maxlength="2000" placeholder="Zum Beispiel: konkrete Umsetzung, Kosten, Risiken und neue Erkenntnisse seit der letzten Recherche"></textarea></div>
+        </div></details>
+        <p class="muted" id="researchScheduleHint">Startet nach dem Speichern. Du kannst den Bereich danach schließen.</p>
+        <div class="actions"><button class="btn primary" type="submit" id="researchSave">Recherche starten</button><button class="btn" type="button" id="researchCancel" hidden>Neue Recherche</button></div>
+        <div id="researchFormState" role="status" aria-live="polite"></div>
+      </form>
+      <section aria-labelledby="researchListTitle"><div class="toolbar"><h2 id="researchListTitle">Deine Rechercheaufträge</h2><button class="mini-btn" type="button" id="researchRefresh">Aktualisieren</button></div><div class="notice" id="researchCapability" hidden></div><div id="researchList" class="import-list"><p class="muted">Noch keine Recherche geladen.</p></div></section>
+    </div>
+  </details>
   <section class="layout">
     <form class="card" id="entryForm"><div class="eyebrow">Wissen erweitern</div><h2 id="formTitle">Link rein. Wissen aufnehmen.</h2><p class="muted">Link einfügen und Kategorie wählen. Den Titel vergibt IVA automatisch.</p>
       <div class="fields">
@@ -56,5 +86,6 @@
 </main>
 <div class="iva" title="IVA lernt mit"><div class="iva-face"></div><small>IVA</small></div>
 <script src="/knowledge.js?v=1.2"></script>
+<script type="module" src="/knowledge-research.js?v=1"></script>
 </body>
 </html>

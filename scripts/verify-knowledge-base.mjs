@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 process.env.DATA_DIR = await fs.mkdtemp(path.join(os.tmpdir(), 'iva-knowledge-base-test-'));
 const store = await import('../knowledge/store.js');
@@ -41,6 +42,28 @@ assert.rejects(() => store.createKnowledgeEntry({ title: 'Unsicher', sourceUrl: 
 assert.rejects(() => store.storeKnowledgeDocument(documentEntry.id, { name: 'bild.png', mime: 'image/png', buffer: Buffer.from('x') }), /Erlaubt/);
 assert.equal((await store.deleteKnowledgeEntry(documentEntry.id)).id, documentEntry.id);
 assert.equal(await store.getKnowledgeEntry(documentEntry.id), null);
+
+const contentHash = value => crypto.createHash('sha256').update(value || '').digest('hex');
+const guarded = await store.createKnowledgeEntry({ title: 'CAS-Test', content: 'Ursprünglich gespeicherte Fassung.' });
+const outcomes = await Promise.allSettled([
+  store.updateKnowledgeEntry(guarded.id, { content: 'Neue Recherche A.' }, { expectedContentHash: contentHash(guarded.content) }),
+  store.updateKnowledgeEntry(guarded.id, { content: 'Neue Recherche B.' }, { expectedContentHash: contentHash(guarded.content) }),
+]);
+assert.equal(outcomes.filter(result => result.status === 'fulfilled').length, 1, 'compare-and-swap must occur inside serialized mutation');
+const conflict = outcomes.find(result => result.status === 'rejected').reason;
+assert.equal(conflict.status, 409); assert.equal(conflict.code, 'KNOWLEDGE_RESEARCH_CONFLICT');
+await store.updateKnowledgeEntry(guarded.id, { content: 'Manuelle Fassung bleibt erhalten.' });
+await assert.rejects(store.updateKnowledgeEntry(guarded.id, { content: 'Veralteter Automatikstand.' }, { expectedContentHash: contentHash(guarded.content) }), { status: 409, code: 'KNOWLEDGE_RESEARCH_CONFLICT' });
+assert.equal((await store.getKnowledgeEntry(guarded.id)).content, 'Manuelle Fassung bleibt erhalten.');
+const kbFile = path.join(process.env.DATA_DIR, 'knowledge-base.json'), beforeCorruption = await fs.readFile(kbFile);
+for (const broken of ['{"entries":', '{"version":1,"entries":{}}']) {
+  await fs.writeFile(kbFile, broken);
+  await assert.rejects(store.listKnowledgeEntries(), { status: 503, code: 'KNOWLEDGE_STORE_UNAVAILABLE' });
+  await assert.rejects(store.createKnowledgeEntry({ content: 'Darf defekte Ablage nicht ersetzen.' }), { status: 503, code: 'KNOWLEDGE_STORE_UNAVAILABLE' });
+  assert.equal(await fs.readFile(kbFile, 'utf8'), broken);
+}
+await fs.writeFile(kbFile, beforeCorruption);
+assert.equal((await store.getKnowledgeEntry(guarded.id)).content, 'Manuelle Fassung bleibt erhalten.');
 
 const html = await fs.readFile(new URL('../public/knowledge.html', import.meta.url), 'utf8');
 const js = await fs.readFile(new URL('../public/knowledge.js', import.meta.url), 'utf8');

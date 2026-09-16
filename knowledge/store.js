@@ -31,8 +31,12 @@ function normalizeUrl(value) {
 async function loadStore() {
   try {
     const parsed = JSON.parse(await fs.readFile(STORE_FILE, 'utf8'));
-    return { version: 1, entries: Array.isArray(parsed.entries) ? parsed.entries : [] };
-  } catch { return emptyStore(); }
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.entries)) throw new Error('Invalid knowledge store');
+    return { version: 1, entries: parsed.entries };
+  } catch (error) {
+    if (error.code === 'ENOENT') return emptyStore();
+    throw Object.assign(new Error('Die Wissensablage ist nicht sicher lesbar. Vorhandene Daten bleiben unverändert.'), { status: 503, code: 'KNOWLEDGE_STORE_UNAVAILABLE' });
+  }
 }
 
 async function saveStore(data) {
@@ -132,10 +136,13 @@ export async function createKnowledgeEntry(input = {}) {
   });
 }
 
-export async function updateKnowledgeEntry(id, patch = {}) {
+export async function updateKnowledgeEntry(id, patch = {}, { expectedContentHash } = {}) {
   return mutate(data => {
     const index = data.entries.findIndex(item => item.id === id);
     if (index < 0) return null;
+    if (expectedContentHash !== undefined && crypto.createHash('sha256').update(data.entries[index].content || '').digest('hex') !== expectedContentHash) {
+      throw Object.assign(new Error('Der Wissenseintrag wurde inzwischen geändert. Die neuere Fassung bleibt erhalten.'), { status: 409, code: 'KNOWLEDGE_RESEARCH_CONFLICT' });
+    }
     const item = normalizeEntry(patch, data.entries[index]);
     item.id = data.entries[index].id;
     item.document = data.entries[index].document;

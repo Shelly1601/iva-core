@@ -184,4 +184,6 @@ $('importJobs').addEventListener('click', event => { const button = event.target
 $('entryList').addEventListener('click', event => { const card = event.target.closest('[data-entry-id]'); if (card) void selectEntry(card.dataset.entryId); });
 $('searchButton').addEventListener('click', () => loadAll($('searchInput').value.trim()).catch(error => notify(error.message, 'error'))); $('searchInput').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); $('searchButton').click(); } });
 loadAll().catch(error => notify(error.message.includes('401') ? 'Bitte zuerst im Cockpit den IVA-API-Token speichern.' : error.message, 'error'));
+window.addEventListener('knowledge-research-updated', () => { void loadAll($('searchInput').value.trim()).catch(error => notify(error.message, 'error')); });
+window.addEventListener('knowledge-research-open-entry', event => { if (event.detail?.id) void selectEntry(event.detail.id); });
 setInterval(() => { if (state.imports.some(item => item.active)) loadImports().catch(error => notify(`Fortschritt konnte kurz nicht aktualisiert werden: ${error.message}`, 'error')); }, 4_000);

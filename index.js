@@ -201,6 +201,8 @@ import { opportunityMarketResearchStatus, runOpportunityMarketResearch } from '.
 import { createProjectFromOpportunity } from './opportunities/project-handoff.js';
 import { evaluateCapability, listCapabilityReviews } from './capabilities/evaluator.js';
 import { assessKnowledgeSourceCandidate, knowledgeLibraryStatus, listKnowledgeLibrary } from './knowledge/library.js';
+import { createKnowledgeResearchService } from './knowledge/research-service.js';
+import { registerKnowledgeResearchRoutes } from './knowledge/research-routes.js';
 import {
   buildKnowledgePromptContext,
   createKnowledgeEntry,
@@ -3342,7 +3344,12 @@ async function hydratedKnowledgeImports(limit = 30) {
   }));
 }
 
-app.get('/api/knowledge/status', async (_req, res) => res.json(await knowledgeBaseStatus()));
+app.get('/api/knowledge/status', async (_req, res) => {
+  try { res.json(await knowledgeBaseStatus()); }
+  catch { res.status(503).json({ error: 'Die Wissensablage ist momentan nicht lesbar. Vorhandene Daten bleiben erhalten.' }); }
+});
+const knowledgeResearch = createKnowledgeResearchService();
+registerKnowledgeResearchRoutes(app, { service: knowledgeResearch, onError: () => console.error('Selbstrecherche: Hintergrundstart vorübergehend fehlgeschlagen.') });
 app.get('/api/knowledge/import-capabilities', async (_req, res) => {
   const device = await deviceAgentStatus();
   const policy = knowledgeImportPolicy();
@@ -3416,10 +3423,15 @@ app.post('/api/knowledge/imports/:id/resume', async (req, res) => {
     res.status(202).json({ import: mergeKnowledgeImportStatus(updated, { command }) });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
-app.get('/api/knowledge', async (req, res) => res.json({ entries: await listKnowledgeEntries({ query: String(req.query?.query || ''), status: String(req.query?.status || ''), kind: String(req.query?.kind || ''), limit: req.query?.limit }) }));
+app.get('/api/knowledge', async (req, res) => {
+  try { res.json({ entries: await listKnowledgeEntries({ query: String(req.query?.query || ''), status: String(req.query?.status || ''), kind: String(req.query?.kind || ''), limit: req.query?.limit }) }); }
+  catch { res.status(503).json({ error: 'Die Wissensablage ist momentan nicht lesbar. Vorhandene Daten bleiben erhalten.' }); }
+});
 app.get('/api/knowledge/:id', async (req, res) => {
-  const item = await getKnowledgeEntry(req.params.id);
-  res.status(item ? 200 : 404).json(item || { error: 'Wissenseintrag nicht gefunden.' });
+  try {
+    const item = await getKnowledgeEntry(req.params.id);
+    res.status(item ? 200 : 404).json(item || { error: 'Wissenseintrag nicht gefunden.' });
+  } catch { res.status(503).json({ error: 'Die Wissensablage ist momentan nicht lesbar. Vorhandene Daten bleiben erhalten.' }); }
 });
 app.post('/api/knowledge', async (req, res) => {
   try { res.status(201).json(await createKnowledgeEntry(req.body || {})); }
@@ -3432,8 +3444,10 @@ app.patch('/api/knowledge/:id', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.delete('/api/knowledge/:id', async (req, res) => {
-  const item = await deleteKnowledgeEntry(req.params.id);
-  res.status(item ? 200 : 404).json(item ? { ok: true, deletedId: item.id } : { error: 'Wissenseintrag nicht gefunden.' });
+  try {
+    const item = await deleteKnowledgeEntry(req.params.id);
+    res.status(item ? 200 : 404).json(item ? { ok: true, deletedId: item.id } : { error: 'Wissenseintrag nicht gefunden.' });
+  } catch { res.status(503).json({ error: 'Die Wissensablage konnte nicht geändert werden. Bitte erneut versuchen.' }); }
 });
 app.post('/api/knowledge/:id/document', express.raw({ type: ['application/pdf', 'text/plain', 'text/markdown', 'application/octet-stream'], limit: '15mb' }), async (req, res) => {
   try {
@@ -3967,10 +3981,16 @@ const automationCatchUpInterval = setInterval(() => {
   void automationRunner.runDueAutomations().catch(error => console.error('Automation-Catch-up:', error.message));
 }, 15 * 60 * 1000);
 automationCatchUpInterval.unref?.();
+// Durable research plans are executed on the server, including after restarts
+// and while the knowledge page is closed. Each tick claims at most one run.
+const firstKnowledgeResearch = setTimeout(() => { void knowledgeResearch.tick().catch(() => console.error('Selbstrecherche: Startprüfung fehlgeschlagen.')); }, 25_000);
+firstKnowledgeResearch.unref?.();
+const knowledgeResearchInterval = setInterval(() => { void knowledgeResearch.tick().catch(() => console.error('Selbstrecherche: Zeitplanprüfung fehlgeschlagen.')); }, 60_000);
+knowledgeResearchInterval.unref?.();
 const __dirnameIva = path.dirname(fileURLToPath(import.meta.url));
 app.use(express.static(path.join(__dirnameIva, 'public'), {
   setHeaders(res, filePath) {
-    if ([`${path.sep}cockpit.html`, `${path.sep}knowledge.html`, `${path.sep}knowledge.js`, `${path.sep}product-creator.html`, `${path.sep}product-creator.js`, `${path.sep}product-creator.css`].some(suffix => filePath.endsWith(suffix))) res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
+    if ([`${path.sep}cockpit.html`, `${path.sep}knowledge.html`, `${path.sep}knowledge.js`, `${path.sep}knowledge-research.js`, `${path.sep}knowledge-research.css`, `${path.sep}product-creator.html`, `${path.sep}product-creator.js`, `${path.sep}product-creator.css`].some(suffix => filePath.endsWith(suffix))) res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
   },
 }));
 app.get('/cockpit', (_req, res) => {
