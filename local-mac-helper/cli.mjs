@@ -12,6 +12,8 @@ import {
 import {
   applyPipedriveFundingFieldUpdates,
   backgroundIntegrationStatus,
+  completePipedriveFundingHandoff,
+  listPipedriveFundingHandoffs,
   downloadAirtableCorrectedOffer,
   downloadPipedriveDealFiles,
   getAirtableWorkflowRecord,
@@ -250,6 +252,13 @@ async function main() {
     if (extra !== '--commit') throw new Error('Pipedrive-Dateien wurden nicht hochgeladen. Zum Bestätigen --commit anhängen.');
     return console.log(JSON.stringify(await uploadPipedriveDealFiles({ dealId: filePath, directory: confirmation }), null, 2));
   }
+  if (command === 'complete-pipedrive-funding-handoff') {
+    if (confirmation !== '--commit') throw new Error('Die Förderübergabe wurde nicht ausgeführt. Zum Bestätigen --commit anhängen.');
+    return console.log(JSON.stringify(await completePipedriveFundingHandoff({ ...await readJson(filePath), confirmApply: true }), null, 2));
+  }
+  if (command === 'list-pipedrive-funding-handoffs') {
+    return console.log(JSON.stringify(await listPipedriveFundingHandoffs(), null, 2));
+  }
   if (command === 'transition-pipedrive-funding-stage') {
     if (final !== '--commit') throw new Error('Pipedrive-Phase wurde nicht geändert. Zum Bestätigen --commit anhängen.');
     return console.log(JSON.stringify(await transitionPipedriveFundingStage({
@@ -436,6 +445,8 @@ async function main() {
   node local-mac-helper/cli.mjs download-pipedrive-files <deal-id> [datei-id,datei-id]
   node local-mac-helper/cli.mjs upload-pipedrive-files <deal-id> <pdf-ordner> --commit
   node local-mac-helper/cli.mjs transition-pipedrive-funding-stage <deal-id> <von-phase> <nach-phase> --commit
+  node local-mac-helper/cli.mjs complete-pipedrive-funding-handoff /pfad/uebergabe.json --commit
+  node local-mac-helper/cli.mjs list-pipedrive-funding-handoffs
   node local-mac-helper/cli.mjs mark-pipedrive-funding-won <deal-id> <zusagedateiname.pdf> --commit
   node local-mac-helper/cli.mjs complete-funding-mail /pfad/abschluss.json --commit
   node local-mac-helper/cli.mjs create-funding-escalation-forward /pfad/weiterleitung.json --commit

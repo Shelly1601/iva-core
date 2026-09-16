@@ -66,6 +66,10 @@ try {
   assert.match(amountRequest.prompt, /fehlende BzA-Bestätigung oder fehlendes Antragsdatum blockieren diese Übersicht nicht/);
   assert.match(amountRequest.prompt, /Keine Quellen-, Datei-, Seiten- oder Regelstandblöcke/);
   assert.match(amountRequest.prompt, /bekannte Grundförderung trotzdem nennen/);
+  assert.match(amountRequest.prompt, /Keine Förderhöhen-Notiz in unvollständigen Deals/);
+  assert.match(amountRequest.prompt, /complete-pipedrive-funding-handoff/);
+  assert.match(amountRequest.prompt, /list-pipedrive-funding-handoffs/);
+  assert.match(amountRequest.prompt, /erste Zeile immer Voraussichtlich … Förderung/);
   assert.doesNotMatch(amountRequest.acceptanceCriteria.join(' '), /Keine Förderzahl.*Antragsdatum/);
 
   const codexTaskSource = await readFile(new URL('../local-mac-helper/codex-tasks.mjs', import.meta.url), 'utf8');

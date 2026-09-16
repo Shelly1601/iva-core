@@ -6,6 +6,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/
 import { classifyFundingDocumentName } from './funding-document-extractor.mjs';
 import { resolveFundingSupervisor } from './funding.mjs';
 import { resolveFundingStage } from './pipedrive-funding.mjs';
+import { isFundingCalculationNote } from './funding-workflows.mjs';
 import { chromeBoundsAppleScript, requireRightDisplayWorkspace } from './display-workspace.mjs';
 import { withPipedriveBrowserLock } from './pipedrive-browser-lock.mjs';
 
@@ -1193,6 +1194,7 @@ export async function createPipedriveFundingInformationNote({ dealId, heading, d
   const id = String(dealId || '').replace(/\D/g, '');
   if (!id) throw new Error('Für die Pipedrive-Information fehlt eine gültige Deal-ID.');
   const rendered = renderPipedriveFundingInformationNote({ heading, details });
+  if (isFundingCalculationNote(rendered.content)) throw new Error('Förderhöhen-Notizen erst nach vollständiger Unterlagenprüfung gemeinsam mit dem bestätigten Phasenwechsel über complete-pipedrive-funding-handoff speichern.');
   const result = JSON.parse(await executePipedriveJavaScript(String.raw`(() => {
       const dealId = ${JSON.stringify(id)};
       const content = ${JSON.stringify(rendered.content)};
@@ -1938,6 +1940,7 @@ export async function transitionPipedriveFundingStage({ dealId, fromStage, toSta
   if (!id) throw new Error('Für den Förder-Phasenwechsel fehlt eine gültige Deal-ID.');
   if (confirmApply !== true) throw new Error('Pipedrive-Phase wurde nicht geändert: confirmApply=true fehlt.');
   const transition = resolvePipedriveFundingStageTransition({ fromStage, toStage });
+  if (transition.toKey === 'fundingRequested') throw new Error('Der Wechsel zur Beantragung erfolgt mit der Förderhöhen-Notiz nach vollständiger Unterlagenprüfung über complete-pipedrive-funding-handoff.');
   const raw = await executePipedriveJavaScript(String.raw`(() => {
       const dealId = ${JSON.stringify(id)};
       const expectedFromAliases = ${JSON.stringify(transition.fromAliases)};

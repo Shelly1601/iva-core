@@ -26,6 +26,8 @@ export const FUNDING_WORKFLOW_POLICY = Object.freeze({
   trashCleanupExecutor: 'authorized-daily-worker',
   processedMailFolder: 'Fertig',
   noteSuffix: '(Notiz von Nadine)',
+  calculationNoteTrigger: 'verified-complete-documents-handoff',
+  calculationNoteBeforeHandoff: false,
   reportChannel: 'telegram-with-project-protocol',
   sheet: Object.freeze({
     spreadsheetId: '1XPlBa5XgBixML0RquR_kwIwyxTDqRtpfXAudYimKB_8',
@@ -70,12 +72,10 @@ export function buildFundingCalculationNote({ result = {}, openPoints = [] } = {
   const bonuses = result.bonuses || {};
   const structured = typeof bonuses.base === 'number' && Number.isFinite(bonuses.base);
   const displayedRate = result.selfUsed === true ? result.selfUsedUnitRate : result.buildingBaseRate;
-  const estimate = result.calculationComplete === false ? 'vorläufige Förderung; weitere Boni offen' : 'voraussichtliche Förderung';
-  const summary = clean(result.noteSummary, 240);
   const firstLine = structured
-    ? units > 1 ? `${euro(result.estimatedGrant)} ${estimate} (${units} Wohneinheiten)`
-      : `${percent(displayedRate ?? result.rate)} ${estimate} (${euro(result.estimatedGrant)})`
-    : units > 1 && !/^[\d.]+,\d{2}\s*€/.test(summary) ? `${euro(result.estimatedGrant)} voraussichtliche Förderung – ${summary}` : summary;
+    ? units > 1 ? `Voraussichtlich ${euro(result.estimatedGrant)} Förderung (${units} Wohneinheiten)`
+      : `Voraussichtlich ${percent(displayedRate ?? result.rate)} Förderung (${euro(result.estimatedGrant)})`
+    : `Voraussichtlich ${euro(result.estimatedGrant)} Förderung${units > 1 ? ` (${units} Wohneinheiten)` : ''}`;
   if (!firstLine) throw new Error('Die wichtigste Förderaussage für die erste Notizzeile fehlt.');
   const details = [];
   if (structured) {
@@ -101,9 +101,19 @@ export function buildFundingCalculationNote({ result = {}, openPoints = [] } = {
   const questions = [...(Array.isArray(result.bonusQuestions) ? result.bonusQuestions : []), ...(Array.isArray(openPoints) ? openPoints : [])]
     .map(item => clean(item, 160)).filter(Boolean)
     .filter(item => !/Antragsdatum|BzA|Regelstand|https?:\/\//i.test(item));
+  if (result.calculationComplete === false && !questions.length) questions.push('Weitere persönliche Boni noch offen.');
   const distinctQuestions = [...new Set(questions)].slice(0, 3);
   if (distinctQuestions.length) details.push(`Offen: ${distinctQuestions.join(' · ')}`);
   return [firstLine, ...details, FUNDING_WORKFLOW_POLICY.noteSuffix].join('\n');
+}
+
+// Amount notes use the verified document handoff, never the generic note paths.
+// Missing-document and KfW-login notes remain available during intake.
+export function isFundingCalculationNote(value) {
+  const text = String(value || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/gi, ' ');
+  return /F(?:ö|oe)rder(?:h(?:ö|oe)he|summe|betrag|quote|satz|sch(?:ä|ae)tzung|berechnung)|Zuschuss(?:betrag|beitrag)/i.test(text)
+    || /(?:Förderung|Zuschuss|Grundförderung|Klimageschwindigkeitsbonus|Einkommensbonus)/i.test(text)
+      && /\d[\d.,\s]*(?:%|€|Euro|Prozent)|(?:voraussichtliche?|vorläufige?)\s+Förderung/i.test(text);
 }
 
 export function buildFundingSheetRow({ customerName, date = new Date() } = {}) {

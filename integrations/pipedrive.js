@@ -4,6 +4,8 @@ import path from 'node:path';
 import { completePipedriveFundingWon, missingFundingRequiredFields } from './pipedrive-funding-won.js';
 import { PIPEDRIVE_COMPANY_DOMAIN, PIPEDRIVE_LAYOUT, comparePipedriveLayout } from './pipedrive-layout.js';
 import { FUNDING_REQUIRED_FIELDS } from '../local-mac-helper/funding-required-fields.mjs';
+import { isFundingCalculationNote } from '../local-mac-helper/funding-workflows.mjs';
+import { completePipedriveFundingHandoff, listPendingFundingHandoffs } from './pipedrive-funding-handoff.js';
 
 const OAUTH_AUTHORIZE_URL = 'https://oauth.pipedrive.com/oauth/authorize';
 const OAUTH_TOKEN_URL = 'https://oauth.pipedrive.com/oauth/token';
@@ -12,6 +14,8 @@ const TOKEN_REFRESH_SKEW_MS = 60_000;
 const MAX_WEBHOOK_EVENTS = 500;
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const IVA_NOTE_SIGNATURE = '(Notiz von Nadine)';
+const FUNDING_HANDOFF_AUTHORITY = Symbol('verified-funding-handoff');
+const handoffRequired = () => Object.assign(new Error('Förderhöhe und Wechsel zur Beantragung erfolgen erst nach vollständiger Unterlagenprüfung gemeinsam über complete-pipedrive-funding-handoff.'), { code: 'FUNDING_HANDOFF_REQUIRED', status: 409 });
 const IVA_NOTE_SUFFIX_PATTERN = /(?:\s*\(Notiz von Nadine(?: via KI)?\))+\s*$/i;
 const DEAL_CUSTOM_FIELD_KEYS = Object.values(PIPEDRIVE_LAYOUT.dealFields).map(field => field.key).join(',');
 export const PIPEDRIVE_WRITE_CONFIRMATION = 'Pipedrive schreiben';
@@ -426,6 +430,30 @@ export async function searchPipedriveDeals(term, { exactMatch = false, limit = 5
   return { term: value, items: result.data?.items || result.data || [], additionalData: result.additionalData };
 }
 
+async function readCompletePipedriveV1Collection(pathname) {
+  const rows = [], seenStarts = new Set(), seenIds = new Set();
+  let start = 0;
+  for (let page = 0; page < 20; page++) {
+    if (seenStarts.has(start)) throw new Error('Pipedrive-Lesung unvollständig: wiederholter Seitenzeiger.');
+    seenStarts.add(start);
+    const separator = pathname.includes('?') ? '&' : '?';
+    const result = await pipedriveRequest(`${pathname}${separator}start=${start}&limit=500`);
+    const data = result.data || [];
+    if (!Array.isArray(data)) throw new Error('Pipedrive-Lesung unvollständig: ungültige Seite.');
+    for (const row of data) {
+      const id = String(row?.id || '');
+      if (!id || seenIds.has(id)) throw new Error('Pipedrive-Lesung unvollständig: fehlende oder doppelte Datensatz-ID.');
+      seenIds.add(id); rows.push(row);
+    }
+    const pagination = result.additionalData?.pagination;
+    if (pagination?.more_items_in_collection === false || !pagination && data.length < 500) return rows;
+    const next = Number(pagination?.next_start);
+    if (pagination?.more_items_in_collection !== true || !data.length || !Number.isInteger(next) || next <= start) throw new Error('Pipedrive-Lesung unvollständig: weitere Seiten sind nicht eindeutig erreichbar.');
+    start = next;
+  }
+  throw new Error('Pipedrive-Lesung unvollständig: zu viele Seiten; vorhandene Daten bleiben unverändert.');
+}
+
 export async function getPipedriveDealBundle(id, { customFieldKeys = DEAL_CUSTOM_FIELD_KEYS } = {}) {
   const dealId = clean(id, 40);
   if (!/^\d+$/.test(dealId)) throw new Error('Ungültige Pipedrive-Deal-ID.');
@@ -440,8 +468,8 @@ export async function getPipedriveDealBundle(id, { customFieldKeys = DEAL_CUSTOM
   const [person, organization, notes, files, activities] = await Promise.all([
     personId ? pipedriveRequest(`/api/v2/persons/${encodeURIComponent(personId)}`).then(result => result.data) : null,
     organizationId ? pipedriveRequest(`/api/v2/organizations/${encodeURIComponent(organizationId)}`).then(result => result.data) : null,
-    pipedriveRequest(`/api/v1/notes?deal_id=${dealId}&start=0&limit=500`).then(result => result.data || []),
-    pipedriveRequest(`/api/v1/deals/${dealId}/files?start=0&limit=500`).then(result => result.data || []),
+    readCompletePipedriveV1Collection(`/api/v1/notes?deal_id=${dealId}`),
+    readCompletePipedriveV1Collection(`/api/v1/deals/${dealId}/files`),
     pipedriveRequest(`/api/v2/activities?deal_id=${dealId}&limit=500`).then(result => result.data || []),
   ]);
   return { deal, person, organization, notes, files, activities };
@@ -569,6 +597,10 @@ export async function getPipedriveFundingSnapshot(id) {
     fileRecords: files.map(file => ({ id: String(file.id || ''), name: clean(file.name || file.file_name, 500), size: Number(file.file_size || file.size || 0), mimeType: clean(file.file_type || file.mime_type, 200) })).filter(file => /^\d+$/.test(file.id) && file.name),
     noteCount: notes.length,
     latestNoteAt: evidence.map(note => note.updateTime || note.addTime).filter(Boolean).sort().at(-1) || null,
+    fundingHandoffNotesFingerprint: crypto.createHash('sha256').update(JSON.stringify(notes
+      .filter(note => !(IVA_NOTE_SUFFIX_PATTERN.test(htmlText(note.content)) && isFundingCalculationNote(note.content)))
+      .map(note => [String(note.id), note.update_time || note.updateTime || note.add_time || null, String(note.content || '')])
+      .sort((a, b) => a[0].localeCompare(b[0])))).digest('hex'),
     latestExternalNote: evidence.filter(note => !note.isIvaFundingRequest).sort((a, b) => String(b.updateTime || b.addTime || '').localeCompare(String(a.updateTime || a.addTime || '')))[0] || null,
     kfwAccountConfirmedByCredentials: evidence.some(note => note.hasKfwCredentials),
     kfwCredentialEvidenceNoteIds: evidence.filter(note => note.hasKfwCredentials).map(note => note.noteId),
@@ -748,7 +780,7 @@ export async function updatePipedriveDealFieldsByName({ dealId, updates, confirm
   return { dealId: id, results, mutated: results.some(item => item.mutated), fullyVerified: results.every(item => item.verified === true), source: 'iva-core-pipedrive-api' };
 }
 
-export async function transitionPipedriveFundingStageApi({ dealId, fromStage, toStage, confirmation } = {}) {
+export async function transitionPipedriveFundingStageApi({ dealId, fromStage, toStage, confirmation } = {}, authority) {
   assertConfirmedWrite(confirmation);
   const allowed = [
     { from: ['Angebot veröffentlicht', 'Angebot gesendet'], to: ['Antrag eingereicht / Förderunterlagen einreichen', 'Auftrag eingereicht / Förderunterlagen einreichen'] },
@@ -761,7 +793,20 @@ export async function transitionPipedriveFundingStageApi({ dealId, fromStage, to
   const fromMatches = structure.stages.filter(stage => rule.from.some(value => normalize(value) === normalize(stage.name)));
   const toMatches = structure.stages.filter(stage => rule.to.some(value => normalize(value) === normalize(stage.name)));
   if (fromMatches.length !== 1 || toMatches.length !== 1) throw new Error('Pipedrive-Förderphase fehlt oder ist nicht eindeutig.');
-  return { dealId: String(dealId), ...(await updatePipedriveDealStage({ dealId, expectedStageId: fromMatches[0].id, targetStageId: toMatches[0].id, confirmation })), source: 'iva-core-pipedrive-api' };
+  return { dealId: String(dealId), ...(await updatePipedriveDealStage({ dealId, expectedStageId: fromMatches[0].id, targetStageId: toMatches[0].id, confirmation }, authority)), source: 'iva-core-pipedrive-api' };
+}
+
+export async function completePipedriveFundingHandoffApi(input = {}) {
+  assertConfirmedWrite(input.confirmation);
+  return completePipedriveFundingHandoff(input, {
+    readSnapshot: getPipedriveFundingSnapshot,
+    transition: data => transitionPipedriveFundingStageApi(data, FUNDING_HANDOFF_AUTHORITY),
+    writeNote: data => createPipedriveDealNote(data, FUNDING_HANDOFF_AUTHORITY),
+  });
+}
+
+export async function listPipedriveFundingHandoffs() {
+  return { handoffs: await listPendingFundingHandoffs() };
 }
 
 export async function markPipedriveFundingDealWonApi(input = {}, dependencies = {}) {
@@ -818,29 +863,38 @@ function assertConfirmedWrite(confirmation) {
   if (confirmation !== PIPEDRIVE_WRITE_CONFIRMATION) throw new Error(`Pipedrive-Schreibbestätigung fehlt: „${PIPEDRIVE_WRITE_CONFIRMATION}“.`);
 }
 
-export async function createPipedriveDealNote({ dealId, text, confirmation } = {}) {
+export async function createPipedriveDealNote({ dealId, text, confirmation, reconcileOnly = false } = {}, authority) {
   assertConfirmedWrite(confirmation);
+  if (isFundingCalculationNote(text) && authority !== FUNDING_HANDOFF_AUTHORITY) throw handoffRequired();
   const id = clean(dealId, 40);
-  const noteText = clean(text, 20_000).replace(IVA_NOTE_SUFFIX_PATTERN, '').trim();
+  const noteText = String(text || '').replace(/\u0000/g, '').replace(/\r\n?/g, '\n').replace(/[^\S\n]+/g, ' ').trim().slice(0, 20_000).replace(IVA_NOTE_SUFFIX_PATTERN, '').trim();
   if (!/^\d+$/.test(id) || !noteText) throw new Error('Deal-ID und Notiztext sind erforderlich.');
   const visible = `${noteText}\n${IVA_NOTE_SIGNATURE}`;
-  const current = await pipedriveRequest(`/api/v1/notes?deal_id=${id}&start=0&limit=500`);
-  const existing = (current.data || []).find(note => IVA_NOTE_SUFFIX_PATTERN.test(htmlText(note.content))
-    && htmlText(note.content).replace(IVA_NOTE_SUFFIX_PATTERN, '').trim() === htmlText(noteText));
-  if (existing) return { created: false, alreadyPresent: true, noteId: String(existing.id), verified: true };
-  const content = `<p>${escapeHtml(noteText).replace(/\n/g, '<br>')}</p><p>${IVA_NOTE_SIGNATURE}</p>`;
-  const created = await pipedriveRequest('/api/v1/notes', { method: 'POST', body: { deal_id: Number(id), content }, write: true });
-  const verifiedNotes = await pipedriveRequest(`/api/v1/notes?deal_id=${id}&start=0&limit=500`);
-  const verified = (verifiedNotes.data || []).find(note => htmlText(note.content) === htmlText(visible));
-  if (!verified) throw new Error('Pipedrive-Notiz wurde nach dem Speichern nicht bestätigt.');
-  return { created: true, alreadyPresent: false, noteId: String(verified.id || created.data?.id || ''), verified: true };
+  let writeAttempted = false;
+  try {
+    const current = await readCompletePipedriveV1Collection(`/api/v1/notes?deal_id=${id}`);
+    const existing = current.find(note => IVA_NOTE_SUFFIX_PATTERN.test(htmlText(note.content))
+      && htmlText(note.content).replace(IVA_NOTE_SUFFIX_PATTERN, '').trim() === htmlText(noteText));
+    if (existing) return { created: false, alreadyPresent: true, noteId: String(existing.id), verified: true, writeAttempted: false };
+    // An uncertain earlier POST must not be repeated just because the notes
+    // listing has not caught up. The durable handoff keeps this step pending.
+    if (reconcileOnly === true) return { created: false, alreadyPresent: false, noteId: null, verified: false, writeAttempted: false, reconcileOnly: true };
+    const content = `<p>${escapeHtml(noteText).replace(/\n/g, '<br>')}</p><p>${IVA_NOTE_SIGNATURE}</p>`;
+    writeAttempted = true;
+    const created = await pipedriveRequest('/api/v1/notes', { method: 'POST', body: { deal_id: Number(id), content }, write: true });
+    const verifiedNotes = await readCompletePipedriveV1Collection(`/api/v1/notes?deal_id=${id}`);
+    const verified = verifiedNotes.find(note => htmlText(note.content) === htmlText(visible));
+    if (!verified) throw new Error('Pipedrive-Notiz wurde nach dem Speichern nicht bestätigt.');
+    return { created: true, alreadyPresent: false, noteId: String(verified.id || created.data?.id || ''), verified: true, writeAttempted: true };
+  } catch (error) { error.writeAttempted = writeAttempted; throw error; }
 }
 
-export async function updatePipedriveDealStage({ dealId, expectedStageId, targetStageId, confirmation } = {}) {
+export async function updatePipedriveDealStage({ dealId, expectedStageId, targetStageId, confirmation } = {}, authority) {
   assertConfirmedWrite(confirmation);
   const id = clean(dealId, 40);
   const expected = Number(expectedStageId);
   const target = Number(targetStageId);
+  if (target === PIPEDRIVE_LAYOUT.stages.applyFunding.id && authority !== FUNDING_HANDOFF_AUTHORITY) throw handoffRequired();
   const allowedStages = new Set(Object.values(PIPEDRIVE_LAYOUT.stages).map(stage => stage.id));
   if (!/^\d+$/.test(id) || !allowedStages.has(expected) || !allowedStages.has(target) || expected === target) throw new Error('Ungültige oder nicht freigegebene Pipedrive-Phasenänderung.');
   const fundingTarget = [PIPEDRIVE_LAYOUT.stages.submitOrderDocuments.id, PIPEDRIVE_LAYOUT.stages.applyFunding.id].includes(target);

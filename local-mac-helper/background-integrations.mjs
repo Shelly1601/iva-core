@@ -110,6 +110,19 @@ export async function transitionPipedriveFundingStage({ dealId, fromStage, toSta
   return request(`/device-agent/${DEVICE_ID}/background/pipedrive/deals/${id}/funding-transition`, { method: 'POST', body: { fromStage, toStage }, timeoutMs: 60_000 });
 }
 
+export async function completePipedriveFundingHandoff({ dealId, documentReview, result, confirmApply = false } = {}) {
+  if (confirmApply !== true) throw new Error('Die Förderübergabe wurde nicht ausgeführt: confirmApply=true fehlt.');
+  const id = String(dealId || '');
+  if (!/^\d+$/.test(id)) throw new Error('Für die Förderübergabe fehlt eine gültige Deal-ID.');
+  return request(`/device-agent/${DEVICE_ID}/background/pipedrive/deals/${id}/funding-handoff`, {
+    method: 'POST', body: { documentReview, result }, timeoutMs: 90_000,
+  });
+}
+
+export async function listPipedriveFundingHandoffs() {
+  return request(`/device-agent/${DEVICE_ID}/background/pipedrive/funding-handoffs`);
+}
+
 export async function markPipedriveFundingDealWon({ dealId, approvalFileName, approvalEvidence, confirmApply = false } = {}) {
   if (confirmApply !== true) throw new Error('Der Deal wurde nicht auf „Gewonnen“ gesetzt: confirmApply=true fehlt.');
   const id = String(dealId || '').replace(/\D/g, '');

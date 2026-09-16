@@ -393,7 +393,7 @@ const mfhNote = buildFundingCalculationNote({
   result: { canUseForFundingNote: true, units: 2, estimatedGrant: 15_580, eligibleCosts: 41_000, noteSummary: '15.580,00 € - 30 % Gesamtgebäude / 46 % selbst genutzte WE', rulesAsOf: '2026-07-21', status: 'precheck-positive' },
   sources: ['KfW-Merkblatt 07/2026'],
 });
-assert.match(mfhNote, /^15\.580,00 €/);
+assert.match(mfhNote, /^Voraussichtlich 15\.580,00 € Förderung/);
 assert.match(mfhNote, /\(Notiz von Nadine\)$/);
 assert.equal(FUNDING_DONE_FOLDER, 'Fertig');
 const completedMailFixture = { messageId: 'outlook:fixture:7479', dealId: '7479', identityVerified: true, sourceReadComplete: true, expectedAttachmentCount: 1, attachmentProcessingVerified: true, uploadedFiles: [{id: '99', filename: 'Personalausweis.pdf', dealId: '7479', verified: true}], textRelevant: true, note: {id: '11', dealId: '7479', verified: true}, verifiedAt: new Date(Date.now()-1000).toISOString() };

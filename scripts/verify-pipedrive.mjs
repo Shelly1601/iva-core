@@ -45,6 +45,7 @@ let lastDealCustomFields = '';
 let failPersonFetch = false;
 let personValues = { id: 5, name: 'Max Muster', emails: [{ value: 'kunde@example.test', primary: true }], phones: [{ value: '+4912345', primary: true }] };
 let personPatches = 0;
+let paginateFunding = false, invalidFundingPage = false;
 
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, options = {}) => {
@@ -109,8 +110,12 @@ globalThis.fetch = async (input, options = {}) => {
     notes.push(note);
     return ok(note);
   }
-  if (url.pathname === '/api/v1/notes') return ok(notes);
-  if (url.pathname === '/api/v1/deals/123/files') return ok(files);
+  if (url.pathname === '/api/v1/notes' || url.pathname === '/api/v1/deals/123/files') {
+    const rows = url.pathname === '/api/v1/notes' ? notes : files;
+    if (!paginateFunding) return ok(rows);
+    const start = Number(url.searchParams.get('start') || 0), data = rows.slice(start, start + 2);
+    return json({ success: true, data, additional_data: { pagination: { more_items_in_collection: start + 2 < rows.length, next_start: invalidFundingPage ? start : start + 2 } } });
+  }
   if (url.pathname === '/api/v1/files/44/download') return new Response(Buffer.from('%PDF-pipedrive-test'), { status: 200, headers: { 'Content-Type': 'application/pdf' } });
   if (url.pathname === '/api/v1/files' && String(options.method || '').toUpperCase() === 'POST') {
     files.push({ id: 45, name: 'Korrektur.pdf' });
@@ -126,6 +131,8 @@ const {
   completePipedriveOAuth,
   createPipedriveAuthUrl,
   createPipedriveDealNote,
+  completePipedriveFundingHandoffApi,
+  listPipedriveFundingHandoffs,
   downloadPipedriveDealFile,
   getPipedriveDealBundle,
   getPipedriveFundingSnapshot,
@@ -228,6 +235,9 @@ try {
     /noch nicht freigeschaltet/,
   );
   process.env.PIPEDRIVE_WRITE_ENABLED = 'true';
+  await assert.rejects(createPipedriveDealNote({ dealId: 123, text: 'Voraussichtlich 30 % Förderung', confirmation: PIPEDRIVE_WRITE_CONFIRMATION }), { code: 'FUNDING_HANDOFF_REQUIRED' });
+  await assert.rejects(createPipedriveDealNote({ dealId: 123, text: 'Zuschussbetrag offen', confirmation: PIPEDRIVE_WRITE_CONFIRMATION }, true), { code: 'FUNDING_HANDOFF_REQUIRED' });
+  await assert.rejects(updatePipedriveDealStage({ dealId: 123, expectedStageId: 19, targetStageId: 18, confirmation: PIPEDRIVE_WRITE_CONFIRMATION }), { code: 'FUNDING_HANDOFF_REQUIRED' });
   dealValues.custom_fields[PIPEDRIVE_LAYOUT.dealFields.orderNumber.key] = null;
   const fieldBatch = await updatePipedriveDealFieldsByName({ dealId: 123, updates: [{ field: 'Auftragsnummer', value: 'HH-200' }], confirmation: PIPEDRIVE_WRITE_CONFIRMATION });
   assert.equal(fieldBatch.fullyVerified, true);
@@ -318,6 +328,34 @@ try {
 
   await assert.rejects(pipedriveRequest('/api/v1/files/1', { method: 'DELETE', write: true }), /Löschaktionen/);
   await assert.rejects(createPipedriveDealNote({ dealId: 123, text: 'Ohne Freigabe' }), /Schreibbestätigung/);
+
+  // The official wrapper is the only authority that can move 19 -> 18 and
+  // publish an amount note, with a fresh full review and a verified readback.
+  const { fundingHandoffSnapshotFingerprint } = await import('../local-mac-helper/funding-handoff-policy.mjs');
+  for (const [index, name] of ['Unterschriebenes Angebot.pdf', 'Personalausweis.pdf', 'Meldebescheinigung.pdf', 'Grundbuchauszug.pdf', 'KfW-Kontobestätigung.pdf'].entries()) files.push({ id: 100 + index, name });
+  for (const content of ['Weitere geprüfte Information', 'Ergänzung zur Unterlagenprüfung']) notes.push({ id: notes.length + 1, deal_id: 123, content });
+  paginateFunding = true; invalidFundingPage = true;
+  await assert.rejects(getPipedriveFundingSnapshot(123), /weitere Seiten/);
+  invalidFundingPage = false;
+  const reviewedSnapshot = await getPipedriveFundingSnapshot(123);
+  assert.equal(reviewedSnapshot.fileRecords.length, files.length);
+  assert.equal(reviewedSnapshot.noteCount, notes.length);
+  const documentReview = { dealId: '123', checkedAt: new Date().toISOString(), complete: true, sourceNotesChecked: true, incomeBonusRequested: false,
+    snapshotFingerprint: fundingHandoffSnapshotFingerprint(reviewedSnapshot),
+    documentEvidence: Object.fromEntries(['signed_offer', 'identity_card', 'registration_certificate', 'land_register', 'kfw_account_confirmation'].map(type => [type, 'present_in_pipedrive'])),
+    files: reviewedSnapshot.fileRecords.map(file => ({ fileId: file.id, readable: true, identityVerified: true })) };
+  const handoffResult = { canUseForFundingNote: true, units: 1, estimatedGrant: 9000, eligibleCosts: 30000, selfUsed: false, buildingBaseRate: 30, buildingBaseGrant: 9000, bonuses: { base: 30, climateSpeed: 0, income: 0 }, incomeBonusRequested: false };
+  const noteCountBeforeHandoff = notes.length;
+  const handoff = await completePipedriveFundingHandoffApi({ dealId: '123', documentReview, result: handoffResult, confirmation: PIPEDRIVE_WRITE_CONFIRMATION });
+  assert.equal(handoff.verified, true); assert.equal(handoff.stageVerified, true); assert.equal(dealStage, 18);
+  assert.equal(notes.length, noteCountBeforeHandoff + 1);
+  assert.match(notes.at(-1).content, /Voraussichtlich 30 % Förderung/);
+  assert.match(notes.at(-1).content, /Förderung \(9\.000,00 €\)<br>Grundförderung/);
+  const replay = await completePipedriveFundingHandoffApi({ dealId: '123', confirmation: PIPEDRIVE_WRITE_CONFIRMATION });
+  assert.equal(replay.alreadyPresent, true); assert.equal(notes.length, noteCountBeforeHandoff + 1);
+  assert.deepEqual((await listPipedriveFundingHandoffs()).handoffs, []);
+  const missingReconciliation = await createPipedriveDealNote({ dealId: '123', text: 'Noch nicht sichtbare Informationsnotiz', reconcileOnly: true, confirmation: PIPEDRIVE_WRITE_CONFIRMATION });
+  assert.equal(missingReconciliation.verified, false); assert.equal(notes.length, noteCountBeforeHandoff + 1);
 
   const authHeader = `Basic ${Buffer.from('iva-webhook:webhook-test-password').toString('base64')}`;
   assert.equal(authorizePipedriveWebhook(authHeader), true);

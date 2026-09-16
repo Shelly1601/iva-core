@@ -65,7 +65,7 @@ test('a ready send needs exact template plus customer, VP and source readback pr
   assert.throws(() => validateFundingSendEnvelope({ input, prepared, evidence: { ...evidence, partnerAddressVerified: false } }), /eindeutig belegt/);
   assert.equal(FUNDING_WORKFLOW_POLICY.noteSuffix, '(Notiz von Nadine)');
   assert.throws(() => buildFundingCalculationNote({ result: { noteSummary: 'Förderhöhe noch offen.', estimatedGrant: null } }), /noch nicht vollständig/);
-  assert.match(buildFundingCalculationNote({ result: { canUseForFundingNote: true, eligibleCosts: 30000, estimatedGrant: 9000, noteSummary: '9.000 Euro Förderung.' } }), /^9.000 Euro Förderung\.[\s\S]*\(Notiz von Nadine\)$/);
+  assert.match(buildFundingCalculationNote({ result: { canUseForFundingNote: true, eligibleCosts: 30000, estimatedGrant: 9000, noteSummary: '9.000 Euro Förderung.' } }), /^Voraussichtlich 9\.000,00 € Förderung[\s\S]*\(Notiz von Nadine\)$/);
 });
 
 test('mail correlation does not confuse number substrings or a surname-only hint with a customer', () => {

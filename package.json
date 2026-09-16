@@ -25,7 +25,7 @@
     "test:credentials": "node scripts/verify-credential-broker.mjs",
     "test:display-sleep": "node scripts/verify-display-sleep-policy.mjs",
     "test:device-control": "node scripts/verify-device-control.mjs",
-    "test:funding-reliability": "node scripts/verify-funding-workflow-reliability.mjs && node scripts/verify-funding-calculation.mjs && node scripts/verify-funding-notes.mjs",
+    "test:funding-reliability": "node scripts/verify-funding-workflow-reliability.mjs && node scripts/verify-funding-calculation.mjs && node scripts/verify-funding-notes.mjs && node scripts/verify-funding-handoff.mjs",
     "test:right-display": "node scripts/verify-right-display.mjs",
     "test:manufacturer-leads": "node scripts/verify-manufacturer-lead-operations.mjs",
     "test:meincrm-panasonic": "node scripts/verify-meincrm-panasonic-leads.mjs",
