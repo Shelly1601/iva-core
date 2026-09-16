@@ -60,22 +60,49 @@ function euro(value) {
   return `${amount.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 }
 
-export function buildFundingCalculationNote({ result = {}, sources = [], openPoints = [], status = '' } = {}) {
+function percent(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? `${value.toLocaleString('de-DE', { maximumFractionDigits: 2 })} %` : 'offen';
+}
+
+export function buildFundingCalculationNote({ result = {}, openPoints = [] } = {}) {
   if (result.canUseForFundingNote !== true || typeof result.estimatedGrant !== 'number' || !Number.isFinite(result.estimatedGrant) || typeof result.eligibleCosts !== 'number' || !Number.isFinite(result.eligibleCosts)) throw new Error('Die Förderberechnung ist noch nicht vollständig belegt und darf nicht als Betragsnotiz verwendet werden.');
   const units = Math.max(1, Math.floor(Number(result.units) || 1));
-  const summary = clean(result.noteSummary, 1200);
-  const firstLine = units > 1 && !/^[\d.]+,\d{2}\s*€/.test(summary)
-    ? `${euro(result.estimatedGrant)} voraussichtliche Förderung – ${summary}`
-    : summary;
+  const bonuses = result.bonuses || {};
+  const structured = typeof bonuses.base === 'number' && Number.isFinite(bonuses.base);
+  const displayedRate = result.selfUsed === true ? result.selfUsedUnitRate : result.buildingBaseRate;
+  const estimate = result.calculationComplete === false ? 'vorläufige Förderung; weitere Boni offen' : 'voraussichtliche Förderung';
+  const summary = clean(result.noteSummary, 240);
+  const firstLine = structured
+    ? units > 1 ? `${euro(result.estimatedGrant)} ${estimate} (${units} Wohneinheiten)`
+      : `${percent(displayedRate ?? result.rate)} ${estimate} (${euro(result.estimatedGrant)})`
+    : units > 1 && !/^[\d.]+,\d{2}\s*€/.test(summary) ? `${euro(result.estimatedGrant)} voraussichtliche Förderung – ${summary}` : summary;
   if (!firstLine) throw new Error('Die wichtigste Förderaussage für die erste Notizzeile fehlt.');
-  const details = [
-    `Status: ${clean(status || (result.status === 'precheck-positive' ? 'GRÜN' : 'GELB'), 40)}`,
-    `Förderfähige Kosten: ${euro(result.eligibleCosts)}`,
-    `Voraussichtlicher Zuschuss: ${euro(result.estimatedGrant)}`,
-    `Regelstand: ${clean(result.rulesAsOf || result.rulesVersion, 120) || 'offen'}`,
-    ...(Array.isArray(sources) && sources.length ? [`Geprüfte Quellen: ${sources.map(item => clean(item, 300)).filter(Boolean).join(' · ')}`] : []),
-    ...(Array.isArray(openPoints) && openPoints.length ? [`Offene Prüfpunkte: ${openPoints.map(item => clean(item, 300)).filter(Boolean).join(' · ')}`] : []),
-  ];
+  const details = [];
+  if (structured) {
+    const income = result.incomeBonusRequested === true ? percent(bonuses.income) : 'nicht beantragt';
+    if (units > 1) {
+      details.push(`Grundförderung: ${percent(bonuses.base)} = ${euro(result.buildingBaseGrant)}.`);
+      if (result.selfUsed !== false) {
+        const openBonus = bonuses.climateSpeed === null || (result.incomeBonusRequested === true && bonuses.income === null) || result.bonusStatus?.allocation === 'open';
+        const additional = openBonus && !result.selfUsedUnitAdditionalGrant ? '; noch nicht eingerechnet'
+          : Number.isFinite(result.selfUsedUnitAdditionalGrant) ? ` = ${euro(result.selfUsedUnitAdditionalGrant)}` : '';
+        details.push(`Boni selbst genutzte Wohnung: Klima ${percent(bonuses.climateSpeed)} · Einkommen ${income}${additional}${result.unitRateCapped ? ` (insgesamt auf ${percent(result.maximumUnitRate)} begrenzt)` : ''}.`);
+      }
+    } else {
+      details.push(`Grundförderung ${percent(bonuses.base)} · Klima ${percent(bonuses.climateSpeed)} · Einkommen ${income}${result.unitRateCapped ? `; insgesamt auf ${percent(result.maximumUnitRate)} begrenzt` : ''}.`);
+    }
+    if (result.incomeBonusRequested === true) {
+      const child = result.eligibleMinorChild === true ? 'berücksichtigt' : result.eligibleMinorChild === false ? 'nein' : 'offen';
+      details.push(`Kind unter 18: ${child}.`);
+    }
+  }
+  // Source references and procedural approval checks stay in the calculation record.
+  // The CRM note shows only the estimate, its components and actual bonus questions.
+  const questions = [...(Array.isArray(result.bonusQuestions) ? result.bonusQuestions : []), ...(Array.isArray(openPoints) ? openPoints : [])]
+    .map(item => clean(item, 160)).filter(Boolean)
+    .filter(item => !/Antragsdatum|BzA|Regelstand|https?:\/\//i.test(item));
+  const distinctQuestions = [...new Set(questions)].slice(0, 3);
+  if (distinctQuestions.length) details.push(`Offen: ${distinctQuestions.join(' · ')}`);
   return [firstLine, ...details, FUNDING_WORKFLOW_POLICY.noteSuffix].join('\n');
 }
 

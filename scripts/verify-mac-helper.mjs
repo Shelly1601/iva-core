@@ -646,10 +646,10 @@ try {
 const workflowWindowSource = await readFile(new URL('../local-mac-helper/workflow-window.mjs', import.meta.url), 'utf8');
 assert.match(workflowWindowSource, /keepDisplayAwake:\s*true/);
 assert.match(workflowWindowSource, /sleepDisplays:\s*true/);
-assert.match(workflowWindowSource, /requestDisplaySleepAfterRun/);
+assert.match(workflowWindowSource, /withMacWakeGuard/);
 assert.doesNotMatch(workflowWindowSource, /execFileAsync\('\/usr\/bin\/pmset'/);
-assert.match(workflowWindowSource, /caffeinate', \['-dimsu'/);
-assert.ok(workflowWindowSource.indexOf("spawn('/usr/bin/caffeinate'") < workflowWindowSource.indexOf('const task = spawn(options.command'));
+assert.match(workflowWindowSource, /onDisplaySleepDecision/);
+assert.ok(workflowWindowSource.indexOf('await withMacWakeGuard') < workflowWindowSource.indexOf('const task = spawn(options.command'));
 
 console.log('PASS IVA Mac Helper: sichere Förder-Prüfläufe, Outlook-Entwürfe, Batch-Rückgängig und gesperrte Versand-/Pipedrive-Aktionen.');
 

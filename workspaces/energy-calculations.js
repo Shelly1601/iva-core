@@ -1,6 +1,6 @@
 const HEAT_LOAD_RULES_VERSION = 'iva-heat-load-preplan-1.0';
 export const FUNDING_RULES_VERSION = 'kfw-458-2026-07-21';
-export const FUNDING_RULES_CHECKED_AT = '2026-09-15';
+export const FUNDING_RULES_CHECKED_AT = '2026-09-16';
 const FUNDING_RULES_START = '2026-07-21';
 const FUNDING_SCHEDULE_END = '2030-12-31';
 
@@ -202,10 +202,10 @@ export function buildKfw458NoteSummary(result = {}) {
   if (result.canUseForFundingNote !== true || !Number.isFinite(result.estimatedGrant)) return `Förderhöhe noch nicht belastbar berechenbar: ${(result.blockers || []).slice(0, 3).join(' ')}`;
   const units = Math.max(1, Math.floor(numberValue(result.units) || 1));
   const bonuses = result.bonuses || {};
-  const child = result.incomeBonusRequested !== true ? 'nicht angesetzt' : result.eligibleMinorChild === true ? 'ja (+10.000 EUR Einkommensgrenze)' : 'nein';
-  const income = bonuses.income > 0 ? formatPercent(bonuses.income) : result.incomeBonusRequested === false ? 'nicht beantragt' : 'nein';
-  const climate = bonuses.climateSpeed > 0 ? formatPercent(bonuses.climateSpeed) : 'nein';
-  const components = `Grund ${formatPercent(bonuses.base || 0)} | Einkommen ${income} | Kind u18: ${child} | Klimageschwindigkeit ${climate}`;
+  const child = result.eligibleMinorChild === null ? 'offen' : result.eligibleMinorChild === true ? 'ja' : 'nein';
+  const income = bonuses.income === null ? 'offen' : bonuses.income > 0 ? formatPercent(bonuses.income) : result.incomeBonusRequested !== true ? 'nicht beantragt' : 'nein';
+  const climate = bonuses.climateSpeed === null ? 'offen' : bonuses.climateSpeed > 0 ? formatPercent(bonuses.climateSpeed) : 'nein';
+  const components = `Grund ${formatPercent(bonuses.base || 0)} | Tempo ${climate} | Einkommen ${income}${result.incomeBonusRequested === true ? ` | Kinder: ${child}` : ''}${result.estimateOnly ? ' | vorläufig' : ''}`;
   if (units > 1 && result.selfUsed === true) {
     return `${round(result.estimatedGrant, 2).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € - ${formatPercent(result.buildingBaseRate || 0)} Gesamtgebäude / ${formatPercent(result.selfUsedUnitRate || 0)} selbst genutzte WE - ${components}${result.unitRateCapped ? ` | gedeckelt auf ${formatPercent(result.maximumUnitRate)}` : ''}`;
   }
@@ -217,17 +217,22 @@ export function buildKfw458NoteSummary(result = {}) {
 }
 
 export function calculateKfw458Funding(input = {}, now = new Date()) {
-  const blockers = [], rateIssues = [], checks = [];
+  const blockers = [], rateIssues = [], bonusQuestions = [], checks = [];
+  const supplied = value => value !== undefined && value !== null && value !== '';
+  const bonusQuestion = text => { if (!bonusQuestions.includes(text)) bonusQuestions.push(text); };
   const applicationDate = validDateValue(input.applicationDate);
   const applicationDay = fundingDateKey(input.applicationDate);
   const effectiveDate = fundingDateKey(now);
   const supplementary = input.applicationKind === 'supplementary';
-  const rulesDay = supplementary ? fundingDateKey(input.baseApplicationDate) : applicationDay;
-  if (!applicationDay) rateIssues.push('Antragsdatum fehlt oder ist ungültig; der KfW-Regelstand kann nicht sicher zugeordnet werden.');
-  if (supplementary && !rulesDay) rateIssues.push('Beim Zusatzantrag fehlt das Eingangsdatum des Basisantrags für die geltenden Fördersätze.');
+  const baseApplicationDay = fundingDateKey(input.baseApplicationDate);
+  const rulesDateAssumed = supplementary ? !supplied(input.baseApplicationDate) : !supplied(input.applicationDate);
+  const rulesDay = (supplementary ? baseApplicationDay : applicationDay) || (rulesDateAssumed ? effectiveDate : null);
+  if (supplied(input.applicationDate) && !applicationDay) rateIssues.push('Das eingetragene Antragsdatum ist ungültig.');
+  if (supplementary && supplied(input.baseApplicationDate) && !baseApplicationDay) rateIssues.push('Das eingetragene Datum des Basisantrags ist ungültig.');
+  if (rulesDateAssumed) checks.push('Vorläufige Berechnung nach aktuellem Regelstand; kein Antragsdatum unterstellt.');
   if (rulesDay && rulesDay < FUNDING_RULES_START) rateIssues.push('Für Anträge bis einschließlich 20.07.2026 muss das frühere KfW-Regelwerk separat berechnet werden.');
   if (rulesDay && rulesDay > FUNDING_SCHEDULE_END) rateIssues.push('Für diesen Antragszeitpunkt muss ein neuer KfW-Regelstand verifiziert werden.');
-  if (supplementary && rulesDay && applicationDay && rulesDay > applicationDay) rateIssues.push('Der Basisantrag darf nicht nach dem Zusatzantrag eingehen.');
+  if (supplementary && baseApplicationDay && applicationDay && baseApplicationDay > applicationDay) rateIssues.push('Der Basisantrag darf nicht nach dem Zusatzantrag eingehen.');
   if (input.rulesVersion && input.rulesVersion !== FUNDING_RULES_VERSION) rateIssues.push('Der übergebene KfW-Regelstand stimmt nicht mit dem geprüften Regelwerk überein.');
   if (!effectiveDate) rateIssues.push('Das Datum der Berechnung ist ungültig.');
   const rulesSupported = Boolean(rulesDay && rulesDay >= FUNDING_RULES_START && rulesDay <= FUNDING_SCHEDULE_END);
@@ -237,37 +242,43 @@ export function calculateKfw458Funding(input = {}, now = new Date()) {
   const suppliedUnits = numberValue(input.units);
   const unitsKnown = suppliedUnits !== null && Number.isSafeInteger(suppliedUnits) && suppliedUnits >= 1;
   const units = unitsKnown ? suppliedUnits : 1;
-  const projectCosts = Math.max(0, numberValue(input.projectCosts) || 0);
+  const projectCosts = Math.max(0, numberValue(input.projectCosts) ?? numberValue(input.offerGrossPrice) ?? numberValue(input.offerPrice) ?? 0);
+  const costBasis = input.eligibleCostsConfirmedByBza === true ? 'bza' : 'offer';
   const ageYears = numberValue(input.existingBuildingAgeYears);
   const privateOwner = input.applicantType === 'private-owner';
   const selfUsedKnown = typeof input.selfUsed === 'boolean';
   const selfUsed = input.selfUsed === true;
-  const incomeBonusRequested = typeof input.incomeBonusRequested === 'boolean' ? input.incomeBonusRequested : null;
-  const incomeYear = applicationDate?.getUTCFullYear();
+  const incomeBonusRequested = input.incomeBonusRequested === true;
+  const incomeReferenceDay = applicationDay || effectiveDate;
+  const incomeYear = validDateValue(incomeReferenceDay)?.getUTCFullYear();
   const requiredTaxYears = incomeYear ? [incomeYear - 3, incomeYear - 2] : [];
-  let verifiedIncome = null, verifiedMinorChild = false, incomeEvidenceComplete = false;
-  if (selfUsed && incomeBonusRequested === null) rateIssues.push('Bitte ausdrücklich festhalten, ob der Einkommensbonus beantragt wird. Eine Einkommensangabe allein ist kein Antrag.');
+  let verifiedIncome = null, verifiedMinorChild = false, incomeEvidenceComplete = false, incomeBonusKnown = !incomeBonusRequested || selfUsedKnown && !selfUsed;
+  if (!selfUsedKnown) bonusQuestion('Eigennutzung offen.');
   if (selfUsed && incomeBonusRequested === true) {
     const evidence = input.incomeEvidence || {}, assessments = Array.isArray(evidence.assessments) ? evidence.assessments : [];
     const annual = requiredTaxYears.map(year => assessments.filter(row => row?.year === year && row.verified === true && typeof row.sourceId === 'string' && row.sourceId.trim() && typeof row.householdTaxableIncome === 'number' && Number.isFinite(row.householdTaxableIncome)));
     incomeEvidenceComplete = evidence.householdComplete === true && annual.length === 2 && annual.every(rows => rows.length === 1);
-    if (!incomeEvidenceComplete) rateIssues.push(`Für den beantragten Einkommensbonus fehlen vollständig geprüfte Einkommensteuerbescheide des relevanten Haushalts für ${requiredTaxYears.join(' und ') || 'die erforderlichen Bezugsjahre'}.`);
+    let incomeInputsValid = incomeEvidenceComplete;
+    if (!incomeEvidenceComplete) bonusQuestion(`Einkommensbonus: Steuerbescheide ${requiredTaxYears.join('/')} vollständig prüfen.`);
     else {
       verifiedIncome = annual[0][0].householdTaxableIncome / 2 + annual[1][0].householdTaxableIncome / 2;
       const suppliedIncome = numberValue(input.householdIncome);
-      if (suppliedIncome !== null && Math.abs(suppliedIncome - verifiedIncome) > 0.005) rateIssues.push('Das eingetragene Haushaltseinkommen weicht vom Durchschnitt der geprüften Steuerbescheide ab.');
+      if (suppliedIncome !== null && Math.abs(suppliedIncome - verifiedIncome) > 0.005) { incomeInputsValid = false; bonusQuestion('Einkommensbonus: widersprüchliche Einkommensangaben klären.'); }
       checks.push(`Haushalts-zvE aus vollständig erfassten Steuerbescheiden ${requiredTaxYears.join('/')} gemittelt.`);
     }
-    if (typeof input.eligibleMinorChild !== 'boolean') rateIssues.push('Es ist noch offen, ob ein kindergeldberechtigtes Kind unter 18 Jahren mit Hauptwohnsitz im Haushalt lebt.');
+    if (typeof input.eligibleMinorChild !== 'boolean') { incomeInputsValid = false; bonusQuestion('Einkommensbonus: Kind unter 18 im Haushalt klären.'); }
     if (input.eligibleMinorChild === true) {
       const child = input.childEvidence || {};
-      verifiedMinorChild = child.verified === true && child.minor === true && child.childBenefitEligible === true && child.mainResidenceMatched === true && typeof child.sourceId === 'string' && Boolean(child.sourceId.trim()) && fundingDateKey(child.applicationDate) === applicationDay;
-      if (!verifiedMinorChild) rateIssues.push('Für den Familienzuschlag fehlen Nachweise zu Minderjährigkeit, Kindergeldberechtigung und Hauptwohnsitz zum Antragszeitpunkt.');
+      verifiedMinorChild = child.verified === true && child.minor === true && child.childBenefitEligible === true && child.mainResidenceMatched === true && typeof child.sourceId === 'string' && Boolean(child.sourceId.trim()) && fundingDateKey(child.applicationDate || child.asOf) === incomeReferenceDay;
+      if (!verifiedMinorChild) { incomeInputsValid = false; bonusQuestion('Einkommensbonus: Kinderangaben bestätigen.'); }
     }
-    if (supplementary && rulesDay && applicationDay && rulesDay.slice(0, 4) !== applicationDay.slice(0, 4)) rateIssues.push('Bei jahresübergreifendem Basis- und Zusatzantrag müssen die maßgeblichen Steuerbezugsjahre vor einer Einkommensbonus-Berechnung gesondert bestätigt werden.');
+    if (supplementary && baseApplicationDay && applicationDay && baseApplicationDay.slice(0, 4) !== applicationDay.slice(0, 4)) { incomeInputsValid = false; bonusQuestion('Einkommensbonus: Steuerbezugsjahre des Zusatzantrags bestätigen.'); }
+    incomeBonusKnown = incomeInputsValid;
   }
-  const climateBonus = selfUsed && input.climateBonusEligible === true && rulesSupported ? climateSpeedBonusRate(rulesDay) : 0;
-  const incomeBonus = selfUsed && incomeBonusRequested === true && incomeEvidenceComplete ? incomeBonusRate(verifiedIncome, verifiedMinorChild) : 0;
+  const climateBonusKnown = selfUsedKnown && (!selfUsed || typeof input.climateBonusEligible === 'boolean');
+  if (selfUsed && !climateBonusKnown) bonusQuestion('Heizungsart/Alter für Tempobonus klären.');
+  const climateBonus = climateBonusKnown ? selfUsed && input.climateBonusEligible === true && rulesSupported ? climateSpeedBonusRate(rulesDay) : 0 : null;
+  const incomeBonus = incomeBonusKnown ? selfUsed && incomeBonusRequested ? incomeBonusRate(verifiedIncome, verifiedMinorChild) : 0 : null;
   const baseBonus = privateOwner ? 30 : 0;
   const uncappedRate = baseBonus + climateBonus + incomeBonus;
   const maximumUnitRate = incomeBonus === 40 ? 80 : 70;
@@ -291,49 +302,53 @@ export function calculateKfw458Funding(input = {}, now = new Date()) {
       selfUsedUnitEligibleCosts = eligibleCosts / units;
     }
   }
-  const additionalUnitRate = Math.max(0, selfUsedUnitRate - buildingBaseRate);
+  const unitAllocationKnown = !selfUsed || units === 1 || buildingStructure === 'unpartitioned' || buildingStructure === 'weg' && ownershipShare !== null;
+  if (!unitAllocationKnown) bonusQuestion(buildingStructure === 'weg' ? 'Miteigentumsanteil für persönliche Boni klären.' : 'WEG oder ungeteiltes Mehrfamilienhaus klären.');
+  const additionalUnitRate = unitAllocationKnown ? Math.max(0, selfUsedUnitRate - buildingBaseRate) : 0;
   const selfUsedUnitAdditionalGrant = round(selfUsedUnitEligibleCosts * additionalUnitRate / 100, 2);
   const amount = round(buildingBaseGrant + selfUsedUnitAdditionalGrant, 2);
   const effectiveBuildingRate = eligibleCosts > 0 ? round(amount / eligibleCosts * 100, 2) : 0;
   if (!privateOwner) blockers.push('Programm 458 richtet sich hier an private Eigentümerinnen und Eigentümer von Wohngebäuden.');
   else checks.push('Private Eigentümerschaft angegeben.');
   if (!unitsKnown) blockers.push('Die Anzahl der abgeschlossenen Wohneinheiten ist nicht eindeutig belegt.');
-  if (!selfUsedKnown) blockers.push('Eigennutzung oder Vermietung ist nicht eindeutig belegt.');
-  if (units > 1 && !buildingStructure) blockers.push('Bei mehreren Wohneinheiten fehlt die eindeutige Einordnung als WEG oder ungeteiltes Mehrfamilienhaus.');
-  if (selfUsed && typeof input.climateBonusEligible !== 'boolean') blockers.push('Die Voraussetzungen des Klimageschwindigkeitsbonus sind nicht eindeutig belegt.');
+
   if (ageYears === null) blockers.push('Alter des bestehenden Wohngebäudes bzw. Datum der Bauanzeige fehlt.');
   else if (ageYears < 5) blockers.push('Bauantrag/Bauanzeige des bestehenden Wohngebäudes muss zum Antragszeitpunkt mindestens fünf Jahre zurückliegen.');
   else checks.push('Mindestalter des bestehenden Gebäudes erfüllt.');
   if (projectCosts < 300) blockers.push('Die förderfähigen Projektkosten müssen mindestens 300 Euro brutto betragen.');
-  if (input.eligibleCostsConfirmedByBza !== true) blockers.push('Die förderfähigen Kosten sind noch nicht durch BzA/Fachunternehmen oder Energieeffizienz-Expertin/-Experten bestätigt.');
-  else checks.push('Förderfähige Kosten laut BzA bestätigt.');
-  if (selfUsed && units > 1 && buildingStructure === 'weg' && ownershipShare === null) {
-    rateIssues.push('Für den Zusatzantrag in einer WEG fehlt ein gültiger Miteigentumsanteil über 0 und bis 100 Prozent.');
-  }
+  checks.push(costBasis === 'bza' ? 'Förderfähige Kosten laut BzA bestätigt.' : 'Angebotspreis als vorläufige Kostenbasis verwendet und auf den Förderhöchstbetrag begrenzt.');
   if (input.contractConditional !== true) blockers.push('Der Liefer-/Leistungsvertrag muss die Förderzusage als aufschiebende oder auflösende Bedingung enthalten.');
   if (input.applicationBeforeStart !== true) blockers.push('Der Antrag muss vor Vorhabenbeginn gestellt werden.');
   if (input.hydraulicBalancingPlanned !== true) blockers.push('Hydraulischer Abgleich bzw. die geforderte Optimierung der Heizungsanlage ist noch nicht bestätigt.');
-  if (!unitsKnown || !selfUsedKnown || !privateOwner || projectCosts < 300 || units > 1 && !buildingStructure) rateIssues.push('Die grundlegenden Angaben zu Eigentümerschaft, Wohneinheiten, Nutzung, Gebäudeart oder Kosten sind noch nicht berechenbar.');
-  if (selfUsed && typeof input.climateBonusEligible !== 'boolean') rateIssues.push('Die Bonusrate kann ohne geklärten Klimageschwindigkeitsbonus nicht berechnet werden.');
+  if (!unitsKnown || !privateOwner || projectCosts < 300) rateIssues.push('Eigentümerschaft, Wohneinheiten oder Angebotspreis klären.');
   if (input.allUnitsAffected === false || Number(input.previousEligibleCosts || 0) > 0) rateIssues.push('Teilanlagen und bereits ausgeschöpfte Gebäudekostengrenzen benötigen eine gesonderte anteilige Berechnung.');
-  blockers.push(...rateIssues);
+  blockers.push(...rateIssues, ...bonusQuestions);
   const calculationReady = rateIssues.length === 0;
+  const knownExclusion = ageYears !== null && ageYears < 5 || input.contractConditional === false || input.applicationBeforeStart === false;
+  const calculationComplete = calculationReady && bonusQuestions.length === 0;
+  const estimateOnly = rulesDateAssumed || costBasis === 'offer' || !calculationComplete || blockers.length > 0;
   const result = {
-    status: blockers.length ? 'precheck-incomplete' : 'precheck-positive',
+    status: blockers.length ? 'precheck-incomplete' : estimateOnly ? 'precheck-estimate' : 'precheck-positive',
     rulesVersion: FUNDING_RULES_VERSION,
     rulesAsOf: '2026-07-21',
     rulesCheckedAt: FUNDING_RULES_CHECKED_AT,
     rulesApplicationDate: rulesDay,
+    rulesDateAssumed,
+    costBasis,
+    estimateOnly,
+    calculationComplete,
+    bonusQuestions,
+    bonusStatus: { climateSpeed: climateBonusKnown ? 'known' : 'open', income: incomeBonusKnown ? incomeBonusRequested ? 'known' : 'not-requested' : 'open', allocation: unitAllocationKnown ? 'known' : 'open' },
     publishedScheduleThrough: FUNDING_SCHEDULE_END,
     isProjection,
     calculationReady,
-    canUseForFundingNote: calculationReady && blockers.length === 0 && !isProjection,
+    canUseForFundingNote: calculationReady && !knownExclusion && !isProjection,
     calculatedAt: new Date().toISOString(),
     effectiveDate,
     applicationDate: applicationDate ? applicationDate.toISOString().slice(0, 10) : null,
     units,
-    selfUsed,
-    eligibleMinorChild: verifiedMinorChild,
+    selfUsed: selfUsedKnown ? selfUsed : null,
+    eligibleMinorChild: incomeBonusRequested && !incomeBonusKnown ? null : verifiedMinorChild,
     incomeBonusRequested,
     requiredTaxYears: selfUsed && incomeBonusRequested === true ? requiredTaxYears : [],
     verifiedHouseholdIncome: verifiedIncome,

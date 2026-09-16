@@ -16,6 +16,7 @@ const {
   prepareProjectWorkflowWindows,
   resolveProjectWorkflowResultStatus,
   startCodexTask,
+  startProjectWorkflowTask,
 } = await import('../local-mac-helper/codex-tasks.mjs');
 
 function fakeSpawn() {
@@ -56,6 +57,16 @@ try {
   assert.match(prompt, /Chrome und Outlook unmittelbar vor dem Start geöffnet, rechts platziert/);
   assert.match(prompt, /Ein mit partial abgeschlossenes Teilprotokoll beendet diesen Teilschritt ebenfalls/);
   assert.match(prompt, /ohne dieses Ergebnisprotokoll gilt ausdrücklich nicht als Erfolg/);
+
+  let amountRequest;
+  await startProjectWorkflowTask({ workflowId: 'kfw-funding-amount-morning', requestId: 'funding-short-note-test',
+    startTask: async input => { amountRequest = input; return { jobId: 'captured-only' }; } });
+  assert.match(amountRequest.prompt, /einschließlich menschlicher Notizen/,
+    'ein älterer Einkommensbonus-Wunsch in einer menschlichen Notiz darf nicht übersehen werden');
+  assert.match(amountRequest.prompt, /fehlende BzA-Bestätigung oder fehlendes Antragsdatum blockieren diese Übersicht nicht/);
+  assert.match(amountRequest.prompt, /Keine Quellen-, Datei-, Seiten- oder Regelstandblöcke/);
+  assert.match(amountRequest.prompt, /bekannte Grundförderung trotzdem nennen/);
+  assert.doesNotMatch(amountRequest.acceptanceCriteria.join(' '), /Keine Förderzahl.*Antragsdatum/);
 
   const codexTaskSource = await readFile(new URL('../local-mac-helper/codex-tasks.mjs', import.meta.url), 'utf8');
   const pipedriveSource = await readFile(new URL('../local-mac-helper/chrome-pipedrive.mjs', import.meta.url), 'utf8');

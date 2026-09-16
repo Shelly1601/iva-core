@@ -13,10 +13,12 @@ function income(amount, extra = {}) { return { incomeBonusRequested: true, eligi
   incomeEvidence: { householdComplete: true, assessments: [2023, 2024].map(year => ({ year, householdTaxableIncome: amount, verified: true, sourceId: 'fixture-assessment-' + year })) }, ...extra }; }
 function child() { return { eligibleMinorChild: true, childEvidence: { verified: true, minor: true, childBenefitEligible: true, mainResidenceMatched: true, sourceId: 'fixture-child-proof', applicationDate: '2026-08-01' } }; }
 const calc = patch => calculate({ ...basic, ...patch }, NOW);
+function incomeOpen(result) { assert.equal(result.calculationReady, true); assert.equal(result.canUseForFundingNote, true); assert.equal(result.calculationComplete, false); assert.equal(result.bonuses.income, null); assert.equal(result.estimatedGrant, 12880); assert.equal(result.rate, 46); assert.match(result.noteSummary, /Einkommen offen/); }
 function unavailable(result) { assert.equal(result.calculationReady, false); assert.equal(result.canUseForFundingNote, false); assert.equal(result.estimatedGrant, null); assert.equal(result.rate, null); assert.doesNotMatch(result.noteSummary, /0 %|0,00 €/); }
 
 test('income amount alone never applies a bonus; explicit no ignores stored income', () => {
-  unavailable(calc({ incomeBonusRequested: undefined, householdIncome: 20_000 }));
+  const unrequested = calc({ incomeBonusRequested: undefined, householdIncome: 20_000 });
+  assert.equal(unrequested.rate, 46); assert.equal(unrequested.incomeBonusRequested, false); assert.equal(unrequested.bonuses.income, 0);
   const result = calc({ householdIncome: 20_000, ...income(20_000), incomeBonusRequested: false });
   assert.equal(result.rate, 46); assert.equal(result.bonuses.income, 0); assert.equal(result.canUseForFundingNote, true); assert.match(result.noteSummary, /nicht beantragt/);
 });
@@ -29,12 +31,12 @@ test('income requires both correct tax years, complete household and actual proo
     { ...income(20_000).incomeEvidence, assessments: income(20_000).incomeEvidence.assessments.map(row => ({ ...row, sourceId: '' })) },
     { ...income(20_000).incomeEvidence, assessments: income(20_000).incomeEvidence.assessments.map(row => ({ ...row, verified: false })) },
     { ...income(20_000).incomeEvidence, assessments: income(20_000).incomeEvidence.assessments.map(row => ({ ...row, householdTaxableIncome: '20000' })) },
-    { ...income(20_000).incomeEvidence, assessments: [...income(20_000).incomeEvidence.assessments, income(20_000).incomeEvidence.assessments[0]] }]) unavailable(calc({ ...income(20_000), incomeEvidence: evidence }));
+    { ...income(20_000).incomeEvidence, assessments: [...income(20_000).incomeEvidence.assessments, income(20_000).incomeEvidence.assessments[0]] }]) incomeOpen(calc({ ...income(20_000), incomeEvidence: evidence }));
 });
 test('household mean is calculated from documents, differing supplied income is rejected', () => {
   const proof = income(20_000); proof.incomeEvidence.assessments[1].householdTaxableIncome = 50_000;
   const result = calc(proof); assert.equal(result.verifiedHouseholdIncome, 35_000); assert.equal(result.rate, 70);
-  unavailable(calc({ ...proof, householdIncome: 20_000 }));
+  incomeOpen(calc({ ...proof, householdIncome: 20_000 }));
 });
 test('income thresholds and family shift include exact boundaries and negative taxable income', () => {
   for (const [value, rate] of [[-100,40],[30000,40],[30000.01,30],[40000,30],[40000.01,10],[50000,10],[50000.01,0]]) {
@@ -47,10 +49,10 @@ test('highest income tier uses 80 percent ceiling, next tier uses 70 percent', (
   assert.equal(next.uncappedRate, 76); assert.equal(next.rate, 70); assert.equal(next.estimatedGrant, 19600);
 });
 test('child shift needs every child eligibility proof and matching application day', () => {
-  unavailable(calc({ ...income(35_000), eligibleMinorChild: undefined }));
-  unavailable(calc({ ...income(35_000), eligibleMinorChild: true }));
-  for (const field of ['verified', 'minor', 'childBenefitEligible', 'mainResidenceMatched']) unavailable(calc({ ...income(35_000), ...child(), childEvidence: { ...child().childEvidence, [field]: false } }));
-  unavailable(calc({ ...income(35_000), ...child(), childEvidence: { ...child().childEvidence, applicationDate: '2026-07-31' } }));
+  incomeOpen(calc({ ...income(35_000), eligibleMinorChild: undefined }));
+  incomeOpen(calc({ ...income(35_000), eligibleMinorChild: true }));
+  for (const field of ['verified', 'minor', 'childBenefitEligible', 'mainResidenceMatched']) incomeOpen(calc({ ...income(35_000), ...child(), childEvidence: { ...child().childEvidence, [field]: false } }));
+  incomeOpen(calc({ ...income(35_000), ...child(), childEvidence: { ...child().childEvidence, applicationDate: '2026-07-31' } }));
   assert.equal(calc({ ...income(35_000), ...child() }).rate, 80);
 });
 test('rental building gets only whole-building base, personal bonuses cannot leak to it', () => {
@@ -67,10 +69,15 @@ test('WEG bonus respects ownership share and separate per-unit ceiling', () => {
   assert.equal(result.buildingBaseGrant, 33300); assert.equal(result.selfUsedUnitEligibleCosts, 13320); assert.equal(result.selfUsedUnitAdditionalGrant, 6660); assert.equal(result.estimatedGrant, 39960);
   const capped = calc({ units: 7, projectCosts: 111000, buildingStructure: 'weg', ownershipSharePercent: 90, ...income(20_000) });
   assert.equal(capped.selfUsedUnitEligibleCosts, 15857.14); assert.equal(capped.selfUsedUnitAdditionalGrant, 7928.57);
-  for (const ownershipSharePercent of [undefined,0,-1,101]) unavailable(calc({ units: 7, buildingStructure: 'weg', ownershipSharePercent }));
+  for (const ownershipSharePercent of [undefined,0,-1,101]) {
+    const open = calc({ units: 7, buildingStructure: 'weg', ownershipSharePercent });
+    assert.equal(open.calculationReady, true); assert.equal(open.calculationComplete, false);
+    assert.equal(open.estimatedGrant, 8400); assert.equal(open.selfUsedUnitAdditionalGrant, 0);
+    assert.equal(open.bonusStatus.allocation, 'open');
+  }
 });
-test('date guards reject missing, invalid, old, unknown rule versions and unverified far future', () => {
-  for (const applicationDate of [undefined,'','2026-02-30','2026-8-1','2026-07-20','2031-01-01']) unavailable(calc({ applicationDate }));
+test('date guards reject invalid, old, unknown rule versions and unverified far future', () => {
+  for (const applicationDate of ['2026-02-30','2026-8-1','2026-07-20','2031-01-01']) unavailable(calc({ applicationDate }));
   unavailable(calc({ rulesVersion: 'unverified-next-version' }));
 });
 test('calendar boundaries determine speed rate and descending cost cap', () => {
@@ -88,15 +95,17 @@ test('historic August application uses its own date even when recalculated after
   const result = calculate(basic,new Date('2027-03-02T10:00:00Z'));
   assert.equal(result.eligibleCostCap,28000); assert.equal(result.bonuses.climateSpeed,16);
 });
-test('supplementary application uses base date; missing or impossible base is blocked', () => {
+test('supplementary application uses base date; missing base is provisional, impossible base remains blocked', () => {
   const result = calc({ applicationKind:'supplementary',applicationDate:'2027-02-01',baseApplicationDate:'2026-08-01',units:2,buildingStructure:'unpartitioned' });
   assert.equal(result.bonuses.climateSpeed,16); assert.equal(result.eligibleCostCap,43000);
-  unavailable(calc({ applicationKind:'supplementary' }));
+  const noBaseDate = calc({ applicationKind:'supplementary' });
+  assert.equal(noBaseDate.canUseForFundingNote,true); assert.equal(noBaseDate.rulesDateAssumed,true); assert.equal(noBaseDate.rulesApplicationDate,'2026-09-15');
   unavailable(calc({ applicationKind:'supplementary',baseApplicationDate:'2026-09-01' }));
-  unavailable(calc({ ...income(20000),applicationKind:'supplementary',applicationDate:'2027-02-01',baseApplicationDate:'2026-08-01' }));
+  const crossYear = calc({ ...income(20000),applicationKind:'supplementary',applicationDate:'2027-02-01',baseApplicationDate:'2026-08-01' });
+  assert.equal(crossYear.calculationReady,true); assert.equal(crossYear.bonuses.income,null); assert.equal(crossYear.estimatedGrant,12880);
 });
 test('partial systems, consumed prior cap and incomplete essential data do not produce invented grants', () => {
-  for (const patch of [{ allUnitsAffected:false },{ previousEligibleCosts:100 },{ units:0 },{ units:1.5 },{ units:3 },{ projectCosts:299 },{ selfUsed:undefined },{ climateBonusEligible:undefined },{ applicantType:'other' }]) unavailable(calc(patch));
+  for (const patch of [{ allUnitsAffected:false },{ previousEligibleCosts:100 },{ units:0 },{ units:1.5 },{ projectCosts:299 },{ applicantType:'other' }]) unavailable(calc(patch));
 });
 test('open BzA and contract prerequisites keep calculation separate from approval', () => {
   const result=calc({ eligibleCostsConfirmedByBza:false,contractConditional:false });
@@ -116,7 +125,52 @@ test('funding UI keeps unknown fields null and renders them as open rather than 
   vm.runInContext(js.slice(js.indexOf('function collectEnergyData('),js.indexOf('function collect()')),context);
   const saved=vm.runInContext('collectEnergyData()',context); assert.equal(saved.funding.allUnitsAffected,false); assert.equal(saved.funding.previousEligibleCosts,4000);
   vm.runInContext(js.slice(js.indexOf('function calcValue('),js.indexOf('async function calculateEnergy(')),context);
-  context.result=calc({incomeBonusRequested:undefined}); vm.runInContext('renderFundingResult(result)',context);
+  context.result=calc({units:undefined}); vm.runInContext('renderFundingResult(result)',context);
   const text=node=>[node.textContent,...node.children.flatMap(text)].join(' ');
   assert.match(text(fields.fundingResult),/Noch offen/); assert.doesNotMatch(text(fields.fundingResult),/0,00 €|0 %/);
+});
+
+
+test('offer alone is an explicit provisional cost basis without BzA or application day', () => {
+  for (const applicationDate of [undefined, null, '']) {
+    const result = calc({ projectCosts:41102.17, eligibleCostsConfirmedByBza:false, applicationDate });
+    assert.equal(result.calculationReady,true); assert.equal(result.canUseForFundingNote,true);
+    assert.equal(result.eligibleCosts,28000); assert.equal(result.estimatedGrant,12880);
+    assert.equal(result.applicationDate,null); assert.equal(result.rulesDateAssumed,true);
+    assert.equal(result.rulesApplicationDate,'2026-09-15'); assert.equal(result.costBasis,'offer');
+    assert.equal(result.estimateOnly,true); assert.match(result.noteSummary,/vorläufig/);
+    assert.equal(result.blockers.some(text=>/BzA|Antragsdatum/.test(text)),false);
+  }
+  const lowerOffer = calc({projectCosts:undefined,offerGrossPrice:'20.000,00',eligibleCostsConfirmedByBza:false,applicationDate:undefined});
+  assert.equal(lowerOffer.eligibleCosts,20000); assert.equal(lowerOffer.estimatedGrant,9200);
+});
+
+test('unknown self-use preserves base funding and leaves personal bonuses open', () => {
+  const result = calc({units:2,projectCosts:41102.17,selfUsed:undefined,buildingStructure:undefined,eligibleCostsConfirmedByBza:false,applicationDate:undefined});
+  assert.equal(result.canUseForFundingNote,true); assert.equal(result.calculationComplete,false);
+  assert.equal(result.selfUsed,null); assert.equal(result.bonuses.base,30); assert.equal(result.bonuses.climateSpeed,null);
+  assert.equal(result.eligibleCostCap,43000); assert.equal(result.buildingBaseGrant,12330.65);
+  assert.equal(result.estimatedGrant,12330.65); assert.equal(result.selfUsedUnitAdditionalGrant,0);
+  assert.match(result.noteSummary,/Tempo offen/); assert.deepEqual(result.bonusQuestions,['Eigennutzung offen.']);
+});
+
+test('unconfirmed administrative prerequisites do not hide the amount, known exclusions do', () => {
+  const result = calc({existingBuildingAgeYears:undefined,contractConditional:undefined,applicationBeforeStart:undefined,hydraulicBalancingPlanned:undefined,eligibleCostsConfirmedByBza:false});
+  assert.equal(result.calculationReady,true); assert.equal(result.canUseForFundingNote,true); assert.equal(result.estimateOnly,true);
+  for (const patch of [{existingBuildingAgeYears:4},{contractConditional:false},{applicationBeforeStart:false}]) assert.equal(calc(patch).canUseForFundingNote,false);
+});
+
+test('missing date uses actual calculation day for rates and evidence, without creating an application date', () => {
+  const later=calculate({...basic,applicationDate:undefined},new Date('2027-02-02T12:00:00Z'));
+  assert.equal(later.eligibleCostCap,27250); assert.equal(later.bonuses.climateSpeed,12); assert.equal(later.applicationDate,null);
+  const withChild=calc({...income(35000),...child(),applicationDate:undefined,childEvidence:{...child().childEvidence,applicationDate:undefined,asOf:'2026-09-15'}});
+  assert.equal(withChild.bonuses.income,40); assert.equal(withChild.requiredTaxYears.join(','),'2023,2024');
+  const undated=calc({...income(35000),...child(),applicationDate:undefined,childEvidence:{...child().childEvidence,applicationDate:undefined}});
+  assert.equal(undated.bonuses.income,null); assert.equal(undated.estimatedGrant,12880);
+});
+
+
+test('expired efficiency bonus and proposed value creation bonus are not added to current rates', () => {
+  const result=calc({efficiencyBonusEligible:true,naturalRefrigerant:true,valueCreationBonusEligible:true,euManufactured:true});
+  assert.deepEqual(result.bonuses,{base:30,climateSpeed:16,income:0}); assert.equal(result.rate,46);
 });
