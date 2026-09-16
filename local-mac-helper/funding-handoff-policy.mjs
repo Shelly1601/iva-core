@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 import { missingFundingRequiredFields } from './funding-required-fields.mjs';
+import { fundingApplicationRequiredDocumentIds } from './funding-document-requirements.mjs';
 
 export const FUNDING_HANDOFF_SOURCE = 'Auftrag eingereicht / Förderunterlagen einreichen';
 export const FUNDING_HANDOFF_TARGET = 'Förderung beantragen';
 export const FUNDING_HANDOFF_REVIEW_MAX_AGE_MS = 30 * 60_000;
-const requiredDocuments = ['signed_offer', 'identity_card', 'registration_certificate', 'land_register', 'kfw_account_confirmation'];
 const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
 export const fundingHandoffError = (code, message) => Object.assign(new Error(message), { code: `FUNDING_HANDOFF_${code}`, status: 409 });
 
@@ -43,11 +43,13 @@ export function validateFundingHandoffReview({ dealId, snapshot, documentReview,
     || reviewed.length !== files.length || new Set(reviewed.map(file => clean(file.fileId))).size !== reviewed.length
     || files.some(file => !reviewed.some(item => clean(item.fileId) === clean(file.id) && item.readable === true && item.identityVerified === true)))
     throw fundingHandoffError('UNREADABLE_DOCUMENTS', 'Alle aktuellen Dealdateien müssen vollständig gelesen, lesbar und eindeutig dem Kunden zugeordnet sein.');
-  const required = [...requiredDocuments, ...(review.incomeBonusRequested ? ['tax_assessment_2023', 'tax_assessment_2024'] : [])];
+  const required = fundingApplicationRequiredDocumentIds(review);
   if (required.some(type => review.documentEvidence?.[type] !== 'present_in_pipedrive'))
     throw fundingHandoffError('MISSING_DOCUMENTS', 'Erforderliche Förderunterlagen fehlen oder sind noch nicht lesbar im Deal bestätigt. Vorher wird keine Förderhöhen-Notiz geschrieben.');
   const fingerprint = fundingHandoffSnapshotFingerprint(snapshot);
   if (review.snapshotFingerprint !== fingerprint) throw fundingHandoffError('CHANGED_DOCUMENTS', 'Dealangaben oder Dateien haben sich seit der Unterlagenprüfung geändert. Bitte erneut vollständig prüfen.');
   return { dealId: id, fingerprint, checkedAt: new Date(checkedAt).toISOString(), incomeBonusRequested: review.incomeBonusRequested,
-    fileIds: files.map(file => clean(file.id)), requiredDocumentIds: required };
+    fileIds: files.map(file => clean(file.id)), requiredDocumentIds: required,
+    applicationOwnershipDocument: required.includes('land_register_notification') ? 'land_register_notification' : 'land_register',
+    payoutOutstandingDocumentIds: required.includes('land_register_notification') ? ['land_register'] : [] };
 }

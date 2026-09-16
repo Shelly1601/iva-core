@@ -3,7 +3,8 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { classifyFundingDocumentName } from './funding-document-extractor.mjs';
-import { FUNDING_BASE_REQUIRED_DOCUMENTS, loadFundingScan } from './funding-scan.mjs';
+import { loadFundingScan } from './funding-scan.mjs';
+import { fundingApplicationRequiredDocumentIds } from './funding-document-requirements.mjs';
 import { detectNewFundingMessages } from './funding-monitor-state.mjs';
 
 const FUNDING_MAILBOX = 'foerderung@heat-hero.com';
@@ -184,9 +185,9 @@ export async function scanFundingMailbox({ fundingScan, persist = true, onProgre
       .filter(document => document.confidence >= 0.9 && document.type !== 'unknown')
       .map(document => document.type);
     const presentDocumentIds = [...new Set(currentPipedriveEvidence)];
-    const requiredDocumentIds = Array.isArray(item.requiredDocumentIds) && item.requiredDocumentIds.length
-      ? item.requiredDocumentIds
-      : FUNDING_BASE_REQUIRED_DOCUMENTS;
+    const requiredDocumentIds = item.stage === 'Angebot veröffentlicht' ? ['signed_offer']
+      : fundingApplicationRequiredDocumentIds({ incomeBonusRequested,
+          documentEvidence: Object.fromEntries(presentDocumentIds.map(type => [type, 'present_in_pipedrive'])) });
     const missingBaseDocumentIds = requiredDocumentIds.filter(id => !presentDocumentIds.includes(id));
     const ambiguousMailAttachments = mailSummaries.some(message => message.hasAttachments);
     return {
@@ -197,6 +198,8 @@ export async function scanFundingMailbox({ fundingScan, persist = true, onProgre
       mailMessageCount: messages.length,
       mailEvidenceDocumentIds: [...mailEvidence],
       presentDocumentIds,
+      requiredDocumentIds,
+      payoutOutstandingDocumentIds: requiredDocumentIds.includes('land_register_notification') ? ['land_register'] : [],
       missingBaseDocumentIds,
       mailReviewRequired: ambiguousMailAttachments,
       messages: mailSummaries,

@@ -5,14 +5,8 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { collectPipedriveFundingDealIds, readPipedriveFundingDealsViaApi } from './background-integrations.mjs';
 import { withFundingFileLock } from './funding-intake-state.mjs';
 import { FUNDING_REQUIRED_FIELDS, missingFundingRequiredFields } from './funding-required-fields.mjs';
-
-export const FUNDING_BASE_REQUIRED_DOCUMENTS = Object.freeze([
-  'signed_offer',
-  'identity_card',
-  'registration_certificate',
-  'land_register',
-  'kfw_account_confirmation',
-]);
+import { fundingApplicationRequiredDocumentIds } from './funding-document-requirements.mjs';
+export { FUNDING_BASE_REQUIRED_DOCUMENTS } from './funding-document-requirements.mjs';
 
 export function defaultFundingScanFile() {
   return path.join(
@@ -54,10 +48,8 @@ function summarizeSnapshot(snapshot, reviewCache = {}) {
   }
   const requiredDocumentIds = snapshot.stage === 'Angebot veröffentlicht'
     ? ['signed_offer']
-    : [
-        ...FUNDING_BASE_REQUIRED_DOCUMENTS,
-        ...(snapshot.incomeBonusRequested === true ? ['tax_assessment_2023', 'tax_assessment_2024'] : []),
-      ];
+    : fundingApplicationRequiredDocumentIds({ incomeBonusRequested: snapshot.incomeBonusRequested,
+        documentEvidence: Object.fromEntries(presentDocumentIds.map(type => [type, 'present_in_pipedrive'])) });
   const missingBaseDocumentIds = requiredDocumentIds.filter(id => !presentDocumentIds.includes(id));
   const unknownFiles = snapshot.documents.filter(document => document.type === 'unknown').map(document => document.fileName);
   const missingRequiredFields = missingFundingRequiredFields(snapshot);
@@ -89,6 +81,7 @@ function summarizeSnapshot(snapshot, reviewCache = {}) {
     ivaFundingRequestNotes: snapshot.ivaFundingRequestNotes || [],
     presentDocumentIds,
     requiredDocumentIds,
+    payoutOutstandingDocumentIds: requiredDocumentIds.includes('land_register_notification') ? ['land_register'] : [],
     missingBaseDocumentIds,
     unknownFiles,
     incomeBonusRequested: snapshot.incomeBonusRequested ?? null,

@@ -92,6 +92,50 @@ test('income bonus requires corresponding readable tax assessments and matching 
   input.result.incomeBonusRequested = true; assert.equal((await f.run(input)).verified, true);
 });
 
+test('verified registration notification permits application and survives retry without claiming a full register', async () => {
+  const f = fixture(), transition = f.dependencies.transition;
+  f.snapshot.fileRecords[3].name = 'Eintragungsbekanntmachung.pdf';
+  const input = f.input();
+  delete input.documentReview.documentEvidence.land_register;
+  input.documentReview.documentEvidence.land_register_notification = 'present_in_pipedrive';
+  f.dependencies.transition = async () => { throw new Error('network'); };
+  await assert.rejects(f.run(input), { code: 'FUNDING_HANDOFF_TRANSITION_UNCONFIRMED' });
+  const record = JSON.parse(await fs.readFile(f.file)).deals['123'];
+  assert.equal(record.proof.applicationOwnershipDocument, 'land_register_notification');
+  assert.deepEqual(record.proof.payoutOutstandingDocumentIds, ['land_register']);
+  assert.equal(record.documentReview.documentEvidence.land_register_notification, 'present_in_pipedrive');
+  assert.equal(record.documentReview.documentEvidence.land_register, undefined);
+  assert.equal(record.proof.requiredDocumentIds.includes('land_register'), false);
+  f.dependencies.transition = transition;
+  assert.equal((await f.run({ dealId: '123', confirmation: 'Pipedrive schreiben' })).verified, true);
+  assert.equal(f.notes.size, 1);
+});
+
+test('notification still requires verified readable deal evidence before handoff', async () => {
+  for (const status of ['available_in_email', 'ambiguous', 'invalid', 'missing']) {
+    const f = fixture(), input = f.input();
+    delete input.documentReview.documentEvidence.land_register;
+    input.documentReview.documentEvidence.land_register_notification = status;
+    await assert.rejects(f.run(input), { code: 'FUNDING_HANDOFF_MISSING_DOCUMENTS' });
+    assert.equal(f.events.includes('transition'), false);
+  }
+});
+
+test('positive source review requires tax evidence even without a positive CRM field; absence does not', async () => {
+  for (const field of [null, false]) {
+    const f = fixture(); f.snapshot.incomeBonusRequested = field;
+    const input = f.input();
+    input.documentReview.incomeBonusRequested = true;
+    input.result.incomeBonusRequested = true;
+    await assert.rejects(f.run(input), { code: 'FUNDING_HANDOFF_MISSING_DOCUMENTS' });
+    input.documentReview.documentEvidence.tax_assessment_2023 = 'present_in_pipedrive';
+    input.documentReview.documentEvidence.tax_assessment_2024 = 'present_in_pipedrive';
+    assert.equal((await f.run(input)).verified, true);
+    const noRequest = fixture(); noRequest.snapshot.incomeBonusRequested = field;
+    assert.equal((await noRequest.run()).verified, true);
+  }
+});
+
 test('uncertain successful stage response is read back before note; transition is never repeated', async () => {
   const f = fixture();
   f.dependencies.transition = async () => { f.events.push('transition'); f.snapshot.stage = 'Förderung beantragen'; throw new Error('response lost'); };

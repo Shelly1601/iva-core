@@ -1,5 +1,6 @@
 import { FUNDING_DOCUMENTS } from './funding.mjs';
 import { missingFundingRequiredFields } from './funding-required-fields.mjs';
+import { FUNDING_APPLICATION_OWNERSHIP_LABEL, fundingApplicationRequiredDocumentIds } from './funding-document-requirements.mjs';
 
 export const PIPEDRIVE_FUNDING_CONFIG = Object.freeze({
   host: 'simplegategmbh.pipedrive.com',
@@ -58,7 +59,7 @@ export function resolveFundingStage(value) {
   throw new Error(`Unbekannte Pipedrive-Förderstufe: ${String(value || 'leer')}`);
 }
 
-export function buildFundingStageChecklist(stageValue, { incomeBonusRequested } = {}) {
+export function buildFundingStageChecklist(stageValue, { incomeBonusRequested, documentEvidence = {} } = {}) {
   const stage = resolveFundingStage(stageValue);
   if (stage.key === 'offerPublished') {
     return {
@@ -74,23 +75,17 @@ export function buildFundingStageChecklist(stageValue, { incomeBonusRequested } 
       openQuestions: [],
     };
   }
-  const requiredDocumentIds = [
-    'signed_offer',
-    'identity_card',
-    'registration_certificate',
-    'land_register',
-    'kfw_account_confirmation',
-  ];
+  const requiredDocumentIds = fundingApplicationRequiredDocumentIds({ incomeBonusRequested, documentEvidence });
   const openQuestions = [];
-  if (incomeBonusRequested === true) requiredDocumentIds.push('tax_assessment_2023', 'tax_assessment_2024');
   // An absent bonus request is not a missing document. Only an explicit
   // positive source instruction adds income evidence to this checklist.
 
   return {
     pipeline: PIPEDRIVE_FUNDING_CONFIG.pipeline,
     stage,
-    requiredDocuments: requiredDocumentIds.map(id => ({ id, label: FUNDING_DOCUMENTS[id] })),
-    scanSources: ['Pipedrive-Dateien', 'zugeordnete Förder-E-Mails'],
+    requiredDocuments: requiredDocumentIds.map(id => ({ id, label: id === 'land_register' ? FUNDING_APPLICATION_OWNERSHIP_LABEL : FUNDING_DOCUMENTS[id] })),
+    payoutOutstandingDocumentIds: requiredDocumentIds.includes('land_register_notification') ? ['land_register'] : [],
+    scanSources: ['Pipedrive-Dateien einschließlich TMB', 'Pipedrive-Notizen', 'zugeordnete Förder-E-Mails'],
     requireCompleteReview: true,
     movementRule: stage.stayInStage
       ? 'Der Deal bleibt unabhängig vom Dokumentenstatus in „Förderung beantragen“. '
@@ -108,7 +103,7 @@ function normalizeDocumentEvidence(value) {
 }
 
 export function decideFundingDealAction(stageValue, { incomeBonusRequested, documentEvidence = {}, snapshot = {} } = {}) {
-  const checklist = buildFundingStageChecklist(stageValue, { incomeBonusRequested });
+  const checklist = buildFundingStageChecklist(stageValue, { incomeBonusRequested, documentEvidence });
   const documents = checklist.requiredDocuments.map(document => ({
     ...document,
     status: normalizeDocumentEvidence(documentEvidence[document.id]),
@@ -144,6 +139,7 @@ export function decideFundingDealAction(stageValue, { incomeBonusRequested, docu
     blockingDocuments,
     openQuestions: checklist.openQuestions,
     documentsCompleteInPipedrive,
+    payoutOutstandingDocumentIds: checklist.payoutOutstandingDocumentIds || [],
     missingRequiredFields,
     requiredFieldsComplete: missingRequiredFields.length === 0,
     moveAllowed: ['move_to_documents', 'move_to_funding_requested'].includes(action),

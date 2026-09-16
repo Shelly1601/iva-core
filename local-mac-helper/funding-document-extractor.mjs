@@ -383,6 +383,9 @@ export function classifyFundingDocumentName(value) {
   if (/(meldebescheinigung|meldebesch(?:einigung)?|meldebest(?:[aä]|ae)tigung|(?:^|\s)mb(?:\s|\.|$))/i.test(normalized)) {
     return { type: 'registration_certificate', confidence: 0.98, fileName };
   }
+  if (/eintragungs\s*bekanntmachung/i.test(normalized)) {
+    return { type: 'land_register_notification', confidence: 0.98, fileName };
+  }
   if (/grundbuch(?:auszug)?|(?:^|\s)(?:gb|gba)(?:\s|\.|$)/i.test(normalized)) {
     return { type: 'land_register', confidence: 0.98, fileName };
   }
@@ -409,6 +412,7 @@ const COMPLIANT_FUNDING_FILE_NAMES = Object.freeze({
   identity_card: /personalausweis.*(?:vorder|front).*(?:r(?:ü|ue)ck|back)|personalausweis.*(?:vorder\s*-?\s*und\s*-?\s*r(?:ü|ue)ckseite)/i,
   registration_certificate: /meldebescheinigung/i,
   land_register: /grundbuchauszug/i,
+  land_register_notification: /eintragungs[\s_-]*bekanntmachung/i,
   tax_assessment_2023: /(?:einkommensteuer|steuerbescheid).*2023/i,
   tax_assessment_2024: /(?:einkommensteuer|steuerbescheid).*2024/i,
   kfw_account_confirmation: /kfw.*(?:konto|best(?:ä|ae)tigung|zugang)/i,

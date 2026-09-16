@@ -1,11 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { loadDirectSalesRosterSync, matchDirectSalesPartner } from './direct-sales-roster.mjs';
+import { FUNDING_APPLICATION_OWNERSHIP_LABEL } from './funding-document-requirements.mjs';
 
 export const FUNDING_DOCUMENTS = Object.freeze({
   signed_offer: 'Unterschriebenes Angebot',
   identity_card: 'Personalausweis (Vorder- und Rückseite)',
   registration_certificate: 'Meldebescheinigung',
   land_register: 'Vollständiger und leserlicher Grundbuchauszug (ca. 10 Seiten)',
+  land_register_notification: 'Eintragungsbekanntmachung (zur Beantragung; vollständiger Grundbuchauszug zur Auszahlung erforderlich)',
   tax_assessment_2023: 'Einkommensteuerbescheid 2023',
   tax_assessment_2024: 'Einkommensteuerbescheid 2024',
   kfw_account_confirmation: 'Zugangsdaten des bestätigten KfW-Kontos',
@@ -279,7 +281,7 @@ export function renderFundingMissingDocumentsEmail(input = {}) {
   if (!missingDocumentIds.length) throw new Error('Es fehlen keine Unterlagen; deshalb wird kein Entwurf erzeugt.');
   if (!orderNumber) throw new Error('Für den Förderentwurf fehlt die Angebots-/Auftragsnummer. Sie muss zuerst aus dem unterschriebenen Angebot oder den Dealinformationen übernommen werden.');
 
-  const missingDocuments = missingDocumentIds.map(id => ({ id, label: FUNDING_DOCUMENTS[id] }));
+  const missingDocuments = missingDocumentIds.map(id => ({ id, label: id === 'land_register' ? FUNDING_APPLICATION_OWNERSHIP_LABEL : FUNDING_DOCUMENTS[id] }));
   const greeting = recipients.greeting;
   const list = missingDocuments.map(item => `- ${item.label}`).join('\n');
   const subject = `${reference.text} - fehlende Unterlagen`;
