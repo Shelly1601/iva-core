@@ -2,7 +2,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, lstat, writeFile } from 'node:fs/promises';
 import { classifyFundingDocumentName } from './funding-document-extractor.mjs';
 import { assertImacExecutionHost, imacDeviceAgentMetadata } from './device-agent.mjs';
 
@@ -57,7 +58,9 @@ async function request(pathname, { method = 'GET', body, binary = false, timeout
     }
     const buffer = Buffer.from(await response.arrayBuffer());
     if (!buffer.length || buffer.length > MAX_FILE_BYTES) throw new Error('Hintergrunddownload ist leer oder größer als 50 MB.');
-    return { buffer, contentType: String(response.headers.get('content-type') || ''), disposition: String(response.headers.get('content-disposition') || '') };
+    return { buffer, contentType: String(response.headers.get('content-type') || ''), disposition: String(response.headers.get('content-disposition') || ''),
+      verified: response.headers.get('x-iva-verified') === 'true', sha256: response.headers.get('x-iva-content-sha256'),
+      size: response.headers.get('x-iva-attachment-size'), sourceHash: response.headers.get('x-iva-source-hash') };
   }
   const text = await response.text();
   let payload = null;
@@ -75,6 +78,90 @@ function safeName(value, fallback) {
 
 export async function backgroundIntegrationStatus() {
   return request(`/device-agent/${DEVICE_ID}/background/status`);
+}
+
+/** Shared-mailbox access stays on the authenticated device channel; Graph tokens never reach this Mac helper. */
+export function createMicrosoftFundingMailTransport({ requestImpl = request, now = Date.now, statusTtlMs = 60000 } = {}) {
+  const base = `/device-agent/${DEVICE_ID}/background/funding-mail`;
+  const cache = new Map();
+  async function status({ probe = false, refresh = false } = {}) {
+    const key = probe ? 'probe' : 'configuration', previous = cache.get(key);
+    if (!refresh && previous && previous.expiresAt > now()) return previous.promise;
+    const promise = Promise.resolve().then(() => requestImpl(`${base}/status${probe ? '?probe=1' : ''}`));
+    const entry = { expiresAt: now() + statusTtlMs, promise }; cache.set(key, entry);
+    // Keep a short failure cache as well: do not multiply failing probes per message.
+    promise.catch(() => { if (cache.get(key) === entry) entry.expiresAt = now() + Math.min(statusTtlMs, 15000); });
+    return promise;
+  }
+  const post = (action, body) => requestImpl(`${base}/${action}`, { method: 'POST', body, timeoutMs: 60000 });
+  return { status,
+    readPage: input => post('page', input), readMessage: input => post('message', input), resolveIdentity: input => post('resolve', input),
+    moveMessage: input => post('move', input),
+    async downloadAttachment(input) {
+      const downloaded = await requestImpl(`${base}/attachment`, { method: 'POST', body: input, binary: true, timeoutMs: 60000 });
+      const buffer = downloaded.buffer;
+      if (!Buffer.isBuffer(buffer) || !buffer.length || buffer.length > MAX_FILE_BYTES) throw new Error('Der verifizierte Fördermail-Anhang ist leer oder zu groß.');
+      const sha256 = createHash('sha256').update(buffer).digest('hex');
+      if (downloaded.verified !== true || Number(downloaded.size) !== buffer.length || downloaded.sha256 !== sha256 || !/^[0-9a-f]{64}$/i.test(downloaded.sourceHash || ''))
+        throw new Error('Der binäre M365-Anhang stimmt nicht mit seinem verifizierten Serverbeleg überein.');
+      let filename = 'anlage';
+      const encoded = downloaded.disposition?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+      if (encoded) { try { filename = decodeURIComponent(encoded); } catch { throw new Error('Der Fördermail-Anhang enthält einen ungültigen Dateinamen.'); } }
+      return { buffer, filename: safeName(filename, 'anlage'), contentType: downloaded.contentType || 'application/octet-stream', size: buffer.length,
+        sha256, sourceHash: downloaded.sourceHash, verified: true, messageId: input.messageId, attachmentId: input.attachmentId, source: 'microsoft-graph' };
+    },
+  };
+}
+const microsoftFundingTransport = createMicrosoftFundingMailTransport();
+export const microsoftFundingMailStatus = input => microsoftFundingTransport.status(input);
+export const readMicrosoftFundingPage = input => microsoftFundingTransport.readPage(input);
+export const readMicrosoftFundingMessage = input => microsoftFundingTransport.readMessage(input);
+export const resolveMicrosoftFundingIdentity = input => microsoftFundingTransport.resolveIdentity(input);
+export const moveMicrosoftFundingMessage = input => microsoftFundingTransport.moveMessage(input);
+export const downloadMicrosoftFundingAttachment = input => microsoftFundingTransport.downloadAttachment(input);
+
+export async function downloadMicrosoftFundingAttachments({ from = 'foerderung@heat-hero.com', folder = 'Posteingang', messageId, directory } = {}, {
+  readMessage = readMicrosoftFundingMessage, downloadAttachment = downloadMicrosoftFundingAttachment,
+} = {}) {
+  const message = await readMessage({ from, folder, messageId });
+  if (message?.source !== 'microsoft-graph' || message.identityVerified !== true || message.messageId !== messageId
+    || message.sourceReadComplete !== true || message.attachmentsComplete !== true || !/^[0-9a-f]{64}$/i.test(message.sourceHash || '') || !Array.isArray(message.attachments))
+    throw new Error('Die Originalmail und ihre vollständige Anlagenliste wurden nicht über M365 bestätigt.');
+  const attachments = message.attachments;
+  if (attachments.length > 200) throw new Error('Diese Fördermail enthält zu viele Anlagen für einen sicheren Einzellauf.');
+  const root = path.join(process.env.IVA_MAC_HELPER_DATA_DIR || DATA_ROOT, 'tmp', 'funding-mail-downloads');
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  const target = directory ? path.resolve(directory) : await mkdtemp(path.join(root, 'mail-'));
+  await mkdir(target, { recursive: true, mode: 0o700 });
+  const files = []; let totalBytes = 0;
+  for (const [index, attachment] of attachments.entries()) {
+    const attachmentId = String(attachment.attachmentId || attachment.id || '');
+    if (!attachmentId) throw new Error('Mindestens einer Anlage fehlt die verifizierte M365-Kennung.');
+    if (attachment.supported !== true) throw new Error('Mindestens eine Fördermail-Anlage benötigt eine gesonderte unterstützte Aufbereitung. Es wird keine vollständige Verarbeitung behauptet.');
+    const file = await downloadAttachment({ from, folder, messageId, attachmentId });
+    if (!Buffer.isBuffer(file.buffer) || !file.buffer.length || file.buffer.length > MAX_FILE_BYTES) throw new Error('Eine Fördermail-Anlage wurde nicht vollständig heruntergeladen.');
+    if (file.verified !== true || Number(file.size) !== file.buffer.length || file.sha256 !== createHash('sha256').update(file.buffer).digest('hex') || file.sourceHash !== message.sourceHash)
+      throw new Error('Der Anhang passt nicht zum gelesenen Originalstand der M365-Nachricht.');
+    totalBytes += file.buffer.length;
+    if (totalBytes > 100 * 1024 * 1024) throw new Error('Die Fördermail überschreitet die zulässige Gesamtgröße von 100 MB.');
+    const fileName = `${String(index + 1).padStart(3, '0')}-${safeName(attachment.name || file.filename, 'anlage')}`;
+    const filePath = path.join(target, fileName);
+    try { await writeFile(filePath, file.buffer, { mode: 0o600, flag: 'wx' }); }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      const existing = await lstat(filePath);
+      if (!existing.isFile() || existing.isSymbolicLink() || existing.size !== file.buffer.length || createHash('sha256').update(await readFile(filePath)).digest('hex') !== createHash('sha256').update(file.buffer).digest('hex'))
+        throw new Error('Eine vorhandene lokale Arbeitskopie passt nicht zur frisch gelesenen Anlage und wird nicht überschrieben.');
+    }
+    files.push({ attachmentId, fileName, filePath, size: file.buffer.length, sha256: createHash('sha256').update(file.buffer).digest('hex'), contentType: file.contentType || attachment.contentType || '' });
+  }
+  const confirmed = await readMessage({ from, folder, messageId });
+  if (confirmed?.messageId !== messageId || confirmed.source !== 'microsoft-graph' || confirmed.identityVerified !== true || confirmed.sourceReadComplete !== true
+    || confirmed.attachmentsComplete !== true || confirmed.sourceHash !== message.sourceHash)
+    throw new Error('Die Originalmail hat sich während des Anlagendownloads geändert. Keine vollständige Ablage bestätigt; den neuen Nachrichtenstand erneut prüfen.');
+  return { messageId, source: 'microsoft-graph', sourceHash: message.sourceHash, immutableId: message.immutableId || null, sourceReadComplete: true,
+    attachmentsComplete: true, identityVerified: true, directory: target, files, expectedCount: attachments.length,
+    downloadedCount: files.length, verified: true, complete: true, readOnlySource: true };
 }
 
 export async function collectPipedriveFundingDealIds() {

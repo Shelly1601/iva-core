@@ -37,6 +37,8 @@ import { registerProjectAccessAdminRoutes, registerPortalRoutes } from './access
 import { createWebsiteService } from './websites/service.js';
 import { registerWebsiteRoutes, registerWebsitePublicationRoute } from './websites/routes.js';
 import { websiteSkill } from './websites/tools.js';
+import { registerMicrosoftFundingCallback, registerMicrosoftFundingConnectionRoutes, registerMicrosoftFundingDeviceRoutes } from './integrations/microsoft-funding-routes.js';
+import { microsoftFundingMailStatus } from './integrations/microsoft-funding-mail.js';
 import { createSpecialistRunner } from './core/specialists.js';
 import { specialistSkill } from './skills/specialists.js';
 import { createInstagramConnector } from './integrations/instagram.js';
@@ -457,6 +459,7 @@ const app = express();
 registerCustomerCarePublicRoutes(app,{service:customerCareService});
 registerWebsitePublicationRoute(app, websiteService);
 registerPortalRoutes(app, {access:projectAccess,websites:websiteService,coreOrigin});
+registerMicrosoftFundingCallback(app);
 // Contract PDFs are base64-encoded by the authenticated comparison editor.
 // Permit its bounded 8 MB original without increasing every API's body limit.
 app.use('/api/advice/workbench/cases/:id/documents', (req,res,next)=>{
@@ -1498,6 +1501,7 @@ app.get('/device-agent/:deviceId/background/status', async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ pipedrive, airtable });
   } catch (error) { res.status(502).json({ error: error.message }); }
 });
+registerMicrosoftFundingDeviceRoutes(app, { authorized: authorizedImacAgent, deviceId: IVA_IMAC_DEVICE_ID });
 app.get('/device-agent/:deviceId/background/pipedrive/funding-board', async (req, res) => {
   if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
   try { res.set('Cache-Control', 'no-store').json(await listPipedriveFundingBoard()); }
@@ -1984,6 +1988,7 @@ app.use('/api', (req, res, next) => {
 });
 
 investment.registerRoutes(app);
+registerMicrosoftFundingConnectionRoutes(app);
 registerProjectProviderRoutes(app,projectProviders);
 registerProjectMarketingRoutes(app,{service:projectMarketing,authorizeProject:requireMarketingProject});
 registerWebsiteRoutes(app, websiteService);
@@ -2014,7 +2019,7 @@ function connector(id, label, ready, missing = [], detail = '') {
 }
 
 async function controlSnapshot() {
-  const [ops, incidentResult, agentRunsResult, qonektoResult, syncResult, voiceResult, knowledgeResult, opportunityResult, learningResult, automationsResult, automationRunsResult, googleGmailResult, tooOftenResult, deviceCommandsResult, projectsResult, protocolRunsResult] = await Promise.all([
+  const [ops, incidentResult, agentRunsResult, qonektoResult, syncResult, voiceResult, knowledgeResult, opportunityResult, learningResult, automationsResult, automationRunsResult, googleGmailResult, tooOftenResult, deviceCommandsResult, projectsResult, protocolRunsResult, microsoftFundingResult] = await Promise.all([
     operationsSummary(),
     incidentMemorySummary().catch(error => ({ total: 0, resolved: 0, open: 0, recurring: 0, preventedCount: 0, items: [], error: error.message })),
     listAgentRuns({ limit: 300 }).catch(() => []),
@@ -2031,6 +2036,7 @@ async function controlSnapshot() {
     listDeviceCommands({ limit: 500 }).catch(() => []),
     listProjects().catch(() => []),
     listProjectWorkflowRuns('heat-hero', { limit: 500 }).catch(() => []),
+    microsoftFundingMailStatus().catch(() => ({ configured: false, ready: false })),
   ]);
   const improvementRequests = learningResult.improvementRequests || [];
   const buildRefreshJobs = buildJobsNeedingRefresh({ requests: improvementRequests, commands: deviceCommandsResult });
@@ -2090,6 +2096,9 @@ async function controlSnapshot() {
     connector('calendar', 'Kalender', CALENDARS.some(item => item.url), ['PRIVAT_GOOGLE_ICS_URL oder weitere ICS-URL'], `${CALENDARS.filter(item => item.url).length} Kalender verbunden.`),
     connector('mail', 'E-Mail-Eingang', loadMailAccounts().length > 0, ['MAIL_1_USER/MAIL_1_PASS oder MAIL_2_USER/MAIL_2_PASS'], `${loadMailAccounts().length} Postfaecher konfiguriert.`),
     connector('google-gmail', 'Google Gmail API', googleGmailResult.ready, googleGmailResult.missing || ['Google-Gmail einmal freigeben'], googleGmailResult.ready ? 'Direkter, bildschirmloser Gmail-Zugriff aktiv.' : 'OAuth ist vorbereitet; die einmalige Kontofreigabe fehlt noch.'),
+    { ...connector('microsoft-funding-mail', 'Förderpostfach · Microsoft 365', microsoftFundingResult.ready,
+      [microsoftFundingResult.configured ? 'Microsoft-Konto einmal verbinden und Zugriff prüfen' : 'Eigene Microsoft-App im HEAT-HERO-Mandanten einrichten'],
+      microsoftFundingResult.ready ? 'Direkter Zugriff auf Fördermails und Anlagen; Ablage nach Fertig nur mit vollständigem Nachweis. Der übrige Förderlauf kann weiterhin Bildschirmzugriff benötigen.' : 'Hintergrundzugang vorbereitet. Die vorhandene Outlook-Anmeldung bleibt verfügbar.'), canConnect: microsoftFundingResult.configured === true },
     connector('report-email', 'Workflow-Reports per E-Mail', reportingStatus().ready, reportingStatus().missing, reportingStatus().ready ? `Versand über ${reportingStatus().provider} an ${reportingStatus().recipient}.` : 'Provider-Key und verifizierter Absender fehlen noch.'),
     connector('calendly', 'Calendly', envReady('CALENDLY_TOKEN'), ['CALENDLY_TOKEN'], 'Termine und Bucher.'),
     connector('iva-scheduling', 'IVA-Terminbuchung', schedulingStatus().liveReady, ['SCHEDULING_CALENDAR_WRITE_READY=true', 'SCHEDULING_MAIL_SEND_READY=true'], schedulingStatus().liveReady ? 'Eigene Terminlinks live.' : 'Terminarten im Vorschaumodus; Live-Schaltung bis zum Ende-zu-Ende-Test gesperrt.'),

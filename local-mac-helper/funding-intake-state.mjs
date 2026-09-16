@@ -59,9 +59,11 @@ export function validateFundingIntakeReceipt(input = {}) {
   if (!expectedAttachmentCount && !textRelevant) throw new Error('Ohne belegte Unterlagen oder relevante Information gilt eine Fördermail nicht als bearbeitet.');
   const verifiedAt = clean(input.verifiedAt, 80);
   if (!Number.isFinite(Date.parse(verifiedAt)) || Date.parse(verifiedAt) > Date.now() + 60000) throw new Error('Der Rücklesezeitpunkt der Fördermail fehlt.');
+  const sourceProof = input.source === 'microsoft-graph' ? { source: 'microsoft-graph', sourceHash: clean(input.sourceHash, 100).toLowerCase() } : {};
+  if (sourceProof.source && !/^[0-9a-f]{64}$/.test(sourceProof.sourceHash)) throw new Error('Dem M365-Ablagebeleg fehlt der Hash der tatsächlich gelesenen Originalmail.');
   return { messageId, messageFingerprint, dealId, identityVerified: true, sourceReadComplete: true, expectedAttachmentCount,
     attachmentProcessingVerified: expectedAttachmentCount === 0 || input.attachmentProcessingVerified === true,
-    uploadedFiles, textRelevant, note, verifiedAt };
+    uploadedFiles, textRelevant, note, verifiedAt, ...sourceProof };
 }
 
 export function createFundingIntakeStore({ filePath = path.join(process.env.IVA_MAC_HELPER_DATA_DIR || path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper'), 'funding-intake.json'), now = Date.now } = {}) {
@@ -100,25 +102,33 @@ export function createFundingIntakeStore({ filePath = path.join(process.env.IVA_
           state.incremental.complete = false; state.incremental.scannedAt = null;
           state.incremental.runId = randomUUID(); state.incremental.startedAt = new Date(now()).toISOString();
         }
-        return { ...run, runId: run.mode === 'incremental' ? state.incremental.runId : 'initial-backfill', pending: state.messages.filter(item => item.status !== 'completed') };
+        return { ...run, source: state.mailboxSource || null, runId: run.mode === 'incremental' ? state.incremental.runId : 'initial-backfill', pending: state.messages.filter(item => item.status !== 'completed') };
       });
     },
     async recordPage(page, { mode, expectedCursor = null } = {}) {
-      if (!['incremental', 'initial-backfill'].includes(mode) || page?.coverageVerified !== true || page?.source !== 'outlook-native' || !Array.isArray(page.messages) || page.messages.length > 500 || typeof page.complete !== 'boolean') throw new Error('Die vollständige native Outlook-Seite ist nicht belegt.');
+      if (!['incremental', 'initial-backfill'].includes(mode) || page?.coverageVerified !== true || !['outlook-native', 'microsoft-graph'].includes(page?.source) || !Array.isArray(page.messages) || page.messages.length > 500 || typeof page.complete !== 'boolean') throw new Error('Die vollständige Förderpostfach-Seite ist nicht belegt.');
       for (const cursor of [page.nextCursor, page.checkpoint]) if (cursor != null && (typeof cursor !== 'string' || cursor.length > 8000 || /[\r\n\0]/.test(cursor))) throw new Error('Ungültiger Outlook-Lesecursor.');
+      for (const cursor of [page.nextCursor, page.checkpoint].filter(Boolean)) if ((page.source === 'microsoft-graph') !== /^msgraph:[A-Za-z0-9_-]+$/.test(cursor)) throw new Error('Der Mailcursor passt nicht zum bestätigten Leseweg.');
+      const removed = page.removedImmutableIds || [];
+      if (!Array.isArray(removed) || removed.length > 500 || removed.some(id => typeof id !== 'string' || !id || id.length > 2048)) throw new Error('Die M365-Änderungsseite enthält ungültige entfernte Nachrichtenkennungen.');
       if (page.complete && (!page.checkpoint || page.nextCursor)) throw new Error('Ein vollständig gelesener Snapshot benötigt einen eindeutigen Abschluss-Checkpoint.');
       if (!page.complete && !page.nextCursor) throw new Error('Ein unvollständiger Mailabruf benötigt einen Fortsetzungscursor.');
       return mutate(state => {
         const run = selectRun(state, mode);
         if (run.mode !== mode || run.scanComplete || (run.cursor || null) !== expectedCursor) throw new Error('Der Mailcursor wurde bereits fortgesetzt; zuerst den gespeicherten Stand lesen.');
+        const previousSource = state.mailboxSource || (run.cursor ? String(run.cursor).startsWith('msgraph:') ? 'microsoft-graph' : 'outlook-native' : null);
+        if (previousSource && previousSource !== page.source) throw Object.assign(new Error('Ein Postfach-Leseweg darf nicht ohne geprüfte Cursor-Migration gewechselt werden.'), { code: 'FUNDING_MAIL_TRANSPORT_MIGRATION_REQUIRED' });
+        state.mailboxSource = page.source;
         const discovered = [];
         for (const raw of page.messages) {
           const messageId = clean(raw.messageId, 1200), fingerprint = fundingIntakeMessageFingerprint(messageId);
+          if (page.source === 'microsoft-graph' && (raw.source !== 'microsoft-graph' || raw.identityVerified !== true || !/^<[^<>\r\n\0]+>$/.test(messageId))) throw new Error('Die M365-Nachricht besitzt keine bestätigte Original-Message-ID.');
           const receivedAt = clean(raw.receivedAt, 80);
           if (!Number.isFinite(Date.parse(receivedAt))) throw new Error('Der Empfangszeitpunkt einer Fördermail fehlt.');
           if (mode === 'initial-backfill' && Date.parse(receivedAt) < Date.parse(`${FUNDING_BACKFILL_SINCE}T00:00:00+02:00`)) continue;
           let item = state.messages.find(entry => entry.fingerprint === fingerprint);
           if (!item) { item = { messageId, fingerprint, receivedAt, hasAttachments: raw.hasAttachments === true, status: 'pending', backfill: mode === 'initial-backfill', discoveredAt: new Date(now()).toISOString() }; state.messages.push(item); }
+          if (page.source === 'microsoft-graph' && item.status !== 'completed') Object.assign(item, { source: page.source, identityVerified: true, immutableId: clean(raw.immutableId, 2048) || null, hasAttachments: raw.hasAttachments === true });
           if (item.status !== 'completed') discovered.push({ ...item, description: typeof raw.description === 'string' ? raw.description.slice(0, 5000) : '' });
         }
         const target = mode === 'initial-backfill' ? state.backfill : state.incremental;
@@ -126,7 +136,7 @@ export function createFundingIntakeStore({ filePath = path.join(process.env.IVA_
         if (page.checkpoint) target.checkpoint = page.checkpoint;
         if (page.complete) { if (mode === 'initial-backfill') target.status = 'scanned'; else target.complete = true; target.scannedAt = new Date(now()).toISOString(); }
         finishBackfill(state);
-        return { messages: discovered, nextCursor: target.cursor, scanComplete: page.complete, backfillStatus: state.backfill.status, pendingCount: state.messages.filter(item => item.status !== 'completed').length };
+        return { messages: discovered, source: page.source, tombstoneCount: removed.length, nextCursor: target.cursor, scanComplete: page.complete, backfillStatus: state.backfill.status, pendingCount: state.messages.filter(item => item.status !== 'completed').length };
       });
     },
     async completeMessage(input) {

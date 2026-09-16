@@ -142,7 +142,10 @@ export async function detectNewFundingMessages({ filePath = defaultFundingMonito
     try {
       const observed = await messageReader({ from: FUNDING_MAILBOX, folder: 'Posteingang', messageId: item.messageId });
       if (observed?.messageId !== item.messageId) throw new Error('message_identity_unverified');
-      messages.push({ ...item, description: String(observed.description || '').slice(0, 5000), hasAttachments: observed.hasAttachments === true });
+      if (observed.source === 'microsoft-graph' && observed.identityVerified !== true) throw new Error('message_identity_unverified');
+      messages.push({ ...item, source: observed.source || item.source || 'outlook-native', identityVerified: observed.identityVerified === true,
+        immutableId: observed.immutableId || item.immutableId || null, uiDescriptionVerified: observed.uiDescriptionVerified === true,
+        description: String(observed.description || '').slice(0, 5000), hasAttachments: observed.hasAttachments === true });
     } catch {
       pendingReadErrors.push({ messageId: item.messageId, fingerprint: item.fingerprint, code: 'FUNDING_PENDING_MESSAGE_RECHECK' });
     }
@@ -156,7 +159,8 @@ export async function detectNewFundingMessages({ filePath = defaultFundingMonito
     newMessageCount: messages.length,
     messages,
     scanComplete: recorded.scanComplete, coverageVerified: page?.coverageVerified === true || run.scanComplete,
-    source: 'outlook-native', fundingRun: { mode: run.mode, since: run.since, runId: run.runId },
+    source: page?.source || run.source || 'outlook-native', tombstoneCount: recorded.tombstoneCount || 0,
+    fundingRun: { mode: run.mode, since: run.since, runId: run.runId },
     pendingReadErrors,
     stateMutated: true,
   };

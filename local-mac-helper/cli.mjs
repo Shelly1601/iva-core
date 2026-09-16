@@ -12,6 +12,9 @@ import {
 import {
   applyPipedriveFundingFieldUpdates,
   backgroundIntegrationStatus,
+  microsoftFundingMailStatus,
+  readMicrosoftFundingMessage,
+  downloadMicrosoftFundingAttachments,
   completePipedriveFundingHandoff,
   listPipedriveFundingHandoffs,
   downloadAirtableCorrectedOffer,
@@ -284,6 +287,9 @@ async function main() {
     if (confirmation !== '--commit') throw new Error('Die Fördermail wurde nicht verschoben. Zum Bestätigen --commit anhängen.');
     return console.log(JSON.stringify(await completeFundingMail(await readJson(filePath)), null, 2));
   }
+  if (command === 'funding-mail-connection-status') return console.log(JSON.stringify(await microsoftFundingMailStatus({ probe: process.argv.includes('--probe'), refresh: true }), null, 2));
+  if (command === 'read-funding-mail-message') return console.log(JSON.stringify(await readMicrosoftFundingMessage(await readJson(filePath)), null, 2));
+  if (command === 'download-funding-mail-attachments') return console.log(JSON.stringify(await downloadMicrosoftFundingAttachments(await readJson(filePath)), null, 2));
   if (command === 'create-funding-escalation-forward') {
     if (confirmation !== '--commit') throw new Error('Der interne Weiterleitungsentwurf wurde nicht erstellt. Zum Bestätigen --commit anhängen.');
     return console.log(JSON.stringify(await createOutlookForwardDraft(await readJson(filePath)), null, 2));
@@ -449,6 +455,9 @@ async function main() {
   node local-mac-helper/cli.mjs list-pipedrive-funding-handoffs
   node local-mac-helper/cli.mjs mark-pipedrive-funding-won <deal-id> <zusagedateiname.pdf> --commit
   node local-mac-helper/cli.mjs complete-funding-mail /pfad/abschluss.json --commit
+  node local-mac-helper/cli.mjs funding-mail-connection-status [--probe]
+  node local-mac-helper/cli.mjs read-funding-mail-message /pfad/nachricht.json
+  node local-mac-helper/cli.mjs download-funding-mail-attachments /pfad/nachricht.json
   node local-mac-helper/cli.mjs create-funding-escalation-forward /pfad/weiterleitung.json --commit
   node local-mac-helper/cli.mjs create-pipedrive-funding-notes /pfad/notizen.json --commit
   node local-mac-helper/cli.mjs create-pipedrive-funding-info-note /pfad/notiz.json --commit

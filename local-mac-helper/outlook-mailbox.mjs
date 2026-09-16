@@ -162,7 +162,7 @@ export function createOutlookMailboxReader({ execute = runAppleScript, now = () 
 }
 
 const readNativeFundingMailboxPage = createOutlookMailboxReader();
-export async function readFundingMailboxPage(input = {}) {
+async function readLegacyFundingMailboxPage(input = {}) {
   let uiCursor = false;
   try { uiCursor = input.cursor && JSON.parse(Buffer.from(input.cursor, 'base64url').toString()).source === 'outlook-ui-mime'; } catch { /* native validation reports malformed cursors */ }
   if (!uiCursor) {
@@ -191,7 +191,7 @@ export function createOutlookMailboxMessageReader({ execute = runAppleScript, no
 }
 
 const readNativeFundingMailboxMessage = createOutlookMailboxMessageReader();
-export async function readFundingMailboxMessage(input = {}) {
+async function readLegacyFundingMailboxMessage(input = {}) {
   if (String(input.messageId || '').startsWith('<')) {
     const { readByMessageId } = await import('./outlook-ui-mailbox.mjs');
     const result = await readByMessageId(input);
@@ -200,3 +200,64 @@ export async function readFundingMailboxMessage(input = {}) {
   }
   return readNativeFundingMailboxMessage(input);
 }
+
+function cursorTransport(cursor) {
+  if (!cursor) return null;
+  if (typeof cursor !== 'string' || cursor.length > 8000 || /[\r\n\0]/.test(cursor)) throw fail('FUNDING_MAIL_BAD_CURSOR', 'Der gespeicherte Postfach-Cursor ist ungültig.');
+  if (/^msgraph:[A-Za-z0-9_-]+$/.test(cursor)) return 'microsoft-graph';
+  try {
+    const value = JSON.parse(Buffer.from(cursor, 'base64url').toString());
+    if (value.source === 'outlook-ui-mime') return 'outlook-ui-mime';
+    if (value.version === 1 && value.mailbox === FUNDING_MAILBOX_ADDRESS) return 'outlook-native';
+  } catch { /* Malformed legacy cursors never become a new Graph scan. */ }
+  throw fail('FUNDING_MAIL_BAD_CURSOR', 'Der gespeicherte Postfach-Cursor gehört zu keinem unterstützten Leseweg.');
+}
+const directCall = (name, input) => import('./background-integrations.mjs').then(module => module[name](input));
+
+export function createFundingMailboxTransport({
+  getStatus = input => directCall('microsoftFundingMailStatus', input),
+  readGraphPage = input => directCall('readMicrosoftFundingPage', input),
+  readGraphMessage = input => directCall('readMicrosoftFundingMessage', input),
+  readLegacyPage = readLegacyFundingMailboxPage, readLegacyMessage = readLegacyFundingMailboxMessage,
+  now = Date.now, statusTtlMs = 60000,
+} = {}) {
+  let cached;
+  async function status() {
+    if (!cached || cached.expiresAt <= now()) {
+      const value = { expiresAt: now() + statusTtlMs, promise: Promise.resolve().then(() => getStatus({ probe: true })) };
+      cached = value;
+      value.promise.catch(() => { if (cached === value) value.expiresAt = now() + Math.min(statusTtlMs, 15000); });
+    }
+    return cached.promise;
+  }
+  async function select({ cursor, messageId } = {}) {
+    const source = cursorTransport(cursor), available = await status();
+    if (source && source !== 'microsoft-graph' && available?.ready === true)
+      throw fail('FUNDING_MAIL_TRANSPORT_MIGRATION_REQUIRED', 'Der gespeicherte Outlook-Cursor gehört zum bisherigen Leseweg. Vor dem Wechsel zu M365 ist eine ausdrücklich geprüfte Cursor-Migration erforderlich; der alte Stand bleibt erhalten.');
+    if (source === 'microsoft-graph' && available?.ready !== true)
+      throw fail('FUNDING_MAIL_GRAPH_UNAVAILABLE', 'Der gespeicherte M365-Lauf benötigt seinen verbundenen M365-Zugang. Es wird kein anderer Leseweg mit diesem Cursor gestartet.');
+    if (available?.ready === true) {
+      if (messageId && !/^<[^<>\r\n\0]+>$/.test(String(messageId))) throw fail('FUNDING_MAIL_ID_MIGRATION_REQUIRED', 'Für den direkten M365-Zugriff wird die Original-Message-ID benötigt; eine native Outlook-Datensatz-ID kann nicht übernommen werden.');
+      return 'microsoft-graph';
+    }
+    return source || 'outlook-native';
+  }
+  return {
+    select,
+    async readPage(input = {}) {
+      if (String(input.from || FUNDING_MAILBOX_ADDRESS).toLowerCase() !== FUNDING_MAILBOX_ADDRESS || (input.folder || 'Posteingang') !== 'Posteingang')
+        throw fail('OUTLOOK_MAILBOX_SCOPE_DENIED', 'Dieser Reader liest ausschließlich den Förderungs-Posteingang.');
+      const source = await select(input);
+      return source === 'microsoft-graph' ? readGraphPage(input) : readLegacyPage(input);
+    },
+    async readMessage(input = {}) {
+      if (String(input.from || FUNDING_MAILBOX_ADDRESS).toLowerCase() !== FUNDING_MAILBOX_ADDRESS) throw fail('OUTLOOK_MAILBOX_SCOPE_DENIED', 'Dieser Reader liest ausschließlich das Förderpostfach.');
+      const source = await select(input);
+      return source === 'microsoft-graph' ? readGraphMessage(input) : readLegacyMessage(input);
+    },
+  };
+}
+const fundingMailboxTransport = createFundingMailboxTransport();
+export const selectFundingMailboxTransport = input => fundingMailboxTransport.select(input);
+export const readFundingMailboxPage = input => fundingMailboxTransport.readPage(input);
+export const readFundingMailboxMessage = input => fundingMailboxTransport.readMessage(input);

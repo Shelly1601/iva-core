@@ -13,6 +13,7 @@ import {
 } from './funding-monitor-state.mjs';
 import { downloadOutlookMessageAttachments } from './macos-ui.mjs';
 import { resolveFundingRecipients } from './funding.mjs';
+import { microsoftFundingMailStatus, downloadMicrosoftFundingAttachments } from './background-integrations.mjs';
 
 function dataRoot() {
   return process.env.IVA_MAC_HELPER_DATA_DIR || path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper');
@@ -61,22 +62,26 @@ function recommendedReviewStatus(caseSnapshot, prepared) {
   return { status: 'no_usable_funding_document', missingAfterSafeUploads };
 }
 
-async function processMessage(message, board) {
+export async function processFundingMonitorMessage(message, board, {
+  reviewExists = fundingReviewExists, acknowledge = acknowledgeFundingMessages, saveReview = saveFundingReview,
+  downloadGraphAttachments = downloadMicrosoftFundingAttachments, downloadUiAttachments = downloadOutlookMessageAttachments,
+  prepareAttachments = prepareFundingAttachments,
+} = {}) {
   const fingerprint = message.fingerprint;
-  if (await fundingReviewExists(fingerprint)) {
-    await acknowledgeFundingMessages([fingerprint]);
+  if (await reviewExists(fingerprint)) {
+    await acknowledge([fingerprint]);
     return { fingerprint, status: 'already_queued', acknowledged: true };
   }
   const matched = matchingCaseForMessage(board, message.description);
   if (!matched.case) {
-    await saveFundingReview({
+    await saveReview({
       messageFingerprint: fingerprint,
       status: matched.matchCount ? 'ambiguous_case_match' : 'manual_case_match_required',
       matchCount: matched.matchCount,
       source: 'outlook-funding-inbox',
       pipedriveMutated: false,
     });
-    await acknowledgeFundingMessages([fingerprint]);
+    await acknowledge([fingerprint]);
     return { fingerprint, status: 'manual_case_match_required', acknowledged: true };
   }
 
@@ -91,25 +96,37 @@ async function processMessage(message, board) {
     stage: snapshot.stage,
     vpName: snapshot.vpName || null,
     vpEmail: snapshot.vpEmail || null,
-    source: 'outlook-funding-inbox',
+    source: message.source === 'microsoft-graph' ? 'microsoft-graph' : 'outlook-funding-inbox',
     pipedriveMutated: false,
     messageId: message.messageId || null,
   };
-  if (message.messageId && !message.uiDescriptionVerified) {
-    await saveFundingReview({ ...base, status: 'native_message_ui_resolution_pending', attachmentCount: null });
-    await acknowledgeFundingMessages([fingerprint]);
-    return { fingerprint, dealId: base.dealId, status: 'native_message_ui_resolution_pending', acknowledged: true };
+  const direct = message.source === 'microsoft-graph' && message.identityVerified === true && /^<[^<>\r\n\0]+>$/.test(String(message.messageId || ''));
+  if (message.source === 'microsoft-graph' && !direct || message.messageId && !message.uiDescriptionVerified && !direct) {
+    const status = message.source === 'microsoft-graph' ? 'graph_message_identity_pending' : 'native_message_ui_resolution_pending';
+    await saveReview({ ...base, status, attachmentCount: null });
+    await acknowledge([fingerprint]);
+    return { fingerprint, dealId: base.dealId, status, acknowledged: true };
   }
-  if (!/hat dateien/i.test(message.description)) {
-    await saveFundingReview({ ...base, status: 'mail_text_review_required', attachmentCount: 0 });
-    await acknowledgeFundingMessages([fingerprint]);
+  if (!direct && !/hat dateien/i.test(message.description)) {
+    await saveReview({ ...base, status: 'mail_text_review_required', attachmentCount: 0 });
+    await acknowledge([fingerprint]);
     return { fingerprint, dealId: base.dealId, status: 'mail_text_review_required', acknowledged: true };
   }
 
   const directory = incomingDirectory(fingerprint);
   await ensureFreshIncomingDirectory(directory);
-  const download = await downloadOutlookMessageAttachments(message.description, directory);
-  const prepared = await prepareFundingAttachments({
+  // Graph hasAttachments excludes inline attachments. Read the complete
+  // message's attachment inventory before deciding that no files exist.
+  const download = direct ? await downloadGraphAttachments({ messageId: message.messageId, directory })
+    : await downloadUiAttachments(message.description, directory);
+  if (direct && (download?.source !== 'microsoft-graph' || download.messageId !== message.messageId || download.identityVerified !== true || download.complete !== true || download.verified !== true))
+    throw new Error('Die M365-Anlagen wurden noch nicht vollständig zur Originalmail verifiziert.');
+  if (direct && download.expectedCount === 0) {
+    await saveReview({ ...base, status: 'mail_text_review_required', attachmentCount: 0, sourceHash: download.sourceHash, sourceReadComplete: download.sourceReadComplete === true });
+    await acknowledge([fingerprint]);
+    return { fingerprint, dealId: base.dealId, status: 'mail_text_review_required', acknowledged: true };
+  }
+  const prepared = await prepareAttachments({
     inputDirectory: directory,
     outputDirectory: path.join(directory, 'prepared'),
     customerName: snapshot.customerName,
@@ -117,9 +134,10 @@ async function processMessage(message, board) {
   });
   const recommendation = recommendedReviewStatus(snapshot, prepared);
   const recipients = resolveFundingRecipients(snapshot);
-  await saveFundingReview({
+  await saveReview({
     ...base,
     ...recommendation,
+    ...(direct ? { sourceHash: download.sourceHash, immutableId: download.immutableId || null, sourceReadComplete: download.sourceReadComplete === true } : {}),
     recipients: { to: recipients.to, cc: recipients.cc, warnings: recipients.warnings },
     downloaded: { directory, expectedCount: download.expectedCount, downloadedCount: download.downloadedCount, verified: download.verified },
     documents: {
@@ -129,11 +147,18 @@ async function processMessage(message, board) {
       allOutputsAutoUploadSafe: prepared.allOutputsAutoUploadSafe,
     },
   });
-  await acknowledgeFundingMessages([fingerprint]);
+  await acknowledge([fingerprint]);
   return { fingerprint, dealId: base.dealId, status: recommendation.status, acknowledged: true };
 }
 
-export async function runFundingMonitorOnce({ ignoreIdle = false, fundingRun = { mode: 'incremental' } } = {}) {
+export function isFundingTombstoneOnlyDelta(detected = {}) {
+  return detected.source === 'microsoft-graph' && Number(detected.tombstoneCount) > 0 && !detected.newMessageCount;
+}
+
+export async function runFundingMonitorOnce({ ignoreIdle = false, fundingRun = { mode: 'incremental' } } = {}, {
+  loadState = loadFundingMonitorState, checkStatus = microsoftFundingMailStatus, checkUiReadiness = fundingMonitorBackgroundReadiness,
+  detectMessages = detectNewFundingMessages, scanBoard = scanPipedriveFundingBoard, processMessage = processFundingMonitorMessage, auditLog = audit,
+} = {}) {
   let lock;
   try {
     await mkdir(dataRoot(), { recursive: true, mode: 0o700 });
@@ -144,19 +169,26 @@ export async function runFundingMonitorOnce({ ignoreIdle = false, fundingRun = {
   }
   const startedAt = new Date().toISOString();
   try {
-    const state = await loadFundingMonitorState();
+    const state = await loadState();
     if (state.mode !== 'review-only' || state.emailSendEnabled === true || state.replyDraftsOnly === false) {
       throw new Error('Fördermonitor startet nur im gesperrten review-only-Modus ohne E-Mail-Versand.');
     }
-    if (!ignoreIdle) {
-      const readiness = await fundingMonitorBackgroundReadiness();
+    const direct = (await checkStatus({ probe: true })).ready === true;
+    if (!ignoreIdle && !direct) {
+      const readiness = await checkUiReadiness();
       if (!readiness.canRunUiAutomation) {
-        await audit({ category: 'monitor-run', status: 'skipped_not_idle', readiness });
+        await auditLog({ category: 'monitor-run', status: 'skipped_not_idle', readiness });
         return { status: 'skipped_not_idle', readiness, sent: false, pipedriveMutated: false };
       }
     }
-    const detected = await detectNewFundingMessages({ fundingRun });
-    const board = await scanPipedriveFundingBoard({ persist: true });
+    const detected = await detectMessages({ fundingRun });
+    if (isFundingTombstoneOnlyDelta(detected)) {
+      const result = { status: 'mail_delta_checked_no_new_mail', scanComplete: detected.scanComplete, tombstoneCount: detected.tombstoneCount,
+        newMessageCount: 0, dealsChecked: 0, sent: false, pipedriveMutated: false };
+      await auditLog({ category: 'monitor-run', ...result, startedAt, completedAt: new Date().toISOString() });
+      return result;
+    }
+    const board = await scanBoard({ persist: true });
     if (!detected.newMessageCount) {
       const result = {
         status: detected.scanComplete ? 'open_deals_checked_no_new_mail' : 'mail_scan_continuation_pending',
@@ -167,7 +199,7 @@ export async function runFundingMonitorOnce({ ignoreIdle = false, fundingRun = {
         sent: false,
         pipedriveMutated: false,
       };
-      await audit({ category: 'monitor-run', ...result, startedAt, completedAt: new Date().toISOString() });
+      await auditLog({ category: 'monitor-run', ...result, startedAt, completedAt: new Date().toISOString() });
       return result;
     }
     const results = [];
@@ -189,7 +221,7 @@ export async function runFundingMonitorOnce({ ignoreIdle = false, fundingRun = {
       sent: false,
       pipedriveMutated: false,
     };
-    await audit({ category: 'monitor-run', ...report });
+    await auditLog({ category: 'monitor-run', ...report });
     return report;
   } finally {
     await lock?.close().catch(() => {});

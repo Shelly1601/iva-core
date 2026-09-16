@@ -4,6 +4,16 @@ Verbindlicher Stand: 16.09.2026. Dieser Ablauf läuft täglich um 05:00 Uhr Euro
 
 Der Mailzugang erfolgt bevorzugt über die bereits angemeldete native Microsoft-Outlook-App. Das Konto `foerderung@heat-hero.com` ist auf diesem Mac Mini unter „Förderung | HEAT HERO“ eingerichtet und sein Posteingang wurde am 13.09.2026 sichtbar geprüft. Vor einer Web-Anmeldung immer zuerst die aktuelle native Kontenliste prüfen. Eine funktionierende Outlook-Sitzung benötigt keine zusätzliche Passwortsuche oder Web-Anmeldung. Frühere Berichte über ein fehlendes Konto sind überholt.
 
+### Direkter Förderpostfachzugang im Hintergrund
+
+Am 16.09.2026 in Outlook bestätigt: Das Förderpostfach ist für `n.sell@heat-hero.com` freigegeben. Der neue Microsoft-Graph-Weg benötigt eine eigene, einmalig freigegebene Microsoft-App; die Outlook-Sitzung stellt keine API-Zugangsdaten bereit. `funding-mail-connection-status --probe` zeigt den wirklichen Verbindungsstand. Ohne bestätigten Zugriff bleibt Outlook verfügbar. Der gesamte Förderlauf darf erst dann als bildschirmunabhängig bezeichnet werden, wenn auch alle übrigen Schritte ohne Oberfläche ausgeführt und real geprüft wurden.
+
+Bei verbundenem Graph-Zugang werden Posteingang, vollständige Nachricht und Dateien direkt gelesen. `read-funding-mail-message nachricht.json` und `download-funding-mail-attachments nachricht.json` erhalten `{"messageId":"<echte-rfc-id@absender>","folder":"Posteingang"}`. Die Message-ID immer aus dem bestätigten Scan übernehmen. Die Downloads enthalten den geprüften `sourceHash`; diesen zusammen mit `source: "microsoft-graph"` in den Pipedrive-Abschlussbeleg übernehmen. Erst nach vollständiger Ablage und Rücklesung `complete-funding-mail abschluss.json --commit` ausführen. Eine später veränderte Mail benötigt eine neue Inhaltsprüfung und einen neuen Ablagebeleg.
+
+Der erste direkte Scan beginnt einmalig am 01.08.2026; danach wird ausschließlich der gespeicherte Delta-Cursor fortgesetzt, ergänzt um offene IDs. Bestehende Outlook-Cursor niemals löschen oder als Graph-Cursor verwenden. Ein notwendiger Providerwechsel ist eine ausdrückliche Cursor-Migration mit erhaltenem Bearbeitungsjournal. Delta-Löschereignisse sind keine abgeschlossenen Bearbeitungen. Der Graph-Zugang versendet keine E-Mails; Kundenanforderungen bleiben im bestehenden geprüften Versandweg.
+
+Microsoft begrenzt serverseitig datumsgefilterte Delta-Abfragen auf 5.000 Nachrichten. Deshalb wird der Inbox-Metadatenstand einmal ohne diesen Filter initialisiert und das Datum vor der Verarbeitung lokal geprüft. Ältere Mailtexte und Anlagen werden dabei nicht geöffnet; in den Arbeitsbestand gelangen nur Nachrichten ab dem 01.08.2026. Spätere Läufe verwenden den Delta-Stand und wiederholen diese Initialisierung nicht.
+
 ## Feste Reihenfolge und Namen
 
 1. **Förderung 1 – Vollständigkeit & Unterlagen**

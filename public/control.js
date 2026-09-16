@@ -122,7 +122,7 @@ function renderAgents(){
 }
 function renderConnectors(){
   const items=state.status?.connectors?.items||[];
-  $('connectors').innerHTML=items.length?items.map(item=>`<article class="connector"><div class="connector-head"><div><b>${esc(item.label)}</b><p>${esc(item.detail||'')}</p></div><span class="badge ${item.ready?'ready':''}">${item.ready?'bereit':'offen'}</span></div>${item.missing?.length?`<div class="missing">Fehlt: ${item.missing.map(esc).join(' · ')}</div>`:''}</article>`).join(''):empty('Keine Connector-Daten.');
+  $('connectors').innerHTML=items.length?items.map(item=>`<article class="connector"><div class="connector-head"><div><b>${esc(item.label)}</b><p>${esc(item.detail||'')}</p></div><span class="badge ${item.ready?'ready':''}">${item.ready?'bereit':'offen'}</span></div>${item.missing?.length?`<div class="missing">Fehlt: ${item.missing.map(esc).join(' · ')}</div>`:''}${item.id==='microsoft-funding-mail'?`<div class="actions"><button class="btn" data-funding-mail="probe">Verbindung prüfen</button>${item.canConnect?'<button class="btn" data-funding-mail="connect">Mit Microsoft verbinden</button>':''}</div>`:''}</article>`).join(''):empty('Keine Connector-Daten.');
 }
 function renderApprovals(){
   $('approvals').innerHTML=state.approvals.length?state.approvals.map(item=>`<article class="list-item"><div class="list-head"><b>${esc(item.title)}</b><span class="badge">${esc(item.status)}</span></div><p>${esc(item.summary||'')}</p><div class="tools">Bestätigung: ${esc(item.confirmationPhrase||'im Vorgang')}</div><div class="meta">${fmt(item.updatedAt)} · ${esc(item.agentId)}</div></article>`).join(''):empty('Keine Freigabe wartet.');
@@ -161,6 +161,22 @@ $('token').value=token();
 if(window.matchMedia('(max-width:800px)').matches)$('connectionCard').removeAttribute('open');
 $('saveToken').addEventListener('click',()=>{ localStorage.setItem(TOKEN_KEY,$('token').value.trim()); load(); });
 $('refresh').addEventListener('click',load);
+$('connectors').addEventListener('click',async event=>{
+  const button=event.target.closest('[data-funding-mail]'); if(!button)return;
+  button.disabled=true;
+  try{
+    if(button.dataset.fundingMail==='connect'){
+      const result=await api('/api/funding-mail/connection/start',{method:'POST'});
+      const url=new URL(result.url);
+      if(url.origin!=='https://login.microsoftonline.com'||url.username||url.password)throw new Error('Microsoft-Verbindungsadresse ungültig.');
+      location.assign(url.href);
+    }else{
+      const result=await api('/api/funding-mail/connection/status?probe=1');
+      await load();
+      setStatus(result.ready?'on':'err',result.ready?'Förderpostfach: Zugriff bestätigt':'Förderpostfach: Microsoft-Einrichtung oder Kontofreigabe fehlt.');
+    }
+  }catch(error){setStatus('err',error.message);}finally{button.disabled=false;}
+});
 $('ivaHelper').addEventListener('click',()=>location.href='/cockpit');
 makeCollapsible();
 load();
