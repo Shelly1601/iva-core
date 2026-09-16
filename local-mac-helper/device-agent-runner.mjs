@@ -1,3 +1,4 @@
+import { createQueueWakeGuard } from './queue-wake-guard.mjs';
 import os from 'node:os';
 import { imacUiIsBusy } from './ui-execution-lock.mjs';
 import { readFileSync } from 'node:fs';
@@ -56,6 +57,21 @@ let lastMigrationScheduleAt = 0;
 // Netzbetrieb wird verhindert, damit der ausgehende Agent erreichbar bleibt.
 const wakeGuard = spawn('/usr/bin/caffeinate', ['-s', '-w', String(process.pid)], { stdio: 'ignore' });
 wakeGuard.unref();
+
+const queueWakeGuard = createQueueWakeGuard({
+  onStatus: async status => {
+    await mkdir(DATA_ROOT, { recursive: true });
+    const file = path.join(DATA_ROOT, 'queue-wake-status.json');
+    const temporary = `${file}.${process.pid}.tmp`;
+    await writeFile(temporary, JSON.stringify({ ...status, runnerPid: process.pid, checkedAt: new Date().toISOString() }), { mode: 0o600 });
+    await rename(temporary, file);
+  },
+});
+const refreshQueueWakeGuard = () => queueWakeGuard.tick().catch(error => console.error(`IVA-Auftrags-Wachschutz: ${error.message}`));
+await refreshQueueWakeGuard();
+setInterval(refreshQueueWakeGuard, 10_000).unref();
+
+
 
 function hostname() {
   return String(os.hostname() || '').trim().toLowerCase().replace(/\.local$/, '');
