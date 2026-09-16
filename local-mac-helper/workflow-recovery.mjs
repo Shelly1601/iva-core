@@ -1,9 +1,17 @@
 export function fundingIntakeProofIsComplete({ proof, jobId, mode, createdAt } = {}) {
   if (!['initial-backfill', 'incremental'].includes(mode) || !jobId || proof?.protocol !== 2 || proof.jobId !== jobId || proof.mode !== mode
-    || proof.coverageComplete !== true || proof.checkpointRecorded !== true || proof.completed !== true || proof.pending !== 0) return false;
+    || proof.coverageComplete !== true || proof.checkpointRecorded !== true || proof.completed !== true) return false;
+  const hasWorkCounts = ['pendingTotal', 'actionablePending', 'waiting'].some(key => Object.hasOwn(proof, key));
+  if (hasWorkCounts) {
+    if (!['pendingTotal', 'actionablePending', 'waiting'].every(key => Number.isSafeInteger(proof[key]) && proof[key] >= 0)
+      || proof.pending !== proof.pendingTotal || proof.pendingTotal !== proof.actionablePending + proof.waiting
+      || proof.actionablePending !== 0 || proof.completionJournalVerified !== true || proof.pendingMoves !== 0
+      || proof.allMessagesCompleted !== (proof.pendingTotal === 0)) return false;
+    if (proof.nextWaitingActionAt != null && (!Number.isFinite(Date.parse(proof.nextWaitingActionAt)) || Date.parse(proof.nextWaitingActionAt) <= Date.now())) return false;
+  } else if (proof.pending !== 0) return false;
   const scannedAt = Date.parse(proof.scannedAt);
   if (!Number.isFinite(scannedAt) || scannedAt > Date.now() + 60000) return false;
-  if (mode === 'initial-backfill') return proof.since === '2026-08-01' && proof.backfillCompleted === true;
+  if (mode === 'initial-backfill') return proof.since === '2026-08-01' && (proof.backfillCompleted === true || hasWorkCounts && proof.backfillReviewComplete === true);
   return Number.isFinite(Date.parse(createdAt)) && scannedAt >= Date.parse(createdAt);
 }
 

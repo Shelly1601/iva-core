@@ -11,7 +11,7 @@ import { accessSync, constants as fsConstants, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { materializeIcloudWorkspace } from './icloud-workspace.mjs';
 import { createPlanbarCompletionStore } from './planbar-completion.mjs';
-import { createFundingIntakeStore, withFundingFileLock } from './funding-intake-state.mjs';
+import { createFundingIntakeStore, fundingIntakePendingWork, withFundingFileLock } from './funding-intake-state.mjs';
 import { assertImacFundingHost } from './funding-workflows.mjs';
 import { isoWeekRange, mergePlanbarSchedulingProgress, planbarSchedulingKey, planbarSchedulingSummary } from '../operations/customer-scheduling.js';
 import { validateDewarmteLinkPdfInput } from '../projects/dewarmte.js';
@@ -308,6 +308,7 @@ function workflowResultInstructions(request) {
 - Lies zu Beginn den gespeicherten Stand mit: ${command('workflow-status', request.jobId)}
 - Bereits als completed gespeicherte Teilschritte nicht erneut ausführen; beim ersten offenen Teilschritt fortsetzen.
 - Ein mit partial abgeschlossenes Teilprotokoll beendet diesen Teilschritt ebenfalls: Fahre mit den anderen eindeutig prüfbaren Fällen im nächsten Teilschritt fort. Nur blocked stoppt die Reihenfolge vollständig.
+- Vollständig geprüfte Mails mit gespeichertem, unverändertem externem Wartebeleg bleiben offen und werden nicht erneut gelesen. Der Einzelfall bleibt fachlich offen; der Prüfschritt darf completed heißen, wenn alle Fälle geprüft und offene Fälle mit gültigem Wartebeleg vorgemerkt sind und keine ausführbare Restarbeit übrig ist. partial gilt für tatsächlich ungeprüfte Fälle oder technische Restarbeit. Bei vollständiger Postfach-Coverage darf so der Scan-/Tageslauf abgeschlossen werden; wartende Fälle im Ergebnis ausdrücklich getrennt nennen. Das bestätigt weder vollständige Kundendeals noch die Ablage dieser Mails in Fertig.
 ${stepLines.join('\n')}
 - Ganz am Ende genau einmal: ${command('workflow-result', request.jobId, '<completed|no_changes|partial|blocked|failed>', '"kurze Gesamtzusammenfassung"')}
 completed/no_changes ist nur erlaubt, wenn jeder Pflicht-Teilschritt protokolliert und nicht partial/blockiert ist. Ein normal beendeter Codex-Prozess ohne dieses Ergebnisprotokoll gilt ausdrücklich nicht als Erfolg.`;
@@ -878,7 +879,7 @@ export async function recordPlanbarCompletion(jobId, action, input = {}, { repor
   return result;
 }
 
-export function buildFundingIntakeProof(request, state) {
+export function buildFundingIntakeProof(request, state, completionJournal) {
   if (!request.fundingRun || !FUNDING_WORKFLOW_STEPS[request.workflowId]?.includes('completeness')) return null;
   const initial = request.fundingRun.mode === 'initial-backfill';
   const backfill = state.backfill || {}, delta = state.incremental || {};
@@ -890,15 +891,24 @@ export function buildFundingIntakeProof(request, state) {
   const checkpoint = initial || !deltaIsLatest ? backfill.checkpoint : delta.checkpoint;
   const checkpointRecorded = typeof checkpoint === 'string' && checkpoint.length > 0;
   const coverageComplete = Boolean(scanFinished && checkpointRecorded && Number.isFinite(Date.parse(scannedAt)) && (initial || Date.parse(scannedAt) >= Date.parse(request.createdAt)));
-  const pending = Array.isArray(state.pending) ? state.pending.length : Infinity;
+  const work = fundingIntakePendingWork(state);
+  const pending = work.pending?.length ?? Infinity, actionablePending = work.actionablePending?.length ?? Infinity, waiting = work.waiting?.length ?? 0;
+  const backfillReviewComplete = Boolean(['scanned', 'completed'].includes(backfill.status) && !backfill.cursor && backfill.checkpoint
+    && Number.isFinite(Date.parse(backfill.scannedAt)) && work.actionablePending && !work.actionablePending.some(item => item.backfill));
+  const nextWaitingActionAt = work.waiting?.map(item => item.waitingReview.nextActionAt).filter(Boolean).sort((a, b) => Date.parse(a) - Date.parse(b))[0] || null;
+  const completionJournalVerified = completionJournal?.version === 2 && Array.isArray(completionJournal.completed) && Array.isArray(completionJournal.pendingMoves);
+  const pendingMoves = completionJournalVerified ? completionJournal.pendingMoves.length : null;
   return { protocol: 2, jobId: request.jobId, mode: request.fundingRun.mode, since: initial ? backfill.since : null,
-    coverageComplete, checkpointRecorded, scannedAt: scannedAt || null, pending,
-    backfillCompleted: backfill.status === 'completed', completed: coverageComplete && pending === 0 };
+    coverageComplete, checkpointRecorded, scannedAt: scannedAt || null, pending, pendingTotal: pending, actionablePending, waiting, nextWaitingActionAt,
+    completionJournalVerified, pendingMoves, allMessagesCompleted: pending === 0 && pendingMoves === 0, backfillReviewComplete,
+    backfillCompleted: backfill.status === 'completed', completed: coverageComplete && actionablePending === 0 && completionJournalVerified && pendingMoves === 0 };
 }
 
 async function fundingIntakeProofFor(request) {
   if (!request.fundingRun || !FUNDING_WORKFLOW_STEPS[request.workflowId]?.includes('completeness')) return null;
-  return buildFundingIntakeProof(request, await createFundingIntakeStore().status());
+  const file = path.join(process.env.IVA_MAC_HELPER_DATA_DIR || path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper'), 'funding-mail-completion.json');
+  const journal = await readJson(file).catch(error => error.code === 'ENOENT' ? { version: 2, completed: [], pendingMoves: [] } : null);
+  return buildFundingIntakeProof(request, await createFundingIntakeStore().status(), journal);
 }
 
 export function resolveFundingTaskFinalStatus({ exitCode, structuredStatus, request, fundingIntakeProof, structuredResult }) {

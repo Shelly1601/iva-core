@@ -95,6 +95,22 @@ export function validateFundingMailWaitingReview(input = {}) {
     openPoints, nextAction, nextActionAt, verifiedAt };
 }
 
+export function fundingIntakePendingWork(state = {}, timestamp = Date.now()) {
+  const messages = Array.isArray(state.messages) ? state.messages : state.pending;
+  if (!Array.isArray(messages)) return { pending: null, actionablePending: null, waiting: null };
+  const pending = messages.filter(item => item.status !== 'completed');
+  const waiting = pending.filter(item => {
+    if (item.status !== 'waiting' || item.resume || waitingDue(item, timestamp)) return false;
+    try {
+      const review = validateFundingMailWaitingReview(item.waitingReview);
+      return item.messageId === review.messageId && item.fingerprint === review.messageFingerprint && item.dealId === review.dealId
+        && (!item.sourceHash || item.sourceHash === review.sourceHash);
+    } catch { return false; }
+  });
+  const deferred = new Set(waiting);
+  return { pending, actionablePending: pending.filter(item => !deferred.has(item)), waiting };
+}
+
 export async function recordFundingMailWaitingReview(input, { intakeStore = createFundingIntakeStore() } = {}) {
   return intakeStore.recordWaitingReview(input);
 }
@@ -236,8 +252,8 @@ export function createFundingIntakeStore({ filePath = path.join(process.env.IVA_
       });
     },
     async status() {
-      const state = await load(), pending = state.messages.filter(item => item.status !== 'completed');
-      return { ...state, pending, actionablePending: pending.filter(item => item.status !== 'waiting' || waitingDue(item, now())), waiting: pending.filter(item => item.status === 'waiting' && !waitingDue(item, now())) };
+      const state = await load();
+      return { ...state, ...fundingIntakePendingWork(state, now()) };
     },
   };
 }
