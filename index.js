@@ -2712,7 +2712,7 @@ app.get('/api/ai-budget/status', async (_req, res) => {
     const budget = await currentSpendEUR();
     res.set('Cache-Control', 'no-store').json({
       ...budget, routing: inspectRouting().resolved,
-      accounting: 'conservative-eur-reservations',
+      accountingMethod: 'conservative-eur-reservations',
       scope: 'IVA text model calls through the central router; excludes existing subscriptions and media providers',
       qualityPolicy: { skipWorkflowChecks: false, silentModelDowngrade: false, unverifiedCompletion: false },
       workflowMigration: { complete: false, activeCodexWorkPreserved: true },
