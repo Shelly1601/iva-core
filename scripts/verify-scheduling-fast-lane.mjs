@@ -5,13 +5,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { acquirePriorityLease, serveBuildUiAccess, requestBuildUiAccess, serveUiCheckpoints, requestUiCheckpoint } from '../local-mac-helper/execution-priority.mjs';
-import { mergeSchedulingMilestones, schedulingMilestoneStatus } from '../operations/customer-scheduling.js';
+import { buildPipedriveCompletion, mergeSchedulingMilestones, schedulingMilestoneStatus } from '../operations/customer-scheduling.js';
 const root = await mkdtemp(path.join(os.tmpdir(), 'iva-fast-lane-'));
 after(() => rm(root, { recursive: true, force: true }));
 process.env.IVA_CODEX_TASK_ROOT = path.join(root, 'tasks');
 process.env.DATA_DIR = path.join(root, 'data');
 const tasks = await import('../local-mac-helper/codex-tasks.mjs');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+test('Pipedrive writer and evidence agree on padded ISO week', () => {
+  assert.equal(buildPipedriveCompletion({year: 2026, week: 9, currentStage: 'A', visibleStages: ['A', 'B']}).fieldValue, 'KW09');
+});
 
 test('priority waits for verified safe point and runs ahead of normal queued UI', async () => {
   const lock = path.join(root, 'desktop'), events = [];

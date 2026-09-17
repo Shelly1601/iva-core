@@ -454,7 +454,7 @@ export function buildPipedriveCompletion({ year, week, currentStage, visibleStag
 
   return {
     fieldName: 'Einbautermin Kalenderwoche',
-    fieldValue: `KW${Number(week)}`,
+    fieldValue: `KW${String(Number(week)).padStart(2, '0')}`,
     sourceStage: String(visibleStages[currentIndex]).trim(),
     targetStage: String(visibleStages[currentIndex + 1]).trim(),
     allowAutomaticDealTitleWeekSuffix: true,
