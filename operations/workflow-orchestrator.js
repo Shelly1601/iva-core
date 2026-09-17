@@ -38,7 +38,7 @@ function transact(file, change) {
   } finally { fs.rmSync(lock, { recursive: true, force: true }); }
 }
 
-export function createWorkflowOrchestrator({ file, handlers = {}, resourceLocks, clock = Date.now, maxConcurrency = 8, baseConcurrency = 2, pollMs = 250 } = {}) {
+export function createWorkflowOrchestrator({ file, handlers = {}, resourceLocks, clock = Date.now, maxConcurrency = 8, baseConcurrency = 2, pollMs = 250, retainCompletedWorkflows = Infinity } = {}) {
   if (!file) throw new Error('Persistent workflow file required');
   if (!Number.isFinite(maxConcurrency) || !Number.isFinite(baseConcurrency) || maxConcurrency < 1 || baseConcurrency < 1 || maxConcurrency > 64) throw new Error('Workflow concurrency must be finite and between 1 and 64');
   maxConcurrency = Math.max(2, Math.floor(maxConcurrency));
@@ -55,6 +55,10 @@ export function createWorkflowOrchestrator({ file, handlers = {}, resourceLocks,
     if (new Set(shards.map(s => s.id)).size !== shards.length || shards.some(s => !s.id || !s.steps?.length || s.steps.some(step => !step.id || !step.handler) || new Set(s.steps.map(step => step.id)).size !== s.steps.length)) throw new Error('Unique shard and step IDs and handlers required');
     return tx(state => {
       if (state.workflows[id]) return state.workflows[id];
+      if (Number.isInteger(retainCompletedWorkflows) && retainCompletedWorkflows > 0) {
+        const completed = Object.values(state.workflows).filter(workflow => workflow.status === 'completed').sort((a, b) => b.completedAt - a.completedAt);
+        for (const prior of completed.slice(Math.max(0, retainCompletedWorkflows - 1))) delete state.workflows[prior.id];
+      }
       const deadlineAt = receivedAt + Math.min(WORKFLOW_BUDGET_MS, Math.max(1, budgetMs));
       const workflow = { id, kind, lane, receivedAt, deadlineAt, status: 'queued', shards: [], createdAt: clock() };
       for (const shard of shards) {

@@ -4,12 +4,32 @@ import { mkdtemp, readFile, mkdir, writeFile, rm, utimes } from 'node:fs/promise
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { acquirePriorityLease, reconcileResourceLease, resourceLockRoot, serveBuildUiAccess, requestBuildUiAccess } from '../local-mac-helper/execution-priority.mjs';
+import { acquirePriorityLease, reconcileResourceLease, resourceLockRoot, serveBuildUiAccess, requestBuildUiAccess, requestUiCheckpoint } from '../local-mac-helper/execution-priority.mjs';
 import { withPipedriveBrowserLock, PIPEDRIVE_BROWSER_LOCK_ROOT } from '../local-mac-helper/pipedrive-browser-lock.mjs';
 import { resourceExecutionRoot, imacUiIsBusy, listResourceLocks } from '../local-mac-helper/ui-execution-lock.mjs';
 const temp = await mkdtemp(path.join(os.tmpdir(), 'iva-resources-'));
 after(() => rm(temp, { recursive: true, force: true }));
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+test('scoped worker serves UI checkpoints under the same owner and yields to urgent waiter', async () => {
+  const root = path.join(temp, 'scoped-checkpoint'), directory = path.join(temp, 'scoped-checkpoint-task');
+  await mkdir(directory); let heldLease, urgentFinished = false;
+  const withLock = async (task, options) => {
+    heldLease = await acquirePriorityLease({ root, ...options });
+    try { return await task(heldLease); } finally { await heldLease.release(); }
+  };
+  await serveBuildUiAccess(directory, withLock, async () => {
+    const idleCheckpoint = await requestUiCheckpoint(directory); assert.equal(idleCheckpoint.yielded, false);
+    await requestBuildUiAccess(directory, 'acquire', { scope: 'planbar-write' });
+    const ownerNonce = heldLease.owner.nonce;
+    const urgent = acquirePriorityLease({ root, scope: 'planbar-write', priority: 100, pollMs: 5 }).then(async lease => { urgentFinished = true; await lease.release(); });
+    await delay(25);
+    const checkpoint = await requestUiCheckpoint(directory, { safeToYield: true, caseCheckpoint: 'reservation-readback' });
+    assert.equal(checkpoint.yielded, true); assert.equal(urgentFinished, true);
+    assert.equal(heldLease.owner.nonce, ownerNonce); assert.equal(heldLease.owner.safeToYield, false);
+    await requestBuildUiAccess(directory, 'release'); await urgent;
+  });
+});
 
 test('old malformed or missing owner remains busy and cannot be stale-evicted', async () => {
   for (const malformed of [true, false]) {

@@ -24,7 +24,8 @@ assert.equal(isLocalCockpitRequest({...req,headers:{host:'evil.example'}}),false
 assert.equal(isLocalCockpitRequest({...req,socket:{remoteAddress:'192.168.1.2'}}),false);
 assert.equal(resolveRightDisplayWorkspace({displays:[{id:1,main:true,x:0,y:0,width:1920,height:1080}]}).displayCount,1);
 assert.equal(shouldResumeCodexTaskAfterTermination({request:{mode:'operational'},resultText:'Browser repariert.\nStatus: erfolgreich',exitCode:0}),false);
-assert.equal(shouldResumeCodexTaskAfterTermination({request:{mode:'operational'},resultText:'Verbindung unterbrochen',exitCode:1,state:{recoveryAttempts:100}}),true);
+assert.equal(shouldResumeCodexTaskAfterTermination({request:{mode:'operational'},resultText:'Verbindung unterbrochen',exitCode:1,state:{recoveryAttempts:100}}),false);
+assert.equal(shouldResumeCodexTaskAfterTermination({request:{mode:'operational',createdAt:new Date().toISOString()},resultText:'Verbindung unterbrochen',exitCode:1,state:{recoveryAttempts:2}}),true);
 assert.equal(shouldResumeCodexTaskAfterTermination({request:{mode:'operational'},resultText:'Nur begonnen',exitCode:0}),true);
 assert.equal(shouldResumeCodexTaskAfterTermination({request:{mode:'operational'},resultText:'CAPTCHA benötigt externe Bestätigung',exitCode:1}),false);
 assert.equal(shouldResumeCodexTaskAfterTermination({request:{mode:'operational'},resultText:'Webanmeldung verlangt Kennwort, kein passender Schlüsselbund-Zugang verfügbar. Passwortmanager-Zugriff durch Browser-Sicherheitsprüfung abgelehnt. Status: blockiert',exitCode:1}),false);

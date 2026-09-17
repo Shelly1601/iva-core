@@ -27,12 +27,28 @@ export async function runFundingPreflightBatch({ id = crypto.randomUUID(), dealI
 
 // The existing Planbar description validator remains authoritative. The persisted index
 // fingerprint reuses only this narrow format audit, never a reservation/write readback.
-export async function runPlanbarIndexAuditBatch({ id = crypto.randomUUID(), index, receivedAt = Date.now(), file = storeFile('planbar-index-audit'), concurrency = 6 } = {}) {
-  const normalized = normalizePlanbarSearchIndex(index);
+export async function runPlanbarIndexAuditBatch({ id = crypto.randomUUID(), index, receivedAt = Date.now(), file = storeFile('planbar-index-audit'), concurrency = 6, shardBuckets = null } = {}) {
+  const normalized = normalizePlanbarSearchIndex(index, { auditDescriptions: false });
   if (!normalized.appointments.length) throw new Error('A nonempty Planbar index is required');
-  const engine = createWorkflowOrchestrator({ file, baseConcurrency: concurrency, maxConcurrency: concurrency + 1, handlers: {
-    'planbar-format-audit': async ({ input }) => ({ verified: true, evidence: { appointmentId: input.appointmentId, descriptionAudit: auditPlanbarDescription(input.description), completeScope: 'indexed-description-format-only' } }),
+  if (shardBuckets !== null && (!Number.isInteger(shardBuckets) || shardBuckets < 1 || shardBuckets > 64)) throw new Error('Planbar audit buckets must be between 1 and 64');
+  const engine = createWorkflowOrchestrator({ file, baseConcurrency: concurrency, maxConcurrency: concurrency + 1, retainCompletedWorkflows: 4, handlers: {
+    'planbar-format-audit': async ({ input }) => ({ verified: true, evidence: input.appointments
+      ? { audits: input.appointments.map(appointment => ({ appointmentId: appointment.id, descriptionAudit: auditPlanbarDescription(appointment.description) })), completeScope: 'indexed-description-format-only' }
+      : { appointmentId: input.appointmentId, descriptionAudit: auditPlanbarDescription(input.description), completeScope: 'indexed-description-format-only' } }),
   } });
-  engine.enqueue({ id, kind: 'planbar-index-description-audit', lane: 'batch', receivedAt, shards: normalized.appointments.map(appointment => ({ id: appointment.id, fingerprint: digest({ version: 1, description: appointment.description }), input: { appointmentId: appointment.id, description: appointment.description }, steps: [{ id: 'description-format', handler: 'planbar-format-audit', budgetMs: 500 }] })) });
+  let shards = normalized.appointments.map(appointment => ({ id: appointment.id, fingerprint: digest({ version: 1, description: appointment.description }), input: { appointmentId: appointment.id, description: appointment.description }, steps: [{ id: 'description-format', handler: 'planbar-format-audit', budgetMs: 500 }] }));
+  if (shardBuckets !== null) {
+    const buckets = new Map();
+    for (const appointment of normalized.appointments) {
+      const bucket = parseInt(digest(appointment.id).slice(0, 8), 16) % shardBuckets;
+      if (!buckets.has(bucket)) buckets.set(bucket, []);
+      buckets.get(bucket).push({ id: appointment.id, description: appointment.description });
+    }
+    shards = [...buckets].map(([bucket, appointments]) => {
+      appointments.sort((a, b) => a.id.localeCompare(b.id));
+      return { id: `bucket-${shardBuckets}-${bucket}`, fingerprint: digest({ version: 1, appointments }), input: { appointments }, steps: [{ id: 'description-format', handler: 'planbar-format-audit', budgetMs: 500 }] };
+    });
+  }
+  engine.enqueue({ id, kind: 'planbar-index-description-audit', lane: 'batch', receivedAt, shards });
   return (await engine.runUntilIdle()).find(workflow => workflow.id === id);
 }

@@ -84,6 +84,10 @@ try {
   assert.equal(modelStarts, 1);
 
   const raceJob = await newJob('lock-during-ui-queue');
+  // This fixture exercises the retained legacy lease; protocol 2 rechecks at each explicit UI acquire.
+  const raceRequestPath = path.join(root, raceJob.jobId, 'request.json');
+  const raceRequest = JSON.parse(await readFile(raceRequestPath, 'utf8'));
+  await writeFile(raceRequestPath, JSON.stringify({ ...raceRequest, resourceProtocol: 1 }));
   const raced = await tasks.runCodexTask(raceJob.jobId, { ...options, withUiLock: async task => { session = locked; return task(); } });
   assert.equal(raced.phase, 'waiting_for_unlock'); assert.equal(modelStarts, 1); assert.equal(wakeStarts, 1);
   const unknownJob = await newJob('unknown-session-state');

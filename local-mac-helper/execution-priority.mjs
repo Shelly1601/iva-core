@@ -145,7 +145,8 @@ export async function serveUiCheckpoints(directory, lease, execute) {
       if (!request?.nonce || request.nonce === seen || request.status !== 'requested') return;
       seen = request.nonce;
       const yielded = await lease.checkpoint({ writeOutcomeVerified: request.writeOutcomeVerified === true, safeToYield: request.safeToYield ?? request.writeOutcomeVerified === true, activeScope: request.activeScope, caseCheckpoint: request.caseCheckpoint });
-      await writeFile(requestFile, JSON.stringify({ ...request, status: 'resumed', yielded }), { mode: 0o600 });
+      const watchdog = await json(path.join(directory, 'operational-watchdog.json'));
+      await writeFile(requestFile, JSON.stringify({ ...request, status: 'resumed', yielded, ...(watchdog?.status === 'requested' ? { cooperativeYieldRequested: true, watchdog } : {}) }), { mode: 0o600 });
     })().finally(() => { active = null; });
     active.catch(() => {}); // caller's command retains an unacknowledged request
   }, 100);
@@ -160,6 +161,7 @@ export async function requestUiCheckpoint(directory, { safeToYield = true, activ
   const deadline = Date.now() + 30 * 60_000;
   while (Date.now() < deadline) {
     const result = await json(file);
+    if (result?.nonce === nonce && result.status === 'failed') throw new Error(result.error);
     if (result?.nonce === nonce && result.status === 'resumed') return result;
     await sleep(100);
   }
@@ -170,11 +172,28 @@ export async function requestUiCheckpoint(directory, { safeToYield = true, activ
 // sections acquire the same lease as operational workflows.
 export async function serveBuildUiAccess(directory, withUiLock, execute) {
   const file = path.join(directory, 'ui-access.json');
-  let active = null, held = null, unlock = null, heldScope = '', seen = '', closing = false;
+  let active = null, held = null, heldLease = null, unlock = null, heldScope = '', seen = '', seenCheckpoint = '', closing = false;
   const controller = new AbortController();
+  const checkpointFile = path.join(directory, 'ui-checkpoint.json');
   const timer = setInterval(() => {
     if (active || closing) return;
     active = (async () => {
+      const checkpoint = await json(checkpointFile);
+      if (checkpoint?.nonce && checkpoint.nonce !== seenCheckpoint && checkpoint.status === 'requested') {
+        seenCheckpoint = checkpoint.nonce;
+        try {
+          if (checkpoint.writeOutcomeVerified !== true || checkpoint.safeToYield === false) throw new Error('Yield erst nach verifiziertem Schreibausgang.');
+          const yielded = heldLease ? await heldLease.checkpoint({ writeOutcomeVerified: true, safeToYield: true, activeScope: heldScope, caseCheckpoint: checkpoint.caseCheckpoint }) : false;
+          // Permission to continue also covers the next UI write until its own
+          // readback/checkpoint. Keep the same owner and never release on crash.
+          if (heldLease && heldScope !== 'browser-read') await heldLease.beginCriticalSection({ criticalSection: heldLease.owner.criticalSection, caseCheckpoint: checkpoint.caseCheckpoint });
+          const watchdog = await json(path.join(directory, 'operational-watchdog.json'));
+          await atomicJson(checkpointFile, { ...checkpoint, status: 'resumed', yielded, activeScope: heldScope,
+            ...(watchdog?.status === 'requested' ? { cooperativeYieldRequested: true, watchdog } : {}) });
+        } catch (error) {
+          await atomicJson(checkpointFile, { ...checkpoint, status: 'failed', error: error.message });
+        }
+      }
       const request = await json(file);
       if (!request?.nonce || request.nonce === seen || request.status !== 'requested') return;
       seen = request.nonce;
@@ -186,6 +205,7 @@ export async function serveBuildUiAccess(directory, withUiLock, execute) {
         const ready = new Promise(resolve => { acquired = resolve; });
         heldScope = requestedScope;
         held = withUiLock(async lease => {
+          heldLease = lease;
           if (requestedScope !== 'browser-read') await lease?.beginCriticalSection?.({ criticalSection: request.criticalSection || 'build-ui', caseCheckpoint: request.caseCheckpoint });
           acquired();
           const verifiedRelease = await new Promise(resolve => { unlock = resolve; });
@@ -195,9 +215,11 @@ export async function serveBuildUiAccess(directory, withUiLock, execute) {
         held.catch(() => {});
         try { await Promise.race([ready, held]); } catch (error) { held = null; unlock = null; throw error; }
       } else if (request.action === 'release' && held) {
-        unlock(true); await held; held = null; unlock = null; heldScope = '';
+        unlock(true); await held; held = null; heldLease = null; unlock = null; heldScope = '';
       }
-      await writeFile(file, JSON.stringify({ ...request, status: 'confirmed' }), { mode: 0o600 });
+      const watchdog = await json(path.join(directory, 'operational-watchdog.json'));
+      const cooperativeYieldRequested = request.action === 'release' && watchdog?.status === 'requested';
+      await writeFile(file, JSON.stringify({ ...request, status: 'confirmed', ...(cooperativeYieldRequested ? { cooperativeYieldRequested: true, watchdog } : {}) }), { mode: 0o600 });
     })().finally(() => { active = null; });
     active.catch(async () => {
       const request = await json(file);

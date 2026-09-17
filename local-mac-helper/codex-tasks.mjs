@@ -1,3 +1,4 @@
+import { MAX_AUTOMATIC_RECOVERIES, taskExecutionLane, taskResourcePriority, taskResultDeadline, taskRecoveryAllowed, taskWatchdogRequest } from './task-execution-policy.mjs';
 import { workflowSla } from '../local-mac-helper/workflow-sla.mjs';
 import crypto from 'node:crypto';
 import { serveBuildUiAccess, requestBuildUiAccess, serveUiCheckpoints, requestUiCheckpoint } from './execution-priority.mjs';
@@ -31,12 +32,12 @@ const TASK_ROOT = process.env.IVA_CODEX_TASK_ROOT || path.join(os.homedir(), 'Li
 const planbarCompletion = createPlanbarCompletionStore({ dataDir: path.join(REPO_ROOT, 'data'), tasksDir: TASK_ROOT });
 const DEWARMTE_INPUT_ROOT = path.join(process.env.IVA_MAC_HELPER_DATA_DIR || path.join(os.homedir(), 'Library', 'Application Support', 'IVA Mac Helper'), 'dewarmte-inputs');
 const MAX_PROMPT_LENGTH = 12_000;
-const MAX_RUNTIME_MS = 6 * 60 * 60_000;
-export const CODEX_TASK_MAX_QUEUE_WAIT_MS = 12 * 60 * 60_000;
+const MAX_RUNTIME_MS = 30 * 60_000;
+export const CODEX_TASK_MAX_QUEUE_WAIT_MS = 30 * 60_000;
 export const CODEX_TASK_HEARTBEAT_INTERVAL_MS = 30_000;
 export const CODEX_TASK_HEARTBEAT_STALE_MS = 90_000;
 export const CODEX_TASK_MAX_LAUNCH_ATTEMPTS = 3;
-export const CODEX_TASK_MAX_RECOVERY_ATTEMPTS = Number.MAX_SAFE_INTEGER;
+export const CODEX_TASK_MAX_RECOVERY_ATTEMPTS = MAX_AUTOMATIC_RECOVERIES;
 const CODEX_TASK_RETENTION_MS = 7 * 24 * 60 * 60_000;
 const TERMINAL_TASK_STATUSES = new Set(['completed', 'failed', 'blocked', 'stopped', 'timed_out', 'incomplete']);
 const FUNDING_WORKFLOW_STEPS = Object.freeze({
@@ -403,7 +404,7 @@ export function shouldResumeCodexTaskAfterTermination({
   timedOut = false,
   stderrEvidence = null,
 } = {}) {
-  if (preserveCodexTaskTerminalState(state) || confirmCodexTaskUsageLimit(stderrEvidence, exitCode)) return false;
+  if (!taskRecoveryAllowed(request, state) || preserveCodexTaskTerminalState(state) || confirmCodexTaskUsageLimit(stderrEvidence, exitCode)) return false;
   if (hasCompletionEvidence({request,state,resultText,structuredResult}) && !timedOut && exitCode === 0) return false;
   if (request.workflowId === 'planbar-completion-morning') {
     const proof = state.planbarCompletionProof;
@@ -431,7 +432,7 @@ export function buildCodexPrompt(request) {
     ? `\n\nDies ist der automatische Wiederanlauf ${Number(request.recoveryAttempt)} nach einem unterbrochenen lokalen Worker. Prüfe vor jeder Schreib- oder Sendeaktion zuerst vorhandene lokale Belege, den sichtbaren Zielzustand und bereits erzeugte Ergebnisse. Setze beim ersten noch nicht verifizierten Schritt fort. Wiederhole niemals eine bereits sichtbare, gespeicherte oder anderweitig belegte Aktion. Der Wiederanlauf ist eine Fortsetzung desselben Auftrags, kein neuer Auftrag.`
     : '';
   const runtimeInstruction = `UI-Priorität: Nach jeder abgeschlossenen und rückgelesenen UI-Aktion sowie vor längerer Recherche/Dateiarbeit führe bei UI-Workflows den kooperativen Checkpoint aus: node ${JSON.stringify(MODULE_PATH)} ui-checkpoint ${request.jobId}. Nur aufrufen, wenn kein unklarer Schreib- oder Sendeausgang besteht; bei Unklarheit zuerst am Ziel rücklesen. Der Checkpoint wartet auf priorisierte Terminierungen und kehrt erst nach erneuter UI-Freigabe zurück. Bauaufträge halten keine globale UI-Sperre während der Codearbeit. Bei Bauaufträgen vor JEDEM Browser-/App-Arbeitsabschnitt node ${JSON.stringify(MODULE_PATH)} ui-access ${request.jobId} acquire ausführen und Bestätigung abwarten; nach sichtbarer Rücklesung und vor weiterer Codearbeit ui-access ${request.jobId} release ausführen. Nicht während unklarer Schreibaktionen freigeben. Die verbindlichen Projektanweisungen stehen in ${path.join(REPO_ROOT, '..', 'AGENTS.md')}; lies diese Datei, auch wenn im Unterordner iva-core keine eigene AGENTS.md liegt. Bestehende lokale IVA-Helfer startest du mit absolutem Pfad aus ${path.dirname(MODULE_PATH)}. Dieser geprüfte Laufzeitstand kommt vom zentralen IVA-Core. Projektquellen und Dokumente bleiben im gesetzten iCloud-Workspace. Keine zweite lokale Kopie als laufenden Agenten starten.`;
-  const resourceInstruction = request.resourceProtocol === 2 ? `Ressourcenprotokoll 2: Dieser Worker hält während Analyse, Dateien, API-Lesen und Codearbeit keine UI-Sperre. Vor JEDEM UI-Arbeitsabschnitt ui-access ${request.jobId} acquire <scope> ausführen; Scope ausschließlich planbar-write, pipedrive-write, outlook-write, native-whatsapp oder browser-read. Nach tatsächlicher Rücklesung ui-access ${request.jobId} release ausführen. Nur kurze Zielaktionen sperren; keine Sperre über Fallanalyse halten. ui-checkpoint ist außerhalb einer aktiven Ressourcensperre nicht nötig. Bei unklarem Ausgang Zielzustand unter derselben Sperre prüfen. Die ursprüngliche SLA-Uhr bleibt erhalten.` : '';
+  const resourceInstruction = request.resourceProtocol === 2 ? `Ressourcenprotokoll 2: Dieser Worker hält während Analyse, Dateien, API-Lesen und Codearbeit keine UI-Sperre. Vor JEDEM UI-Arbeitsabschnitt ui-access ${request.jobId} acquire <scope> ausführen; Scope ausschließlich planbar-write, pipedrive-write, outlook-write, native-whatsapp oder browser-read. Nach tatsächlicher Rücklesung ui-access ${request.jobId} release ausführen. Nur kurze Zielaktionen sperren; keine Sperre über Fallanalyse halten. ui-checkpoint ist außerhalb einer aktiven Ressourcensperre nicht nötig. Bei unklarem Ausgang Zielzustand unter derselben Sperre prüfen. Die ursprüngliche SLA-Uhr bleibt erhalten. Liefert ein Checkpoint oder ui-access release cooperativeYieldRequested=true, zuerst den rückgelesenen Fallcheckpoint sichern und offene unabhängige Shards zur Umverteilung melden. Kein Erfolg ohne Vollständigkeitsnachweis; keine unklare Schreibaktion abbrechen.` : '';
   const fundingWindowInstruction = FUNDING_WORKFLOW_STEPS[request.workflowId]
     ? ' Der zentrale iMac-Runner hat zusätzlich Chrome und Outlook unmittelbar vor dem Start geöffnet, rechts platziert und im selben laufzeitgebundenen Nachweis bestätigt. `place-app-right` darfst du zur Diagnose aufrufen; eine sandboxbedingte Accessibility-Ablehnung wird nur für genau diese vorgeprüften Apps über den Nachweis aufgelöst.'
     : '';
@@ -526,7 +527,7 @@ export function codexTaskPolicy() {
   });
 }
 
-export async function startCodexTask({ prompt, title = '', requestId = '', acceptanceCriteria = [], mode = 'build', projectId = '', workflowId = '', workflowName = '', planbar = null, forecastDelivery = null, fundingRun = null, workflowRevision = '' } = {}, { materialize = materializeIcloudWorkspace, spawnProcess = spawn, report = reportTaskState } = {}) {
+export async function startCodexTask({ prompt, title = '', requestId = '', acceptanceCriteria = [], mode = 'build', projectId = '', workflowId = '', workflowName = '', planbar = null, forecastDelivery = null, fundingRun = null, workflowRevision = '', lane = '', runMode = '', automationSlotKey = '', trigger = '' } = {}, { materialize = materializeIcloudWorkspace, spawnProcess = spawn, report = reportTaskState } = {}) {
   assertImacExecutionHost();
   const cleanPrompt = clean(prompt, MAX_PROMPT_LENGTH);
   if (cleanPrompt.length < 10) throw new Error('Der Codex-Auftrag ist zu kurz.');
@@ -578,6 +579,8 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
     forecastDelivery,
     fundingRun,
     workflowRevision,
+    lane: taskExecutionLane({ planbar, lane, runMode, automationSlotKey, trigger, forecastDelivery, workflowId, fundingRun }),
+    runMode, automationSlotKey, trigger,
     launchProtocol: 2,
     resourceProtocol: 2,
     resultProtocol: clean(workflowId, 140) === 'planbar-completion-morning' ? 2 : FUNDING_WORKFLOW_STEPS[clean(workflowId, 140)] ? 1 : 0,
@@ -602,9 +605,20 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
   const launchState = await withFundingFileLock(paths.state, async () => {
     const beforeLaunch = await readJson(paths.state);
     if (beforeLaunch.status !== 'queued') return beforeLaunch;
+    const savedRequest = await readJson(paths.request);
+    const deadlineExceeded = Date.now() >= taskResultDeadline(savedRequest, beforeLaunch);
+    const launchesExhausted = Number(beforeLaunch.launchAttempts || 0) >= (Number(beforeLaunch.recoveryAttempts || 0) + 1) * CODEX_TASK_MAX_LAUNCH_ATTEMPTS;
+    if (deadlineExceeded || launchesExhausted) return writeState(paths, { ...beforeLaunch, status: 'incomplete',
+      phase: deadlineExceeded ? 'sla_violation' : 'recovery_exhausted', nextAttemptAt: null,
+      error: deadlineExceeded ? 'Ursprüngliche 30-Minuten-Ergebnisfrist überschritten.' : 'Begrenzte automatische Startversuche ausgeschöpft.',
+      detail: 'Fachlicher Scope ist nicht abgeschlossen; Belege bleiben erhalten. Kein unbegrenzter automatischer Neustart.',
+      completedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
     return writeState(paths, { ...beforeLaunch, launchAttempts: Number(beforeLaunch.launchAttempts || 0) + 1, lastLaunchAt: new Date().toISOString() });
   });
-  if (launchState.status !== 'queued') return { jobId, status: launchState.status, startedLocally: true, duplicate: true };
+  if (launchState.status !== 'queued') {
+    await report(await readJson(paths.request), launchState);
+    return { jobId, status: launchState.status, startedLocally: false, duplicate: true };
+  }
   const child = spawnProcess(process.execPath, [MODULE_PATH, 'run', jobId], { detached: true, stdio: 'ignore', env: childEnv });
   // spawn() allein bestätigt keinen gestarteten Prozess (z.B. EAGAIN).
   await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
@@ -678,6 +692,8 @@ export async function startProjectWorkflowTask({
   requestId = '',
   runMode = 'manual',
   automationSlotKey = '',
+  lane = '',
+  trigger = '',
   workflowInput = {},
   startTask = startCodexTask,
 } = {}) {
@@ -769,6 +785,7 @@ export async function startProjectWorkflowTask({
       workflowId: normalizedWorkflowId,
       workflowName: taskDefinition.title,
       requestId: effectiveRequestId,
+      lane, runMode: normalizedRunMode, automationSlotKey: normalizedAutomationSlotKey, trigger,
       forecastDelivery: { runMode: normalizedRunMode, ...(normalizedRunMode === 'automatic' ? { automationSlotKey: normalizedAutomationSlotKey } : { deliveryRunKey: normalizedRequestId }) },
     });
   }
@@ -779,6 +796,7 @@ export async function startProjectWorkflowTask({
     workflowId: normalizedWorkflowId,
     workflowName: taskDefinition.title,
     fundingRun,
+    lane, runMode, automationSlotKey, trigger,
     workflowRevision: normalizedWorkflowId === 'planbar-completion-morning' ? 'heat-hero-completion-v2' : '',
     requestId: effectiveRequestId,
   });
@@ -1146,6 +1164,19 @@ export function buildCodexCliArguments(request) {
   ];
 }
 
+export async function requestCodexTaskWatchdog(jobId, { report = reportTaskState, now = Date.now() } = {}) {
+  const paths = jobPaths(jobId), request = await readJson(paths.request), latest = await readJson(paths.state);
+  if (preserveCodexTaskTerminalState(latest) || now < taskResultDeadline(request, latest, now)) return latest;
+  const watchdog = taskWatchdogRequest(request, latest, now);
+  await writeJsonAtomic(path.join(paths.directory, 'operational-watchdog.json'), watchdog);
+  const violated = await writeCodexTaskTerminationState(jobId, { ...latest, phase: 'sla_violation',
+    sla: { ...workflowSla({ ...latest, createdAt: request.createdAt }, now), violated: true }, watchdog,
+    error: '30-Minuten-Ergebnisfrist überschritten; fachlicher Abschluss nicht belegt.',
+    detail: 'SLA verletzt. Kooperativer Fallcheckpoint zur Umverteilung angefordert; unklare Schreibaktion wird nicht abgebrochen.', updatedAt: new Date(now).toISOString() });
+  await report(request, violated, violated.detail);
+  return violated;
+}
+
 async function runCodexTaskWithoutWakeGuard(jobId) {
   const paths = jobPaths(jobId);
   const request = await readJson(paths.request);
@@ -1208,7 +1239,15 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   child.stderr.pipe(stderrLog);
   if (child.pid) await recordCodexTaskHeartbeat(jobId, { childPid: child.pid }).catch(() => {});
   let timedOut = false;
-  const timer = setTimeout(() => { timedOut = true; child.kill('SIGTERM'); }, MAX_RUNTIME_MS);
+  let watchdogUpdate = Promise.resolve();
+  const timer = setTimeout(() => {
+    timedOut = true;
+    // A deadline is an error signal, never permission to kill an ambiguous
+    // writer or label incomplete work as complete. Preserve the original clock.
+    watchdogUpdate = (async () => {
+      await requestCodexTaskWatchdog(jobId);
+    })().catch(error => console.error(`SLA-Wächter konnte Zustand nicht speichern: ${clean(error.message, 200)}`));
+  }, Math.max(1, taskResultDeadline(request, previousState) - Date.now()));
   const exitCode = await new Promise((resolve, reject) => {
     child.on('error', reject);
     child.on('close', code => resolve(code));
@@ -1217,6 +1256,7 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
     return -1;
   });
   clearTimeout(timer);
+  await watchdogUpdate;
   await stderrFinished;
   await evidenceWrite;
   capturedEvidence = confirmCodexTaskUsageLimit(capturedEvidence, exitCode);
@@ -1457,7 +1497,7 @@ export async function runCodexTask(jobId, {
         const session = await sessionStatus();
         if (!session.usable) throw new Error('Desktop ist gesperrt; keine UI-Freigabe erteilt.');
         return task(lease);
-      }, { ...options, jobId, title: request.title, priority: request.planbar ? 100 : 0, timeoutMs: CODEX_TASK_MAX_QUEUE_WAIT_MS }), () => execute(jobId)),
+      }, { ...options, jobId, title: request.title, priority: taskResourcePriority(request), timeoutMs: CODEX_TASK_MAX_QUEUE_WAIT_MS }), () => execute(jobId)),
       { maxSeconds: Math.ceil(MAX_RUNTIME_MS / 1000) + 60, sleepDisplays: false });
     return await withUiLock(async lease => {
       // The screen can lock while another UI job owns the execution lock.
@@ -1473,7 +1513,7 @@ export async function runCodexTask(jobId, {
         sleepDisplays: true,
       });
       return lease ? serveUiCheckpoints(jobPaths(jobId).directory, lease, run) : run();
-    }, { timeoutMs: CODEX_TASK_MAX_QUEUE_WAIT_MS, priority: request.planbar ? 100 : 0, jobId });
+    }, { timeoutMs: CODEX_TASK_MAX_QUEUE_WAIT_MS, priority: taskResourcePriority(request), jobId });
   } finally {
     await stopHeartbeat();
   }
@@ -1654,7 +1694,7 @@ export async function syncCodexTaskStates({
       const protectedPlanbarWrite = Boolean(request.planbar);
       const planbarReservationVerified = Boolean(state.planbarProgress?.reservation?.verified);
       const recoveryAttempts = Number(state.recoveryAttempts || 0);
-      if (!protectedPlanbarWrite && recoveryAttempts < CODEX_TASK_MAX_RECOVERY_ATTEMPTS) {
+      if (!protectedPlanbarWrite && taskRecoveryAllowed(request, state, now)) {
         await archiveExecutionClaim(paths, now);
         state = await writeCodexTaskTerminationState(entry.name, {
           ...state,
@@ -1684,7 +1724,7 @@ export async function syncCodexTaskStates({
           error: protectedPlanbarWrite
             ? 'Der Planbar-Workflow wurde nach möglicher Schreibaktion unterbrochen. Keine automatische Wiederholung oder Doppelbuchung.'
             : `Der Workflow-Prozess wurde nach ${CODEX_TASK_MAX_RECOVERY_ATTEMPTS} automatischen Fortsetzungen erneut unterbrochen.`,
-          detail: planbarReservationVerified ? 'Lauf unterbrochen; vorhandener Slot-Nachweis bleibt erhalten.' : protectedPlanbarWrite ? 'Lauf unterbrochen; Planbar-Zielzustand muss vor einer Fortsetzung geprüft werden.' : 'Automatische Wiederanläufe ausgeschöpft.',
+          detail: planbarReservationVerified ? 'Lauf unterbrochen; vorhandener Slot-Nachweis bleibt erhalten.' : protectedPlanbarWrite ? 'Lauf unterbrochen; Planbar-Zielzustand muss vor einer Fortsetzung geprüft werden.' : 'Automatische Wiederanläufe oder ursprüngliches Ergebnisbudget ausgeschöpft; fachlicher Scope bleibt offen.',
           completedAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() });
       }
     }

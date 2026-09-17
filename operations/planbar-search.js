@@ -94,7 +94,7 @@ function berlinDate(now = new Date()) {
   }).format(now);
 }
 
-function normalizeAppointment(input = {}) {
+function normalizeAppointment(input = {}, { auditDescriptions = true } = {}) {
   const customerName = clean(input.customerName, 220);
   const description = clean(input.description, 3000);
   const team = clean(input.team, 260);
@@ -108,7 +108,7 @@ function normalizeAppointment(input = {}) {
     id: clean(input.id, 180) || crypto.createHash('sha256').update(fingerprint).digest('hex').slice(0, 24),
     customerName,
     description,
-    descriptionAudit: auditPlanbarDescription(description),
+    ...(auditDescriptions ? { descriptionAudit: auditPlanbarDescription(description) } : {}),
     team,
     resourceId,
     startDate,
@@ -118,11 +118,11 @@ function normalizeAppointment(input = {}) {
   };
 }
 
-export function normalizePlanbarSearchIndex(input = {}) {
+export function normalizePlanbarSearchIndex(input = {}, options = {}) {
   const parsedUpdatedAt = new Date(input.updatedAt || Date.now());
   const byId = new Map();
   for (const raw of (Array.isArray(input.appointments) ? input.appointments : [])) {
-    const appointment = normalizeAppointment(raw);
+    const appointment = normalizeAppointment(raw, options);
     if (appointment) byId.set(appointment.id, appointment);
   }
   const appointments = [...byId.values()]
@@ -147,9 +147,32 @@ async function readIndex() {
   }
 }
 
+const activeIndexIngestions = new Map();
 export async function replacePlanbarSearchIndex(input = {}) {
-  const index = normalizePlanbarSearchIndex(input);
+  const key = crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex');
+  if (activeIndexIngestions.has(key)) return activeIndexIngestions.get(key);
+  const operation = replacePlanbarSearchIndexOnce(input);
+  activeIndexIngestions.set(key, operation);
+  try { return await operation; } finally { activeIndexIngestions.delete(key); }
+}
+
+async function replacePlanbarSearchIndexOnce(input = {}) {
+  const receivedAt = Date.now();
+  const index = normalizePlanbarSearchIndex(input, { auditDescriptions: false });
   if (!index.appointments.length) throw new Error('Der Planbar-Stand enthält keine eindeutig lesbaren Kundentermine.');
+  // Publish only after the existing format validator has covered the complete
+  // submitted index. Stable read-only buckets bound persistence I/O at 3000 rows.
+  const { runPlanbarIndexAuditBatch } = await import('./workflow-batches.js');
+  const audit = await runPlanbarIndexAuditBatch({
+    id: `planbar-index-${crypto.createHash('sha256').update(JSON.stringify(index)).digest('hex')}`,
+    index, receivedAt, file: path.join(DATA_DIR, 'planbar-index-audit-workflow-shards.json'), shardBuckets: 32,
+  });
+  if (audit?.status !== 'completed') throw new Error('Der vollständige Planbar-Formatprüflauf ist noch nicht verifiziert; bisheriger Leseindex bleibt erhalten.');
+  const proofs = new Map(audit.shards.flatMap(shard => shard.evidence?.['description-format']?.audits || []).map(proof => [proof.appointmentId, proof.descriptionAudit]));
+  if (proofs.size !== index.appointments.length || index.appointments.some(appointment => !proofs.has(appointment.id))) throw new Error('Der Planbar-Formatprüflauf deckt den vollständigen Leseindex nicht ab.');
+  for (const appointment of index.appointments) appointment.descriptionAudit = proofs.get(appointment.id);
+  const auditWorkflow = { id: audit.id, scope: 'indexed-description-format-only', status: audit.status, completedShards: audit.finished,
+    totalShards: audit.total, reusedShards: audit.shards.filter(shard => shard.reused).length, totalDurationMs: audit.totalDurationMs, slaViolated: audit.slaViolated };
   await fs.mkdir(DATA_DIR, { recursive: true });
   const temporary = `${STORE_FILE}.${process.pid}.${crypto.randomUUID()}.tmp`;
   try {
@@ -158,7 +181,7 @@ export async function replacePlanbarSearchIndex(input = {}) {
   } finally {
     await fs.unlink(temporary).catch(() => {});
   }
-  return { ...index, appointmentCount: index.appointments.length };
+  return { ...index, appointmentCount: index.appointments.length, auditWorkflow };
 }
 
 export async function getPlanbarSearchIndex() {

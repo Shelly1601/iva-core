@@ -56,3 +56,18 @@ test('persistent queue admits 20 concurrent requests once without waiting for ex
 test('public requests stay on source-check and confirmation-mail workflow',async()=>{
  assert.equal((await resolveSchedulingRequest({...request,source:'public-heat-hero'},{index:{entries:[mapping]}})).reason,'public_source_check_and_confirmation_mail_require_existing_workflow');
 });
+test('verified fast-lane receipt captures one durable completion case without executing afterwork',async t=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'iva-afterwork-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const {capturePendingSchedulingAfterwork}=await import('../local-mac-helper/scheduling-runtime.mjs');
+ const {createPlanbarCompletionStore}=await import('../local-mac-helper/planbar-completion.mjs');
+ const store=createPlanbarCompletionStore({dataDir:path.join(root,'data'),tasksDir:path.join(root,'tasks')});
+ await mkdir(path.join(root,'afterwork'));
+ const progress={status:'reserved',reservation:{appointmentId:'a',customerId:'c',resourceId:'r',resourceName:'Montage 1',isoYear:2026,week:41,startDate:'2026-10-05',endDateExclusive:'2026-10-10',verified:true,identityVerified:true,verifiedAt:new Date().toISOString()},missingDetails:['Vervollständigung'],remainingActions:['WhatsApp']};
+ const record={captured:false,executionStatus:'not_started',request:{...request,partnerPrefix:'HH',jobId:'scheduling-test'},progress};
+ await writeFile(path.join(root,'afterwork','001.json'),JSON.stringify(record));
+ await writeFile(path.join(root,'afterwork','002.json'),JSON.stringify(record));
+ assert.deepEqual(await capturePendingSchedulingAfterwork({root,capture:store.capture}),{captured:2,executed:0});
+ assert.deepEqual(await capturePendingSchedulingAfterwork({root,capture:store.capture}),{captured:0,executed:0});
+ const cases=await store.list();assert.equal(cases.length,1);assert.equal(cases[0].appointmentId,'a');assert.equal(cases[0].status,'scope_pending');assert.equal(cases[0].detailsComplete,false);
+ const {readFile}=await import('node:fs/promises');assert.equal(JSON.parse(await readFile(path.join(root,'afterwork','001.json'),'utf8')).executionStatus,'not_started');
+});

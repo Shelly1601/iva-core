@@ -1,3 +1,4 @@
+import { taskExecutionLane, taskResourcePriority } from './task-execution-policy.mjs';
 import crypto from 'node:crypto';
 import { withImacExecutionLock, imacUiIsBusy, listResourceLocks } from './ui-execution-lock.mjs';
 import { readFileSync } from 'node:fs';
@@ -327,6 +328,12 @@ export function planbarSearchIndexPayload(snapshot = {}) {
   };
 }
 
+export function deviceCommandTaskMetadata(command = {}) {
+  const payload = command.payload || {};
+  return { lane: taskExecutionLane({ ...payload, lane: command.lane, action: command.action }),
+    runMode: payload.runMode || '', automationSlotKey: payload.automationSlotKey || '', trigger: payload.trigger || '' };
+}
+
 async function executeDeviceCommand(command) {
   if (command.action === 'agent.status') {
     let launchd;
@@ -414,7 +421,7 @@ async function executeDeviceCommand(command) {
       collect: collectPlanbarSearchIndex,
       refresh: () => withImacExecutionLock(
         () => withMacWakeGuard(() => refreshPlanbarPage(), { maxSeconds: 90 }),
-        { timeoutMs: 20_000 },
+        { timeoutMs: 20_000, scope: 'planbar-write', priority: taskResourcePriority({ ...command.payload, lane: command.lane, action: command.action }), jobId: command.id, criticalSection: 'planbar-page-refresh' },
       ),
     });
     const capacity = buildPlanbarCapacitySnapshot(snapshot);
@@ -455,7 +462,7 @@ async function executeDeviceCommand(command) {
   }
   if (command.action === 'codex.task.start') {
     const { startCodexTask } = await import('./codex-tasks.mjs');
-    return startCodexTask({ ...command.payload, requestId: command.id });
+    return startCodexTask({ ...command.payload, ...deviceCommandTaskMetadata(command), requestId: command.id });
   }
   if (command.action === 'codex.task.cancel') {
     const { cancelCodexTask } = await import('./codex-tasks.mjs');
@@ -485,8 +492,7 @@ async function executeDeviceCommand(command) {
     return startProjectWorkflowTask({
       workflowId: command.payload?.workflowId,
       requestId,
-      runMode: command.payload?.runMode,
-      automationSlotKey: command.payload?.automationSlotKey,
+      ...deviceCommandTaskMetadata(command),
       workflowInput,
     });
   }
@@ -523,7 +529,7 @@ export async function runImacDeviceAgentOnce({ lane = 'all', maintenance = true 
   try {
     if (deviceCommandNeedsImmediateUiLock(command.action)) {
       const { withMacWakeGuard } = await import('./mac-wake-guard.mjs');
-      result = await withImacExecutionLock(() => withMacWakeGuard(() => executeDeviceCommand(command), { maxSeconds: 120 }), { timeoutMs: 20_000 });
+      result = await withImacExecutionLock(() => withMacWakeGuard(() => executeDeviceCommand(command), { maxSeconds: 120 }), { timeoutMs: 20_000, priority: taskResourcePriority({ ...command.payload, lane: command.lane, action: command.action }), jobId: command.id });
     } else {
       result = await executeDeviceCommand(command);
     }

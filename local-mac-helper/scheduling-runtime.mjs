@@ -10,6 +10,7 @@ import { acquirePriorityLease } from './execution-priority.mjs';
 import { mergePlanbarSchedulingProgress } from '../operations/customer-scheduling.js';
 import { resourceExecutionRoot } from './ui-execution-lock.mjs';
 import { collectPlanbarSearchIndex } from './planbar.mjs';
+import { createPlanbarCompletionStore } from './planbar-completion.mjs';
 import { readPipedriveFundingDeal } from './background-integrations.mjs';
 
 const normalize = value => String(value || '').normalize('NFKC').toLocaleLowerCase('de').replace(/\s+/g, ' ').trim();
@@ -127,6 +128,27 @@ async function deliverPending(root,report) {
     try { await report(pending.payload);await atomicQueueWrite(file,{...pending,delivered:true}); } catch { break; /* preserve transition order on delivery retry */ }
   }
 }
+let completionStore;
+const captureDefault = (request, progress) => (completionStore ||= createPlanbarCompletionStore()).capture(request, progress);
+const capturingAfterwork = new Map();
+export function capturePendingSchedulingAfterwork({root=defaultRoot,capture=captureDefault}={}) {
+  if(capturingAfterwork.has(root))return capturingAfterwork.get(root);
+  const operation=(async()=>{
+    const directory=path.join(root,'afterwork');let captured=0;
+    for(const name of (await readdir(directory).catch(()=>[])).sort()){
+      if(!name.endsWith('.json'))continue;
+      const file=path.join(directory,name),pending=await load(file);
+      if(pending.captured||pending.notApplicable)continue;
+      // Existing store validates the reservation and derives its stable case ID.
+      // Capture is a durable open case, never an executed afterwork workflow.
+      const record=await capture(pending.request,pending.progress);
+      await atomicQueueWrite(file,{...pending,captured:Boolean(record),notApplicable:!record,caseId:record?.caseId||null,executionStatus:'not_started'});
+      if(record)captured++;
+    }
+    return {captured,executed:0};
+  })().finally(()=>capturingAfterwork.delete(root));
+  capturingAfterwork.set(root,operation);return operation;
+}
 const reportDefault = async input => (await import('./device-agent.mjs')).reportOperationalRun(input);
 function runQueued(record,{root,report=reportDefault,runtimeFactory=createSchedulingRuntime}={}) {
   const key=record.key,activeKey=`${root}:${key}`;
@@ -139,7 +161,14 @@ function runQueued(record,{root,report=reportDefault,runtimeFactory=createSchedu
       runtime=runtimeFactory({root,resolve:async request=>({qualified:true,request}),onProgress:async state=>{
         await mkdir(path.join(root,'reports'),{recursive:true});
         const name=`${state.schedulingKey}-${String(state.sequence).padStart(12,'0')}.json`;
-        await atomicQueueWrite(path.join(root,'reports',name),{delivered:false,payload:schedulingOperationalRun(state)});
+        const operational=schedulingOperationalRun(state);
+        await atomicQueueWrite(path.join(root,'reports',name),{delivered:false,payload:operational});
+        if(operational.planbarProgress?.reservation?.verified){
+          const current=await load(queueFile(root,state.schedulingKey));
+          if(!current.request)throw Error('Verified scheduling reservation has no persisted request identity');
+          await mkdir(path.join(root,'afterwork'),{recursive:true});
+          await atomicQueueWrite(path.join(root,'afterwork',name),{captured:false,executionStatus:'not_started',request:Object.fromEntries(['jobId','requestId','id','partnerId','partnerPrefix','customerName','isoYear','week','source','objectLocation','materialDeliverySpace','theftWeatherProtected','additionalInfo'].filter(field=>current.request[field]!==undefined).map(field=>[field,current.request[field]])),progress:operational.planbarProgress});
+        }
       }});
       runtimes.set(root,runtime);
     }
@@ -152,7 +181,7 @@ function runQueued(record,{root,report=reportDefault,runtimeFactory=createSchedu
     await atomicQueueWrite(queueFile(root,key),record);
   })();
   active.set(activeKey,operation);
-  operation.catch(()=>{}).finally(()=>{active.delete(activeKey);void reportPending(root,report).catch(()=>{});});
+  operation.catch(()=>{}).finally(()=>{active.delete(activeKey);void reportPending(root,report).catch(()=>{});void capturePendingSchedulingAfterwork({root}).catch(()=>{});});
 }
 export async function enqueueSchedulingFastLane(request,{root=defaultRoot,resolve=resolveSchedulingRequest,report=reportDefault,runtimeFactory=createSchedulingRuntime}={}) {
   const resolution=await resolve(request,{root});
@@ -175,6 +204,7 @@ export async function resumePendingSchedulingFastLanes({root=defaultRoot,report=
     runQueued(record,{root,report,runtimeFactory});resumed++;
   }
   void reportPending(root,report).catch(()=>{});
+  void capturePendingSchedulingAfterwork({root}).catch(()=>{});
   return {resumed,active:active.size};
 }
 let directRuntime;
