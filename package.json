@@ -90,7 +90,7 @@
     "express": "^4.19.2",
     "imapflow": "^1.0.0",
     "node-cron": "^3.0.3",
-    "node-ical": "^0.20.0",
+    "node-ical": "^0.27.2",
     "pdf-lib": "^1.17.1",
     "pdfkit": "^0.17.2",
     "unpdf": "^0.12.1",
