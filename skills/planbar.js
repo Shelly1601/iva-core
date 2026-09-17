@@ -30,8 +30,8 @@ export function planbarSkill({ searchPlanbarAppointments, addCustomerSchedulingR
         allowFreeResourceFallback: z.boolean().describe('Nur für Enter: true, wenn bei fehlendem vollständigem ENTER-Block ersatzweise ein vollständig freier Montag-bis-Freitag-Platz verwendet werden darf.'),
         isoYear: z.number().int().min(2000).max(2100),
         week: z.number().int().min(1).max(53),
-        materialDeliverySpace: z.boolean().describe('Ob der Kunde Material einige Tage vor Montagebeginn annehmen kann.'),
-        theftWeatherProtected: z.boolean().describe('Ob die Materiallagerung diebstahl- und wettersicher ist.'),
+        materialDeliverySpace: z.union([z.boolean(), z.literal('not-asked')]).describe('Ob der Kunde Material einige Tage vor Montagebeginn annehmen kann.'),
+        theftWeatherProtected: z.union([z.boolean(), z.literal('not-asked')]).describe('Ob die Materiallagerung diebstahl- und wettersicher ist.'),
         additionalInfo: z.string().max(2000).optional(),
       }),
       execute: async input => {

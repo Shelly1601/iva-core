@@ -3,6 +3,8 @@ import path from 'path';
 import crypto from 'crypto';
 import {
   buildPlanbarSchedulingExtras,
+  isMaterialAnswer,
+  normalizeMaterialAnswer,
   DEFAULT_CUSTOMER_SCHEDULING_PARTNERS,
   normalizeCustomerSchedulingPartners,
   normalizePlanbarCapacitySnapshot,
@@ -513,8 +515,8 @@ function normalizeCustomerSchedulingRequest(request = {}) {
   const customerName = clean(request.customerName, 220);
   const isoYear = Math.max(2000, Math.min(2100, Number(request.isoYear) || new Date().getUTCFullYear()));
   const week = Math.max(1, Math.min(53, Number(request.week) || 1));
-  const materialDeliverySpace = request.materialDeliverySpace === true;
-  const theftWeatherProtected = request.theftWeatherProtected === true;
+  const materialDeliverySpace = normalizeMaterialAnswer(request.materialDeliverySpace);
+  const theftWeatherProtected = normalizeMaterialAnswer(request.theftWeatherProtected);
   const additionalInfo = clean(request.additionalInfo, 2000);
   const partnerId = clean(request.partnerId, 80) || 'heat-hero';
   const partnerName = clean(request.partnerName, 80) || 'Heat Hero';
@@ -879,8 +881,9 @@ export async function addCustomerSchedulingRequest(id, input = {}, { enqueue = e
   if (customerName.length < 3) throw new Error('Bitte den vollständigen Kundennamen eingeben.');
   if (!Number.isInteger(isoYear) || isoYear < 2000 || isoYear > 2100) throw new Error('Das Kalenderjahr ist ungültig.');
   if (!Number.isInteger(week) || week < 1 || week > 53) throw new Error('Die Kalenderwoche ist ungültig.');
-  if (typeof input.materialDeliverySpace !== 'boolean' || typeof input.theftWeatherProtected !== 'boolean') {
-    throw new Error('Bitte beide Materialfragen mit Ja oder Nein beantworten.');
+  if (!isMaterialAnswer(input.materialDeliverySpace) || !isMaterialAnswer(input.theftWeatherProtected)
+    || (publicRequest && (typeof input.materialDeliverySpace !== 'boolean' || typeof input.theftWeatherProtected !== 'boolean'))) {
+    throw new Error('Bitte beide Materialfragen mit Ja, Nein oder Nicht abgefragt beantworten.');
   }
   const created = await mutate(async store => {
     const project = store.projects.find(item => item.id === clean(id, 100));

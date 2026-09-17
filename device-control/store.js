@@ -1,3 +1,4 @@
+import { isMaterialAnswer } from '../operations/customer-scheduling.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -227,8 +228,9 @@ function validatePayload(action, payload = {}) {
     }
     if (!Number.isInteger(isoYear) || isoYear < 2000 || isoYear > 2100) throw new Error('Ungültiges ISO-Kalenderjahr.');
     if (!Number.isInteger(week) || week < 1 || week > 53) throw new Error('Ungültige ISO-Kalenderwoche.');
-    if (typeof payload.materialDeliverySpace !== 'boolean' || typeof payload.theftWeatherProtected !== 'boolean') {
-      throw new Error('Die beiden Materialfragen müssen vor der Planbar-Terminierung eindeutig mit Ja oder Nein beantwortet sein.');
+    if (!isMaterialAnswer(payload.materialDeliverySpace) || !isMaterialAnswer(payload.theftWeatherProtected)
+      || (payload.source === 'public-heat-hero' && (typeof payload.materialDeliverySpace !== 'boolean' || typeof payload.theftWeatherProtected !== 'boolean'))) {
+      throw new Error('Die beiden Materialfragen müssen vor der Planbar-Terminierung mit Ja, Nein oder Nicht abgefragt beantwortet sein.');
     }
     const publicRequest = payload.source === 'public-heat-hero';
     if (publicRequest && (partnerId !== 'heat-hero' || partnerPrefix !== 'HH' || schedulingMode !== 'free-resource'

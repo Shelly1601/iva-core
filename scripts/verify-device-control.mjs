@@ -412,7 +412,8 @@ try {
   assert.match(finalBootstrapSource, /4\/4 – Dauerverbindung wird umgeschaltet und doppelt geprüft/);
   const codexTaskSource = await readFile(new URL('../local-mac-helper/codex-tasks.mjs', import.meta.url), 'utf8');
   assert.match(codexTaskSource, /'exec', '--approve-for-me'/);
-  assert.match(codexTaskSource, /withMacWakeGuard\(\(\) => runCodexTaskWithoutWakeGuard/);
+  assert.match(codexTaskSource, /withWakeGuard \|\|.*withMacWakeGuard/);
+  assert.match(codexTaskSource, /wake\(\(\) => execute\(jobId\)/);
   assert.match(codexTaskSource, /delete childEnv\.IVA_MAC_WAKE_GUARD_ACTIVE/);
   assert.match(codexTaskSource, /request\.mode === 'operational'/);
   assert.match(codexTaskSource, /materializeIcloudWorkspace/);

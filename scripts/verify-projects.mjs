@@ -175,7 +175,7 @@ check('Chancenradar-Projekte zeigen Potenzial, Belege und Rücklink', js.include
 check('Kunde terminieren steht oben mit Kundenname und KW-Auswahl bereit', html.includes('.workflow-launcher') && js.includes('Kunde terminieren') && js.includes('scheduleCustomerName') && js.includes('scheduleWeek') && js.includes('/customer-scheduling-requests'));
 check('Kunde terminieren startet direkt und erklärt die Fünf-Tage-Kapazität', js.includes('Jetzt terminieren') && js.includes('direkt an den Planbar-Workflow') && js.includes('vollständig freien fünf Tagen'));
 check('Kundentypen, Kürzelverwaltung und Enter-Ersatzplatz sind bedienbar', js.includes('schedulePartner') && js.includes('schedulePartnerPrefixes') && js.includes('saveCustomerSchedulingPartners') && js.includes('scheduleAllowFreeResourceFallback') && js.includes('ENTER-Block'));
-check('Kunde terminieren ist standardmäßig kompakt einklappbar', js.includes('<details class="workflow-launcher workflow-launcher-disclosure"') && html.includes('.workflow-launcher-disclosure'));
+check('Kunde terminieren ist initial offen und bei Bedarf einklappbar', js.includes('<details id="customerSchedulingDisclosure" open class="workflow-launcher workflow-launcher-disclosure"') && html.includes('.workflow-launcher-disclosure'));
 check('Materialfragen und optionale Zusatzinfo stehen im Schnellstart bereit', js.includes('scheduleMaterialDeliverySpace') && js.includes('scheduleTheftWeatherProtected') && js.includes('scheduleAdditionalInfo'));
 const dewarmteJobId = '12345678-1234-4123-8123-123456789012';
 const dewarmteFile = await storeProjectFile('dewarmte', {

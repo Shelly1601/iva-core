@@ -63,6 +63,12 @@ function schedulingHistory(project) {
   return `<h3>Terminierungsaufträge · Live-Status</h3>${(project.customerSchedulingRequests || []).slice(0, 10).map(request => `<p><b>${esc(request.customerName)} · KW ${esc(request.week)}/${esc(request.isoYear)}</b><br><span role="status">${esc(request.schedulingSummary || 'Status wird geprüft …')}</span></p>`).join('')}`;
 }
 
+function materialAnswerLabel(value) { return value === 'not-asked' ? 'Nicht abgefragt' : value === true ? 'Ja' : 'Nein'; }
+function materialAnswerSelect(id, question) {
+  return `<label class="schedule-material"><span class="schedule-question">${question}</span><select id="${id}" required><option value="" disabled selected>Bitte auswählen</option><option value="true">Ja</option><option value="false">Nein</option><option value="not-asked">Nicht abgefragt</option></select></label>`;
+}
+function readMaterialAnswer(id) { const value = $(id).value; return value === 'not-asked' ? value : value === 'true'; }
+
 function customerSchedulingSection(project) {
   if (project.id !== 'heat-hero') return '';
   const partners = (project.customerSchedulingPartners || []).length
@@ -76,9 +82,9 @@ function customerSchedulingSection(project) {
   const partnerConfig = partners.map(partner => `${partner.name}=${partner.prefix}`).join('\n');
   const latest = (project.customerSchedulingRequests || [])[0];
   const latestSummary = latest
-    ? `Zuletzt: <b>${esc(latest.customerName)}</b> · ${esc(latest.partnerName || 'Heat Hero')} (${esc(latest.partnerPrefix || 'HH')}) · KW ${esc(latest.week)}/${esc(latest.isoYear)} · Material vorher: ${latest.materialDeliverySpace ? 'Ja' : 'Nein'} · geschützt: ${latest.theftWeatherProtected ? 'Ja' : 'Nein'}${latest.allowFreeResourceFallback ? ' · Enter darf freien Platz nutzen' : ''}${latest.additionalInfo ? ' · Zusatzinfo vorhanden' : ''}<br><span id="planbarSchedulingStatus" role="status">${esc(latest.schedulingSummary || 'Noch kein gesicherter Planbar-Slot bestätigt.')}</span>`
+    ? `Zuletzt: <b>${esc(latest.customerName)}</b> · ${esc(latest.partnerName || 'Heat Hero')} (${esc(latest.partnerPrefix || 'HH')}) · KW ${esc(latest.week)}/${esc(latest.isoYear)} · Material vorher: ${materialAnswerLabel(latest.materialDeliverySpace)} · geschützt: ${materialAnswerLabel(latest.theftWeatherProtected)}${latest.allowFreeResourceFallback ? ' · Enter darf freien Platz nutzen' : ''}${latest.additionalInfo ? ' · Zusatzinfo vorhanden' : ''}<br><span id="planbarSchedulingStatus" role="status">${esc(latest.schedulingSummary || 'Noch kein gesicherter Planbar-Slot bestätigt.')}</span>`
     : 'Zuerst den Slot in Planbar sichern, danach fehlende Angaben ergänzen. Noch kein Kunde vorgemerkt.';
-  return `<details class="workflow-launcher workflow-launcher-disclosure" aria-labelledby="customerSchedulingTitle"><summary><div class="workflow-launcher-head"><div><div class="eyebrow">Operativer Workflow</div><h2 id="customerSchedulingTitle">Kunde terminieren</h2><div class="muted">${latestSummary}</div></div><span class="workflow-tag">Planbar + Pipedrive</span></div></summary><div class="workflow-launcher-body"><div class="muted scheduling-intro">Kundentyp, Kunde, Kalenderwoche und Materialannahme erfassen. IVA verwendet automatisch das gespeicherte Planbar-Kürzel, wählt den passenden Block-/Freiplatzweg und meldet den verifizierten Termin anschließend in WhatsApp.</div>${planbarCapacityOverview(project)}${planbarSearchPanel()}<form class="schedule-form" id="customerSchedulingForm"><label><span>Kundenname</span><input id="scheduleCustomerName" name="customerName" maxlength="220" autocomplete="off" required placeholder="Vorname Nachname"></label><label><span>Kundentyp / Partner</span><select id="schedulePartner" name="partnerId" required>${partnerOptions}</select></label><label><span>Kalenderwoche</span><select id="scheduleWeek" name="week" required>${schedulingWeekOptions()}</select></label><button class="btn primary" type="submit">Jetzt terminieren</button><div class="schedule-checks"><label class="schedule-check"><input id="scheduleMaterialDeliverySpace" type="checkbox"><span class="schedule-question">Hat der Kunde Platz, Material einige Tage vor Montagebeginn anzunehmen?</span><span class="schedule-answer" data-answer-for="scheduleMaterialDeliverySpace">Nein</span></label><label class="schedule-check"><input id="scheduleTheftWeatherProtected" type="checkbox"><span class="schedule-question">Diebstahl- und wettersicher?</span><span class="schedule-answer" data-answer-for="scheduleTheftWeatherProtected">Nein</span></label><label class="schedule-check" id="scheduleEnterFallbackRow" hidden><input id="scheduleAllowFreeResourceFallback" type="checkbox"><span class="schedule-question">Enter: Falls kein vollständiger ENTER-Block vorhanden ist, einen vollständig freien Montag-bis-Freitag-Platz verwenden?</span><span class="schedule-answer" data-answer-for="scheduleAllowFreeResourceFallback">Nein</span></label></div><label class="schedule-extra"><span>Zusatzinfo · optional</span><textarea id="scheduleAdditionalInfo" maxlength="2000" placeholder="Nur ausfüllen, wenn diese Information zusätzlich in Planbar stehen soll."></textarea></label></form><details class="schedule-partner-settings"><summary>Kundentypen und Planbar-Kürzel verwalten</summary><div class="muted">Eine Zeile pro Typ im Format Name=Kürzel. Enter behält dabei automatisch seinen speziellen Block-Workflow.</div><textarea id="schedulePartnerPrefixes" maxlength="2000">${esc(partnerConfig)}</textarea><button class="btn" id="saveSchedulePartners" type="button">Kürzel speichern</button></details></div></details>`;
+  return `<details id="customerSchedulingDisclosure" open class="workflow-launcher workflow-launcher-disclosure" aria-labelledby="customerSchedulingTitle"><summary><div class="workflow-launcher-head"><div><div class="eyebrow">Operativer Workflow</div><h2 id="customerSchedulingTitle">Kunde terminieren</h2><div class="muted">${latestSummary}</div></div><span class="workflow-tag">Planbar + Pipedrive</span></div></summary><div class="workflow-launcher-body"><div class="muted scheduling-intro">Kundentyp, Kunde, Kalenderwoche und Materialannahme erfassen. IVA verwendet automatisch das gespeicherte Planbar-Kürzel, wählt den passenden Block-/Freiplatzweg und meldet den verifizierten Termin anschließend in WhatsApp.</div>${planbarCapacityOverview(project)}${planbarSearchPanel()}<form class="schedule-form" id="customerSchedulingForm"><label><span>Kundenname</span><input id="scheduleCustomerName" name="customerName" maxlength="220" autocomplete="off" required placeholder="Vorname Nachname"></label><label><span>Kundentyp / Partner</span><select id="schedulePartner" name="partnerId" required>${partnerOptions}</select></label><label><span>Kalenderwoche</span><select id="scheduleWeek" name="week" required>${schedulingWeekOptions()}</select></label><button class="btn primary" type="submit">Jetzt terminieren</button><div class="schedule-checks">${materialAnswerSelect('scheduleMaterialDeliverySpace', 'Materialannahme einige Tage vor Montagebeginn?')}${materialAnswerSelect('scheduleTheftWeatherProtected', 'Diebstahl- und wettersicher?')}<label class="schedule-check" id="scheduleEnterFallbackRow" hidden><input id="scheduleAllowFreeResourceFallback" type="checkbox"><span class="schedule-question">Enter: Falls kein vollständiger ENTER-Block vorhanden ist, einen vollständig freien Montag-bis-Freitag-Platz verwenden?</span><span class="schedule-answer" data-answer-for="scheduleAllowFreeResourceFallback">Nein</span></label></div><label class="schedule-extra"><span>Zusatzinfo · optional</span><textarea id="scheduleAdditionalInfo" maxlength="2000" placeholder="Nur ausfüllen, wenn diese Information zusätzlich in Planbar stehen soll."></textarea></label></form><details class="schedule-partner-settings"><summary>Kundentypen und Planbar-Kürzel verwalten</summary><div class="muted">Eine Zeile pro Typ im Format Name=Kürzel. Enter behält dabei automatisch seinen speziellen Block-Workflow.</div><textarea id="schedulePartnerPrefixes" maxlength="2000">${esc(partnerConfig)}</textarea><button class="btn" id="saveSchedulePartners" type="button">Kürzel speichern</button></details></div></details>`;
 }
 
 function dewarmteJobRows() {
@@ -314,7 +320,11 @@ function bindProjectActions() {
   dropzone.addEventListener('drop', event => uploadFiles([...event.dataTransfer.files]));
 }
 
+let schedulingProjectId = '';
 function render() {
+  const retainedScheduling = schedulingProjectId === state.current?.id ? $('customerSchedulingDisclosure') : null;
+  schedulingProjectId = state.current?.id || '';
+
   renderList();
   const project = state.current;
   if (!project) {
@@ -330,10 +340,14 @@ function render() {
   $('description').textContent = project.description || 'Projektakte für Ideen, Absprachen und Dokumente.';
   const objective = project.objective || project.description;
   $('content').innerHTML = `${customerSchedulingSection(project)}${dewarmteLinkPdfSection(project)}${brandSection(project)}${opportunityOriginSection(project)}${notesSection(project)}${objective ? `<section class="hero"><div class="eyebrow">Zielbild</div><h2>${esc(objective)}</h2></section>` : ''}${archiveSection(project)}${operationalSections(project)}`;
-  $('content').insertAdjacentHTML('afterbegin','<details class="card project-team-host"><summary>Team &amp; Anbindungen · Fachagenten und Projektzugänge</summary><div id="projectTeam"></div></details>');
+  $('content').insertAdjacentHTML('beforeend','<details class="card project-team-host"><summary>Team &amp; Anbindungen · Fachagenten und Projektzugänge</summary><div id="projectTeam"></div></details>');
   window.mountIvaProjectTeam?.($('projectTeam'),{project,api});
+  const accessDisclosure = document.createElement('details');
+  accessDisclosure.className = 'card project-disclosure';
+  accessDisclosure.innerHTML = '<summary>Bereiche und Kundenzugänge</summary>';
   const accessHost = document.createElement('div');
-  $('content').prepend(accessHost);
+  accessDisclosure.append(accessHost);
+  $('content').append(accessDisclosure);
   window.mountIvaProjectAccess?.(accessHost, { project, api });
   collapseProjectSections();
   if ($('customerSchedulingForm')) $('customerSchedulingForm').insertAdjacentHTML('afterend', `<section id="schedulingHistory" class="capacity-overview">${schedulingHistory(project)}</section>`);
@@ -345,6 +359,16 @@ function render() {
       catch { showToast(`Terminlink: ${url}`); }
     };
   }
+  if (retainedScheduling) {
+    const fresh = $('customerSchedulingDisclosure');
+    const oldCapacity = retainedScheduling.querySelector('.capacity-overview');
+    if (oldCapacity) oldCapacity.outerHTML = planbarCapacityOverview(project);
+    const history = retainedScheduling.querySelector('#schedulingHistory');
+    if (history) history.innerHTML = schedulingHistory(project);
+    const oldSummary = retainedScheduling.querySelector('summary');
+    if (oldSummary) oldSummary.innerHTML = fresh.querySelector('summary').innerHTML;
+    fresh.replaceWith(retainedScheduling);
+  }
   bindProjectActions();
   scheduleDewarmtePolling();
 }
@@ -355,8 +379,8 @@ async function requestCustomerScheduling(event) {
   const customerName = $('scheduleCustomerName').value.trim();
   const [isoYear, week] = $('scheduleWeek').value.split('-').map(Number);
   const partnerId = $('schedulePartner').value;
-  const materialDeliverySpace = $('scheduleMaterialDeliverySpace').checked;
-  const theftWeatherProtected = $('scheduleTheftWeatherProtected').checked;
+  const materialDeliverySpace = readMaterialAnswer('scheduleMaterialDeliverySpace');
+  const theftWeatherProtected = readMaterialAnswer('scheduleTheftWeatherProtected');
   const additionalInfo = $('scheduleAdditionalInfo').value.trim();
   const allowFreeResourceFallback = $('scheduleAllowFreeResourceFallback').checked;
   const submit = event.submitter;

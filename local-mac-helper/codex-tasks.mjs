@@ -14,7 +14,7 @@ import { materializeIcloudWorkspace } from './icloud-workspace.mjs';
 import { createPlanbarCompletionStore } from './planbar-completion.mjs';
 import { createFundingIntakeStore, fundingIntakePendingWork, withFundingFileLock } from './funding-intake-state.mjs';
 import { assertImacFundingHost } from './funding-workflows.mjs';
-import { isoWeekRange, mergePlanbarSchedulingProgress, planbarSchedulingKey, planbarSchedulingSummary } from '../operations/customer-scheduling.js';
+import { materialAnswerLabel, isoWeekRange, mergePlanbarSchedulingProgress, planbarSchedulingKey, planbarSchedulingSummary } from '../operations/customer-scheduling.js';
 import { validateDewarmteLinkPdfInput } from '../projects/dewarmte.js';
 import {
   findLocalPreventions,
@@ -824,12 +824,14 @@ export async function startPlanbarCustomerSchedulingTask(input = {}) {
   if (!customerName || !partnerName || !/^[A-Z0-9]{1,6}$/.test(partnerPrefix) || !Number.isInteger(isoYear) || !Number.isInteger(week)) {
     throw new Error('Kundenname, Partner, Planbar-Kürzel, ISO-Jahr oder Kalenderwoche fehlen für die Planbar-Terminierung.');
   }
-  const materialDeliverySpace = input.materialDeliverySpace === true ? 'Ja' : 'Nein';
-  const theftWeatherProtected = input.theftWeatherProtected === true ? 'Ja' : 'Nein';
+  const materialDeliverySpace = materialAnswerLabel(input.materialDeliverySpace);
+  const theftWeatherProtected = materialAnswerLabel(input.theftWeatherProtected);
   const additionalInfo = clean(input.additionalInfo, 2000);
   const publicRequest = input.source === 'public-heat-hero';
   if (publicRequest && (input.partnerId !== 'heat-hero' || partnerPrefix !== 'HH' || !input.objectLocation)) throw new Error('Ungültige öffentliche Heat-Hero-Anfrage.');
-  const prompt = publicRequest ? buildPublicSchedulingPrompt(input) : `Führe den Workflow „Kunde terminieren“ auf diesem iMac aus. Verbindliche neue Priorität vom 27.08.2026: ZUERST Kunde und echten zulässigen Montag-bis-Freitag-Slot in Planbar sichern und rücklesen, DANACH Angebots-/TMB-Unterlagen auswerten und fehlende Angaben ergänzen. Lies KUNDE_TERMINIEREN_WORKFLOW.md; die neue Slot-zuerst-Regel ersetzt ältere widersprechende Alles-oder-nichts-/Keine-Teilanlage-Regeln. PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md ist erst für die Ergänzungsphase erforderlich.
+  const prompt = publicRequest ? buildPublicSchedulingPrompt(input) : `Bei den beiden Materialfragen ist „Nicht abgefragt“ ein gültiger, bewusst gewählter Wert. Übernimm ihn wörtlich in die jeweilige Planbar-Beschreibungszeile; wandle ihn nicht in Nein um und blockiere deshalb nicht den Direktstart.
+
+Führe den Workflow „Kunde terminieren“ auf diesem iMac aus. Verbindliche neue Priorität vom 27.08.2026: ZUERST Kunde und echten zulässigen Montag-bis-Freitag-Slot in Planbar sichern und rücklesen, DANACH Angebots-/TMB-Unterlagen auswerten und fehlende Angaben ergänzen. Lies KUNDE_TERMINIEREN_WORKFLOW.md; die neue Slot-zuerst-Regel ersetzt ältere widersprechende Alles-oder-nichts-/Keine-Teilanlage-Regeln. PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md ist erst für die Ergänzungsphase erforderlich.
 
 Identität, Kundentyp, Zielwoche, Dublettenprüfung und zulässige freie Kapazität bleiben harte Gates. Übernimm vorhandene belegte Kontaktdaten; optionale fehlende Felder bleiben leer. Nur tatsächlich von Planbar verlangte Mindestfelder blockieren die Anlage, niemals pauschal fehlende E-Mail/Telefon/Angebotsnummer/Beschreibung. Keine erfundenen Ersatzwerte. Quellenwidersprüche in Angebots-/TMB-Details blockieren nur die Ergänzung, bei Identität/Kunde bleiben sie blockierend.
 

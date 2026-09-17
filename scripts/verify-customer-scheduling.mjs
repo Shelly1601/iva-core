@@ -272,3 +272,5 @@ assert.match(workflow, /`Heat Hero = HH`, `Enter = EN` und `D Warmte = DW`/);
 assert.match(workflow, /Falls kein ENTER-Block vorhanden ist, freien Fünf-Tage-Platz verwenden/);
 
 console.log('PASS Kunde terminieren: Fünf-Tage-Kapazität, Quellen-Gate, Planbar/Pipedrive und native WhatsApp-Bestätigung');
+
+await import('./verify-scheduling-material.mjs');

@@ -415,10 +415,21 @@ export function selectPlanbarSchedulingSlot({
   };
 }
 
+// Preserve legacy booleans and the explicit internal third answer end to end.
+export function isMaterialAnswer(value) {
+  return typeof value === 'boolean' || value === 'not-asked';
+}
+export function normalizeMaterialAnswer(value) {
+  return value === 'not-asked' ? value : value === true;
+}
+export function materialAnswerLabel(value) {
+  return value === 'not-asked' ? 'Nicht abgefragt' : value === true ? 'Ja' : 'Nein';
+}
+
 export function buildPlanbarSchedulingExtras({ materialDeliverySpace, theftWeatherProtected, additionalInfo = '' }) {
   const lines = [
-    `Materialannahme einige Tage vor Montagebeginn: ${materialDeliverySpace === true ? 'Ja' : 'Nein'}`,
-    `Diebstahl- und wettersicher: ${theftWeatherProtected === true ? 'Ja' : 'Nein'}`,
+    `Materialannahme einige Tage vor Montagebeginn: ${materialAnswerLabel(materialDeliverySpace)}`,
+    `Diebstahl- und wettersicher: ${materialAnswerLabel(theftWeatherProtected)}`,
   ];
   const cleanAdditionalInfo = String(additionalInfo || '').trim();
   if (cleanAdditionalInfo) lines.push(`Zusatzinfo: ${cleanAdditionalInfo}`);

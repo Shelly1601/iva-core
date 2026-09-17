@@ -2,7 +2,7 @@
 //  1) Router-Defaults ohne ENV-Ueberschreibungen
 //  2) Registrierte Tool-Namen unveraendert gegenueber Baseline
 //  3) Agent-Registry-Inhalt + Fallback-Verhalten
-//  4) Ein echter Anthropic-Call via Router (ohne Tools, minimaler Prompt)
+//  4) SDK/Router/Budget mit simuliertem Provider; echter Call nur mit IVA_TEST_LIVE_MODEL=1
 //  5) Persistenz: recordUsage schreibt Datei, addiert bei zweitem Call
 //  6) Ungueltiges IVA_MODEL_<TASK> wirft klaren Fehler (kein stiller Fallback)
 import 'dotenv/config';
@@ -123,8 +123,17 @@ truthy('  Investment-Agent besitzt Investment-Skill', getAgent('iva-investment')
 eq('  Recruiting-Anfrage routet zum Recruiting-Agent', routeAgent('Bitte Lebenslauf fuer das Vorstellungsgespraech pruefen').agent.id, 'iva-recruiting');
 eq('  iva-standard modelProfile', getAgent('iva-standard').modelProfile, 'chat');
 
-console.log('\n[4] Echter LLM-Call via Router (chat-Profil, ohne Tools)');
+console.log('\n[4] SDK-Call via Router und persistente Budgetkontrolle');
 let spendBefore = 0, spendAfter = 0;
+const originalFetch = globalThis.fetch;
+const originalAnthropicKey = process.env.ANTHROPIC_API_KEY;
+if (process.env.IVA_TEST_LIVE_MODEL !== '1') {
+  process.env.ANTHROPIC_API_KEY = 'fixture-not-a-real-key';
+  globalThis.fetch = async (url) => {
+    if (!String(url).startsWith('https://api.anthropic.com/')) throw new Error('Unexpected provider in offline fixture');
+    return new Response(JSON.stringify({id:'fixture-message',type:'message',role:'assistant',model:'claude-sonnet-4-6',content:[{type:'text',text:'OK'}],stop_reason:'end_turn',stop_sequence:null,usage:{input_tokens:20,output_tokens:2}}), {status:200,headers:{'content-type':'application/json'}});
+  };
+}
 try {
   spendBefore = (await currentSpendEUR()).totalEUR;
   const r = chooseModel({ task: 'chat' });
@@ -145,6 +154,10 @@ try {
   truthy('  currentSpendEUR > vorher (Persistenz aktiv)', spendAfter > spendBefore);
 } catch (e) {
   console.log(`  FAIL LLM-Call: ${e.message}`); fails++;
+} finally {
+  globalThis.fetch = originalFetch;
+  if (originalAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+  else process.env.ANTHROPIC_API_KEY = originalAnthropicKey;
 }
 
 console.log('\n[5] Persistenz-Test - synth. Recording, Datei-Reload');
@@ -152,6 +165,8 @@ try {
   const spend1 = await currentSpendEUR();
   const r = chooseModel({ task: 'route' });
   await recordUsage(r, { promptTokens: 1000, completionTokens: 200 });
+  eq('  zentral budgetiertes Modell wird nicht doppelt abgerechnet', (await currentSpendEUR()).totalEUR, spend1.totalEUR);
+  await recordUsage({ ...r, model: null }, { promptTokens: 1000, completionTokens: 200 });
   const dataDir = process.env.DATA_DIR;
   const raw = JSON.parse(await fs.readFile(dataDir + '/model-usage.json', 'utf8'));
   const monthKey = new Date().getUTCFullYear() + '-' + String(new Date().getUTCMonth() + 1).padStart(2, '0');
