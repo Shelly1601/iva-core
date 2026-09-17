@@ -49,9 +49,11 @@ export function mergePlanbarSchedulingProgress(previous = null, input = {}) {
     || confirmationMail.from !== 'n.sell@heat-hero.com' || !/^[a-f0-9]{64}$/.test(confirmationMail.recipientHash || '')
     || !Number.isFinite(Date.parse(confirmationMail.sentAt)) || Date.parse(confirmationMail.sentAt) > Date.now() + 60_000
     || Date.parse(confirmationMail.sentAt) < Date.parse(proof.firstVerifiedAt))) throw new Error('Der geprüfte Bestätigungs-Mailnachweis fehlt.');
+  const milestones = mergeSchedulingMilestones(previous?.milestones, input.milestones, proof);
   if (input.status === 'completed' && (missingDetails.length || remainingActions.length || input.completionVerified !== true)) throw new Error('Offene Ergänzungen oder Folgeaktionen dürfen nicht als vollständig gemeldet werden.');
   if (previous?.status === 'completed' && input.status !== 'completed') throw new Error('Ein vollständig geprüfter Auftrag darf nicht zurückgesetzt werden.');
-  return { status: input.status, reservation: proof, missingDetails, remainingActions,
+  return { status: input.status, reservation: proof, missingDetails, remainingActions, milestones,
+    steps: schedulingMilestoneStatus({ reservation: proof, milestones, missingDetails }),
     ...(sourceCheck ? { sourceCheck: {
       ...Object.fromEntries(['dealId', 'partnerId', 'stage', 'identityVerified', 'objectLocationMatched', 'planbarRefreshedAt', 'verifiedAt'].map(key => [key, sourceCheck[key]])),
       customerSegment: sourceCheck.customerSegmentVerified === true && ['private', 'business'].includes(sourceCheck.customerSegment) ? sourceCheck.customerSegment : 'unknown',
@@ -97,6 +99,9 @@ export function planbarSchedulingSummary(progress) {
   if (!progress?.reservation?.verified) return 'Noch kein gesicherter Planbar-Slot bestätigt.';
   if (progress.status === 'completed') return 'Slot in Planbar gesichert – Angaben und Folgeaktionen vollständig geprüft.';
   const open = [...(progress.missingDetails || []), ...(progress.remainingActions || [])];
+  const milestones = progress.milestones || {};
+  const done = [milestones.pipedriveWeek && 'Pipedrive KW gespeichert', milestones.pipedriveStage && 'Phase verschoben', milestones.whatsapp && 'WhatsApp bestätigt'].filter(Boolean);
+  if (done.length) return 'Slot in Planbar gesichert – ' + done.join(' – ') + (open.length ? ' – offen: ' + open.join(', ') : '');
   return `Slot in Planbar gesichert – ${progress.missingDetails?.length ? 'Angaben noch offen' : 'Nacharbeiten offen'}${open.length ? ': ' + open.join(', ') : '.'}`;
 }
 
@@ -462,3 +467,37 @@ export const CUSTOMER_SCHEDULING_RULES = Object.freeze({
   pipedriveWeekField: 'Einbautermin Kalenderwoche',
   allowAutomaticDealTitleWeekSuffix: true,
 });
+
+const at = proof => Date.parse(proof?.verifiedAt);
+const valid = proof => proof?.verified === true && Number.isFinite(at(proof)) && at(proof) <= Date.now() + 60000;
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+export function mergeSchedulingMilestones(previous = {}, input = {}, reservation) {
+  const result = { ...previous };
+  for (const key of ['pipedriveWeek', 'pipedriveStage', 'whatsapp']) {
+    if (!input[key]) continue;
+    if (previous[key] && !same(previous[key], input[key])) throw new Error('Verifizierter Folgeschritt darf nicht ersetzt oder wiederholt werden.');
+    result[key] = structuredClone(input[key]);
+  }
+  const { pipedriveWeek: week, pipedriveStage: stage, whatsapp } = result;
+  if (week && (!reservation?.verified || !valid(week) || !/^\d+$/.test(week.dealId) || week.value !== `KW${String(reservation.week).padStart(2, '0')}` || at(week) < Date.parse(reservation.firstVerifiedAt || reservation.verifiedAt))) throw new Error('KW-Feld muss nach dem Slot gespeichert und rückgelesen sein.');
+  if (stage) {
+    const order = stage.visibleStageOrder;
+    const from = Array.isArray(order) ? order.indexOf(stage.fromStageId) : -1;
+    if (!week || !valid(stage) || stage.dealId !== week.dealId || at(stage) < at(week) || !Array.isArray(order) || new Set(order).size !== order.length || from < 0 || order[from + 1] !== stage.toStageId) throw new Error('Phase erst nach bestätigtem KW-Feld exakt eine sichtbare Phase nach rechts.');
+  }
+  if (whatsapp && (!stage || !valid(whatsapp) || at(whatsapp) < at(stage) || whatsapp.app !== 'native-whatsapp' || whatsapp.group !== 'Terminierung Dispo' || whatsapp.community !== 'Heat Hero GmbH' || !whatsapp.messageId || !whatsapp.orderNumber || whatsapp.orderNumberSource?.kind !== 'signed-offer' || !whatsapp.orderNumberSource?.documentId || whatsapp.orderNumberSource?.verified !== true || whatsapp.text !== `${whatsapp.customerName}, KW ${reservation.week}, ${whatsapp.orderNumber}`)) throw new Error('Native WhatsApp benötigt exakte Community-Gruppe und belegte Angebots-Auftragsnummer.');
+  return result;
+}
+
+export function schedulingMilestoneStatus(progress, transport = {}) {
+  return {
+    transferred: Boolean(transport.jobId || progress?.reservation?.verified), waiting: ['queued', 'waiting_for_imac', 'waiting_for_ui'].includes(transport.phase || transport.status),
+    slotReserved: progress?.reservation?.verified === true,
+    pipedriveWeekSaved: progress?.milestones?.pipedriveWeek?.verified === true,
+    pipedriveStageMoved: progress?.milestones?.pipedriveStage?.verified === true,
+    whatsappConfirmed: progress?.milestones?.whatsapp?.verified === true,
+    detailsPending: Boolean(progress?.missingDetails?.length),
+    minimalComplete: progress?.reservation?.verified === true && progress?.milestones?.pipedriveWeek?.verified === true && progress?.milestones?.pipedriveStage?.verified === true,
+  };
+}

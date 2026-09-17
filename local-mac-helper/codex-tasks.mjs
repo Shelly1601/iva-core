@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { serveBuildUiAccess, requestBuildUiAccess, serveUiCheckpoints, requestUiCheckpoint } from './execution-priority.mjs';
 import { withImacExecutionLock } from './ui-execution-lock.mjs';
 import { MAC_SESSION_RECHECK_MS, readMacSessionLockStatus } from './mac-session-lock.mjs';
 import os from 'node:os';
@@ -425,7 +426,7 @@ export function buildCodexPrompt(request) {
   const recoveryInstruction = Number(request.recoveryAttempt || 0) > 0
     ? `\n\nDies ist der automatische Wiederanlauf ${Number(request.recoveryAttempt)} nach einem unterbrochenen lokalen Worker. Prüfe vor jeder Schreib- oder Sendeaktion zuerst vorhandene lokale Belege, den sichtbaren Zielzustand und bereits erzeugte Ergebnisse. Setze beim ersten noch nicht verifizierten Schritt fort. Wiederhole niemals eine bereits sichtbare, gespeicherte oder anderweitig belegte Aktion. Der Wiederanlauf ist eine Fortsetzung desselben Auftrags, kein neuer Auftrag.`
     : '';
-  const runtimeInstruction = `Die verbindlichen Projektanweisungen stehen in ${path.join(REPO_ROOT, '..', 'AGENTS.md')}; lies diese Datei, auch wenn im Unterordner iva-core keine eigene AGENTS.md liegt. Bestehende lokale IVA-Helfer startest du mit absolutem Pfad aus ${path.dirname(MODULE_PATH)}. Dieser geprüfte Laufzeitstand kommt vom zentralen IVA-Core. Projektquellen und Dokumente bleiben im gesetzten iCloud-Workspace. Keine zweite lokale Kopie als laufenden Agenten starten.`;
+  const runtimeInstruction = `UI-Priorität: Nach jeder abgeschlossenen und rückgelesenen UI-Aktion sowie vor längerer Recherche/Dateiarbeit führe bei UI-Workflows den kooperativen Checkpoint aus: node ${JSON.stringify(MODULE_PATH)} ui-checkpoint ${request.jobId}. Nur aufrufen, wenn kein unklarer Schreib- oder Sendeausgang besteht; bei Unklarheit zuerst am Ziel rücklesen. Der Checkpoint wartet auf priorisierte Terminierungen und kehrt erst nach erneuter UI-Freigabe zurück. Bauaufträge halten keine globale UI-Sperre während der Codearbeit. Bei Bauaufträgen vor JEDEM Browser-/App-Arbeitsabschnitt node ${JSON.stringify(MODULE_PATH)} ui-access ${request.jobId} acquire ausführen und Bestätigung abwarten; nach sichtbarer Rücklesung und vor weiterer Codearbeit ui-access ${request.jobId} release ausführen. Nicht während unklarer Schreibaktionen freigeben. Die verbindlichen Projektanweisungen stehen in ${path.join(REPO_ROOT, '..', 'AGENTS.md')}; lies diese Datei, auch wenn im Unterordner iva-core keine eigene AGENTS.md liegt. Bestehende lokale IVA-Helfer startest du mit absolutem Pfad aus ${path.dirname(MODULE_PATH)}. Dieser geprüfte Laufzeitstand kommt vom zentralen IVA-Core. Projektquellen und Dokumente bleiben im gesetzten iCloud-Workspace. Keine zweite lokale Kopie als laufenden Agenten starten.`;
   const fundingWindowInstruction = FUNDING_WORKFLOW_STEPS[request.workflowId]
     ? ' Der zentrale iMac-Runner hat zusätzlich Chrome und Outlook unmittelbar vor dem Start geöffnet, rechts platziert und im selben laufzeitgebundenen Nachweis bestätigt. `place-app-right` darfst du zur Diagnose aufrufen; eine sandboxbedingte Accessibility-Ablehnung wird nur für genau diese vorgeprüften Apps über den Nachweis aufgelöst.'
     : '';
@@ -800,7 +801,12 @@ Nach verifizierter konfliktfreier Reservierung: Pipedrive-KW/Phasenschritt und n
 Mailinhalt: freundliche Bestätigung der tatsächlich reservierten Kalenderwoche mit Montag-bis-Freitag-Datumsbereich, keine erfundenen Tageszeiten und keine weiteren Leistungszusagen. Vor dem Senden Empfänger, Absender, Kunde und Woche exakt prüfen. Vorab Gesendet und den bestehenden Aufgabenbeleg auf Doppelversand prüfen. Versandversuch im lokalen Aufgabenordner vor dem Senden dauerhaft markieren; nach unklarem Ausgang nie erneut senden, zuerst Gesendet prüfen. Anschließend in Gesendet genau diese Mail verifizieren und confirmationMail mit beobachteter messageId, from:n.sell@heat-hero.com, SHA256 der normalisierten Empfängeradresse als recipientHash, sentAt und verified:true im planbar-progress melden. Keine echte Kundenadresse im Ergebnisbericht ausgeben. Ein reservierter Slot allein ist kein Mailversandnachweis. completed nur nach verifizierter Mail UND allen weiteren Pflichtschritten, sonst details_pending mit konkreten Restpunkten. Die nächste Stunde ist eine voraussichtliche Bearbeitungszeit, keine garantierte Frist.`;
 }
 
-export async function startPlanbarCustomerSchedulingTask(input = {}) {
+export async function startPlanbarCustomerSchedulingTask(input = {}, dependencies = {}) {
+  const key = planbarSchedulingKey(input);
+  return withFundingFileLock(path.join(TASK_ROOT, 'schedule-admission', key), () => startPlanbarCustomerSchedulingTaskLocked(input, dependencies), { timeoutMs: 30000 });
+}
+
+async function startPlanbarCustomerSchedulingTaskLocked(input = {}, dependencies = {}) {
   const key = planbarSchedulingKey(input);
   for (const entry of await readdir(TASK_ROOT, { withFileTypes: true }).catch(() => [])) {
     if (!entry.isDirectory() || !/^[a-f0-9-]{20,80}$/i.test(entry.name)) continue;
@@ -808,8 +814,7 @@ export async function startPlanbarCustomerSchedulingTask(input = {}) {
     const existingRequest = await readJson(paths.request).catch(() => null);
     if (!existingRequest?.planbar || planbarSchedulingKey(existingRequest.planbar) !== key) continue;
     const state = await getCodexTaskStatus(entry.name).catch(() => null);
-    if (state?.status === 'queued' && existingRequest.launchProtocol === 2) return startCodexTask(existingRequest);
-    if (state && (['queued', 'running'].includes(state.status) || state.planbarProgress?.reservation?.verified)) {
+    if (state) {
       return { jobId: entry.name, status: state.status, duplicate: true, startedLocally: false, planbarProgress: state.planbarProgress, message: 'Vorhandenen Terminierungsauftrag verwenden; keine zweite Slot-Anlage.' };
     }
   }
@@ -831,7 +836,7 @@ export async function startPlanbarCustomerSchedulingTask(input = {}) {
   if (publicRequest && (input.partnerId !== 'heat-hero' || partnerPrefix !== 'HH' || !input.objectLocation)) throw new Error('Ungültige öffentliche Heat-Hero-Anfrage.');
   const prompt = publicRequest ? buildPublicSchedulingPrompt(input) : `Bei den beiden Materialfragen ist „Nicht abgefragt“ ein gültiger, bewusst gewählter Wert. Übernimm ihn wörtlich in die jeweilige Planbar-Beschreibungszeile; wandle ihn nicht in Nein um und blockiere deshalb nicht den Direktstart.
 
-Führe den Workflow „Kunde terminieren“ auf diesem iMac aus. Verbindliche neue Priorität vom 27.08.2026: ZUERST Kunde und echten zulässigen Montag-bis-Freitag-Slot in Planbar sichern und rücklesen, DANACH Angebots-/TMB-Unterlagen auswerten und fehlende Angaben ergänzen. Lies KUNDE_TERMINIEREN_WORKFLOW.md; die neue Slot-zuerst-Regel ersetzt ältere widersprechende Alles-oder-nichts-/Keine-Teilanlage-Regeln. PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md ist erst für die Ergänzungsphase erforderlich.
+Führe den Workflow „Kunde terminieren“ auf diesem iMac aus. Verbindliche neue Priorität vom 27.08.2026: ZUERST Kunde und echten zulässigen Montag-bis-Freitag-Slot in Planbar sichern und rücklesen, DANACH sofort Pipedrive-KW speichern/rücklesen und exakt eine sichtbare Phase weiter. Angebots-/TMB-Details an Planbar-Vervollständigung übergeben. Lies KUNDE_TERMINIEREN_WORKFLOW.md; die neue Slot-zuerst-Regel ersetzt ältere widersprechende Alles-oder-nichts-/Keine-Teilanlage-Regeln. PLANBAR_VERVOLLSTAENDIGUNG_WORKFLOW.md ist erst für die Ergänzungsphase erforderlich.
 
 Identität, Kundentyp, Zielwoche, Dublettenprüfung und zulässige freie Kapazität bleiben harte Gates. Übernimm vorhandene belegte Kontaktdaten; optionale fehlende Felder bleiben leer. Nur tatsächlich von Planbar verlangte Mindestfelder blockieren die Anlage, niemals pauschal fehlende E-Mail/Telefon/Angebotsnummer/Beschreibung. Keine erfundenen Ersatzwerte. Quellenwidersprüche in Angebots-/TMB-Details blockieren nur die Ergänzung, bei Identität/Kunde bleiben sie blockierend.
 
@@ -845,14 +850,14 @@ Auftrag:
 - Materialannahme einige Tage vor Montagebeginn: ${materialDeliverySpace}
 - Diebstahl- und wettersicher: ${theftWeatherProtected}${additionalInfo ? `\n- Zusatzinfo: ${additionalInfo}` : ''}
 
-Der IVA-Auftrag ist die ausdrückliche Freigabe für die in KUNDE_TERMINIEREN_WORKFLOW.md eng beschriebenen Planbar- und Pipedrive-Schritte; verlange keine weitere Bestätigung. ${schedulingMode === 'enter-block-first' ? `Dieser Partner verwendet ENTER-Blöcke: Ersetze vorrangig den ersten zulässigen vollständigen Block mit dem exakten Text „Geblockt für Kunde ENTER“. ${allowFreeResourceFallback ? 'Nur wenn kein solcher Block vorhanden ist, darf ersatzweise die erste Ressource verwendet werden, die Montag bis Freitag vollständig frei ist.' : 'Ist kein solcher Block vorhanden, bleibt Planbar unverändert; eine freie Ressource darf nicht ersatzweise verwendet werden.'}` : 'Verwende ausschließlich die erste zulässige Ressource, die von Montag bis Freitag vollständig frei ist.'} Schließe Dawid/David Service sowie Antonio Lausic und alle dokumentierten Schreibvarianten aus. Erst nach sichtbar verifizierter Planbar-Anlage sende über die native WhatsApp-App genau einmal „${customerName}, KW ${week}“ in die Gruppe „Terminierung Dispo“ innerhalb der Community „Heat Hero GmbH“ (Nadines Klarstellung vom 27.08.2026 ersetzt die ältere Plural-Schreibweise). Bei nicht eindeutig unterscheidbarer gleichnamiger Gruppe wird nichts gesendet. Keine Web-Version von WhatsApp verwenden.`;
+Der IVA-Auftrag ist die ausdrückliche Freigabe für die in KUNDE_TERMINIEREN_WORKFLOW.md eng beschriebenen Planbar- und Pipedrive-Schritte; verlange keine weitere Bestätigung. ${schedulingMode === 'enter-block-first' ? `Dieser Partner verwendet ENTER-Blöcke: Ersetze vorrangig den ersten zulässigen vollständigen Block mit dem exakten Text „Geblockt für Kunde ENTER“. ${allowFreeResourceFallback ? 'Nur wenn kein solcher Block vorhanden ist, darf ersatzweise die erste Ressource verwendet werden, die Montag bis Freitag vollständig frei ist.' : 'Ist kein solcher Block vorhanden, bleibt Planbar unverändert; eine freie Ressource darf nicht ersatzweise verwendet werden.'}` : 'Verwende ausschließlich die erste zulässige Ressource, die von Montag bis Freitag vollständig frei ist.'} Schließe Dawid/David Service sowie Antonio Lausic und alle dokumentierten Schreibvarianten aus. Erst nach sichtbar verifizierter Planbar-Anlage, gespeichertem KW-Feld und genau einem bestätigten Phasenschritt sende über die native WhatsApp-App genau einmal „${customerName}, KW ${week}, <belegte Auftragsnummer aus unterschriebenem Angebot>“ in die Gruppe „Terminierung Dispo“ innerhalb der Community „Heat Hero GmbH“ (Nadines Klarstellung vom 27.08.2026 ersetzt die ältere Plural-Schreibweise). Bei nicht eindeutig unterscheidbarer gleichnamiger Gruppe wird nichts gesendet. Keine Web-Version von WhatsApp verwenden.`;
   return startCodexTask({
     prompt,
     title: `Planbar: ${partnerName}-Kunde ${customerName} in KW ${week}/${isoYear} terminieren`,
     requestId: input.commandId || `planbar-schedule-${isoYear}-${week}-${Date.now()}`,
     mode: 'project-workflow',
     projectId: 'heat-hero',
-    planbar: { customerName, partnerId: input.partnerId, partnerPrefix, isoYear, week,
+    planbar: { customerName, partnerId: input.partnerId, partnerPrefix, isoYear, week, fastLaneProtocol: 1,
       ...(publicRequest ? { source: 'public-heat-hero', objectLocation: clean(input.objectLocation, 180) } : {}) },
     acceptanceCriteria: [
       'Kunde und Deal sind eindeutig; der echte Slot wurde VOR Angebots-/TMB-Auswertung verifiziert gespeichert.',
@@ -865,7 +870,7 @@ Der IVA-Auftrag ist die ausdrückliche Freigabe für die in KUNDE_TERMINIEREN_WO
       'Ohne Reservierungsnachweis kein Erfolg und keine WhatsApp. Nach gesicherter Reservierung bleiben Termin und Nachweis bei Folgefehlern erhalten; offene Angaben werden separat gemeldet.',
       ...(publicRequest ? ['Planbar wurde zuerst neu geladen; Kundenphase, Objektstandort und konfliktfreie Belegung wurden erneut geprüft.', 'Die Bestätigungs-E-Mail ist einmalig an die belegte CRM-Kundenadresse versendet und in Gesendet geprüft; eigener Mailnachweis liegt vor.'] : []),
     ],
-  });
+  }, dependencies);
 }
 
 function planbarReceiptInstructions(request) {
@@ -874,8 +879,9 @@ function planbarReceiptInstructions(request) {
 Noch VOR dem Lesen von Angeboten/TMB nach dem erneuten Öffnen des gespeicherten Termins eine JSON-Datei ${path.join(paths.directory, 'reservation-receipt.json')} mit den tatsächlich rückgelesenen Werten schreiben und ausführen:
 node ${JSON.stringify(MODULE_PATH)} planbar-progress ${request.jobId} ${JSON.stringify(path.join(paths.directory, 'reservation-receipt.json'))}
 Schema: {"status":"reserved","reservation":{"customerId":"beobachtet","appointmentId":"beobachtet","resourceId":"beobachtet","resourceName":"beobachtet","isoYear":${request.planbar.isoYear},"week":${request.planbar.week},"startDate":"tatsächlicher Montag YYYY-MM-DD","endDateExclusive":"tatsächlicher Samstag YYYY-MM-DD","verifiedAt":"aktueller ISO-Zeitpunkt","verified":true,"identityVerified":true},"missingDetails":["Auftragsnummer","Leistungsbeschreibung"],"remainingActions":["Pipedrive-Abschluss","WhatsApp-Bestätigung"]}.
+Folgeschritte in milestones speichern: pipedriveWeek={dealId,value:"KW${String(request.planbar.week).padStart(2, '0')}",verified:true,verifiedAt}, pipedriveStage={dealId,fromStageId,toStageId,visibleStageOrder:[live beobachtete IDs in Reihenfolge],verified:true,verifiedAt}, whatsapp={app:"native-whatsapp",group:"Terminierung Dispo",community:"Heat Hero GmbH",messageId,customerName,orderNumber,orderNumberSource:{kind:"signed-offer",documentId,verified:true},text,verified:true,verifiedAt}. Nur tatsächlich beobachtete Werte, jeden Schritt unmittelbar nach Rücklesen separat melden; niemals vorab Belege erzeugen.
 IDs niemals erfinden. verified und identityVerified nur nach echter erneuter Sichtprüfung setzen. Fehler beim Melden beseitigen; nie eine zweite Anlage erzeugen. Der Nachweis bleibt lokal dauerhaft gespeichert und wird ins Kontrollzentrum übertragen.
-Danach Ergänzungen versuchen und denselben Befehl mit aktualisierter JSON-Datei verwenden: status details_pending, konkrete missingDetails/remainingActions. reservation kann bei Folgeupdates entfallen; der vorhandene Termin darf nicht ersetzt werden. status completed nur mit leeren missingDetails/remainingActions UND completionVerified:true nach tatsächlich geprüfter vollständiger Befüllung und Folgeaktionen. Kein erneuter Pipedrive-Phasenschritt/WhatsApp-Versand wenn bereits nachgewiesen. Bei verbleibenden Lücken den Slot als gesichert und die Lücken als offen melden.`;
+Zuerst Pipedrive: Einbautermin Kalenderwoche als KW plus zweistellige ISO-Woche speichern und rücklesen. Erst danach exakt eine Phase nach rechts anhand live sichtbarer Reihenfolge; rücklesen. Erst danach native WhatsApp in Terminierung Dispo innerhalb Heat Hero GmbH: Vorname Nachname, KW <Nummer>, <belegte Auftragsnummer aus unterschriebenem Angebot>. Ohne belegte Nummer WhatsApp offen halten. Vollständige Beschreibung/Kontakte/TMB an Planbar-Vervollständigung übergeben, keine lange Detailanalyse in der Reservierungsstrecke. Danach denselben Befehl mit aktualisierter JSON-Datei verwenden: status details_pending, konkrete missingDetails/remainingActions. reservation kann bei Folgeupdates entfallen; der vorhandene Termin darf nicht ersetzt werden. status completed nur mit leeren missingDetails/remainingActions UND completionVerified:true nach tatsächlich geprüfter vollständiger Befüllung und Folgeaktionen. Kein erneuter Pipedrive-Phasenschritt/WhatsApp-Versand wenn bereits nachgewiesen. Bei verbleibenden Lücken den Slot als gesichert und die Lücken als offen melden.`;
 }
 
 export async function recordPlanbarTaskProgress(jobId, input, { report = reportTaskState } = {}) {
@@ -885,6 +891,7 @@ export async function recordPlanbarTaskProgress(jobId, input, { report = reportT
   let previous = null;
   try { previous = await readJson(paths.planbarProgress); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   const progress = mergePlanbarSchedulingProgress(previous, input);
+  if (request.planbar.fastLaneProtocol === 1 && input.status === 'completed' && !progress.steps.whatsappConfirmed) throw new Error('Schnellspur-Abschluss benötigt KW-, Phasen- und WhatsApp-Nachweis.');
   if (request.planbar.source === 'public-heat-hero') {
     if (!progress.sourceCheck) throw new Error('Öffentliche Anfrage benötigt den geprüften Heat-Hero-Kundenabgleich.');
     const refreshed=Date.parse(progress.sourceCheck.planbarRefreshedAt);
@@ -1439,7 +1446,14 @@ export async function runCodexTask(jobId, {
   try {
     if (!requiresUi && request.mode !== 'build') return await execute(jobId);
     const wake = withWakeGuard || (await import('./mac-wake-guard.mjs')).withMacWakeGuard;
-    return await withUiLock(async () => {
+    if (!requiresUi) return wake(() => serveBuildUiAccess(jobPaths(jobId).directory,
+      (task, options) => withUiLock(async () => {
+        const session = await sessionStatus();
+        if (!session.usable) throw new Error('Desktop ist gesperrt; keine UI-Freigabe erteilt.');
+        return task();
+      }, { ...options, jobId, timeoutMs: CODEX_TASK_MAX_QUEUE_WAIT_MS }), () => execute(jobId)),
+      { maxSeconds: Math.ceil(MAX_RUNTIME_MS / 1000) + 60, sleepDisplays: false });
+    return await withUiLock(async lease => {
       // The screen can lock while another UI job owns the execution lock.
       if (requiresUi) {
         const session = await sessionStatus();
@@ -1448,11 +1462,12 @@ export async function runCodexTask(jobId, {
           return deferCodexTaskUntilUnlocked(jobId, session, { report });
         }
       }
-      return wake(() => execute(jobId), {
+      const run = () => wake(() => execute(jobId), {
         maxSeconds: Math.ceil(MAX_RUNTIME_MS / 1000) + 60,
         sleepDisplays: true,
       });
-    }, { timeoutMs: CODEX_TASK_MAX_QUEUE_WAIT_MS });
+      return lease ? serveUiCheckpoints(jobPaths(jobId).directory, lease, run) : run();
+    }, { timeoutMs: CODEX_TASK_MAX_QUEUE_WAIT_MS, priority: request.planbar ? 100 : 0, jobId });
   } finally {
     await stopHeartbeat();
   }
@@ -1674,6 +1689,12 @@ if (isCodexTasksEntrypoint() && process.argv[2] === 'workflow-status') {
     if (path.dirname(receipt) !== paths.directory || receipt === paths.planbarProgress || receipt === paths.state || receipt === paths.request) throw new Error('Der Eingangsbeleg muss im eigenen Auftragsordner liegen.');
     console.log(JSON.stringify(await recordPlanbarTaskProgress(process.argv[3], await readJson(receipt))));
   } catch (error) { console.error(error.message); process.exitCode = 1; }
+} else if (isCodexTasksEntrypoint() && process.argv[2] === 'ui-access') {
+  try { console.log(JSON.stringify(await requestBuildUiAccess(jobPaths(process.argv[3]).directory, process.argv[4]))); }
+  catch (error) { console.error(error.message); process.exitCode = 1; }
+} else if (isCodexTasksEntrypoint() && process.argv[2] === 'ui-checkpoint') {
+  try { console.log(JSON.stringify(await requestUiCheckpoint(jobPaths(process.argv[3]).directory))); }
+  catch (error) { console.error(error.message); process.exitCode = 1; }
 } else if (isCodexTasksEntrypoint() && process.argv[2] === 'progress') {
   try { await updateCodexTaskProgress(process.argv[3], process.argv[4], process.argv.slice(5).join(' ')); }
   catch (error) { console.error(error.message); process.exitCode = 1; }

@@ -2,6 +2,21 @@
 
 Stand: 27. August 2026 · Version 6 · Direktstart und Slot zuerst
 
+## Verbindliche Schnellspur – 17. September 2026
+
+Diese Reihenfolge ersetzt widersprechende ältere Detail- und WhatsApp-Angaben unten:
+
+1. Bestehenden Auftrag und Zielzustand prüfen; niemals bei unklarem Schreibausgang neu anlegen. Den zulässigen Montag-bis-Freitag-Platz mit minimalem Kundentext `HH Vorname Nachname` sichern und Kunde, Ressource, Zeitraum und Termin rücklesen. Kapazitäts- und Ausschlussregeln bleiben verbindlich. Sofort `planbar-progress` speichern.
+2. Im eindeutig zugehörigen Deal `Einbautermin Kalenderwoche` als `KW` plus zweistellige ISO-Woche speichern und rücklesen. Bereits korrekt gespeicherte Werte wiederverwenden.
+3. Erst dann exakt eine Phase nach rechts anhand der aktuellen sichtbaren Reihenfolge wechseln und rücklesen. Ohne rechte Nachbarphase offen lassen; keine andere Pipeline erraten und niemals zurückstufen.
+4. Danach genau einmal in der nativen WhatsApp-App in `Terminierung Dispo` innerhalb `Heat Hero GmbH` senden: `Vorname Nachname, KW <Nummer>, <belegte Auftragsnummer>`. Die Auftragsnummer muss aus dem unterschriebenen Angebot stammen. Ohne Beleg bleiben Slot und CRM-Schritte erhalten, WhatsApp bleibt offen.
+5. Beschreibung, Kontakte und technische Details an die vorhandene Planbar-Vervollständigung übergeben. Slot + KW + Phase ist der fachliche Minimalstand; WhatsApp ist der sichtbare Abschlussbeleg, offene Details bleiben gesondert sichtbar.
+
+Interne Materialantworten: Ja, Nein oder Nicht abgefragt; alte Booleans bleiben gültig. Der öffentliche Kundenlink verlangt weiterhin ausdrücklich Ja oder Nein.
+
+Der lokale Runner hält während Bau-/Hintergrundarbeit keine Desktop-Sperre. UI-Abschnitte von Bauaufträgen benötigen `ui-access <Job-ID> acquire` und danach `release`. Terminierungen haben Priorität 100; andere UI-Aufträge geben an sicheren `ui-checkpoint <Job-ID>`-Punkten kooperativ ab. Eine unbestätigte laufende Schreibaktion wird niemals unterbrochen oder parallel dupliziert. Bereits laufende alte Worker ohne Checkpointprotokoll werden nicht zwangsweise entsperrt. Zeit bis zum sicheren Checkpoint bleibt ehrlich als Warten sichtbar; wenige Sekunden bei freier UI sind ein Ziel und kein Buchungsbeleg.
+
+
 ## Öffentlicher Heat-Hero-Terminlink (28.08.2026)
 
 `/heat-hero/termin` ist ein wiederverwendbarer, öffentlicher Link ausschließlich für bestehende Heat-Hero-Aufträge. In der Heat-Hero-Projektakte kann Nadine ihn kopieren. Vor-/Nachname, Standort des Objekts (PLZ und Ort, bei mehreren Objekten genaue Anschrift), Kalenderwoche und zwei explizite Ja/Nein-Antworten sind Pflicht; sonstige Hinweise sind freiwillig. Die Anwendung speichert keine Formularwerte im Browser und setzt sie bei Neuaufruf sowie Vor-/Zurücknavigation zurück. Jede Anfrage wird dauerhaft gespeichert und über den bestehenden authentifizierten Gerätekanal an `imac-nadine` übergeben. Der Besucher erhält niemals Kundenlisten, CRM-Daten, interne Geräte-IDs oder private Statusdetails.
