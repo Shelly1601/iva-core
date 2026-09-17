@@ -4,15 +4,11 @@
 // oder Defaults). Bei ueberschrittenem Budget wirft der Router einen Fehler,
 // statt heimlich auf ein schwaecheres Modell umzuschalten.
 //
-// Nutzung:
-//   const routed = chooseModel({ task: 'chat' });
-//   const { text, usage } = await generateText({ model: routed.model, ... });
-//   recordUsage(routed, usage);
-//
-// Vor dem Call optional:
-//   checkBudget(routed);   // wirft, wenn Monatsbudget hart ueberschritten
-import fs from 'fs/promises';
+// Every paid provider dispatch must reserve an enforced upper bound first.
+// checkBudget alone is a status check; runWithModelBudget owns settlement.
 import fsSync from 'node:fs';
+import { createModelBudget, priceModelUsage } from './model-budget.js';
+import { wrapBudgetedModel } from './budgeted-model.js';
 import { anthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createGoogleSchemaFetch, googleRateLimitFetch } from './google-schema-transport.js';
@@ -21,15 +17,16 @@ import { createOpenAI } from '@ai-sdk/openai';
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const USAGE_FILE = DATA_DIR + '/model-usage.json';
 const INTEGRATION_CHECKUP_FILE = DATA_DIR + '/integration-checkup.json';
+const budgetedModels = new WeakSet();
+const centrallyBudgeted = routed => budgetedModels.has(routed?.model);
 
-// Grobe EUR-Preise pro 1 Mio. Tokens. Dienen NUR der Budget-Anzeige, nicht
-// der Abrechnung. Bei Provider-Preisaenderungen hier zentral pflegbar.
+// Model identities remain unchanged. Provider prices must be explicitly
+// verified/configured; model names never imply an invented price profile.
 const MODELS = {
-  'anthropic:claude-sonnet-4-6':          { provider: 'anthropic', id: 'claude-sonnet-4-6',          eurPerMTokIn: 2.75, eurPerMTokOut: 13.80 },
-  'anthropic:claude-haiku-4-5-20251001':  { provider: 'anthropic', id: 'claude-haiku-4-5-20251001',  eurPerMTokIn: 0.75, eurPerMTokOut:  3.68 },
-  'google:gemini-3.6-flash':              { provider: 'google',    id: 'gemini-3.6-flash',           eurPerMTokIn: 0.09, eurPerMTokOut:  0.37 },
-  // Approximate EUR display values; Groq lists USD 0.15 / 0.60 per million.
-  'groq:openai/gpt-oss-120b':             { provider: 'groq', id: 'openai/gpt-oss-120b', eurPerMTokIn: 0.14, eurPerMTokOut: 0.55 },
+  'anthropic:claude-sonnet-4-6': { provider: 'anthropic', id: 'claude-sonnet-4-6' },
+  'anthropic:claude-haiku-4-5-20251001': { provider: 'anthropic', id: 'claude-haiku-4-5-20251001' },
+  'google:gemini-3.6-flash': { provider: 'google', id: 'gemini-3.6-flash' },
+  'groq:openai/gpt-oss-120b': { provider: 'groq', id: 'openai/gpt-oss-120b' },
 };
 
 // Task-Profile: 1:1 die heute im Code verwendeten Modelle. KEIN Verhaltens-
@@ -64,7 +61,7 @@ const TASK_SAFETY = {
 // Gemini bekommt einen eigenen Transport pro Modellaufruf, damit die
 // Signaturen mehrstufiger Werkzeugaufrufe innerhalb ihrer Sitzung bleiben.
 function googleClient() {
-  return createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY, fetch: createGoogleSchemaFetch() });
+  return createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY, fetch: createGoogleSchemaFetch(fetch, { maxRetries: 0 }) });
 }
 
 // Env-Overrides pro Task-Profil: IVA_MODEL_CHAT, IVA_MODEL_ROUTE, ...
@@ -83,10 +80,10 @@ let runtimeModelOverrides = loadRuntimeOverrides();
 function dynamicModelConfig(key) {
   const [provider, id] = String(key || '').split(':', 2);
   if (provider === 'google' && /^gemini-[a-z0-9.-]+$/i.test(id || '')) {
-    return { provider, id, eurPerMTokIn: 0.09, eurPerMTokOut: 0.37 };
+    return { provider, id };
   }
   if (provider === 'anthropic' && /^claude-[a-z0-9.-]+$/i.test(id || '')) {
-    return { provider, id, eurPerMTokIn: 2.75, eurPerMTokOut: 13.80 };
+    return { provider, id };
   }
   return null;
 }
@@ -128,9 +125,9 @@ export function chooseModelKey(key, { task = 'brain-review' } = {}) {
   let model;
   if (cfg.provider === 'anthropic') model = anthropic(cfg.id);
   else if (cfg.provider === 'google') model = googleClient()(cfg.id);
-  else if (cfg.provider === 'groq') model = createOpenAI({apiKey:process.env.GROQ_API_KEY,baseURL:'https://api.groq.com/openai/v1',compatibility:'compatible',fetch:(url,init)=>googleRateLimitFetch(fetch,url,init)}).chat(cfg.id,{structuredOutputs:false});
+  else if (cfg.provider === 'groq') model = createOpenAI({apiKey:process.env.GROQ_API_KEY,baseURL:'https://api.groq.com/openai/v1',compatibility:'compatible',fetch:(url,init)=>googleRateLimitFetch(fetch,url,init,{maxRetries:0})}).chat(cfg.id,{structuredOutputs:false});
   else throw new Error(`Router: unbekannter Provider "${cfg.provider}"`);
-  return {
+  const routed = {
     task,
     key,
     provider: cfg.provider,
@@ -138,119 +135,119 @@ export function chooseModelKey(key, { task = 'brain-review' } = {}) {
     safetyLevel: TASK_SAFETY[task] || 'operational',
     model,
   };
+  Object.defineProperty(routed, 'budgetEnforced', { value: true });
+  routed.model = wrapBudgetedModel(model, routed, { reserve: reserveProviderRequest, estimate: estimateUsageEUR });
+  budgetedModels.add(routed.model);
+  return routed;
 }
 
 // ----------------------- Kosten & Budget ---------------------------
 
-const MONTHLY_BUDGET_EUR = Number(process.env.IVA_MONTHLY_BUDGET_EUR || 100);
-const WARN_THRESHOLD_EUR = Number(process.env.IVA_BUDGET_WARN_EUR || 70);
+// Official USD list prices checked 2026-09-17. These are conservative internal
+// EUR accounting ceilings, not invoices or a guarantee of the provider balance.
+// USD * 1.5 reserves FX/tax headroom. Anthropic input uses twice the base price
+// to include the more expensive cache-write class. All reasoning output must be
+// counted by the provider adapter. Additional paid provider tools are excluded.
+const PRICE_EVIDENCE = {
+  verifiedAt: '2026-09-17T00:00:00.000Z', validUntil: '2026-12-16T00:00:00.000Z',
+  includesAllCharges: true, eurPerUsdCeiling: 1.5,
+};
+const VERIFIED_PRICING = {
+  'anthropic:claude-sonnet-4-6': { ...PRICE_EVIDENCE, eurPerMTokIn: 9, eurPerMTokOut: 22.5, source: 'https://platform.claude.com/docs/en/about-claude/pricing' },
+  'anthropic:claude-haiku-4-5-20251001': { ...PRICE_EVIDENCE, eurPerMTokIn: 3, eurPerMTokOut: 7.5, source: 'https://platform.claude.com/docs/en/about-claude/pricing' },
+  'google:gemini-3.6-flash': { ...PRICE_EVIDENCE, eurPerMTokIn: 1.125, eurPerMTokOut: 5.625, source: 'https://ai.google.dev/gemini-api/docs/pricing' },
+  'groq:openai/gpt-oss-120b': { ...PRICE_EVIDENCE, eurPerMTokIn: 0.225, eurPerMTokOut: 0.9, source: 'https://console.groq.com/docs/models' },
+};
 
-function currentMonthKey(d = new Date()) {
-  return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0');
+// EUR upper bounds must include provider taxes/FX and every billed token type.
+// Keep evidence and an expiry with each profile; a free/paid tier guess is unsafe.
+// IVA_MODEL_PRICING_JSON = { "provider:model": {
+//   eurPerMTokIn, eurPerMTokOut, source, verifiedAt, validUntil,
+//   includesAllCharges: true
+// } }. No network lookup, credential change or cheaper model switch occurs here.
+function configuredNumber(name, fallback) {
+  const raw = process.env[name];
+  const value = raw == null || raw === '' ? fallback : Number(raw);
+  if (!Number.isFinite(value) || value < 0) throw Object.assign(new Error(`Router: ungueltige Budget-Konfiguration ${name}.`), { code: 'budget_config_invalid' });
+  return value;
 }
 
-let _usageCache = null;
-let _usageLoading = null;
-let _accountingQueue = Promise.resolve();
-const reservations = new Map();
-function accounting(action) {
-  const pending = _accountingQueue.then(action);
-  _accountingQueue = pending.catch(() => {});
-  return pending;
+export function modelPricing(routed) {
+  let profiles;
+  try { profiles = JSON.parse(process.env.IVA_MODEL_PRICING_JSON || '{}'); }
+  catch { throw Object.assign(new Error('Router: IVA_MODEL_PRICING_JSON ist ungueltig.'), { code: 'budget_pricing_unknown' }); }
+  const profile = profiles?.[routed?.key] ?? VERIFIED_PRICING[routed?.key];
+  const verified = Date.parse(profile?.verifiedAt);
+  const expires = Date.parse(profile?.validUntil);
+  if (!profile || profile.includesAllCharges !== true || typeof profile.source !== 'string' || !/^https:\/\//.test(profile.source) ||
+      !Number.isFinite(verified) || !Number.isFinite(expires) || verified > Date.now() || expires <= Date.now() || expires <= verified ||
+      ![profile.eurPerMTokIn, profile.eurPerMTokOut].every(value => typeof value === 'number' && Number.isFinite(value) && value >= 0) ||
+      profile.eurPerMTokIn + profile.eurPerMTokOut <= 0) {
+    throw Object.assign(new Error(`Router: verifizierte EUR-Preisobergrenze fuer "${routed?.key}" fehlt oder ist abgelaufen.`), { code: 'budget_pricing_unknown' });
+  }
+  return { eurPerMTokIn: profile.eurPerMTokIn, eurPerMTokOut: profile.eurPerMTokOut, source: profile.source, verifiedAt: profile.verifiedAt, validUntil: profile.validUntil, includesAllCharges: true };
 }
-async function loadUsage() {
-  if (_usageCache) return _usageCache;
-  if (!_usageLoading) _usageLoading = fs.readFile(USAGE_FILE, 'utf8')
-    .then(JSON.parse).catch(() => ({ months: {} }))
-    .then(value => (_usageCache = value));
-  return _usageLoading;
+
+const budget = createModelBudget({
+  file: USAGE_FILE,
+  monthlyLimitEUR: configuredNumber('IVA_MONTHLY_BUDGET_EUR', 30),
+  warnAtEUR: configuredNumber('IVA_BUDGET_WARN_EUR', 24),
+  pricingFor: modelPricing,
+  onWarn: ({ monthKey, totalEUR, warnAtEUR }) => console.warn(`[ROUTER] Monatsverbrauch ${totalEUR.toFixed(2)} EUR >= Warnschwelle ${warnAtEUR} EUR (${monthKey}).`),
+});
+
+export const currentSpendEUR = month => budget.currentSpend(month);
+
+// Compatibility for unreserved completed calls only. Admission control requires
+// reserveModelBudget/runWithModelBudget before dispatch, even for liability tasks.
+export const recordUsage = (routed, usage) => centrallyBudgeted(routed) ? Promise.resolve() : budget.record(routed, usage);
+export const checkBudget = () => budget.check();
+export function estimateUsageEUR(routed, usage = {}) {
+  return priceModelUsage(usage, modelPricing(routed)).eur;
 }
-async function saveUsage(u) {
-  _usageCache = u;
+
+// The callable handle preserves pre-dispatch cancellation compatibility. Once
+// sent, release without verified usage keeps the full reservation and fails shut.
+async function reserveProviderRequest(routed, upperBoundEUR) {
+  const id = await budget.reserve(routed, upperBoundEUR);
+  const handle = options => budget.release(id, options);
+  handle.id = id;
+  handle.markDispatched = () => budget.markDispatched(id);
+  handle.settle = usage => budget.settle(id, usage);
+  handle.release = handle;
+  return handle;
+}
+
+export async function reserveModelBudget(routed, upperBoundEUR) {
+  if (!centrallyBudgeted(routed)) return reserveProviderRequest(routed, upperBoundEUR);
+  // Existing advisory callers have an outer reservation. The wrapped provider
+  // now reserves each actual dispatch, so that outer scope must not double bill.
+  await checkBudget();
+  const handle = async () => {};
+  handle.markDispatched = handle;
+  handle.settle = handle;
+  handle.release = handle;
+  return handle;
+}
+
+// Recovery by a persisted reservation id, including after a process restart.
+export const settleModelBudget = (id, usage) => budget.settle(id, usage);
+export const releaseModelBudget = (id, options) => budget.release(id, options);
+
+// The callback must enforce the bounds used to calculate upperBoundEUR (input,
+// output, tool steps, retries, and non-token charges). A provider error is not
+// evidence that the request was unbilled; only provider usage can reconcile it.
+export async function runWithModelBudget(routed, { upperBoundEUR }, execute) {
+  const reservation = await reserveModelBudget(routed, upperBoundEUR);
   try {
-    await fs.mkdir(DATA_DIR, { recursive: true }).catch(() => {});
-    const temporary = `${USAGE_FILE}.${process.pid}.tmp`;
-    await fs.writeFile(temporary, JSON.stringify(u, null, 2), { mode: 0o600 });
-    await fs.rename(temporary, USAGE_FILE);
-  } catch { /* Persistenz-Fehler nicht kritisch */ }
-}
-
-// Aktuellen Monatsverbrauch abfragen (EUR + Tokens pro Task/Modell).
-export async function currentSpendEUR(monthKey = currentMonthKey()) {
-  const u = await loadUsage();
-  const month = u.months?.[monthKey];
-  if (!month) return { monthKey, totalEUR: 0, byModel: {}, byTask: {} };
-  const totalEUR = Object.values(month.byModel || {}).reduce((s, v) => s + (v.eur || 0), 0);
-  return { monthKey, totalEUR, byModel: month.byModel || {}, byTask: month.byTask || {} };
-}
-
-// Nach jedem LLM-Call aufrufen. usage = { promptTokens, completionTokens } (AI-SDK-Shape).
-export async function recordUsage(routed, usage) {
-  if (!routed || !usage) return;
-  return accounting(() => recordUsageUnlocked(routed, usage));
-}
-
-async function recordUsageUnlocked(routed, usage) {
-  const cfg = modelConfig(routed.key);
-  if (!cfg) return;
-  const positive = value => Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0;
-  const tin = positive(usage.promptTokens);
-  const tout = positive(usage.completionTokens);
-  const eur = (tin / 1e6) * cfg.eurPerMTokIn + (tout / 1e6) * cfg.eurPerMTokOut;
-  const u = await loadUsage();
-  const mk = currentMonthKey();
-  u.months = u.months || {};
-  const month = u.months[mk] || { byModel: {}, byTask: {} };
-  const m = month.byModel[routed.key] || { tokensIn: 0, tokensOut: 0, eur: 0, calls: 0 };
-  m.tokensIn += tin; m.tokensOut += tout; m.eur += eur; m.calls += 1;
-  month.byModel[routed.key] = m;
-  const t = month.byTask[routed.task] || { tokensIn: 0, tokensOut: 0, eur: 0, calls: 0 };
-  t.tokensIn += tin; t.tokensOut += tout; t.eur += eur; t.calls += 1;
-  month.byTask[routed.task] = t;
-  u.months[mk] = month;
-  await saveUsage(u);
-  // Warn-Log bei Ueberschreitung der Warn-Schwelle (idempotent: einmal pro Monat).
-  const totalEUR = Object.values(month.byModel).reduce((s, v) => s + (v.eur || 0), 0);
-  if (totalEUR >= WARN_THRESHOLD_EUR && !month._warnedAt) {
-    month._warnedAt = new Date().toISOString();
-    console.warn(`[${new Date().toISOString()}] [ROUTER] WARN: Monatsverbrauch ${totalEUR.toFixed(2)} EUR >= Warnschwelle ${WARN_THRESHOLD_EUR} EUR (Monat ${mk}).`);
-    await saveUsage(u);
+    await reservation.markDispatched();
+    const result = await execute(reservation);
+    await reservation.settle(result?.totalUsage ?? result?.usage);
+    return result;
+  } catch (error) {
+    try { await reservation.release(); } catch { /* durable unresolved hold retained */ }
+    throw error;
   }
-}
-
-// Vor dem LLM-Call aufrufen. Wirft bei hartem Budget-Limit, es sei denn das
-// Task-Profil ist explizit als "liability" markiert (haftungsrelevant, darf
-// niemals aus Kostengruenden blockiert werden).
-export async function checkBudget(routed) {
-  await _accountingQueue;
-  const { totalEUR } = await currentSpendEUR();
-  const reservedEUR = [...reservations.values()].reduce((sum, value) => sum + value, 0);
-  if (totalEUR + reservedEUR >= MONTHLY_BUDGET_EUR && routed?.safetyLevel !== 'liability') {
-    const err = new Error(`Router: Monatsbudget ${MONTHLY_BUDGET_EUR} EUR erreicht (aktuell ${totalEUR.toFixed(2)} EUR). Task "${routed?.task}" gestoppt. Erhoehe IVA_MONTHLY_BUDGET_EUR oder warte auf naechsten Monat.`);
-    err.code = 'budget_exceeded';
-    throw err;
-  }
-}
-
-export function estimateUsageEUR(routed, { promptTokens = 0, completionTokens = 0 } = {}) {
-  const cfg = modelConfig(routed?.key);
-  if (!cfg) return Infinity;
-  return (Math.max(0, promptTokens) * cfg.eurPerMTokIn + Math.max(0, completionTokens) * cfg.eurPerMTokOut) / 1e6;
-}
-
-// Reserve the bounded advisory request before dispatch, including concurrent
-// requests. The caller releases in finally; actual usage is recorded separately.
-export function reserveModelBudget(routed, estimateEUR) {
-  return accounting(async () => {
-    const { totalEUR } = await currentSpendEUR();
-    const reservedEUR = [...reservations.values()].reduce((sum, value) => sum + value, 0);
-    if (!Number.isFinite(estimateEUR) || estimateEUR < 0 || totalEUR + reservedEUR + estimateEUR >= MONTHLY_BUDGET_EUR) {
-      throw Object.assign(new Error('Budget fuer Modellpruefung nicht verfuegbar.'), { code: 'budget_exceeded' });
-    }
-    const id = Symbol('brain-budget');
-    reservations.set(id, estimateEUR);
-    return () => reservations.delete(id);
-  });
 }
 
 // Fuer Introspection (Tests, spaetere UI).
@@ -262,5 +259,5 @@ export function inspectRouting() {
     try { const r = chooseModel({ task }); out[task] = { key: r.key, safetyLevel: r.safetyLevel }; }
     catch (e) { out[task] = { error: e.message }; }
   }
-  return { defaults: TASK_DEFAULTS, resolved: out, budget: { monthly: MONTHLY_BUDGET_EUR, warnAt: WARN_THRESHOLD_EUR } };
+  return { defaults: TASK_DEFAULTS, resolved: out, budget: budget.limits };
 }

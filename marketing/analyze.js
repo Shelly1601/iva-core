@@ -8,7 +8,7 @@
 // Benoetigt ENV: APIFY_TOKEN (und ANTHROPIC_API_KEY, wie der Rest von iva-core).
 
 import { generateText } from 'ai';
-import { anthropic } from '@ai-sdk/anthropic';
+import { chooseModelKey } from '../core/router.js';
 
 const APIFY_URL = 'https://api.apify.com/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items';
 
@@ -92,7 +92,7 @@ export async function analyzeReferences(handles, { brand = '', resultsLimit = 30
   if (!ok.length) return { ok: false, error: 'Keine Daten von den Referenz-Konten erhalten', perAccount };
 
   const { text } = await generateText({
-    model: anthropic(model),
+    model: chooseModelKey('anthropic:' + model, { task: 'knowledge' }).model,
     system: `Du bist ein scharfer Social-Media-Stratege. Analysiere die verdichteten Daten echter Referenz-Konten und destilliere ein SOFORT verwertbares Muster-Profil${brand ? ' fuer die Marke ' + brand : ''}.
 Antworte kompakt auf Deutsch, mit genau diesen Abschnitten:
 - Hooks: 5-8 wiederkehrende Aufhaenger als Vorlagen mit [Platzhaltern]

@@ -4,10 +4,10 @@
 //   - image -> Bild-Post (Hook, Caption, Hashtags, Bild-Prompt)
 //   - email -> E-Mail (Betreff, Preview, Body, CTA)
 // Bezieht das BRAND-PROFIL ein (Zielgruppe, Tonalitaet, Markenfarben) + das Analyse-Muster-Profil.
-// Laeuft ueber Claude -> praktisch kostenlos.
+// Modellkosten werden zentral vor jedem Aufruf reserviert und abgerechnet.
 
 import { generateText } from 'ai';
-import { anthropic } from '@ai-sdk/anthropic';
+import { chooseModelKey } from '../core/router.js';
 
 function formatSpec(format, count) {
   if (format === 'reel') return `Erzeuge ${count} Reel-Ideen. Pro Idee GENAU dieses Format:
@@ -60,6 +60,6 @@ Alles auf Deutsch, sofort verwendbar, keine Vorrede. Richte dich strikt nach Zie
 Referenz-Konten liefern nur abstrakte Muster wie Hook-Struktur, Rhythmus, Informationsdichte und visuelle Hierarchie. Uebernimm niemals konkrete Saetze, Claims, Bildkompositionen, Logos, Figuren oder geschuetzte Designs. Logo-/Bild-Transitionen und 3D-Assets sind nur optionale Mittel, wenn sie die Botschaft wirklich verstaendlicher machen. Nenne keine Erfolgs-, Gratis- oder Unbegrenzt-Behauptung ohne belegte Primarquelle.`;
 
   const userPrompt = briefing ? `Meine Vorgabe: ${briefing}` : `Erzeuge ${count} starke Ideen im gelernten Stil.`;
-  const { text } = await generateText({ model: anthropic(model), system, prompt: userPrompt });
+  const { text } = await generateText({ model: chooseModelKey('anthropic:' + model, { task: 'knowledge' }).model, system, prompt: userPrompt });
   return { ok: true, brand: brandName, format, count, briefing, content: text };
 }

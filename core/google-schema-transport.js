@@ -56,6 +56,20 @@ export async function googleRateLimitFetch(fetchImpl,url,init,{wait=waitForRetry
   }
 }
 
+// SDK v4 predates thoughtsTokenCount. Preserve provider accounting before its
+// response schema discards newer fields. Cached input is already in prompt count.
+export function googleCompleteUsage(data) {
+  const usage=data?.usageMetadata;
+  if(!usage)return data;
+  const counts=[usage.candidatesTokenCount,usage.thoughtsTokenCount,usage.totalTokenCount,usage.promptTokenCount];
+  if(counts.some(value=>value!=null&&(!Number.isSafeInteger(value)||value<0)))throw new Error('Invalid Google token usage');
+  const visible=usage.candidatesTokenCount??0,thoughts=usage.thoughtsTokenCount??0;
+  const totalOutput=usage.totalTokenCount!=null&&usage.promptTokenCount!=null?usage.totalTokenCount-usage.promptTokenCount:0;
+  if(totalOutput<0)throw new Error('Invalid Google total token usage');
+  if(usage.candidatesTokenCount!=null||usage.thoughtsTokenCount!=null||usage.totalTokenCount!=null)usage.candidatesTokenCount=Math.max(visible+thoughts,totalOutput);
+  return data;
+}
+
 // Each model instance owns its transport. Retain the exact provider parts of
 // each tool turn, including thought signatures the older SDK would discard.
 // No signatures are invented, logged or shared between concurrent chat calls.
@@ -81,13 +95,21 @@ export function createGoogleSchemaFetch(fetchImpl=fetch, retryOptions={}) {
     const response=await googleRateLimitFetch(fetchImpl,url,init,retryOptions);
     if(!response.ok)return response;
     if(!response.headers.get('content-type')?.includes('text/event-stream')){
-      const data=await response.clone().json();remember(data.candidates?.[0]?.content?.parts||[]);return response;
+      const data=googleCompleteUsage(await response.json());remember(data.candidates?.[0]?.content?.parts||[]);
+      const headers=new Headers(response.headers);headers.delete('content-length');headers.delete('content-encoding');
+      return new Response(JSON.stringify(data),{status:response.status,statusText:response.statusText,headers});
     }
     const parts=[],decoder=new TextDecoder();let pending='';
-    const consume=block=>{for(const line of block.split(/\r?\n/)){if(!line.startsWith('data:'))continue;try{const data=JSON.parse(line.slice(5).trim());parts.push(...(data.candidates?.[0]?.content?.parts||[]))}catch{}}};
+    const encoder=new TextEncoder();
+    const consume=block=>block.split(/\r?\n/).map(line=>{
+      if(!line.startsWith('data:')||line.slice(5).trim()==='[DONE]')return line;
+      const data=googleCompleteUsage(JSON.parse(line.slice(5).trim()));
+      parts.push(...(data.candidates?.[0]?.content?.parts||[]));
+      return 'data: '+JSON.stringify(data);
+    }).join('\n')+'\n\n';
     const stream=response.body.pipeThrough(new TransformStream({
-      transform(chunk,controller){pending+=decoder.decode(chunk,{stream:true});const events=pending.split(/\r?\n\r?\n/);pending=events.pop();events.forEach(consume);controller.enqueue(chunk)},
-      flush(){pending+=decoder.decode();if(pending.trim())consume(pending);remember(parts)},
+      transform(chunk,controller){pending+=decoder.decode(chunk,{stream:true});const events=pending.split(/\r?\n\r?\n/);pending=events.pop();for(const event of events)controller.enqueue(encoder.encode(consume(event)))},
+      flush(controller){pending+=decoder.decode();if(pending.trim())controller.enqueue(encoder.encode(consume(pending)));remember(parts)},
     }));
     return new Response(stream,{status:response.status,statusText:response.statusText,headers:response.headers});
   };

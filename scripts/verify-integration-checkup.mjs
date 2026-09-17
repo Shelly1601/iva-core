@@ -41,15 +41,15 @@ const replacementFetch = async url => {
   };
 };
 const replaced = await runIntegrationCheckup({ fetchImpl: replacementFetch });
-assert.equal(replaced.checks.find(item => item.id === 'gemini').status, 'updated');
-assert.equal(replaced.updates[0].to, 'gemini-4.0-flash');
-assert.equal(probeCalls, 1);
-assert.equal(inspectRouting().resolved['marketing-market'].key, 'google:gemini-4.0-flash');
+assert.equal(replaced.checks.find(item => item.id === 'gemini').status, 'attention');
+assert.equal(replaced.updates.length, 0);
+assert.equal(probeCalls, 0);
+assert.equal(inspectRouting().resolved['marketing-market'].key, 'google:gemini-3.6-flash');
 
 const persisted = await getIntegrationCheckupStatus();
-assert.equal(persisted.modelOverrides['marketing-assist'], 'google:gemini-4.0-flash');
+assert.equal(persisted.modelOverrides['marketing-assist'], undefined);
 assert.equal(persisted.packageUpdates.safeAutoMergeAfterTests, true);
-assert.match(formatCheckupTelegram(replaced), /Automatisch aktualisiert/);
+assert.match(formatCheckupTelegram(replaced), /Bitte ansehen/);
 
 await fs.rm(dir, { recursive: true, force: true });
 console.log('Monatlicher KI- und Integrations-Check-up: OK');

@@ -11,7 +11,7 @@
 // - Genauigkeit > Geschwindigkeit.
 
 import { generateText, generateObject, tool } from 'ai';
-import { anthropic } from '@ai-sdk/anthropic';
+import { chooseModelKey } from '../core/router.js';
 import { z } from 'zod';
 import dns from 'dns/promises';
 import net from 'net';
@@ -745,7 +745,7 @@ async function runResearchLoop(state) {
   pushTrace(state, 'research', 'start', `budget=${state.researchBudgetMs}ms`);
   try {
     const { text } = await generateText({
-      model: anthropic(MODEL_ID),
+      model: chooseModelKey('anthropic:' + MODEL_ID, { task: 'knowledge' }).model,
       system: RESEARCH_SYSTEM,
       prompt: `Anfrage: ${state.query}\n\nRecherchiere jetzt. Nutze search und fetch iterativ. Am Ende: kurze Zusammenfassung deiner Funde mit URL-Referenzen.`,
       tools,
@@ -907,7 +907,7 @@ async function synthesize(state) {
     const startedAt = Date.now();
     try {
       const { object } = await generateObject({
-        model: anthropic(modelId),
+        model: chooseModelKey('anthropic:' + modelId, { task: 'knowledge' }).model,
         schema: SynthesisSchema,
         system: SYNTHESIS_SYSTEM + (reminder ? '\n\n' + reminder : ''),
         prompt,
@@ -1029,7 +1029,7 @@ async function refute(state, claims) {
   pushTrace(state, 'refute', 'start', `budget=${state.refutationBudgetMs}ms | evaluable=${evaluable.length}/${claims.length} (high only)`);
   try {
     const { object } = await generateObject({
-      model: anthropic(MODEL_ID),
+      model: chooseModelKey('anthropic:' + MODEL_ID, { task: 'knowledge' }).model,
       schema: RefutationSchema,
       system: REFUTATION_SYSTEM,
       prompt: `Anfrage: ${state.query}\n\nZu pruefende high-Claims (nutze in refutations.claimIndex genau den in [N] genannten Original-Index; pro Claim max ${SOURCES_PER_CLAIM} Quellen mit gekuerztem Auszug):\n${claimsBlock}\n\nWiderlege jetzt. Bestaetige nichts.`,

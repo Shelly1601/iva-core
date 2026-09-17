@@ -70,7 +70,7 @@ import { klassifiziereMailBatch } from './klassifikation.js';
 import { importPanasonicLeadsToMeinCrm } from './integrations/meincrm-panasonic-leads.js';
 import { addTodoSubtask, createTodo, toggleTodoSubtask, updateTodoNotes } from './todos/model.js';
 // Stufe 1-3: Model Router, Skills, Agent-Registry.
-import { chooseModel, recordUsage, checkBudget } from './core/router.js';
+import { chooseModel, recordUsage, checkBudget, currentSpendEUR, inspectRouting } from './core/router.js';
 import { prepareBrain, brainStatus } from './core/brain.js';
 import { memorySkill } from './skills/memory.js';
 import { calendarSkill } from './skills/calendar.js';
@@ -2707,6 +2707,18 @@ app.post('/api/todos/:ts/subtasks/:id/toggle', async (req, res) => {
 app.post('/api/chat', async (req, res) => { try { res.json({ reply: await askIva(req.body?.message || '', req.body?.sessionId || 'web', req.body?.voice === true, req.body?.agentId || 'iva-standard', req.body?.projectId || '') }); } catch (e) { res.json({ reply: 'Fehler: ' + e.message }); } });
 registerProjectTeamRoutes(app,{getProject,connections:projectConnections,runner:specialistRunner,toolMap:contextToolMap,getAgent,beginAgentRun,finishAgentRun});
 app.get('/api/brain/status', (_req, res) => res.json(brainStatus()));
+app.get('/api/ai-budget/status', async (_req, res) => {
+  try {
+    const budget = await currentSpendEUR();
+    res.set('Cache-Control', 'no-store').json({
+      ...budget, routing: inspectRouting().resolved,
+      accounting: 'conservative-eur-reservations',
+      scope: 'IVA text model calls through the central router; excludes existing subscriptions and media providers',
+      qualityPolicy: { skipWorkflowChecks: false, silentModelDowngrade: false, unverifiedCompletion: false },
+      workflowMigration: { complete: false, activeCodexWorkPreserved: true },
+    });
+  } catch (error) { res.status(503).json({ error: error.code || 'budget_unavailable' }); }
+});
 app.post('/api/chat/stream', async (req, res) => {
   const aborter = new AbortController();
   req.on('aborted', () => aborter.abort());

@@ -55,17 +55,6 @@ export function newestStableGeminiFlash(modelIds = []) {
     })[0] || '';
 }
 
-async function probeGemini(modelId, apiKey, fetchImpl) {
-  await requestJson(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: 'Antworte nur mit OK.' }] }], generationConfig: { maxOutputTokens: 8 } }),
-    },
-    { fetchImpl },
-  );
-}
-
 async function checkGemini({ state, fetchImpl }) {
   const key = String(process.env.GEMINI_API_KEY || '').trim();
   if (!key) return { id: 'gemini', label: 'Gemini', status: 'not-configured', detail: 'GEMINI_API_KEY fehlt.', updates: [] };
@@ -78,11 +67,8 @@ async function checkGemini({ state, fetchImpl }) {
     const updates = [];
     if (missing.length) {
       const replacement = newestStableGeminiFlash(available);
-      if (!replacement) throw new Error(`Konfigurierte Modelle nicht verfügbar (${missing.join(', ')}); kein stabiles Flash-Ersatzmodell gefunden.`);
-      await probeGemini(replacement, key, fetchImpl);
-      for (const task of GOOGLE_TASKS) state.modelOverrides[task] = `google:${replacement}`;
-      setRuntimeModelOverrides(state.modelOverrides);
-      updates.push({ type: 'model', provider: 'google', from: missing.join(', '), to: replacement, tasks: GOOGLE_TASKS });
+      return { id: 'gemini', label: 'Gemini', status: 'attention', configuredModels: configured, updates: [],
+        detail: `Konfigurierte Modelle nicht verfügbar (${missing.join(', ')}). ${replacement ? `Kandidat ${replacement} muss zuerst fachlich und hinsichtlich Kosten geprüft werden.` : 'Kein stabiles Ersatzmodell im Katalog.'} Bestehende Route bleibt erhalten.` };
     }
     return {
       id: 'gemini', label: 'Gemini', status: updates.length ? 'updated' : 'ok',
