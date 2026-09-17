@@ -16,6 +16,10 @@ Verbindlicher Stand: 16.09.2026. Dieser Ablauf läuft täglich um 05:00 Uhr Euro
 
 Der Mailzugang erfolgt bevorzugt über die bereits angemeldete native Microsoft-Outlook-App. Das Konto `foerderung@heat-hero.com` ist auf diesem Mac Mini unter „Förderung | HEAT HERO“ eingerichtet und sein Posteingang wurde am 13.09.2026 sichtbar geprüft. Vor einer Web-Anmeldung immer zuerst die aktuelle native Kontenliste prüfen. Eine funktionierende Outlook-Sitzung benötigt keine zusätzliche Passwortsuche oder Web-Anmeldung. Frühere Berichte über ein fehlendes Konto sind überholt.
 
+### Fenster und Tabs wiederverwenden
+
+Nadines Fenster- und Tabregel vom 17.09.2026: Vorhandene passende Browserfenster und Tabs zuerst verwenden. Pro Arbeitsschritt oder Wiederanlauf kein zusätzliches Fenster öffnen. Ist ein eigener Arbeitstab nicht mehr erreichbar, diesen schließen und im selben Fenster ersetzen; nur wenn das Fenster selbst unbrauchbar ist, das defekte eigene Fenster schließen und genau einen Ersatz öffnen. Nach verifiziertem Abschluss einer Tätigkeit die dafür angelegten Arbeitstabs schließen, ein dadurch leeres eigenes Arbeitsfenster ebenfalls. Benötigte Fortsetzungstabs behalten, fremde oder aktiv vom Nutzer bearbeitete Tabs und ungespeicherte Entwürfe schützen. Wiederanläufe übernehmen bestehende Fenster statt neue Fensterstapel zu erzeugen. Dies gilt ebenfalls für Outlook-Nachrichtenfenster: vorhandene Ansicht verwenden und eigene erledigte Nachrichtenfenster schließen.
+
 ### Dauerhafter Gesamtablauf und Änderungsprüfung nach dem Erstlauf
 
 Der gesamte Ablauf bleibt verbindlich: fachliche Vollständigkeit mit sämtlichen relevanten Quellen prüfen; bei Vollständigkeit nach `Förderung beantragen` übergeben, kurze Fördersummennotiz speichern und rücklesen, Viktoria Lambel genau einmal per WhatsApp informieren und den vorgesehenen Tabelleneintrag verifizieren. Keine dieser Folgeaktionen wird durch einen bloßen Mailabschluss oder Bericht ersetzt.

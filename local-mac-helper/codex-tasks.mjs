@@ -7,7 +7,8 @@ import { recoveryDelayMs, hasCompletionEvidence, planbarRecoveryDelayMs } from '
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { mkdir, open, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
-import { accessSync, constants as fsConstants, realpathSync } from 'node:fs';
+import { accessSync, constants as fsConstants, realpathSync, createWriteStream } from 'node:fs';
+import { finished } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { materializeIcloudWorkspace } from './icloud-workspace.mjs';
 import { createPlanbarCompletionStore } from './planbar-completion.mjs';
@@ -64,6 +65,46 @@ const TECHNICAL_FAILURE_PATTERN = /(?:status|ergebnis)\s*:\s*(?:\*\*)?technisch\
 
 function clean(value, max = 500) {
   return String(value || '').replace(/\u0000/g, '').trim().slice(0, max);
+}
+
+export function createCodexTaskStderrEvidence() {
+  let tail = '', limited = false;
+  return {
+    observe(chunk) {
+      // Only stderr from this child is supplied here; never scan codex.log,
+      // which also contains old attempts, prompts and tool output.
+      tail = `${tail}${String(chunk)}`.replace(/\u001b\[[0-9;]*m/g, '');
+      limited ||= /(?:^|\n)\s*(?:ERROR:\s*)?(?:you(?:['’]ve| have)\s+hit\s+your\s+usage\s+limit\b|(?:usage|quota)\s+limit\s+(?:reached|exceeded)\b|(?:insufficient_quota|usage_limit_reached|quota_exceeded)\b)/i.test(tail);
+      tail = tail.slice(-8192);
+      return limited;
+    },
+    result() { return limited ? { code: 'CODEX_USAGE_LIMIT', source: 'current_process_stderr' } : null; },
+  };
+}
+
+export function confirmCodexTaskUsageLimit(evidence, exitCode) {
+  return evidence?.code === 'CODEX_USAGE_LIMIT' && evidence.source === 'current_process_stderr'
+    && Number.isInteger(exitCode) && exitCode !== 0 ? { ...evidence, exitCode } : null;
+}
+
+export function preserveCodexTaskTerminalState(state = {}) {
+  return state.status === 'stopped' || state.status === 'completed' || state.phase === 'user_deferred'
+    || state.phase === 'usage_limit' || state.executionBlocker?.code === 'CODEX_USAGE_LIMIT'
+    || (TERMINAL_TASK_STATUSES.has(state.status) && Boolean(state.completedAt));
+}
+
+export async function writeCodexTaskTerminationState(jobId, value) {
+  const paths = jobPaths(jobId);
+  return withFundingFileLock(paths.state, async () => {
+    const current = await readJson(paths.state);
+    return preserveCodexTaskTerminalState(current) ? current : writeState(paths, { ...current, ...value });
+  });
+}
+
+function usageLimitTaskState(state, evidence, completedAt = new Date().toISOString()) {
+  const detail = 'Der Codex-Hintergrundprozess meldet ein ausgeschöpftes Nutzungskontingent. Keine automatischen Wiederanläufe; Fortschritt und Belege bleiben erhalten. Nach bestätigter Verfügbarkeit denselben Auftrag gezielt fortsetzen.';
+  return { ...state, status: 'blocked', phase: 'usage_limit', executionBlocker: evidence,
+    nextAttemptAt: null, workerPid: null, childPid: null, detail, error: detail, completedAt, updatedAt: completedAt };
 }
 
 async function openMacApplication(appName) {
@@ -128,6 +169,7 @@ function jobPaths(jobId) {
     request: path.join(directory, 'request.json'),
     state: path.join(directory, 'state.json'),
     log: path.join(directory, 'codex.log'),
+    stderrEvidence: path.join(directory, 'stderr-evidence.json'),
     lastMessage: path.join(directory, 'result.txt'),
     planbarProgress: path.join(directory, 'planbar-progress.json'),
     workflowResult: path.join(directory, 'workflow-result.json'),
@@ -334,6 +376,7 @@ function commandCompletionMandate() {
 - Jede ausdrückliche Handlungsanweisung von Nadine ist ein Vollausführungsauftrag. Arbeite zuerst auf das konkret beauftragte fachliche Ergebnis hin; ein vorbereiteter, eingereihter oder nur teilweise bearbeiteter Auftrag ist nicht erledigt.
 - Nur unmittelbar notwendige Prüfungen aus dem beauftragten Workflow dürfen dem Zielschritt vorausgehen. Starte keine optionalen Bestands-, Forecast-, Präfix- oder Nebenprüfungen, solange ausdrücklich benannte Fälle offen sind.
 - Browser-, Tab-, Fenster-, UI-, Login-, Verbindungs-, Reload-, Datei-, Tool- oder Steuerungsfehler sind Reparaturaufgaben, kein Abschluss. Prüfe bei einem unklaren Schreib- oder Sendeausgang zuerst den sichtbaren Zielzustand, repariere Sitzung, Tab, Fenster, Verbindung oder zugelassenen Helfer und setze am ersten noch nicht verifizierten Schritt idempotent fort. Niemals blind wiederholen.
+- Verwende vorhandene passende Fenster und Tabs wieder. Einen defekten eigenen Tab schließt du und ersetzt ihn im selben Fenster; öffne nicht bei jedem Schritt oder Wiederanlauf neue Fenster. Nach einem verifizierten Schritt schließt du eigene erledigte Tabs und Fenster. Fremde Tabs und aktive Nutzerarbeit bleiben erhalten.
 - „Status: blockiert“ ist ausschließlich bei einem echten äußeren Hindernis zulässig: CAPTCHA, Kontosperre, zwingende externe Bestätigung, abgelehnte oder sicher nicht verfügbare Zugangsdaten, fehlende Berechtigung, physisch nicht verfügbarer rechter Bildschirm oder eine irreversible Aktion außerhalb des Auftrags. Unklare Fachunterlagen werden nicht geraten; dokumentiere den einzelnen Fall und bearbeite alle übrigen unabhängigen Fälle weiter.
 - Beende den Auftrag nur nach sichtbarer Soll-/Ist-Prüfung des beauftragten Ergebnisses. Technische Zwischenfehler werden intern protokolliert und gelöst, nicht als Endergebnis an Nadine delegiert.`;
 }
@@ -353,8 +396,9 @@ export function shouldResumeCodexTaskAfterTermination({
   structuredResult = null,
   exitCode = 0,
   timedOut = false,
+  stderrEvidence = null,
 } = {}) {
-  if (state.status === 'stopped' || state.phase === 'user_deferred') return false;
+  if (preserveCodexTaskTerminalState(state) || confirmCodexTaskUsageLimit(stderrEvidence, exitCode)) return false;
   if (hasCompletionEvidence({request,state,resultText,structuredResult}) && !timedOut && exitCode === 0) return false;
   if (request.workflowId === 'planbar-completion-morning') {
     const proof = state.planbarCompletionProof;
@@ -486,7 +530,8 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
   try {
   let existing = await readJson(paths.state).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
   let upgradedWorkflow = false;
-  if (existing && ['failed', 'blocked', 'timed_out', 'incomplete'].includes(existing.status)
+  if (existing && existing.phase !== 'usage_limit' && existing.executionBlocker?.code !== 'CODEX_USAGE_LIMIT'
+    && ['failed', 'blocked', 'timed_out', 'incomplete'].includes(existing.status)
     && workflowId === 'planbar-completion-morning' && workflowRevision === 'heat-hero-completion-v2') {
     const priorRequest = await readJson(paths.request);
     if (priorRequest.workflowId === workflowId && priorRequest.workflowRevision !== workflowRevision) {
@@ -1032,6 +1077,7 @@ export async function getCodexTaskStatus(jobId) {
 export async function updateCodexTaskProgress(jobId, phase, detail = '') {
   const paths = jobPaths(jobId);
   const state = await readJson(paths.state);
+  if (preserveCodexTaskTerminalState(state)) return state;
   const request = await readJson(paths.request).catch(() => null);
   const nextPhase = clean(phase, 60);
   const isBlocked = nextPhase === 'blocked';
@@ -1039,7 +1085,7 @@ export async function updateCodexTaskProgress(jobId, phase, detail = '') {
   const currentProgress = Number(state.progress) || 0;
   const nextProgress = isBlocked ? currentProgress : nextPhase === 'completed' ? 99 : BUILD_PHASES[nextPhase];
   if (!isBlocked && nextProgress < currentProgress) throw new Error('Ein abgeschlossener Baumeilenstein kann nicht zurückgesetzt werden.');
-  const updated = await writeState(paths, {
+  const updated = await writeCodexTaskTerminationState(jobId, {
     ...state,
     status: isBlocked ? 'blocked' : 'running',
     phase: isBlocked ? (state.phase || 'planning') : nextPhase,
@@ -1089,6 +1135,7 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   const paths = jobPaths(jobId);
   const request = await readJson(paths.request);
   const previousState = await readJson(paths.state);
+  if (preserveCodexTaskTerminalState(previousState)) return previousState;
   if (request.workflowId === 'planbar-completion-morning') await planbarCompletion.reconcile();
   const incidentContext = {
     system: 'imac',
@@ -1108,7 +1155,9 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
   }
   const executionRequest = { ...request, recoveryAttempt: Number(previousState.recoveryAttempts || 0), preventionLessons };
   const startedAt = new Date().toISOString();
-  const runningState = await writeState(paths, { jobId, workerPid: process.pid, title: request.title, requestId: request.requestId, mode: request.mode, projectId: request.projectId, workflowId: request.workflowId, recoveryAttempts: Number(previousState.recoveryAttempts || 0), status: 'running', phase: request.mode === 'build' ? 'planning' : 'running', progress: request.mode === 'build' ? 10 : 5, detail: request.mode === 'build' ? 'Planung wurde begonnen.' : 'Workflow wurde gestartet.', createdAt: request.createdAt, startedAt, updatedAt: startedAt, workspace: REPO_ROOT });
+  const attemptStartedAt = startedAt;
+  const runningState = await writeCodexTaskTerminationState(jobId, { jobId, workerPid: process.pid, title: request.title, requestId: request.requestId, mode: request.mode, projectId: request.projectId, workflowId: request.workflowId, recoveryAttempts: Number(previousState.recoveryAttempts || 0), status: 'running', phase: request.mode === 'build' ? 'planning' : 'running', progress: request.mode === 'build' ? 10 : 5, detail: request.mode === 'build' ? 'Planung wurde begonnen.' : 'Workflow wurde gestartet.', createdAt: request.createdAt, startedAt, attemptStartedAt, updatedAt: startedAt, workspace: REPO_ROOT });
+  if (runningState.status !== 'running') return runningState;
   await reportTaskState(request, runningState);
   let rightDisplayAttestation = '';
   if (['operational', 'project-workflow'].includes(request.mode)) {
@@ -1128,7 +1177,20 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
     PATH: [path.dirname(command), process.env.PATH || ''].filter(Boolean).join(path.delimiter),
     ...(rightDisplayAttestation ? { IVA_RIGHT_DISPLAY_ATTESTATION: rightDisplayAttestation } : {}),
   };
-  const child = spawn(command, args, { cwd: REPO_ROOT, stdio: ['ignore', logHandle.fd, logHandle.fd], env: childEnv });
+  const stderrEvidence = createCodexTaskStderrEvidence();
+  let evidenceWrite = Promise.resolve(), capturedEvidence = null;
+  const child = spawn(command, args, { cwd: REPO_ROOT, stdio: ['ignore', logHandle.fd, 'pipe'], env: childEnv });
+  const stderrLog = createWriteStream(paths.log, { flags: 'a', mode: 0o600 });
+  const stderrFinished = finished(stderrLog).catch(() => {});
+  child.stderr.on('data', chunk => {
+    if (stderrEvidence.observe(chunk) && !capturedEvidence) {
+      capturedEvidence = { ...stderrEvidence.result(), attemptStartedAt, detectedAt: new Date().toISOString() };
+      // Keep observation separate from the confirmed termination. CLI stderr
+      // can contain tool text; a quoted quota line alone must not stop a task.
+      evidenceWrite = writeJsonAtomic(paths.stderrEvidence, capturedEvidence).catch(() => {});
+    }
+  });
+  child.stderr.pipe(stderrLog);
   if (child.pid) await recordCodexTaskHeartbeat(jobId, { childPid: child.pid }).catch(() => {});
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; child.kill('SIGTERM'); }, MAX_RUNTIME_MS);
@@ -1136,13 +1198,23 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
     child.on('error', reject);
     child.on('close', code => resolve(code));
   }).catch(async error => {
-    await writeFile(paths.lastMessage, `Codex konnte nicht gestartet werden: ${error.message}`);
+    await writeFile(paths.lastMessage, `Codex konnte nicht gestartet werden: ${error.message}`, { flag: 'wx' }).catch(() => {});
     return -1;
   });
   clearTimeout(timer);
+  await stderrFinished;
+  await evidenceWrite;
+  capturedEvidence = confirmCodexTaskUsageLimit(capturedEvidence, exitCode);
+  if (capturedEvidence) await writeJsonAtomic(paths.stderrEvidence, capturedEvidence).catch(() => {});
   await logHandle.close();
   const completedAt = new Date().toISOString();
   const current = await readJson(paths.state).catch(() => ({}));
+  if (preserveCodexTaskTerminalState(current)) return current;
+  if (capturedEvidence) {
+    const blocked = await writeCodexTaskTerminationState(jobId, usageLimitTaskState({ ...current, exitCode }, capturedEvidence, completedAt));
+    await reportTaskState(request, blocked, blocked.detail);
+    return blocked;
+  }
   const resultText = await readFile(paths.lastMessage, 'utf8').catch(() => '');
   const planbarProgress = await readJson(paths.planbarProgress).catch(() => current.planbarProgress || null);
   const structuredResult = workflowResultSummary(await readJson(paths.workflowResult).catch(() => null));
@@ -1165,6 +1237,7 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
     structuredResult,
     exitCode,
     timedOut,
+    stderrEvidence: capturedEvidence,
   });
   if (resumeAfterTechnicalFailure) {
     const recoveryAttempts = Number(current.recoveryAttempts || 0) + 1;
@@ -1184,7 +1257,7 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
     // The previous worker holds the atomic claim. Archive it before starting the
     // same job again; the continuation prompt requires target-state readback.
     await archiveExecutionClaim(paths, Date.now());
-    let recoveryState = await writeState(paths, {
+    let recoveryState = await writeCodexTaskTerminationState(jobId, {
       ...current,
       planbarProgress,
       workflowProof,
@@ -1208,12 +1281,13 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
       workspace: REPO_ROOT,
     });
     await reportTaskState(request, recoveryState, resultPreview);
+    if (recoveryState.status !== 'queued') return recoveryState;
     try {
       await startCodexTask(request);
     } catch (error) {
       // Keep the job queued. The durable task synchronizer can still launch the
       // same idempotent continuation after a transient spawn failure.
-      recoveryState = await writeState(paths, {
+      recoveryState = await writeCodexTaskTerminationState(jobId, {
         ...recoveryState,
         detail: 'Die automatische Fortsetzung ist vorgemerkt und wird nach einem vorübergehenden Startfehler erneut gestartet.',
         updatedAt: new Date().toISOString(),
@@ -1240,7 +1314,7 @@ async function runCodexTaskWithoutWakeGuard(jobId) {
           ? 'incomplete'
           : 'completed';
   const finalProgress = status === 'completed' ? 100 : Number(current.progress) || 0;
-  const finalState = await writeState(paths, {
+  const finalState = await writeCodexTaskTerminationState(jobId, {
     ...current,
     planbarProgress,
     workflowProof,
@@ -1487,6 +1561,13 @@ export async function syncCodexTaskStates({
       });
     }
     if (workerInterrupted && !orphanChildStillRunning) {
+      const stderrProof = await readJson(paths.stderrEvidence).catch(() => null);
+      if (confirmCodexTaskUsageLimit(stderrProof, stderrProof?.exitCode)
+        && state.attemptStartedAt && stderrProof.attemptStartedAt === state.attemptStartedAt) {
+        state = await writeCodexTaskTerminationState(entry.name, usageLimitTaskState(state, stderrProof, new Date(now).toISOString()));
+      }
+    }
+    if (workerInterrupted && !orphanChildStillRunning && state.status === 'running') {
       const resultText = await readFile(paths.lastMessage, 'utf8').catch(() => '');
       const resultPreview = clean(resultText, 1800);
       const resultBlocked = request.workflowId === 'planbar-completion-morning'
@@ -1517,7 +1598,7 @@ export async function syncCodexTaskStates({
       const recoveryAttempts = Number(state.recoveryAttempts || 0);
       if (!protectedPlanbarWrite && recoveryAttempts < CODEX_TASK_MAX_RECOVERY_ATTEMPTS) {
         await archiveExecutionClaim(paths, now);
-        state = await writeState(paths, {
+        state = await writeCodexTaskTerminationState(entry.name, {
           ...state,
           status: 'queued',
           phase: 'recovering',
@@ -1532,15 +1613,16 @@ export async function syncCodexTaskStates({
           updatedAt: new Date(now).toISOString(),
         });
         await report(request, state, state.detail);
+        if (state.status !== 'queued') continue;
         try {
           await launch(request);
           recovered += 1;
           state = await getCodexTaskStatus(entry.name);
         } catch (error) {
-          state = await writeState(paths, { ...state, error: clean(error.message, 1000), detail: 'Automatische Fortsetzung konnte noch nicht gestartet werden.', updatedAt: new Date(now).toISOString() });
+          state = await writeCodexTaskTerminationState(entry.name, { ...state, error: clean(error.message, 1000), detail: 'Automatische Fortsetzung konnte noch nicht gestartet werden.', updatedAt: new Date(now).toISOString() });
         }
       } else {
-        state = await writeState(paths, { ...state, status: planbarReservationVerified ? 'incomplete' : 'failed',
+        state = await writeCodexTaskTerminationState(entry.name, { ...state, status: planbarReservationVerified ? 'incomplete' : 'failed',
           error: protectedPlanbarWrite
             ? 'Der Planbar-Workflow wurde nach möglicher Schreibaktion unterbrochen. Keine automatische Wiederholung oder Doppelbuchung.'
             : `Der Workflow-Prozess wurde nach ${CODEX_TASK_MAX_RECOVERY_ATTEMPTS} automatischen Fortsetzungen erneut unterbrochen.`,
@@ -1606,10 +1688,10 @@ if (isCodexTasksEntrypoint() && process.argv[2] === 'workflow-status') {
   try { await runCodexTask(process.argv[3]); }
   catch (error) {
     const paths = jobPaths(process.argv[3]);
-    await writeFile(paths.lastMessage, `Codex-Auftrag fehlgeschlagen: ${error.message}`).catch(() => {});
     const previous = await readJson(paths.state).catch(() => ({}));
+    if (!preserveCodexTaskTerminalState(previous)) await writeFile(paths.lastMessage, `Codex-Auftrag fehlgeschlagen: ${error.message}`, { flag: 'wx' }).catch(() => {});
     const planbarProgress = await readJson(paths.planbarProgress).catch(() => previous.planbarProgress || null);
-    const failed = await writeState(paths, { ...previous, jobId: process.argv[3], status: planbarProgress?.reservation?.verified ? 'incomplete' : 'failed', planbarProgress,
+    const failed = await writeCodexTaskTerminationState(process.argv[3], { ...previous, jobId: process.argv[3], status: planbarProgress?.reservation?.verified ? 'incomplete' : 'failed', planbarProgress,
       detail: clean(error.message, 1000), updatedAt: new Date().toISOString(), completedAt: new Date().toISOString(), error: clean(error.message, 1000) }).catch(() => null);
     const request = await readJson(paths.request).catch(() => null);
     if (request && failed) await reportTaskState(request, failed);
