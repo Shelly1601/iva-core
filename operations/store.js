@@ -42,7 +42,11 @@ function recoveryAttempt(value) {
 }
 
 function isVerifiedRecovery(existing, input, incomingStatus, incomingUpdatedAt, existingUpdatedAt) {
-  if (!existing || !['failed', 'blocked', 'timed_out', 'incomplete'].includes(existing.status)
+  // A deliberate stop needs a fresh explicit resume marker on this report.
+  // The marker is not persisted and never bypasses the existing identity gates.
+  const resumable = existing && (['failed', 'blocked', 'timed_out', 'incomplete'].includes(existing.status)
+    || existing.status === 'stopped' && input.resumeAuthorized === true);
+  if (!resumable
     || !['queued', 'running'].includes(incomingStatus) || input.phase !== 'recovering'
     || !Number.isFinite(incomingUpdatedAt) || incomingUpdatedAt <= existingUpdatedAt
     || recoveryAttempt(input.recoveryAttempts) <= recoveryAttempt(existing.recoveryAttempts)
