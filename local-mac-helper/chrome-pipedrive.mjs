@@ -60,48 +60,91 @@ function dealIdFromUrl(value) {
   return String(value || '').match(/\/deal\/(\d+)/)?.[1] || null;
 }
 
-export async function executePipedriveJavaScript(javascript, { dealId = '', timeoutMs = 15000 } = {}) {
-  const target = dealId ? `pipedrive.com/deal/${String(dealId).replace(/\D/g, '')}` : 'pipedrive.com/pipeline/1';
-  const workspace = await requireRightDisplayWorkspace();
-  const windowCondition = `set windowBounds to bounds of w
-  set isRightWorkspace to (item 1 of windowBounds) is greater than or equal to ${Math.round(workspace.target.x)} and (item 3 of windowBounds) is less than or equal to ${Math.round(workspace.target.x + workspace.target.width)}`;
-  const runInRightWindow = async () => {
+const exactPipedriveTabCondition = target => `(tabURL is ${JSON.stringify(target)} or tabURL is ${JSON.stringify(`${target}/`)} or tabURL starts with ${JSON.stringify(`${target}?`)} or tabURL starts with ${JSON.stringify(`${target}#`)})`;
+
+export function buildPipedrivePipelineTabAppleScript(workspace) {
+  const target = `https://${PIPEDRIVE_HOST}/pipeline/1`;
+  return `tell application "Google Chrome"
+set ivaWindow to missing value
+set workWindow to missing value
+repeat with w in windows
+  set windowBounds to bounds of w
+  if workWindow is missing value and (item 1 of windowBounds) is greater than or equal to ${Math.round(workspace.target.x)} and (item 3 of windowBounds) is less than or equal to ${Math.round(workspace.target.x + workspace.target.width)} then set workWindow to w
+  repeat with t in tabs of w
+    set tabURL to URL of t
+    if ${exactPipedriveTabCondition(target)} then return "existing:" & (id of t as text)
+    if ivaWindow is missing value and tabURL starts with "https://${PIPEDRIVE_HOST}/" then set ivaWindow to w
+  end repeat
+end repeat
+if ivaWindow is missing value then set ivaWindow to workWindow
+if ivaWindow is missing value and (count of windows) is greater than 0 then set ivaWindow to first window
+if ivaWindow is missing value then
+  set ivaWindow to make new window
+  set createdTab to active tab of ivaWindow
+  set URL of createdTab to ${JSON.stringify(target)}
+  set bounds of ivaWindow to ${chromeBoundsAppleScript(workspace)}
+else
+  set createdTab to make new tab at end of tabs of ivaWindow with properties {URL:${JSON.stringify(target)}}
+end if
+return "created:" & (id of createdTab as text)
+end tell`;
+}
+
+export async function executePipedriveJavaScript(javascript, { dealId = '', timeoutMs = 15000, cleanupTemporaryTab = false,
+  run = runAppleScript, waitFn = wait, getWorkspace = requireRightDisplayWorkspace } = {}) {
+  const target = `https://${PIPEDRIVE_HOST}/${dealId ? `deal/${String(dealId).replace(/\D/g, '')}` : 'pipeline/1'}`;
+  const runInExistingTab = async () => {
     const script = `tell application "Google Chrome"
 repeat with w in windows
-  ${windowCondition}
-  if isRightWorkspace then
-    repeat with t in tabs of w
-      if (URL of t) contains "${target}" then return (execute t javascript ${JSON.stringify(String(javascript))})
-    end repeat
-  end if
+  repeat with t in tabs of w
+    set tabURL to URL of t
+    if ${exactPipedriveTabCondition(target)} then return (execute t javascript ${JSON.stringify(String(javascript))})
+  end repeat
 end repeat
 return "NO_TAB"
 end tell`;
     let lastError = null;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
-      try { return await runAppleScript(script, { timeoutMs }); }
+      try { return await run(script, { timeoutMs }); }
       catch (error) {
         lastError = error;
         const transient = /connection invalid|appleevent|zeitlimit|timed out|-600|-1712/i.test(String(error?.message || error));
         if (!transient || attempt === 3) throw error;
-        await wait(250 * attempt);
+        await waitFn(250 * attempt);
       }
     }
     throw lastError;
   };
-  let output = await runInRightWindow();
-  if (output === 'NO_TAB' && !dealId) {
-    await runAppleScript(`tell application "Google Chrome"
-set ivaWindow to make new window
-set URL of active tab of ivaWindow to "https://${PIPEDRIVE_HOST}/pipeline/1"
-set bounds of ivaWindow to ${chromeBoundsAppleScript(workspace)}
-set index of ivaWindow to 1
-end tell`, { timeoutMs: 20000 });
-    await wait(2200);
-    output = await runInRightWindow();
+  let createdTabId = '';
+  try {
+    let output = await runInExistingTab();
+    if (output === 'NO_TAB' && !dealId) {
+      const handle = await run(buildPipedrivePipelineTabAppleScript(await getWorkspace()), { timeoutMs: 20000 });
+      if (!/^(?:existing|created):\d+$/.test(handle)) throw new Error('Der Pipedrive-Arbeitstab konnte nicht eindeutig zugeordnet werden.');
+      if (handle.startsWith('created:')) {
+        createdTabId = handle.slice('created:'.length);
+        await waitFn(2200);
+      }
+      output = await runInExistingTab();
+    }
+    if (output === 'NO_TAB') throw new Error(`Kein geöffneter Pipedrive-Deal ${dealId || ''} gefunden.`.trim());
+    return output;
+  } finally {
+    // Only synchronous note operations opt in. Async readers retain their source for polling.
+    if (cleanupTemporaryTab && createdTabId) await run(`tell application "Google Chrome"
+repeat with w in windows
+  repeat with t in tabs of w
+    if (id of t as text) is "${createdTabId}" then
+      close t
+      return "closed"
+    end if
+  end repeat
+end repeat
+return "already_closed"
+end tell`, { timeoutMs: 10000 }).catch(() => {
+      console.warn('Der eigene Pipedrive-Hilfstab konnte nicht geschlossen werden; das zuvor ermittelte Vorgangsergebnis bleibt erhalten.');
+    });
   }
-  if (output === 'NO_TAB') throw new Error(`Kein geöffneter Pipedrive-Deal ${dealId || ''} gefunden.`.trim());
-  return output;
 }
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -1233,7 +1276,7 @@ export async function createPipedriveFundingInformationNote({ dealId, heading, d
       } catch (error) {
         return JSON.stringify({ error: String(error?.message || error) });
       }
-    })()`, { timeoutMs: 30000 }));
+    })()`, { timeoutMs: 30000, cleanupTemporaryTab: true }));
   if (result.error) throw new Error(`Pipedrive-Information für Deal ${id}: ${result.error}`);
   return { dealId: id, heading: rendered.heading, ...result, mutated: result.created === true, deletedFromPipedrive: false };
 }
@@ -1298,7 +1341,7 @@ export async function updatePipedriveFundingRequestNotes({ items } = {}) {
         }
       }
       return JSON.stringify({ results });
-    })()`, { timeoutMs: 180000 }));
+    })()`, { timeoutMs: 180000, cleanupTemporaryTab: true }));
   if (result.fatal) throw new Error('Der angemeldete Pipedrive-Notizzugriff ist nicht verfügbar.');
   const results = result.results || [];
   return {
@@ -1364,7 +1407,7 @@ export async function createPipedriveFundingRequestNotes({ items } = {}) {
         }
       }
       return JSON.stringify({ results });
-    })()`, { timeoutMs: 180000 }));
+    })()`, { timeoutMs: 180000, cleanupTemporaryTab: true }));
   if (result.fatal) throw new Error('Der angemeldete Pipedrive-Notizzugriff ist nicht verfuegbar.');
   const results = result.results || [];
   return {
