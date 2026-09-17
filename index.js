@@ -72,6 +72,7 @@ import { addTodoSubtask, createTodo, toggleTodoSubtask, updateTodoNotes } from '
 // Stufe 1-3: Model Router, Skills, Agent-Registry.
 import { chooseModel, recordUsage, checkBudget, currentSpendEUR, inspectRouting } from './core/router.js';
 import { prepareBrain, brainStatus } from './core/brain.js';
+import { createChatStreamLifecycle, pipeChatTextStream, safeChatStreamError } from './core/chat-stream-lifecycle.js';
 import { memorySkill } from './skills/memory.js';
 import { calendarSkill } from './skills/calendar.js';
 import { mailsSkill } from './skills/mails.js';
@@ -1303,39 +1304,61 @@ async function streamIva(userText, sessionId = 'default', voice = false, agentId
   const agent = routedAgent.agent;
   const started = Date.now();
   const run = await beginAgentRun({ agentId: agent.id, agentName: agent.name, routeReason: routedAgent.reason, channel: voice ? 'voice' : 'chat', sessionId, requestPreview: userText });
-  const agentTools = await assembleTools(agent, { sessionId, runId: run.id, projectId, userText });
-  let system = scoped.project ? `Du bist IVA, die deutschsprachige Projektassistentin. Arbeite konkret am Nutzerauftrag, belege Ergebnisse mit tatsächlichen Werkzeugdaten und nenne fehlende Informationen.\n${projectContext(scoped.project)}` : await buildSystemPrompt();
-  system += `\n\n${TOOL_EXECUTION_POLICY}`;
-  const personalKnowledge = projectId ? '' : await buildKnowledgePromptContext(userText);
-  if (personalKnowledge) system += `\n\n${personalKnowledge}`;
-  if (agent.rolePrompt) system += `\n\nAktiver Fachagent: ${agent.name}\n${projectId?'Verwende für dieses Projekt ausschließlich die aktuelle Projektakte und zugeordnete Werkzeuge. Keine unternehmensspezifischen Standardabläufe aus anderen Projekten.':agent.rolePrompt}`;
-  if(!projectId)system += `\n\n${await incidentPromptContext(agent, run.id)}`;
-  if (voice) system += VOICE_SYSTEM_SUFFIX;
-  const conv = await loadConversations();
-  const history = Array.isArray(conv[sessionId]) ? conv[sessionId] : [];
-  const messages = [...history, { role: 'user', content: userText }];
+  let conv, messages, routed;
+  const lifecycle = createChatStreamLifecycle({
+    abortSignal,
+    finishRun: patch => finishAgentRun(run.id, { ...patch, durationMs: Date.now() - started }),
+    saveCompleted: async ({ text, usage }) => {
+      await recordUsage(routed, usage);
+      conv[sessionId] = [...messages, { role: 'assistant', content: text }].slice(-MAX_TURNS);
+      await saveConversations(conv);
+    },
+    saveInterrupted: async ({ error, checkpoint }) => {
+      if (!conv || !messages) return;
+      // Read again after the long-running stream: a newer turn or another
+      // session may already have been saved while this request was in flight.
+      const latest = await loadConversations();
+      const current = Array.isArray(latest[sessionId]) ? latest[sessionId] : [];
+      const request = messages.at(-1);
+      const previous = current.at(-1);
+      const missingRequest = previous?.role === 'user' && previous.content === request.content ? [] : [request];
+      latest[sessionId] = [...current, ...missingRequest, { role: 'assistant', content: `Chatlauf ${run.id} unterbrochen (${error.code}): ${error.message} ${checkpoint}` }].slice(-MAX_TURNS);
+      await saveConversations(latest);
+    },
+    recordFailure: error => recordChatRunFailure(agent, run, error),
+  });
   try {
-    const routed = chooseModel({ task: agent.modelProfile });
+    const agentTools = await assembleTools(agent, { sessionId, runId: run.id, projectId, userText });
+    let system = scoped.project ? `Du bist IVA, die deutschsprachige Projektassistentin. Arbeite konkret am Nutzerauftrag, belege Ergebnisse mit tatsächlichen Werkzeugdaten und nenne fehlende Informationen.\n${projectContext(scoped.project)}` : await buildSystemPrompt();
+    system += `\n\n${TOOL_EXECUTION_POLICY}`;
+    const personalKnowledge = projectId ? '' : await buildKnowledgePromptContext(userText);
+    if (personalKnowledge) system += `\n\n${personalKnowledge}`;
+    if (agent.rolePrompt) system += `\n\nAktiver Fachagent: ${agent.name}\n${projectId?'Verwende für dieses Projekt ausschließlich die aktuelle Projektakte und zugeordnete Werkzeuge. Keine unternehmensspezifischen Standardabläufe aus anderen Projekten.':agent.rolePrompt}`;
+    if(!projectId)system += `\n\n${await incidentPromptContext(agent, run.id)}`;
+    if (voice) system += VOICE_SYSTEM_SUFFIX;
+    conv = await loadConversations();
+    const history = Array.isArray(conv[sessionId]) ? conv[sessionId] : [];
+    messages = [...history, { role: 'user', content: userText }];
+    routed = chooseModel({ task: agent.modelProfile });
     await checkBudget(routed);
     ({ system } = await prepareBrain({ system, messages, userText, primary: routed, voice, abortSignal, onReport: report => recordBrainReview(run.id, report) }));
     if (abortSignal?.aborted) throw abortSignal.reason || new Error('Abgebrochen');
     await checkBudget(routed);
-    return streamText({
+    const result = streamText({
       model: routed.model,
       system, messages, tools: agentTools, maxSteps: 6,
       ...(voice ? { maxTokens: 420 } : {}),
       abortSignal,
-      onFinish: async ({ text, usage, steps }) => {
-        await recordUsage(routed, usage);
-        conv[sessionId] = [...messages, { role: 'assistant', content: text || '(ok)' }].slice(-MAX_TURNS);
-        await saveConversations(conv);
-        await finishAgentRun(run.id, { status: abortSignal?.aborted ? 'stopped' : 'completed', durationMs: Date.now() - started, tools: usedToolNames(steps), resultPreview: text });
-      },
+      onChunk: lifecycle.onChunk,
+      onStepFinish: lifecycle.onStepFinish,
+      onError: lifecycle.onError,
+      onFinish: lifecycle.onFinish,
     });
+    Object.defineProperty(result, 'ivaStreamLifecycle', { value: lifecycle });
+    return result;
   } catch (error) {
-    await finishAgentRun(run.id, { status: 'failed', durationMs: Date.now() - started, error: error.message });
-    await recordChatRunFailure(agent, run, error);
-    throw error;
+    await lifecycle.fail(error);
+    throw safeChatStreamError(error);
   }
 }
 
@@ -2725,11 +2748,12 @@ app.post('/api/chat/stream', async (req, res) => {
   res.on('close', () => { if (!res.writableEnded) aborter.abort(); });
   try {
     const result = await streamIva(req.body?.message || '', req.body?.sessionId || 'web', req.body?.voice === true, req.body?.agentId || 'iva-standard', aborter.signal, req.body?.projectId || '');
-    result.pipeTextStreamToResponse(res);
+    await pipeChatTextStream(result, res);
   } catch (e) {
     if (aborter.signal.aborted) return;
     if (!res.headersSent) { res.status(500); res.setHeader('Content-Type', 'text/plain; charset=utf-8'); }
-    res.end('Fehler: ' + e.message);
+    const failure = safeChatStreamError(e);
+    res.end(`\n\nChatlauf unterbrochen (${failure.code}): ${failure.message}`);
   }
 });
 app.post('/api/speak', async (req, res) => {

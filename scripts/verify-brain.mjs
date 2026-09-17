@@ -3,6 +3,17 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { brainPolicy, reviewContext, selectBrainModels, createBrain } from '../core/brain.js';
 import { projectSessionId, projectContext } from '../core/project-scope.js';
+import { createChatStreamLifecycle, safeChatStreamError } from '../core/chat-stream-lifecycle.js';
+
+// streamText is synchronous; defer the asynchronous fixture to consumption.
+const streamFixture = primary => args => ({ fullStream: (async function* () {
+  const result = await primary(args);
+  yield { type: 'text-delta', textDelta: result.text };
+})() });
+async function consumeFixture(result) {
+  for await (const part of result.fullStream) { /* exercise the actual lifecycle */ }
+  await result.ivaStreamLifecycle.complete();
+}
 
 const models = [
   { key: 'groq:test', provider: 'groq', model: { id: 'one' } },
@@ -126,16 +137,17 @@ for (const streaming of [false, true]) {
       assert.match(args.system, /untrusted_model_notes/);
       assert.equal(args.model, models[0].model);
       await args.tools.write.execute();
-      const result = { text: 'done', usage: {}, steps: [] };
+      const result = { text: 'done', usage: {}, steps: [], finishReason: 'stop' };
       await args.onFinish?.(result);
       return result;
     };
     const deps = {
       chatProject: async (_projectId, sessionId) => ({ project: null, sessionId }), TOOL_EXECUTION_POLICY: 'Use only the actual registered tools.',
-      handleTrackedQonektoConfirmation: async () => null, routeAgent: () => ({ agent: { id: 'iva', name: 'IVA', modelProfile: 'chat' } }), beginAgentRun: async () => ({ id: 'test' }), assembleTools: () => ({ write: { execute: async () => { writes++; } } }), buildSystemPrompt: async () => input.system, buildKnowledgePromptContext: async () => '', incidentPromptContext: async () => '', loadConversations: async () => ({}), saveConversations: async () => {}, chooseModel: () => models[0], checkBudget: async () => {}, prepareBrain: f.brain.prepare, recordBrainReview: async () => {}, generateText: primary, streamText: primary, recordUsage: async () => {}, finishAgentRun: async () => {}, usedToolNames: () => [], recordChatRunFailure: async () => {}, MAX_TURNS: 10,
+      handleTrackedQonektoConfirmation: async () => null, routeAgent: () => ({ agent: { id: 'iva', name: 'IVA', modelProfile: 'chat' } }), beginAgentRun: async () => ({ id: 'test' }), assembleTools: () => ({ write: { execute: async () => { writes++; } } }), buildSystemPrompt: async () => input.system, buildKnowledgePromptContext: async () => '', incidentPromptContext: async () => '', loadConversations: async () => ({}), saveConversations: async () => {}, chooseModel: () => models[0], checkBudget: async () => {}, prepareBrain: f.brain.prepare, recordBrainReview: async () => {}, generateText: primary, streamText: streamFixture(primary), createChatStreamLifecycle, safeChatStreamError, recordUsage: async () => {}, finishAgentRun: async () => {}, usedToolNames: () => [], recordChatRunFailure: async () => {}, MAX_TURNS: 10,
     };
     const entry = new Function(...Object.keys(deps), `${askSource}\n${streamSource}\nreturn ${streaming ? 'streamIva' : 'askIva'};`)(...Object.values(deps));
-    await entry(input.userText, 'test', false);
+    const response = await entry(input.userText, 'test', false);
+    if (streaming) await consumeFixture(response);
     assert.equal(f.calls.length, 2);
     assert.equal(executions, 1);
     assert.equal(writes, 1);
@@ -158,7 +170,7 @@ for (const streaming of [false, true]) {
       assert.doesNotMatch(args.system, /GLOBAL_ACCOUNT_RULE_SENTINEL|GLOBAL_PRIVATE_MEMORY_SENTINEL/);
       assert.match(args.system, /Marketing & Growth/);
       const value = await args.tools.readProject.execute();
-      const result = { text: `Done ${value.projectId}`, usage: {}, steps: [] };
+      const result = { text: `Done ${value.projectId}`, usage: {}, steps: [], finishReason: 'stop' };
       await args.onFinish?.(result);
       return result;
     };
@@ -173,12 +185,12 @@ for (const streaming of [false, true]) {
       loadConversations: async () => structuredClone(histories), saveConversations: async value => { histories = value; },
       chooseModel: () => models[0], checkBudget: async () => {},
       prepareBrain: async args => { assert.doesNotMatch(JSON.stringify(args.messages), /GLOBAL_PRIVATE_MEMORY_SENTINEL/); return { system: args.system }; },
-      recordBrainReview: async () => {}, generateText: primary, streamText: primary, recordUsage: async () => {},
+      recordBrainReview: async () => {}, generateText: primary, streamText: streamFixture(primary), createChatStreamLifecycle, safeChatStreamError, recordUsage: async () => {},
       finishAgentRun: async (id, result) => finished.push({ id, ...result }), usedToolNames: () => ['readProject'], recordChatRunFailure: async () => {}, MAX_TURNS: 10,
     };
     const entry = new Function(...Object.keys(deps), `${chatProjectSource}\n${askSource}\n${streamSource}\nreturn ${streaming ? 'streamIva' : 'askIva'};`)(...Object.values(deps));
     for (const projectId of ['alpha', 'beta']) {
-      if (streaming) await entry(`Work for ${projectId}`, 'web', false, 'iva-marketing', undefined, projectId);
+      if (streaming) await consumeFixture(await entry(`Work for ${projectId}`, 'web', false, 'iva-marketing', undefined, projectId));
       else await entry(`Work for ${projectId}`, 'web', false, 'iva-marketing', projectId);
     }
     assert.deepEqual(forbidden, []);

@@ -68,14 +68,37 @@ function googleClient() {
 // Format: '<provider>:<model-id>' (muss in MODELS registriert sein).
 function envKeyFor(task) { return 'IVA_MODEL_' + String(task).toUpperCase().replace(/-/g, '_'); }
 
-function loadRuntimeOverrides() {
-  try {
-    const parsed = JSON.parse(fsSync.readFileSync(INTEGRATION_CHECKUP_FILE, 'utf8'));
-    return parsed?.modelOverrides && typeof parsed.modelOverrides === 'object' ? parsed.modelOverrides : {};
-  } catch { return {}; }
+const configurationError = () => Object.assign(new Error('Router: explizite Modellkonfiguration ist ungueltig oder nicht lesbar; keine Ersatzroute aktiviert.'), { code: 'router_config_invalid' });
+const plainObject = value => value !== null && typeof value === 'object' && [Object.prototype, null].includes(Object.getPrototypeOf(value));
+
+function validateRuntimeOverrides(overrides) {
+  if (!plainObject(overrides)) throw configurationError();
+  for (const [task, key] of Object.entries(overrides)) {
+    if (!Object.hasOwn(TASK_DEFAULTS, task) || typeof key !== 'string' || !Object.hasOwn(MODELS, key)) throw configurationError();
+  }
+  return { ...overrides };
 }
 
-let runtimeModelOverrides = loadRuntimeOverrides();
+function loadRuntimeOverrides() {
+  let content;
+  try { content = fsSync.readFileSync(INTEGRATION_CHECKUP_FILE, 'utf8'); }
+  catch (error) {
+    if (error.code === 'ENOENT') return {};
+    throw configurationError();
+  }
+  try {
+    const parsed = JSON.parse(content);
+    if (!plainObject(parsed)) throw configurationError();
+    return Object.hasOwn(parsed, 'modelOverrides') ? validateRuntimeOverrides(parsed.modelOverrides) : {};
+  } catch { throw configurationError(); }
+}
+
+// Keep diagnostics available on a broken configuration, but refuse model
+// selection until a valid explicit update repairs it. Never activate defaults.
+let runtimeModelOverrides = {};
+let runtimeConfigurationError = null;
+try { runtimeModelOverrides = loadRuntimeOverrides(); }
+catch (error) { runtimeConfigurationError = error; }
 
 function dynamicModelConfig(key) {
   const [provider, id] = String(key || '').split(':', 2);
@@ -88,26 +111,29 @@ function dynamicModelConfig(key) {
   return null;
 }
 
-function modelConfig(key) { return MODELS[key] || dynamicModelConfig(key); }
+function modelConfig(key) { return Object.hasOwn(MODELS, key) ? MODELS[key] : dynamicModelConfig(key); }
 
 export function setRuntimeModelOverrides(overrides = {}) {
-  runtimeModelOverrides = overrides && typeof overrides === 'object' ? { ...overrides } : {};
+  try {
+    runtimeModelOverrides = validateRuntimeOverrides(overrides);
+    runtimeConfigurationError = null;
+  } catch (error) {
+    runtimeConfigurationError = error;
+    throw error;
+  }
 }
 
 function resolveModelKey(task) {
+  if (runtimeConfigurationError) throw runtimeConfigurationError;
+  if (!Object.hasOwn(TASK_DEFAULTS, task)) throw configurationError();
   const envKey = envKeyFor(task);
   const override = process.env[envKey];
-  if (override) {
-    if (!modelConfig(override)) {
-      throw new Error(`Router: unbekanntes Modell "${override}" in ${envKey}. Erlaubt: ${Object.keys(MODELS).join(', ')}`);
-    }
+  if (override !== undefined) {
+    if (!Object.hasOwn(MODELS, override)) throw configurationError();
     return override;
   }
-  const runtimeOverride = runtimeModelOverrides[task];
-  if (runtimeOverride && modelConfig(runtimeOverride)) return runtimeOverride;
-  const def = TASK_DEFAULTS[task];
-  if (!def) throw new Error(`Router: unbekanntes Task-Profil "${task}". Erlaubt: ${Object.keys(TASK_DEFAULTS).join(', ')}`);
-  return def;
+  if (Object.hasOwn(runtimeModelOverrides, task)) return runtimeModelOverrides[task];
+  return TASK_DEFAULTS[task];
 }
 
 // Waehlt Modell + gibt AI-SDK-Instanz zurueck.
@@ -120,6 +146,7 @@ export function chooseModel({ task }) {
 
 // Explicit secondary model selection never changes the configured main route.
 export function chooseModelKey(key, { task = 'brain-review' } = {}) {
+  if (runtimeConfigurationError) throw runtimeConfigurationError;
   const cfg = modelConfig(key);
   if (!cfg) throw new Error(`Router: unbekanntes Modell "${key}"`);
   let model;
