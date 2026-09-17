@@ -3,6 +3,7 @@ import path from 'node:path';
 import { access, mkdir, stat } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { buildFundingCaseReference } from './funding.mjs';
 import { ensureAppWindowOnRightDisplay } from './display-workspace.mjs';
 import {
@@ -244,4 +245,32 @@ export async function diagnoseWhatsAppMac() {
         ]
       : ['WhatsApp aus dem Mac App Store installieren'],
   };
+}
+
+// Read-only message reconciliation (navigation only). The receipt ID identifies
+// observed AX evidence, not an invented WhatsApp server message ID.
+export async function readExactWhatsAppGroupMessage({ chatName, message, expectedInfoMarker = 'Heat Hero GmbH' } = {}) {
+  if (!chatName || !message) throw new Error('WhatsApp reconciliation requires exact target and text');
+  let dump = await runWhatsAppProbe(['--dump']);
+  if (!dumpShowsActiveChat(dump, chatName)) {
+    await runWhatsAppProbe(['--open-chat', chatName]);
+    dump = await runWhatsAppProbe(['--dump']);
+  }
+  if (!dumpShowsActiveChat(dump, chatName)) throw new Error('WhatsApp reconciliation target not active');
+  await runWhatsAppProbe(['--press-identifier', 'NavigationBar_HeaderViewButton']);
+  const info = await runWhatsAppProbe(['--dump']);
+  const infoText = (info.textNodes || []).map(node => `${node.description || ''} ${node.value || ''}`).join(' ');
+  const communityVerified = infoText.toLocaleLowerCase('de').includes(expectedInfoMarker.toLocaleLowerCase('de'));
+  await runWhatsAppProbe(['--press-description', 'Fertig']);
+  if (!communityVerified) throw new Error('WhatsApp community not verified');
+  dump = await runWhatsAppProbe(['--dump']);
+  if (!dumpShowsActiveChat(dump, chatName)) throw new Error('WhatsApp target changed during reconciliation');
+  const clean = value => String(value || '').replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').replace(/\s+/g, ' ').trim();
+  const candidates = (dump.textNodes || []).filter(node => node.identifier === 'WAMessageBubbleTableViewCell'
+    && clean(node.description).includes(clean(message)) && /deine nachricht/i.test(node.description)
+    && clean(node.description).includes(clean(chatName)));
+  if (!candidates.length) return { absenceVerified: true, communityVerified: true, observedAt: new Date().toISOString() };
+  const evidence = clean(candidates[0].description);
+  return { messageId: `ax-sha256:${createHash('sha256').update(JSON.stringify([chatName, expectedInfoMarker, evidence])).digest('hex')}`,
+    evidenceKind: 'native-ax-message-bubble', evidence, verified: true, verifiedAt: new Date().toISOString(), communityVerified: true };
 }

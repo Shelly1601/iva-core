@@ -1632,7 +1632,7 @@ app.get('/device-agent/:deviceId/funding-runtime-status', async (req, res) => {
 });
 app.get('/device-agent/:deviceId/commands/next', async (req, res) => {
   if (!authorizedImacAgent(req) || req.params.deviceId !== IVA_IMAC_DEVICE_ID) return res.sendStatus(401);
-  try { res.json({ command: await claimNextDeviceCommand(req.params.deviceId, imacAgentMetadataFromRequest(req)) }); }
+  try { res.json({ command: await claimNextDeviceCommand(req.params.deviceId, imacAgentMetadataFromRequest(req), { lane: ['urgent', 'normal'].includes(req.query.lane) ? req.query.lane : 'all' }) }); }
   catch (error) { res.status(/Attestierung/.test(error.message) ? 403 : 500).json({ error: error.message }); }
 });
 app.post('/device-agent/:deviceId/commands/:commandId/complete', async (req, res) => {

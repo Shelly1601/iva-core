@@ -65,6 +65,7 @@ function agentEvent(run = {}) {
     status: statusOf(run.status),
     summary: clean(run.resultPreview || run.requestPreview || run.error || 'Agentenlauf protokolliert.'),
     error: clean(run.error, 1000),
+    sla: run.sla || null,
     phase: clean(run.phase, 80),
     progress: Number.isFinite(Number(run.progress)) ? Number(run.progress) : null,
     startedAt: timestamp(run.startedAt, run.createdAt),

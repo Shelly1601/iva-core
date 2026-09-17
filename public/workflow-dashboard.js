@@ -47,6 +47,7 @@
       jobId: clean(item.jobId, 100),
       title: clean(item.title || item.name || 'IVA-Workflow', 220),
       rawStatus,
+      sla: item.sla || null,
       source: sourceLabel(item, origin),
       purpose: clean(item.description || item.summary || item.requestPreview || item.detail || 'Echter IVA-Lauf', 1200),
       detail: clean(item.detail || item.summary || item.resultPreview || item.description || item.error || 'Laufstatus wurde erfasst.', 1800),
@@ -128,7 +129,11 @@
     for (const entry of merged.values()) {
       const classification = groupFor(entry, now);
       if (!classification) continue;
-      const normalized = { ...entry, ...classification };
+      const origin = timeValue(entry.sla?.originAt || entry.startedAt);
+      const elapsed = origin ? Math.max(0, (timeValue(entry.completedAt) || now) - origin) : 0;
+      const sla = { ...entry.sla, totalDurationMs: elapsed, remainingMs: Math.max(0, 1800000 - elapsed), violated: elapsed > 1800000 };
+      const normalized = { ...entry, ...classification, sla };
+      if (sla.violated) { normalized.label += ' · SLA verletzt'; normalized.slaError = true; }
       if (normalized.group !== 'blocked') normalized.blocker = '';
       groups[normalized.group].push(normalized);
     }

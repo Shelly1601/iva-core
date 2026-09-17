@@ -185,8 +185,8 @@ try {
   let threw = false;
   try { chooseModel({ task: 'chat' }); } catch (e) {
     threw = true;
-    truthy('  Fehler enthaelt Modellname', /openai:gpt-fake-999/.test(e.message));
-    truthy('  Fehler enthaelt "unbekannt"', /unbekannt/i.test(e.message));
+    truthy('  Fehler benennt ungültige Konfiguration', /Modellkonfiguration.*ungueltig/i.test(e.message));
+    truthy('  Keine stille Ersatzroute', /keine Ersatzroute/i.test(e.message));
   }
   truthy('  chooseModel wirft bei ungueltigem Override', threw);
   delete process.env.IVA_MODEL_CHAT;

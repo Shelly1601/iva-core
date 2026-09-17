@@ -153,7 +153,7 @@ export async function startNativeWorkflow(input = {}, {
         'Der ursprüngliche Versand ist noch nicht vollständig und dauerhaft im Gesendet-Ordner bestätigt.',
         { supported: true, phase: 'verification', retryReadbackOnly: true });
       return completed(saved, true);
-    }, { timeoutMs: 20_000 });
+    }, { timeoutMs: 20_000, scope: 'outlook-write', jobId: context.canonicalKey, title: 'Forecast Versandprüfung', criticalSection: 'sent-folder-readback' });
   } catch {
     return blocked('NATIVE_WORKFLOW_PROOF_PENDING',
       'Die Gesendet-Prüfung des ursprünglichen Versandversuchs bleibt offen; derselbe Auftrag wird ausschließlich rückgelesen.',

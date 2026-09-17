@@ -39,6 +39,9 @@ export const DEVICE_ACTIONS = Object.freeze({
   'knowledge.import.start': Object.freeze({ description: 'Einen fortsetzbaren Kursimport mit lokalem Login und optionaler Drive-Lernakte starten', mutating: true, requiresAttestedAgent: true }),
   'app.open': Object.freeze({ description: 'Eine freigegebene App auf dem iMac öffnen', mutating: true, requiresAttestedAgent: true }),
   'codex.task.start': Object.freeze({ description: 'Einen ausdrücklich beauftragten IVA-Bau- oder iMac-Operationsauftrag im lokalen Codex starten', mutating: true, requiresAttestedAgent: true }),
+  'codex.task.cancel': Object.freeze({ description: 'Schreibfreien Auftrag sicher beenden oder kooperativen Abbruch vormerken', mutating: true, requiresAttestedAgent: true }),
+  'scheduling.request.supersede': Object.freeze({ description: 'Bestehenden verifizierten Termin übernehmen', mutating: true, requiresAttestedAgent: true }),
+  'scheduling.request.adopt-existing': Object.freeze({ description: 'Bestehenden verifizierten Termin übernehmen', mutating: true, requiresAttestedAgent: true }),
   'codex.task.status': Object.freeze({ description: 'Status eines lokalen Codex-Bauauftrags lesen', mutating: false, requiresAttestedAgent: true }),
 });
 
@@ -120,6 +123,11 @@ function normalizedAgentMetadata(input = {}) {
   return {
     hostname: normalizedHostname(input.hostname),
     uiBusy: input.uiBusy === true,
+    resourceLocks: (Array.isArray(input.resourceLocks) ? input.resourceLocks : []).slice(0, 8).map(lock => ({
+      scope: cleanText(lock.scope, 60), jobId: cleanText(lock.jobId, 100), title: cleanText(lock.title, 180),
+      acquiredAt: lock.acquiredAt || null, heartbeat: lock.heartbeat || null,
+      criticalSection: cleanText(lock.criticalSection, 120), safeToYield: lock.safeToYield === true, ownerStatus: cleanText(lock.ownerStatus, 60),
+    })),
     protocolVersion: Number(input.protocolVersion || 0),
     release: cleanText(input.release, 120),
     runtimeRevision: /^[a-f0-9]{64}$/.test(input.runtimeRevision || '') ? input.runtimeRevision : '',
@@ -333,10 +341,10 @@ function validatePayload(action, payload = {}) {
         .map(value => cleanText(value, 500)).filter(Boolean).slice(0, 12),
     };
   }
-  if (action === 'codex.task.status') {
+  if (['codex.task.status', 'codex.task.cancel', 'scheduling.request.supersede', 'scheduling.request.adopt-existing'].includes(action)) {
     const jobId = cleanText(payload.jobId, 80);
     if (!/^[a-f0-9-]{20,80}$/i.test(jobId)) throw new Error('Ungültige Codex-Auftrags-ID.');
-    return { jobId };
+    return { jobId, reason: cleanText(payload.reason, 500) };
   }
   return {};
 }
@@ -404,7 +412,7 @@ export async function enqueueDeviceCommand({ deviceId = IVA_IMAC_DEVICE_ID, acti
   });
 }
 
-export async function claimNextDeviceCommand(deviceId = IVA_IMAC_DEVICE_ID, agentMetadata = {}) {
+export async function claimNextDeviceCommand(deviceId = IVA_IMAC_DEVICE_ID, agentMetadata = {}, { lane = 'all' } = {}) {
   return transaction(async () => {
     const store = await loadStore();
     const claimingAgent = assertClaimingAgent(store, deviceId, agentMetadata);
@@ -433,22 +441,28 @@ export async function claimNextDeviceCommand(deviceId = IVA_IMAC_DEVICE_ID, agen
         changed = true;
       }
     }
-    const command = store.commands.find(item => item.deviceId === deviceId
+    const priority = item => item.action === 'planbar.customer.schedule' ? 100 : item.payload?.automationSlotKey ? 0 : 50;
+    const command = store.commands.filter(item => item.deviceId === deviceId
+      && (lane === 'all' || (lane === 'urgent' ? priority(item) === 100 : priority(item) < 100))
       && item.status === 'queued'
       && (!item.retryAt || Date.parse(item.retryAt) <= now)
       // The Planbar search refresh reads the live tooltip endpoint for an
       // explicit range without steering or reloading the shared UI. It is safe
       // to claim while another workflow owns the UI lock; scheduling and every
       // other UI-writing action remain blocked here.
-      && (!claimingAgent?.uiBusy || ['agent.status', 'codex.task.status', 'funding.monitor.status', 'funding.reviews.list', 'portal.credentials.status', 'planbar.search.refresh'].includes(item.action))
+      && (!claimingAgent?.uiBusy || ['agent.status', 'codex.task.cancel', 'scheduling.request.supersede', 'scheduling.request.adopt-existing', 'codex.task.start', 'project.workflow.run', 'planbar.customer.schedule', 'codex.task.status', 'funding.monitor.status', 'funding.reviews.list', 'portal.credentials.status', 'planbar.search.refresh'].includes(item.action))
       && (!DEVICE_ACTIONS[item.action]?.requiresAttestedAgent
-        || (claimingAgent && claimingAgent.allowedActions.includes(item.action))));
+        || (claimingAgent && claimingAgent.allowedActions.includes(item.action))))
+      .sort((a, b) => priority(b) - priority(a) || Date.parse(a.createdAt) - Date.parse(b.createdAt))[0];
     if (!command) {
       if (changed) await saveStore(store);
       return null;
     }
     command.status = 'running';
-    command.startedAt = new Date().toISOString();
+    command.startedAt ||= new Date().toISOString();
+    command.attemptStartedAt = new Date().toISOString();
+    command.queueDelayMs ??= Math.max(0, now - Date.parse(command.createdAt));
+    command.lane = priority(command) === 100 ? 'customer-scheduling' : priority(command) === 50 ? 'interactive' : 'batch';
     command.attempts = Number(command.attempts || 0) + 1;
     command.leaseToken = crypto.randomBytes(24).toString('hex');
     command.leaseExpiresAt = new Date(Date.now() + LEASE_MS).toISOString();

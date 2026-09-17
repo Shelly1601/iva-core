@@ -110,6 +110,7 @@ function taskFromRequest(request, commands) {
   const gitCommit = resultText.match(/(?:commit|git(?:-stand)?)[^0-9a-f]{0,20}([0-9a-f]{7,40})/i)?.[1] || '';
   const liveUrl = resultText.match(/https:\/\/[^\s)\]}>,]+/i)?.[0] || '';
   return {
+    sla: local?.sla || null,
     id: request.id,
     requestId: request.id,
     commandId: start?.id || request.commandId || '',
@@ -158,6 +159,7 @@ function taskFromOperationalRun(run = {}) {
     : Math.max(0, Math.min(99, Number(run.progress) || (status === 'queued' ? 5 : build ? progressForPhase(phase, 30) : 70)));
   const detail = clean(run.resultPreview || run.requestPreview || (status === 'queued' ? 'Der Auftrag wartet auf die lokale Ausführung.' : 'Der Auftrag läuft.'), 1800);
   return {
+    sla: run.sla || null,
     id: run.id, requestId: '', commandId: '', jobId: clean(run.jobId, 100),
     title: clean(run.taskTitle || run.agentName || 'IVA-Hintergrundauftrag', 180),
     description: clean(run.requestPreview, 1200), status, phase,

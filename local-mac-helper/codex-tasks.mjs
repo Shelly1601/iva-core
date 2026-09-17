@@ -1,6 +1,7 @@
+import { workflowSla } from '../local-mac-helper/workflow-sla.mjs';
 import crypto from 'node:crypto';
 import { serveBuildUiAccess, requestBuildUiAccess, serveUiCheckpoints, requestUiCheckpoint } from './execution-priority.mjs';
-import { withImacExecutionLock } from './ui-execution-lock.mjs';
+import { withImacExecutionLock, listResourceLocks } from './ui-execution-lock.mjs';
 import { MAC_SESSION_RECHECK_MS, readMacSessionLockStatus } from './mac-session-lock.mjs';
 import os from 'node:os';
 import { assertImacExecutionHost } from './imac-host-guard.mjs';
@@ -191,6 +192,7 @@ async function readJson(file) {
 }
 
 async function writeState(paths, value) {
+  value = { ...value, sla: workflowSla(value) };
   const temporary = `${paths.state}.${crypto.randomUUID()}.tmp`;
   await writeFile(temporary, JSON.stringify(value, null, 2), { mode: 0o600 });
   await rename(temporary, paths.state);
@@ -242,6 +244,7 @@ export async function recordCodexTaskHeartbeat(jobId, {
   const startedAt = Date.parse(state.startedAt || state.createdAt || timestamp);
   const liveState = {
     ...state,
+    sla: workflowSla({ ...state, createdAt: request.createdAt }, now),
     workerPid: heartbeat.workerPid,
     childPid: heartbeat.childPid,
     heartbeatAt: heartbeat.heartbeatAt,
@@ -291,6 +294,7 @@ async function reportTaskState(request, state, resultPreview = '') {
       workflowId: request.workflowId || '',
       schedulingKey: request.planbar ? planbarSchedulingKey(request.planbar) : '',
       planbarProgress: state.planbarProgress || null,
+      sla: workflowSla({ ...state, createdAt: request.createdAt, metrics: { ...state.sla, resourceLocks: listResourceLocks().filter(lock => lock.jobId === request.jobId) } }),
       recoveryAttempts: Number(state.recoveryAttempts || 0),
       requestPreview: request.title,
       status: state.status,
@@ -427,6 +431,7 @@ export function buildCodexPrompt(request) {
     ? `\n\nDies ist der automatische Wiederanlauf ${Number(request.recoveryAttempt)} nach einem unterbrochenen lokalen Worker. Prüfe vor jeder Schreib- oder Sendeaktion zuerst vorhandene lokale Belege, den sichtbaren Zielzustand und bereits erzeugte Ergebnisse. Setze beim ersten noch nicht verifizierten Schritt fort. Wiederhole niemals eine bereits sichtbare, gespeicherte oder anderweitig belegte Aktion. Der Wiederanlauf ist eine Fortsetzung desselben Auftrags, kein neuer Auftrag.`
     : '';
   const runtimeInstruction = `UI-Priorität: Nach jeder abgeschlossenen und rückgelesenen UI-Aktion sowie vor längerer Recherche/Dateiarbeit führe bei UI-Workflows den kooperativen Checkpoint aus: node ${JSON.stringify(MODULE_PATH)} ui-checkpoint ${request.jobId}. Nur aufrufen, wenn kein unklarer Schreib- oder Sendeausgang besteht; bei Unklarheit zuerst am Ziel rücklesen. Der Checkpoint wartet auf priorisierte Terminierungen und kehrt erst nach erneuter UI-Freigabe zurück. Bauaufträge halten keine globale UI-Sperre während der Codearbeit. Bei Bauaufträgen vor JEDEM Browser-/App-Arbeitsabschnitt node ${JSON.stringify(MODULE_PATH)} ui-access ${request.jobId} acquire ausführen und Bestätigung abwarten; nach sichtbarer Rücklesung und vor weiterer Codearbeit ui-access ${request.jobId} release ausführen. Nicht während unklarer Schreibaktionen freigeben. Die verbindlichen Projektanweisungen stehen in ${path.join(REPO_ROOT, '..', 'AGENTS.md')}; lies diese Datei, auch wenn im Unterordner iva-core keine eigene AGENTS.md liegt. Bestehende lokale IVA-Helfer startest du mit absolutem Pfad aus ${path.dirname(MODULE_PATH)}. Dieser geprüfte Laufzeitstand kommt vom zentralen IVA-Core. Projektquellen und Dokumente bleiben im gesetzten iCloud-Workspace. Keine zweite lokale Kopie als laufenden Agenten starten.`;
+  const resourceInstruction = request.resourceProtocol === 2 ? `Ressourcenprotokoll 2: Dieser Worker hält während Analyse, Dateien, API-Lesen und Codearbeit keine UI-Sperre. Vor JEDEM UI-Arbeitsabschnitt ui-access ${request.jobId} acquire <scope> ausführen; Scope ausschließlich planbar-write, pipedrive-write, outlook-write, native-whatsapp oder browser-read. Nach tatsächlicher Rücklesung ui-access ${request.jobId} release ausführen. Nur kurze Zielaktionen sperren; keine Sperre über Fallanalyse halten. ui-checkpoint ist außerhalb einer aktiven Ressourcensperre nicht nötig. Bei unklarem Ausgang Zielzustand unter derselben Sperre prüfen. Die ursprüngliche SLA-Uhr bleibt erhalten.` : '';
   const fundingWindowInstruction = FUNDING_WORKFLOW_STEPS[request.workflowId]
     ? ' Der zentrale iMac-Runner hat zusätzlich Chrome und Outlook unmittelbar vor dem Start geöffnet, rechts platziert und im selben laufzeitgebundenen Nachweis bestätigt. `place-app-right` darfst du zur Diagnose aufrufen; eine sandboxbedingte Accessibility-Ablehnung wird nur für genau diese vorgeprüften Apps über den Nachweis aufgelöst.'
     : '';
@@ -442,7 +447,7 @@ Nach dem verifizierten Erstlauf nur neue/geänderte Deals und Quellen bearbeiten
   if (request.mode === 'project-workflow') {
     return `Nadine hat diesen Projekt-Workflow ausdrücklich beauftragt; der Start erfolgt manuell oder über den von ihr eingerichteten Zeitplan. Führe jetzt genau einen operativen Einmallauf aus, ohne eine weitere Planbestätigung zu verlangen.
 
-Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.md vollständig. ${runtimeInstruction} ${displayInstruction} Dies ist kein Bauauftrag: ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts. Führe nur den unten genannten Workflow mit seinen dokumentierten Quellen, Sicherheitsregeln, Verifikationen, Zeitlimits, Protokollen und Rückfallwegen aus. Normale erneute Anmeldungen erledigst du mit den vorhandenen sicheren Zugangsdaten selbstständig. Bei CAPTCHA, Kontosperre oder technisch erzwungener externer Bestätigung stoppst du mit dem konkreten Blocker. Bei einem fachlichen Sicherheits-Gate rate nicht: lasse den betroffenen Fall unverändert und bearbeite alle übrigen unabhängigen Fälle weiter. Erfinde keinen Erfolg.
+Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.md vollständig. ${runtimeInstruction} ${resourceInstruction} ${displayInstruction} Dies ist kein Bauauftrag: ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts. Führe nur den unten genannten Workflow mit seinen dokumentierten Quellen, Sicherheitsregeln, Verifikationen, Zeitlimits, Protokollen und Rückfallwegen aus. Normale erneute Anmeldungen erledigst du mit den vorhandenen sicheren Zugangsdaten selbstständig. Bei CAPTCHA, Kontosperre oder technisch erzwungener externer Bestätigung stoppst du mit dem konkreten Blocker. Bei einem fachlichen Sicherheits-Gate rate nicht: lasse den betroffenen Fall unverändert und bearbeite alle übrigen unabhängigen Fälle weiter. Erfinde keinen Erfolg.
 
 Beauftragter Lauf:
 ${request.prompt}${recoveryInstruction}${fundingExecutionInstruction}
@@ -462,7 +467,7 @@ ${request.acceptanceCriteria?.length ? `Abnahmekriterien:\n${request.acceptanceC
   if (request.mode === 'operational') {
     return `Nadine hat diese konkrete Aktion ausdrücklich zur Ausführung auf ihrem iMac beauftragt. Führe sie jetzt genau dort aus, ohne eine weitere Planbestätigung zu verlangen.
 
-Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.md vollständig. ${runtimeInstruction} ${displayInstruction} Dies ist ein operativer iMac-Auftrag und kein IVA-Bauauftrag: Ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts, außer der Auftrag verlangt selbst ausdrücklich eine Code- oder Systemänderung. Versende keine E-Mail und führe keine andere externe Kommunikation aus, sofern sie im Auftrag nicht eindeutig freigegeben ist. Verwende bei lokalen WhatsApp-Aufträgen ausschließlich die native WhatsApp-App. Wiederhole eine Aktion niemals allein deshalb, weil der Erfolgsnachweis verzögert oder uneindeutig ist.
+Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace und lies AGENTS.md vollständig. ${runtimeInstruction} ${resourceInstruction} ${displayInstruction} Dies ist ein operativer iMac-Auftrag und kein IVA-Bauauftrag: Ändere keinen Quellcode, erstelle keinen Commit, pushe und deploye nichts, außer der Auftrag verlangt selbst ausdrücklich eine Code- oder Systemänderung. Versende keine E-Mail und führe keine andere externe Kommunikation aus, sofern sie im Auftrag nicht eindeutig freigegeben ist. Verwende bei lokalen WhatsApp-Aufträgen ausschließlich die native WhatsApp-App. Wiederhole eine Aktion niemals allein deshalb, weil der Erfolgsnachweis verzögert oder uneindeutig ist.
 
 Der autoritative Arbeitsordner liegt in iCloud. Bei „Resource deadlock avoided“, EAGAIN, EDEADLK oder kurzzeitig nicht lesbaren Dateien stößt du zuerst den lokalen iCloud-Download an und wiederholst den lesenden Zugriff; behandle das nicht vorschnell als fehlende Datei. Melde ausschließlich das tatsächlich verifizierte Ergebnis oder einen konkreten Blocker und erfinde keinen Erfolg.
 
@@ -480,7 +485,7 @@ ${request.acceptanceCriteria?.length ? `Abnahmekriterien:\n${request.acceptanceC
   const progressCommand = phase => `node ${JSON.stringify(MODULE_PATH)} progress ${request.jobId} ${phase}`;
   return `Nadine hat diesen Auftrag ausdrücklich über ihren IVA-Chat erteilt. Setze ihn jetzt vollständig und eigenständig um, ohne eine weitere Planbestätigung von Nadine zu verlangen.
 
-Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace. Lies und befolge AGENTS.md vollständig. ${runtimeInstruction} Bewahre fremde und nicht zum Auftrag gehörende Änderungen. Fertig bedeutet gemäß Projektregel: implementieren, angemessen testen, Fehler beheben, nur die eigenen Änderungen committen, pushen, Railway deployen und die öffentliche Live-URL prüfen. Falls ein echter externer Blocker besteht, dokumentiere ihn konkret im Endergebnis; erfinde keinen Erfolg.
+Arbeite ausschließlich im bereits gesetzten IVA-Core-Workspace. Lies und befolge AGENTS.md vollständig. ${runtimeInstruction} ${resourceInstruction} Bewahre fremde und nicht zum Auftrag gehörende Änderungen. Fertig bedeutet gemäß Projektregel: implementieren, angemessen testen, Fehler beheben, nur die eigenen Änderungen committen, pushen, Railway deployen und die öffentliche Live-URL prüfen. Falls ein echter externer Blocker besteht, dokumentiere ihn konkret im Endergebnis; erfinde keinen Erfolg.
 
 Melde Nadine im IVA-Kontrollzentrum ausschließlich tatsächlich begonnene Meilensteine. Führe dafür jeweils beim Start des Schritts genau den passenden lokalen Befehl aus:
 - Planung: ${progressCommand('planning')}
@@ -574,6 +579,7 @@ export async function startCodexTask({ prompt, title = '', requestId = '', accep
     fundingRun,
     workflowRevision,
     launchProtocol: 2,
+    resourceProtocol: 2,
     resultProtocol: clean(workflowId, 140) === 'planbar-completion-morning' ? 2 : FUNDING_WORKFLOW_STEPS[clean(workflowId, 140)] ? 1 : 0,
     workspace: REPO_ROOT,
     workspaceReadiness: {
@@ -1446,12 +1452,12 @@ export async function runCodexTask(jobId, {
   try {
     if (!requiresUi && request.mode !== 'build') return await execute(jobId);
     const wake = withWakeGuard || (await import('./mac-wake-guard.mjs')).withMacWakeGuard;
-    if (!requiresUi) return wake(() => serveBuildUiAccess(jobPaths(jobId).directory,
-      (task, options) => withUiLock(async () => {
+    if (!requiresUi || request.resourceProtocol === 2) return wake(() => serveBuildUiAccess(jobPaths(jobId).directory,
+      (task, options) => withUiLock(async lease => {
         const session = await sessionStatus();
         if (!session.usable) throw new Error('Desktop ist gesperrt; keine UI-Freigabe erteilt.');
-        return task();
-      }, { ...options, jobId, timeoutMs: CODEX_TASK_MAX_QUEUE_WAIT_MS }), () => execute(jobId)),
+        return task(lease);
+      }, { ...options, jobId, title: request.title, priority: request.planbar ? 100 : 0, timeoutMs: CODEX_TASK_MAX_QUEUE_WAIT_MS }), () => execute(jobId)),
       { maxSeconds: Math.ceil(MAX_RUNTIME_MS / 1000) + 60, sleepDisplays: false });
     return await withUiLock(async lease => {
       // The screen can lock while another UI job owns the execution lock.
@@ -1471,6 +1477,41 @@ export async function runCodexTask(jobId, {
   } finally {
     await stopHeartbeat();
   }
+}
+
+// Cancellation never kills a writer. Queued, unclaimed work can be stopped atomically.
+export async function cancelCodexTask(jobId, { reason = 'Von Nadine beendet', report = reportTaskState } = {}) {
+  const paths = jobPaths(jobId);
+  const result = await withFundingFileLock(paths.state, async () => {
+    const state = await readJson(paths.state);
+    if (TERMINAL_TASK_STATUSES.has(state.status)) return state;
+    const claim = await readJson(paths.executionClaim).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
+    if (state.status !== 'queued' || [state.workerPid, state.childPid, claim?.pid].some(processIsAlive)) {
+      return writeState(paths, { ...state, cancellationRequested: true, cancellationReason: clean(reason, 500),
+        detail: 'Abbruch vorgemerkt; laufende Aktion wird nicht ohne sicheren Fallcheckpoint beendet.', updatedAt: new Date().toISOString() });
+    }
+    const timestamp = new Date().toISOString();
+    return writeState(paths, { ...state, status: 'stopped', phase: 'cancelled', completedAt: timestamp, updatedAt: timestamp,
+      cancellationReason: clean(reason, 500), detail: 'Wartender schreibfreier Auftrag sicher beendet.' });
+  });
+  await report(await readJson(paths.request), result);
+  return result;
+}
+
+export async function adoptExistingSchedulingTask(jobId, { supersede = false, report = reportTaskState } = {}) {
+  const paths = jobPaths(jobId), request = await readJson(paths.request);
+  if (!request.planbar) throw new Error('Kein Terminierungsauftrag.');
+  const evidence = await readJson(paths.planbarProgress);
+  const reservation = mergePlanbarSchedulingProgress(null, { ...evidence, status: 'reserved' }).reservation;
+  if (!reservation?.verified || Number(reservation.week) !== Number(request.planbar.week)
+    || Number(reservation.isoYear) !== Number(request.planbar.isoYear)) throw new Error('Übernahme braucht den rückgelesenen bestehenden Termin derselben Zielwoche.');
+  const result = await withFundingFileLock(paths.state, async () => {
+    const state = await readJson(paths.state);
+    return writeState(paths, { ...state, existingAppointmentAdopted: reservation.appointmentId,
+      bookingProhibited: true, schedulingSuperseded: supersede, updatedAt: new Date().toISOString() });
+  });
+  await report(request, result);
+  return { jobId, adopted: true, appointmentId: reservation.appointmentId, planbarProgress: evidence, complete: evidence.completionVerified === true };
 }
 
 export async function claimCodexTaskExecution(jobId, { report = reportTaskState } = {}) {
@@ -1690,10 +1731,10 @@ if (isCodexTasksEntrypoint() && process.argv[2] === 'workflow-status') {
     console.log(JSON.stringify(await recordPlanbarTaskProgress(process.argv[3], await readJson(receipt))));
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 } else if (isCodexTasksEntrypoint() && process.argv[2] === 'ui-access') {
-  try { console.log(JSON.stringify(await requestBuildUiAccess(jobPaths(process.argv[3]).directory, process.argv[4]))); }
+  try { console.log(JSON.stringify(await requestBuildUiAccess(jobPaths(process.argv[3]).directory, process.argv[4], { scope: process.argv[5] || 'browser-read' }))); }
   catch (error) { console.error(error.message); process.exitCode = 1; }
-} else if (isCodexTasksEntrypoint() && process.argv[2] === 'ui-checkpoint') {
-  try { console.log(JSON.stringify(await requestUiCheckpoint(jobPaths(process.argv[3]).directory))); }
+} else if (isCodexTasksEntrypoint() && ['ui-checkpoint', 'operational-checkpoint'].includes(process.argv[2])) {
+  try { console.log(JSON.stringify(await requestUiCheckpoint(jobPaths(process.argv[3]).directory, process.argv[4] ? JSON.parse(process.argv[4]) : {}))); }
   catch (error) { console.error(error.message); process.exitCode = 1; }
 } else if (isCodexTasksEntrypoint() && process.argv[2] === 'progress') {
   try { await updateCodexTaskProgress(process.argv[3], process.argv[4], process.argv.slice(5).join(' ')); }

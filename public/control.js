@@ -9,6 +9,13 @@ function setStatus(kind,text){ $('status').className='status'+(kind?' '+kind:'')
 async function api(path,options={}){ const response=await fetch(path,{...options,headers:{Authorization:'Bearer '+token(),...(options.body?{'Content-Type':'application/json'}:{}),...(options.headers||{})},body:options.body?JSON.stringify(options.body):undefined}); const payload=await response.json().catch(()=>({})); if(!response.ok)throw new Error(payload.error||'HTTP '+response.status); return payload; }
 function empty(text){ return `<div class="empty">${esc(text)}</div>`; }
 
+function workflowSlaFacts(item){
+  const s=item.sla;if(!s)return '';
+  const duration=ms=>ms==null?'nicht gemeldet':`${Math.round(Number(ms)/1000)} s`;
+  const shards=s.totalShards==null?'nicht gemeldet':`${s.completedShards||0}/${s.totalShards} fertig · ${s.activeShards||0} aktiv`;
+  const locks=(s.resourceLocks||[]).map(lock=>typeof lock==='string'?lock:`${lock.scope} (${lock.jobId||lock.owner||'Owner offen'})`).join(', ')||'keine gemeldet';
+  return `<div class="workflow-facts${s.violated?' workflow-blocker':''}"><span>30-Minuten-SLA</span><b>${s.violated?'Frist überschritten':duration(s.remainingMs)+' verbleibend'}</b><span>Gesamtzeit / Queue</span><b>${esc(duration(s.totalDurationMs))} / ${esc(duration(s.queueDelayMs))}</b><span>Fälle</span><b>${esc(shards)}</b><span>Langsamster Schritt</span><b>${esc(s.slowestStep?.id||s.slowestStep?.stepId||'nicht gemeldet')}</b><span>Ressourcensperren</span><b>${esc(locks)}</b><span>Owner / Prognose</span><b>${esc(s.owner||'nicht gemeldet')} / ${s.estimatedCompletionAt?fmt(s.estimatedCompletionAt):'noch nicht belastbar'}</b></div>`;
+}
 function workflowCard(item){
   const kind=item.group==='running'?'live':item.group==='done'?'ready':item.group==='waiting'?'off':'';
   const hasProgress=item.progress!=null&&item.progress!==''&&Number.isFinite(Number(item.progress));
@@ -19,7 +26,7 @@ function workflowCard(item){
   const blocker=item.group==='blocked'?`<div class="workflow-blocker"><b>Konkreter Blocker:</b> ${esc(item.blocker||'Der Lauf ist ausdrücklich als blockiert gemeldet, aber ohne weiteren Grund.')}</div>`:'';
   const stale=item.stale?'<div class="workflow-stale">Nicht mehr als aktiv gezählt: Seit über fünf Minuten fehlt ein echtes Update.</div>':'';
   const technical=item.technicalReview?'<div class="workflow-stale">Technischer Zwischenfehler – fachlich nicht automatisch als blockiert gewertet.</div>':'';
-  return `<article class="workflow-card"><div class="workflow-card-head"><div><h4>${esc(item.title)}</h4><div class="workflow-source">${esc(item.source)}</div></div><span class="badge ${kind}">${esc(item.label)}</span></div><div class="workflow-purpose">${esc(item.purpose)}</div><div class="workflow-facts"><span>Phase</span><b>${esc(item.phase)}</b><span>Letztes Update</span><b>${fmt(item.updatedAt)}</b><span>Detail</span><b>${esc(item.detail)}</b></div>${progressView}${blocker}${stale}${technical}</article>`;
+  return `<article class="workflow-card"><div class="workflow-card-head"><div><h4>${esc(item.title)}</h4><div class="workflow-source">${esc(item.source)}</div></div><span class="badge ${kind}">${esc(item.label)}</span></div><div class="workflow-purpose">${esc(item.purpose)}</div><div class="workflow-facts"><span>Phase</span><b>${esc(item.phase)}</b><span>Letztes Update</span><b>${fmt(item.updatedAt)}</b><span>Detail</span><b>${esc(item.detail)}</b></div>${workflowSlaFacts(item)}${progressView}${blocker}${stale}${technical}</article>`;
 }
 function renderWorkflowDashboard(){
   const dashboard=window.IVAWorkflowDashboard?.buildWorkflowDashboard(state.status||{})||{running:[],waiting:[],blocked:[],done:[],counts:{running:0,waiting:0,blocked:0,done:0}};
@@ -139,9 +146,9 @@ function renderAudit(){
 }
 function renderImacStatus(){
   const agent=state.deviceAgent||{};
-  const label=!agent.online?'Mac Mini nicht verbunden':agent.uiBusy?'Mac Mini arbeitet – weitere Aufträge warten':agent.dispatchReady?'Mac Mini bereit':'Mac Mini verbunden – Befehlsabholung wird geprüft';
+  const label=!agent.online?'Mac Mini nicht verbunden':agent.uiBusy?'Mac Mini arbeitet · Ressourcensperren aktiv':agent.dispatchReady?'Mac Mini bereit':'Mac Mini verbunden – Befehlsabholung wird geprüft';
   const el=$('imacStatus');
-  if(el)el.innerHTML=`<b>${esc(label)}</b><div class="meta">Nur dieser Mac Mini · iMac und MacBook gesperrt · Cockpit → IVA-Core → Mac Mini · ${esc(agent.release||'Version unbekannt')}${agent.runtimeRevision?' · '+esc(agent.runtimeRevision.slice(0,12)):''}</div><div class="meta">${esc(agent.detail||'')} · Letzter Abruf: ${fmt(agent.lastPolledAt)}</div>`;
+  if(el)el.innerHTML=`<b>${esc(label)}</b><div class="meta">Nur dieser Mac Mini · iMac und MacBook gesperrt · Cockpit → IVA-Core → Mac Mini · ${esc(agent.release||'Version unbekannt')}${agent.runtimeRevision?' · '+esc(agent.runtimeRevision.slice(0,12)):''}</div><div class="meta">${esc(agent.detail||'')} · Letzter Abruf: ${fmt(agent.lastPolledAt)}</div><div class="meta">${(agent.resourceLocks||[]).map(lock=>esc(`${lock.scope}: ${lock.title||lock.jobId||lock.ownerStatus||'Owner unbekannt'} · ${lock.criticalSection||'Aktion nicht gemeldet'}`)).join('<br>')}</div>`;
 }
 function render(){ renderImacStatus(); renderWorkflowDashboard(); renderBuildProgress(); renderMetrics(); renderIncidents(); renderAutomations(); renderAgents(); renderConnectors(); renderApprovals(); renderRuns(); renderBacklog(); renderAudit(); }
 function makeCollapsible(){ document.querySelectorAll('.main>section.card,.main>section.grid>.card').forEach(card=>{ const heading=card.querySelector(':scope>h2'); if(!heading)return; const subtitle=heading.nextElementSibling?.classList?.contains('muted')?heading.nextElementSibling:null; const details=document.createElement('details'); details.className=card.className+' disclosure'; details.style.cssText=card.style.cssText; const summary=document.createElement('summary'); summary.innerHTML=`<div><span>${esc(heading.textContent)}</span>${subtitle?`<small>${esc(subtitle.textContent)}</small>`:''}</div>`; const body=document.createElement('div'); body.className='disclosure-body'; [...card.children].forEach(child=>{ if(child!==heading&&child!==subtitle)body.appendChild(child); }); details.append(summary,body); card.replaceWith(details); }); }

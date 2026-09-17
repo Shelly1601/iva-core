@@ -1,3 +1,4 @@
+import { createDeviceCommandPump } from './device-command-pump.mjs';
 import { createQueueWakeGuard } from './queue-wake-guard.mjs';
 import os from 'node:os';
 import { imacUiIsBusy } from './ui-execution-lock.mjs';
@@ -9,7 +10,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const DEVICE_AGENT_HARD_TIMEOUT_MS = 240_000;
-export const DEVICE_AGENT_POLL_INTERVAL_MS = 15_000;
+export const DEVICE_AGENT_POLL_INTERVAL_MS = 1_000;
 
 const execFileAsync = promisify(execFile);
 const DEVICE_ID = 'imac-nadine';
@@ -38,6 +39,9 @@ const ALLOWED_ACTIONS = Object.freeze([
   'app.open',
   'codex.task.start',
   'codex.task.status',
+  'codex.task.cancel',
+  'scheduling.request.supersede',
+  'scheduling.request.adopt-existing',
   'computer.status',
   'funding.monitor.status',
   'funding.legacy-monitor.suspend',
@@ -291,7 +295,7 @@ async function runWithTimeout() {
   }
 }
 
-let lastCentralUpdateAt = 0;
+let lastCentralUpdateAt = 0, preparedRuntime = null;
 async function updateFromCentralRuntime() {
   if (!LOCAL_RUNTIME || Date.now() - lastCentralUpdateAt < 60_000) return false;
   if (imacUiIsBusy()) return false; // Finish the current UI task before switching releases.
@@ -302,24 +306,36 @@ async function updateFromCentralRuntime() {
   const { fetchCentralRuntimeBundle, imacDeviceAgentMetadata } = await loadDeviceAgent();
   const bundle = await fetchCentralRuntimeBundle();
   if (bundle.revision === imacDeviceAgentMetadata().runtimeRevision) return false;
-  const { prepareCentralRuntime, activateCentralRuntime } = await import('./central-runtime.mjs');
+  const { prepareCentralRuntime } = await import('./central-runtime.mjs');
   const target = await prepareCentralRuntime(bundle, { dependencyRoot: path.dirname(LOCAL_HELPER_DIR) });
-  await activateCentralRuntime(target);
-  return true;
+  preparedRuntime = target;
+  return false;
 }
 
-for (;;) {
-  try {
+const pump = createDeviceCommandPump({
+  intervalMs: DEVICE_AGENT_POLL_INTERVAL_MS,
+  run: async options => {
+    const { runImacDeviceAgentOnce } = await loadDeviceAgent();
+    return runImacDeviceAgentOnce(options);
+  },
+  maintenance: async () => {
     await reportBootstrapHeartbeat();
-    if (await updateFromCentralRuntime().catch(error => { console.error(`Zentrale Aktualisierung wird erneut versucht: ${error.message}`); return false; })) process.exit(75);
-    if (await updateLocalRunnerFromIcloud()) process.exit(75);
-    await scheduleLocalRuntimeMigration().catch(error => {
-      console.error(`Lokale iMac-Übernahme wird erneut versucht: ${error?.message || error}`);
-    });
-    console.log(JSON.stringify(await runWithTimeout(), null, 2));
-  } catch (error) {
-    deviceAgentModule = null;
-    console.error(`Fehler: ${error?.message || error}`);
-  }
-  await new Promise(resolve => setTimeout(resolve, DEVICE_AGENT_POLL_INTERVAL_MS));
-}
+    // Do not switch the runtime while any command has an unresolved result.
+    await updateFromCentralRuntime();
+    const { syncCodexTaskStates } = await import('./codex-tasks.mjs');
+    await syncCodexTaskStates();
+    const { resumePendingSchedulingFastLanes } = await import('./scheduling-runtime.mjs');
+    await resumePendingSchedulingFastLanes();
+  },
+  onIdle: async () => {
+    const { schedulingFastLaneActiveCount } = await import('./scheduling-runtime.mjs');
+    if (preparedRuntime && !imacUiIsBusy() && schedulingFastLaneActiveCount() === 0) {
+      const { activateCentralRuntime } = await import('./central-runtime.mjs');
+      await activateCentralRuntime(preparedRuntime);
+      process.exit(75);
+    }
+  },
+  onResult: result => { if (result?.status !== 'no_command') console.log(JSON.stringify(result)); },
+  onError: error => { console.error(`Geräteabruf: ${error?.message || error}`); },
+});
+pump.start();

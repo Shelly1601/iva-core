@@ -140,11 +140,18 @@ export function createAutomationOrchestrator(handlers = {}) {
 
   async function runDueAutomations(now = new Date()) {
     const due = AUTOMATION_DEFINITIONS.filter(definition => isDue(definition, now));
-    const results = [];
-    for (const definition of due) {
-      try { results.push(await runAutomation(definition.id, { trigger: 'catch-up', now })); }
-      catch (error) { results.push({ automationId: definition.id, error: error.message }); }
+    const results = new Array(due.length);
+    let cursor = 0;
+    async function worker() {
+      while (cursor < due.length) {
+        const index = cursor++, definition = due[index];
+        try { results[index] = await runAutomation(definition.id, { trigger: 'catch-up', now }); }
+        catch (error) { results[index] = { automationId: definition.id, error: error.message }; }
+      }
     }
+    // Independent due workflows share four workers. Claims remain atomic in
+    // beginAutomationRun; business writes retain their own resource barriers.
+    await Promise.all(Array.from({ length: Math.min(4, due.length) }, worker));
     return results;
   }
 

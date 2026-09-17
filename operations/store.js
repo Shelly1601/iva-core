@@ -1,3 +1,4 @@
+import { workflowSla } from '../local-mac-helper/workflow-sla.mjs';
 import fs from 'fs/promises';
 import crypto from 'crypto';
 import { mergePlanbarSchedulingProgress, planbarSchedulingSummary } from './customer-scheduling.js';
@@ -204,6 +205,7 @@ export async function upsertExternalAgentRun(input = {}) {
       completedAt,
       updatedAt: safeTimestamp(input.updatedAt, now),
     });
+    item.sla = workflowSla({ ...item, sla: { ...input.sla, originAt: item.sla?.originAt || input.sla?.originAt || item.createdAt } });
     if (input.planbarProgress) {
       const baseline = item.planbarProgress || mergePlanbarSchedulingProgress(null, { ...input.planbarProgress, status: 'reserved' });
       item.planbarProgress = mergePlanbarSchedulingProgress(baseline, input.planbarProgress);

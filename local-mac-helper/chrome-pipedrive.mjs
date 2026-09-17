@@ -90,7 +90,7 @@ return "created:" & (id of createdTab as text)
 end tell`;
 }
 
-export async function executePipedriveJavaScript(javascript, { dealId = '', timeoutMs = 15000, cleanupTemporaryTab = false,
+export async function executePipedriveJavaScript(javascript, { dealId = '', timeoutMs = 15000, cleanupTemporaryTab = false, retryTransient = true,
   run = runAppleScript, waitFn = wait, getWorkspace = requireRightDisplayWorkspace } = {}) {
   const target = `https://${PIPEDRIVE_HOST}/${dealId ? `deal/${String(dealId).replace(/\D/g, '')}` : 'pipeline/1'}`;
   const runInExistingTab = async () => {
@@ -109,7 +109,7 @@ end tell`;
       catch (error) {
         lastError = error;
         const transient = /connection invalid|appleevent|zeitlimit|timed out|-600|-1712/i.test(String(error?.message || error));
-        if (!transient || attempt === 3) throw error;
+        if (!retryTransient || !transient || attempt === 3) throw error;
         await waitFn(250 * attempt);
       }
     }

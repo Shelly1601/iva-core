@@ -242,16 +242,25 @@ export async function markPipedriveFundingDealWon({ dealId, approvalFileName, ap
   return request(`/device-agent/${DEVICE_ID}/background/pipedrive/deals/${id}/won`, { method: 'POST', body: { approvalFileName, approvalEvidence }, timeoutMs: 90_000 });
 }
 
-export async function readPipedriveFundingDealsViaApi({ dealIds, onProgress } = {}) {
+export async function readPipedriveFundingDealsViaApi({ dealIds, onProgress } = {}, { readDeal = readPipedriveFundingDeal } = {}) {
   const ids = [...new Set((Array.isArray(dealIds) ? dealIds : []).map(value => String(value).replace(/\D/g, '')).filter(Boolean))];
   if (!ids.length) throw new Error('Für den Förder-Prüflauf fehlen Deal-IDs.');
-  const snapshots = [];
-  const errors = [];
-  for (const [index, dealId] of ids.entries()) {
-    try { snapshots.push(await readPipedriveFundingDeal({ dealId })); }
-    catch (error) { errors.push({ dealId, error: String(error?.message || error).slice(0, 500) }); }
-    if (typeof onProgress === 'function') onProgress({ processed: index + 1, total: ids.length });
+  const outcomes = new Array(ids.length);
+  let cursor = 0, processed = 0;
+  async function worker() {
+    while (cursor < ids.length) {
+      const index = cursor++, dealId = ids[index];
+      try { outcomes[index] = { snapshot: await readDeal({ dealId }) }; }
+      catch (error) { outcomes[index] = { failure: { dealId, error: String(error?.message || error).slice(0, 500) } }; }
+      processed++;
+      if (typeof onProgress === 'function') onProgress({ processed, total: ids.length });
+    }
   }
+  // Workers take the next unclaimed case immediately; a slow or externally
+  // blocked deal cannot hold up the other API reads. Output stays input-ordered.
+  await Promise.all(Array.from({ length: Math.min(6, ids.length) }, worker));
+  const snapshots = outcomes.filter(value => !value.failure).map(value => value.snapshot);
+  const errors = outcomes.filter(value => value.failure).map(value => value.failure);
   return { requested: ids.length, read: snapshots.length, failed: errors.length, snapshots, errors, readOnly: true, mutated: false, source: 'iva-core-pipedrive-api' };
 }
 

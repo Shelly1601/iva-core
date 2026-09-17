@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { withImacExecutionLock, imacUiIsBusy } from './ui-execution-lock.mjs';
+import { withImacExecutionLock, imacUiIsBusy, listResourceLocks } from './ui-execution-lock.mjs';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -51,6 +51,9 @@ const ALLOWED_ACTIONS = Object.freeze([
   'knowledge.import.start',
   'codex.task.start',
   'codex.task.status',
+  'codex.task.cancel',
+  'scheduling.request.supersede',
+  'scheduling.request.adopt-existing',
   'app.open',
 ]);
 
@@ -85,6 +88,7 @@ export function imacDeviceAgentMetadata() {
     release: DEVICE_AGENT_RELEASE,
     runtimeRevision: RUNTIME_REVISION,
     uiBusy: imacUiIsBusy(),
+    resourceLocks: listResourceLocks(),
     workspace: AGENT_WORKSPACE,
     iCloudAuthoritative: isAuthoritativeIcloudWorkspace(),
     allowedActions: [...ALLOWED_ACTIONS],
@@ -431,6 +435,9 @@ async function executeDeviceCommand(command) {
     };
   }
   if (command.action === 'planbar.customer.schedule') {
+    const { enqueueSchedulingFastLane } = await import('./scheduling-runtime.mjs');
+    const deterministic = await enqueueSchedulingFastLane({ ...command.payload, requestId: command.payload?.requestId || command.id, createdAt: command.createdAt });
+    if (!deterministic.requiresExistingWorkflow) return deterministic;
     const { startPlanbarCustomerSchedulingTask } = await import('./codex-tasks.mjs');
     return startPlanbarCustomerSchedulingTask({ ...command.payload, commandId: command.id });
   }
@@ -449,6 +456,14 @@ async function executeDeviceCommand(command) {
   if (command.action === 'codex.task.start') {
     const { startCodexTask } = await import('./codex-tasks.mjs');
     return startCodexTask({ ...command.payload, requestId: command.id });
+  }
+  if (command.action === 'codex.task.cancel') {
+    const { cancelCodexTask } = await import('./codex-tasks.mjs');
+    return cancelCodexTask(command.payload?.jobId, { reason: command.payload?.reason });
+  }
+  if (['scheduling.request.supersede', 'scheduling.request.adopt-existing'].includes(command.action)) {
+    const { adoptExistingSchedulingTask } = await import('./codex-tasks.mjs');
+    return adoptExistingSchedulingTask(command.payload?.jobId, { supersede: command.action === 'scheduling.request.supersede' });
   }
   if (command.action === 'codex.task.status') {
     const { getCodexTaskStatus } = await import('./codex-tasks.mjs');
@@ -479,11 +494,12 @@ async function executeDeviceCommand(command) {
   throw new Error('Der iMac hat diesen Befehl nicht in seiner lokalen Positivliste.');
 }
 
-export async function runImacDeviceAgentOnce() {
+export async function runImacDeviceAgentOnce({ lane = 'all', maintenance = true } = {}) {
   assertImacExecutionHost();
   if (!isAuthoritativeIcloudWorkspace()) {
     throw new Error(`Der iMac-Geräteagent läuft nicht aus dem verbindlichen iCloud-Workspace (${AGENT_WORKSPACE}).`);
   }
+  if (maintenance) {
   await cleanupExpiredDewarmteLocalData().catch(error => console.error(`DeWarmte-Lokalbereinigung: ${error.message}`));
   await reportImacDeviceAgentHeartbeat().catch(error => {
     // Während der einmaligen Railway-Migration darf ein noch nicht deployter
@@ -496,7 +512,8 @@ export async function runImacDeviceAgentOnce() {
   // automatischen Doppelbuchung geschützt.
   const { syncCodexTaskStates } = await import('./codex-tasks.mjs');
   await syncCodexTaskStates().catch(error => console.error(`Workflow-Aufsicht: ${error.message}`));
-  const payload = await request(`/device-agent/${IMAC_DEVICE_ID}/commands/next`);
+  }
+  const payload = await request(`/device-agent/${IMAC_DEVICE_ID}/commands/next?lane=${encodeURIComponent(lane)}`);
   const command = payload?.command;
   if (!command) return { status: 'no_command', deviceId: IMAC_DEVICE_ID };
   let ok = false;
@@ -533,6 +550,7 @@ export function imacDeviceAgentPolicy() {
     release: DEVICE_AGENT_RELEASE,
     runtimeRevision: RUNTIME_REVISION,
     uiBusy: imacUiIsBusy(),
+    resourceLocks: listResourceLocks(),
     workspace: AGENT_WORKSPACE,
     iCloudAuthoritative: isAuthoritativeIcloudWorkspace(),
     expectedHostname: String(process.env.IVA_IMAC_HOSTNAME || '').trim() || 'Hostname enthält „iMac“',

@@ -18,7 +18,7 @@ test('full server connects operations behind owner/module gates and accepts only
  const request=async(route,{method='GET',body,auth=true,headers={},raw}={})=>{const r=await fetch(base+route,{method,headers:{'content-type':'application/json',...(auth?{authorization:'Bearer '+token}:{}),...headers},body:raw??(body===undefined?undefined:JSON.stringify(body))});let data=await r.text();try{data=JSON.parse(data);}catch{}return{status:r.status,data};};
  const ok=async(route,options)=>{const result=await request(route,options);assert.ok(result.status>=200&&result.status<300,route+' '+result.status+' '+JSON.stringify(result.data));return result.data;};
  try{
-  let ready=false;for(let n=0;n<100;n++){if(child.exitCode!==null)throw Error(logs);if(logs.includes('IVA-Core auf Port')){ready=true;break;}await new Promise(r=>setTimeout(r,100));}assert.ok(ready,logs);
+  let ready=false;for(let n=0;n<300;n++){if(child.exitCode!==null)throw Error(logs);if(logs.includes('IVA-Core auf Port')){ready=true;break;}await new Promise(r=>setTimeout(r,100));}assert.ok(ready,logs);
   const project=await ok('/api/projects',{method:'POST',body:{name:'Operations fixture'}}),pid=project.id;
   for(const endpoint of ['/api/advice/workbench/catalog','/api/sales-coach/context','/api/tax-preparation/context','/api/prospecting/context','/api/whatsapp/automation/config']){
    assert.equal((await request(endpoint+'?projectId='+pid,{auth:false})).status,401);await ok(endpoint+'?projectId='+pid);

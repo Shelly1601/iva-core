@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { runMacUiBridge } from './macos-ui.mjs';
 import { assertImacExecutionHost } from './imac-host-guard.mjs';
-import { withImacExecutionLock } from './ui-execution-lock.mjs';
+import { withImacExecutionLock, resourceExecutionRoot } from './ui-execution-lock.mjs';
 
 const exec = promisify(execFile);
 const ROOT = path.join(os.homedir(), 'Library/Application Support/IVA Mac Helper');
@@ -71,16 +71,18 @@ async function uiLease(task) {
     // A CLI subprocess inside the existing workflow lease must not deadlock on
     // its own ancestor's lease. An unrelated process must obtain the lock.
     let owned=false;
-    const owner=await readFile(path.join(ROOT,'ui-execution-lock/owner.json'),'utf8').then(JSON.parse).catch(()=>null);
-    if (owner?.pid) {
-      let pid=process.pid;
-      for(let i=0;i<20&&pid>1;i++) {
-        if(pid===owner.pid) { owned=true; break; }
-        const out=await exec('/bin/ps',['-p',String(pid),'-o','ppid=']).catch(()=>null);
-        pid=Number(out?.stdout.trim());
+    const owners=await Promise.all([path.join(resourceExecutionRoot,'owner.json'), path.join(`${resourceExecutionRoot}.resources`,'outlook-write','owner.json')].map(file=>readFile(file,'utf8').then(JSON.parse).catch(()=>null)));
+    for (const owner of owners) {
+      if (owner?.pid) {
+        let pid=process.pid;
+        for(let i=0;i<20&&pid>1;i++) {
+          if(pid===owner.pid) { owned=true; break; }
+          const out=await exec('/bin/ps',['-p',String(pid),'-o','ppid=']).catch(()=>null);
+          pid=Number(out?.stdout.trim());
+        }
       }
     }
-    return owned ? task() : withImacExecutionLock(task,{timeoutMs:30000});
+    return owned ? task() : withImacExecutionLock(task,{timeoutMs:30000,scope:'outlook-write',criticalSection:'outlook-mailbox-read'});
   };
   const result=queue.then(execute,execute); queue=result.catch(()=>{}); return result;
 }

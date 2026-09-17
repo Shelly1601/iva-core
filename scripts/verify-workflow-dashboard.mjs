@@ -67,7 +67,7 @@ assert.match(controlJs, /setInterval\(\(\)=>\{ if\(document\.visibilityState==='
 
 const escSource = controlJs.match(/function esc\(value\)\{[^\n]+/)?.[0];
 const fmtSource = controlJs.match(/function fmt\(value\)\{[^\n]+/)?.[0];
-const workflowCardSource = controlJs.slice(controlJs.indexOf('function workflowCard'), controlJs.indexOf('function renderWorkflowDashboard'));
+const workflowCardSource = controlJs.slice(controlJs.indexOf('function workflowSlaFacts'), controlJs.indexOf('function renderWorkflowDashboard'));
 assert.ok(escSource && fmtSource && workflowCardSource, 'Workflow-Kartenrenderer muss testbar vorhanden sein');
 const workflowCard = new Function(`${escSource}\n${fmtSource}\n${workflowCardSource}\nreturn workflowCard;`)();
 const attack = '<img src=x onerror="globalThis.pwned=true">';
@@ -85,3 +85,9 @@ assert.match(cockpit, /'Authorization':'Bearer '\+c\.tok/);
 assert.doesNotMatch(`${controlJs}\n${cockpit}`, /[?&](?:token|api_token)=/i, 'Token darf nie in einer URL stehen');
 
 console.log('Workflow-Dashboard: Einstieg, Statuslogik, XSS- und API-Sicherheit geprüft.');
+
+const breached = buildWorkflowDashboard({activity:[{id:'late',status:'running',createdAt:'2026-09-02T11:00:00Z',updatedAt:recent,sla:{originAt:'2026-09-02T11:00:00Z',owner:'worker-1'}}]}, {now});
+assert.equal(breached.running[0].sla.violated,true);
+assert.match(breached.running[0].label,/SLA verletzt/);
+const slaAttack=workflowCard({title:'SLA',sla:{resourceLocks:[{scope:attack,jobId:attack}],owner:attack,slowestStep:{id:attack}}});
+assert.doesNotMatch(slaAttack,/<img\b/i);
