@@ -82,7 +82,7 @@
     "test:operations-workbench": "node --test scripts/verify-advice-workbench.mjs scripts/verify-advice-customer-file.mjs scripts/verify-sales-coach.mjs scripts/verify-tax-preparation.mjs scripts/verify-project-operation-store.mjs scripts/verify-whatsapp-automation.mjs scripts/verify-prospecting.mjs scripts/verify-operations-http.mjs"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^1.0.0",
+    "@ai-sdk/anthropic": "^4.0.53",
     "@ai-sdk/google": "^1.0.0",
     "@modelcontextprotocol/client": "2.0.0",
     "ai": "^4.0.0",
