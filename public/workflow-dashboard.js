@@ -55,6 +55,7 @@
       phase: clean(item.phaseLabel || item.phase || rawStatus, 100),
       progress: progressValue(item.progress),
       updatedAt,
+      createdAt: clean(item.createdAt || item.startedAt, 80),
       startedAt: clean(item.startedAt || item.createdAt, 80),
       completedAt: clean(item.completedAt, 80),
       origin,
@@ -71,6 +72,11 @@
       ...current,
       ...richer,
       rawStatus: statusOwner.rawStatus,
+      createdAt: statusOwner.createdAt || current.createdAt || incoming.createdAt,
+      startedAt: statusOwner.startedAt || current.startedAt || incoming.startedAt,
+      completedAt: TERMINAL.has(statusOwner.rawStatus) || TECHNICAL_REVIEW.has(statusOwner.rawStatus) || statusOwner.rawStatus === 'blocked'
+        ? statusOwner.completedAt || current.completedAt || incoming.completedAt : '',
+      sla: statusOwner.sla || richer.sla || current.sla || incoming.sla,
       blocker: statusOwner.rawStatus === 'blocked' ? (statusOwner.blocker || current.blocker || incoming.blocker) : '',
       source: statusOwner.source || richer.source,
       updatedAt: timeValue(incoming.updatedAt) > timeValue(current.updatedAt) ? incoming.updatedAt : current.updatedAt,
@@ -129,9 +135,14 @@
     for (const entry of merged.values()) {
       const classification = groupFor(entry, now);
       if (!classification) continue;
-      const origin = timeValue(entry.sla?.originAt || entry.startedAt);
-      const elapsed = origin ? Math.max(0, (timeValue(entry.completedAt) || now) - origin) : 0;
-      const sla = { ...entry.sla, totalDurationMs: elapsed, remainingMs: Math.max(0, 1800000 - elapsed), violated: elapsed > 1800000 };
+      const origin = timeValue(entry.sla?.originAt || entry.createdAt || entry.startedAt);
+      const completed = timeValue(entry.completedAt);
+      const terminal = TERMINAL.has(entry.rawStatus) || TECHNICAL_REVIEW.has(entry.rawStatus) || ['canceled', 'cancelled'].includes(entry.rawStatus);
+      const recordedDuration = entry.sla?.totalDurationMs;
+      const elapsed = completed && origin ? Math.max(0, completed - origin)
+        : terminal ? (Number.isFinite(recordedDuration) ? Math.max(0, recordedDuration) : null)
+        : origin ? Math.max(0, now - origin) : null;
+      const sla = { ...entry.sla, totalDurationMs: elapsed, remainingMs: elapsed == null ? null : Math.max(0, 1800000 - elapsed), violated: elapsed != null && elapsed > 1800000 };
       const normalized = { ...entry, ...classification, sla };
       if (sla.violated) { normalized.label += ' · SLA verletzt'; normalized.slaError = true; }
       if (normalized.group !== 'blocked') normalized.blocker = '';

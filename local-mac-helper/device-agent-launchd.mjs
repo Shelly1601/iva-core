@@ -84,7 +84,7 @@ export async function verifyImacDeviceAgentConnection({
           release: latest.release,
           firstVerifiedHeartbeatAt: new Date(firstHeartbeat).toISOString(),
           secondVerifiedHeartbeatAt: new Date(seen).toISOString(),
-          pollSeconds: 15,
+          pollSeconds: 1,
         };
       }
     }
@@ -162,8 +162,8 @@ export async function imacDeviceAgentLaunchdStatus() {
   const target = `gui/${process.getuid()}/${IMAC_DEVICE_AGENT_LABEL}`;
   try {
     const { stdout } = await execFileAsync('/bin/launchctl', ['print', target], { timeout: 10000, maxBuffer: 1024 * 1024 });
-    return { loaded: true, state: String(stdout).match(/\bstate = ([^\n]+)/)?.[1]?.trim() || 'loaded', pollSeconds: 15 };
-  } catch { return { loaded: false, state: 'not-loaded', pollSeconds: 15 }; }
+    return { loaded: true, state: String(stdout).match(/\bstate = ([^\n]+)/)?.[1]?.trim() || 'loaded', pollSeconds: 1 };
+  } catch { return { loaded: false, state: 'not-loaded', pollSeconds: 1 }; }
 }
 
 export async function installImacDeviceAgentLaunchd() {

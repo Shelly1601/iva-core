@@ -5,13 +5,16 @@ export function workflowSla(state = {}, now = Date.now()) {
   const origin = Number.isFinite(created) ? created : now;
   const deadline = origin + WORKFLOW_RESULT_BUDGET_MS;
   const end = Date.parse(state.completedAt);
-  const duration = Math.max(0, (Number.isFinite(end) ? end : now) - origin);
   const metrics = state.metrics || state.sla || {};
+  const terminal = ['completed', 'successful', 'sent-and-verified', 'skipped', 'failed', 'stopped', 'timed_out', 'incomplete', 'canceled', 'cancelled'].includes(state.status);
+  const duration = Number.isFinite(end) ? Math.max(0, end - origin)
+    : terminal ? (Number.isFinite(metrics.totalDurationMs) ? Math.max(0, metrics.totalDurationMs) : null)
+    : Math.max(0, now - origin);
   return {
     originAt: new Date(origin).toISOString(), deadlineAt: new Date(deadline).toISOString(),
     budgetMs: WORKFLOW_RESULT_BUDGET_MS, totalDurationMs: duration,
-    remainingMs: Math.max(0, WORKFLOW_RESULT_BUDGET_MS - duration),
-    violated: duration > WORKFLOW_RESULT_BUDGET_MS,
+    remainingMs: duration == null ? null : Math.max(0, WORKFLOW_RESULT_BUDGET_MS - duration),
+    violated: duration != null && duration > WORKFLOW_RESULT_BUDGET_MS,
     queueDelayMs: metrics.queueDelayMs ?? (state.startedAt ? Math.max(0, Date.parse(state.startedAt) - origin) : null),
     activeShards: metrics.activeShards ?? null, completedShards: metrics.completedShards ?? null,
     totalShards: metrics.totalShards ?? null, slowestStep: metrics.slowestStep ?? null,

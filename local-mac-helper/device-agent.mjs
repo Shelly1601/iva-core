@@ -349,7 +349,7 @@ async function executeDeviceCommand(command) {
       launchd = {
         loaded: null,
         state: 'probe-retry-required',
-        pollSeconds: 15,
+        pollSeconds: 1,
         error: String(error?.message || error).slice(0, 300),
       };
     }

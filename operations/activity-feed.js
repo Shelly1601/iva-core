@@ -1,4 +1,4 @@
-const TERMINAL_STATUSES = new Set(['completed', 'failed', 'blocked', 'stopped', 'timed_out', 'incomplete', 'skipped', 'sent-and-verified']);
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'blocked', 'stopped', 'timed_out', 'incomplete', 'skipped', 'sent-and-verified', 'successful', 'canceled', 'cancelled']);
 
 function clean(value, max = 2000) {
   return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -46,6 +46,7 @@ function automationEvent(run = {}) {
     status: statusOf(run.status),
     summary: clean(run.summary || run.error || 'Automationslauf protokolliert.'),
     error: clean(run.error, 1000),
+    createdAt: timestamp(run.createdAt, run.startedAt),
     startedAt: run.startedAt || '',
     completedAt: run.completedAt || '',
     updatedAt: eventTime(run),
@@ -68,6 +69,7 @@ function agentEvent(run = {}) {
     sla: run.sla || null,
     phase: clean(run.phase, 80),
     progress: Number.isFinite(Number(run.progress)) ? Number(run.progress) : null,
+    createdAt: timestamp(run.createdAt, run.startedAt),
     startedAt: timestamp(run.startedAt, run.createdAt),
     completedAt: run.completedAt || '',
     updatedAt: eventTime(run),
@@ -119,8 +121,12 @@ function commandEvent(command = {}, commands = []) {
     error: clean(local?.error || command.error, 1000),
     phase: clean(local?.phase, 80),
     progress: Number.isFinite(Number(local?.progress)) ? Number(local.progress) : null,
+    createdAt: timestamp(local?.createdAt, command.createdAt, command.startedAt),
     startedAt: timestamp(local?.startedAt, command.startedAt, command.createdAt),
-    completedAt: TERMINAL_STATUSES.has(clean(local?.status, 50)) ? timestamp(local?.completedAt, statusCommand?.completedAt) : '',
+    completedAt: local
+      ? (TERMINAL_STATUSES.has(clean(local.status, 50)) ? timestamp(local.completedAt) : '')
+      : (!jobId && TERMINAL_STATUSES.has(clean(command.status, 50)) ? timestamp(command.completedAt) : ''),
+    sla: local?.sla || { ...(command.sla || {}), queueDelayMs: command.queueDelayMs ?? command.sla?.queueDelayMs ?? null },
     updatedAt: timestamp(local?.updatedAt, statusCommand?.completedAt, command.completedAt, command.startedAt, command.createdAt),
     durationMs: null,
     jobId,
@@ -146,6 +152,7 @@ function protocolEvent(run = {}, project = {}) {
     status: statusOf(run.status || run.outcome),
     summary: clean(run.summary || run.details || 'Projektlauf protokolliert.'),
     error: clean(run.error, 1000),
+    createdAt: timestamp(run.createdAt, run.startedAt, run.executedAt),
     startedAt: timestamp(run.startedAt, run.executedAt),
     completedAt: timestamp(run.completedAt, run.executedAt),
     updatedAt: timestamp(run.completedAt, run.executedAt, run.startedAt),
@@ -190,6 +197,7 @@ function mergeEvents(events) {
       ...protocolFirst,
       phase: protocolFirst.phase || other.phase,
       progress: protocolFirst.progress ?? other.progress,
+      createdAt: timestamp(protocolFirst.createdAt, other.createdAt),
       startedAt: timestamp(other.startedAt, protocolFirst.startedAt),
       completedAt: timestamp(protocolFirst.completedAt, other.completedAt),
       updatedAt: timestamp(protocolFirst.updatedAt, other.updatedAt),
